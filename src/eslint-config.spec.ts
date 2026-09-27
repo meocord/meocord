@@ -38,7 +38,13 @@ describe('import-x/no-cycle', () => {
   const compilerOptions = { strict: true, module: 'ESNext', moduleResolution: 'Bundler', paths: { '@src/*': ['./src/*'] } }
   const tsconfigs = {
     'tsconfig.json': { compilerOptions, include: ['src/**/*.ts'], exclude: ['src/**/*.spec.ts'] },
-    'tsconfig.test.json': { extends: './tsconfig.json', include: ['src/**/*.ts'], exclude: [] },
+    // With an alias only the tests use, as an app may add for its test helpers
+    'tsconfig.test.json': {
+      extends: './tsconfig.json',
+      compilerOptions: { paths: { '@src/*': ['./src/*'], '@test/*': ['./test/*'] } },
+      include: ['src/**/*.ts', 'test/**/*.ts'],
+      exclude: [],
+    },
     'tsconfig.eslint.json': { extends: './tsconfig.json', include: ['src/**/*.ts'] },
   }
   for (const [name, tsconfig] of Object.entries(tsconfigs)) fs.writeFileSync(path.join(root, name), JSON.stringify(tsconfig))
@@ -70,6 +76,16 @@ describe('import-x/no-cycle', () => {
   }
   fs.mkdirSync(path.join(root, 'src'))
   for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(root, 'src', name), text)
+  // A cycle through a test helper, by the alias only tsconfig.test.json declares
+  fs.mkdirSync(path.join(root, 'test'))
+  fs.writeFileSync(
+    path.join(root, 'src', 'fixture.spec.ts'),
+    "import { Helper } from '@test/helper'\n\nexport class Fixture {\n  constructor(readonly helper: Helper) {}\n}\n",
+  )
+  fs.writeFileSync(
+    path.join(root, 'test', 'helper.ts'),
+    "import { Fixture } from '@src/fixture.spec'\n\nexport class Helper {\n  constructor(readonly fixture: Fixture) {}\n}\n",
+  )
 
   const lintCycles = async (file: string) => {
     const eslint = new ESLint({
@@ -127,6 +143,10 @@ describe('import-x/no-cycle', () => {
 
   it("resolves the alias from a spec, which only tsconfig.test.json includes, through tsconfig.json's paths", async () => {
     expect(await lintCycles('ledger.spec.ts')).toEqual([[1, 'Dependency cycle detected']])
+  })
+
+  it('resolves an alias only tsconfig.test.json declares, from a spec', async () => {
+    expect(await lintCycles('fixture.spec.ts')).toEqual([[1, 'Dependency cycle detected']])
   })
 
   // The first thing a new application's `bun run lint` would print
