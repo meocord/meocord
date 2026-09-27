@@ -15,9 +15,22 @@ export enum ControllerType {
 }
 
 /**
- * The kind of interaction a `@Command` method handles. Each member is one Discord interaction type,
- * so the handler's parameter type follows from it; entity select menus are separate members for
- * that reason.
+ * The kind of interaction a `@Command` handles, such as a slash command or a button.
+ *
+ * Pass it to `@Command` with the command's name or the component's customId pattern. Each member is one Discord
+ * interaction type, so the handler's parameter type follows from it; entity select menus are separate members
+ * for that reason.
+ *
+ * @example
+ * ```ts
+ * @Command('profile/{uid}', CommandType.BUTTON)
+ * async profile(interaction: ButtonInteraction, { uid }: { uid: string }) {
+ *   await respond(interaction).send(`Profile of <@${uid}>`)
+ * }
+ * ```
+ *
+ * @group Types
+ * @see {@link Command}
  */
 export enum CommandType {
   /** Chat input command, or one subcommand of it. */
@@ -26,13 +39,19 @@ export enum CommandType {
   CONTEXT_MENU = 'CONTEXT_MENU',
   /** Activity launch command (`ApplicationCommandType.PrimaryEntryPoint`). */
   PRIMARY_ENTRY_POINT = 'PRIMARY_ENTRY_POINT',
+  /** Button, routed by its customId pattern. */
   BUTTON = 'BUTTON',
   /** String select menu — the one whose options the application defines itself. */
   SELECT_MENU = 'SELECT_MENU',
+  /** User select menu. */
   USER_SELECT_MENU = 'USER_SELECT_MENU',
+  /** Role select menu. */
   ROLE_SELECT_MENU = 'ROLE_SELECT_MENU',
+  /** Mentionable select menu, of users and roles. */
   MENTIONABLE_SELECT_MENU = 'MENTIONABLE_SELECT_MENU',
+  /** Channel select menu. */
   CHANNEL_SELECT_MENU = 'CHANNEL_SELECT_MENU',
+  /** Modal submission, routed by its customId pattern. */
   MODAL_SUBMIT = 'MODAL_SUBMIT',
 }
 

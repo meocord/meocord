@@ -17,7 +17,15 @@ export type ShardCallHandler = (
 /** How long `ShardContext.call` waits for a shard to answer. */
 export const SHARD_CALL_TIMEOUT_MS = 10_000
 
-/** One process's answer to a `ShardContext.call`: the shards it runs, and the method's result or error. */
+/**
+ * One process's answer to a {@link ShardContext.call}: the shards it runs, and the method's value or its error.
+ *
+ * Check `ok` before reading `value`: a process that threw, lacked the service or did not answer in time gives
+ * `ok: false` with the error's message, and the other processes still answer.
+ *
+ * @group Types
+ * @see {@link ShardContext}
+ */
 export type ShardCallResult<T> =
   | { shardIds: number[]; ok: true; value: T }
   | { shardIds: number[]; ok: false; error: string }
@@ -55,19 +63,17 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Pr
 }
 
 /**
- * The shards this process runs, and a way to call a service in every shard.
+ * Tells a service which shards its process runs, and calls a service method in every shard.
  *
- * Inject it into a service or controller. With process sharding each shard runs in its own process;
- * otherwise one process runs every shard and `call` runs once, here.
+ * Inject it where the answer needs every shard, such as a total server count, or where one-off work must run in
+ * one process only. With process sharding each shard runs in its own process; otherwise one process runs every
+ * shard and `call` runs once, here.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Service()
  * export class StatsService {
- *   constructor(
- *     private readonly shards: ShardContext,
- *     private readonly client: Client,
- *   ) {}
+ *   constructor(private readonly shards: ShardContext, private readonly client: Client) {}
  *
  *   guildCount() {
  *     return this.client.guilds.cache.size
@@ -79,6 +85,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Pr
  *   }
  * }
  * ```
+ *
+ * @group Controllers
+ * @see {@link ShardCallResult}
+ * @see {@link https://meocord.dev/docs/4.1/sharding | Sharding}
  */
 export class ShardContext {
   private readonly logger = new Logger(ShardContext.name)

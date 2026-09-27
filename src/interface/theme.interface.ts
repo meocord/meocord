@@ -113,10 +113,24 @@ export interface MeoCordTheme {
 /** Values a theme holds whole: an array or tuple is one token, never merged or made partial element by element. */
 type ThemeLeaf = string | number | bigint | boolean | symbol | null | undefined | readonly unknown[] | ((...args: never[]) => unknown)
 
-/** `T` with every property optional, at every depth; arrays and tuples stay whole. */
+/**
+ * `T` with every property optional, at every depth; arrays and tuples stay whole.
+ *
+ * It is the shape of a theme an app, a server or a user gives: only the tokens that change.
+ *
+ * @group Types
+ * @see {@link DeepReadonly}
+ */
 export type DeepPartial<T> = T extends ThemeLeaf ? T : { [K in keyof T]?: DeepPartial<T[K]> }
 
-/** `T` with every property readonly, at every depth; an array becomes a readonly one of readonly elements. */
+/**
+ * `T` with every property readonly, at every depth; an array becomes a readonly one of readonly elements.
+ *
+ * It is the shape of the theme a call reads, which no handler can change.
+ *
+ * @group Types
+ * @see {@link DeepPartial}
+ */
 export type DeepReadonly<T> = T extends readonly unknown[]
   ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
   : T extends ThemeLeaf
