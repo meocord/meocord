@@ -25,41 +25,44 @@ export interface CooldownByDecorator<P> {
 }
 
 /**
- * Limits how often a handler runs: at most `uses` calls within `seconds`, counted per user, server,
- * channel or for everyone. The window slides, so each use comes back `seconds` after it was spent.
- * Stack several for layered limits, such as one every 3 seconds and 5 a minute. They are counted in the
- * order they read, and a call one refuses has already spent those above it, so put the shortest first.
+ * Limits how often a handler runs, counted per user, server, channel or for everyone.
  *
- * A blocked call throws `CooldownError`, answered only to the caller with how long to wait. The
- * cooldown is counted after guards, validation and pipes allow the call, so a denied call or bad
- * input spends nothing. On a controller, it applies to each of its handlers separately.
+ * Use it to rate-limit a command, a component or a message command: a call over the limit is answered only
+ * to the caller, with how long to wait. For a check that is not about how often, use a {@link Guard}.
  *
- * Calls are counted in a `CooldownStore`, in memory by default; see `@MeoCord({ cooldownStore })`.
+ * @remarks
+ * The window slides, so each use comes back `seconds` after it was spent. Stacked cooldowns are checked
+ * together and counted only if all allow the call. A call is counted after its guards, validation and
+ * pipes, so a denied call or bad input spends nothing; on a controller, each handler is counted apart.
+ * Calls are kept in a `CooldownStore`, in memory unless `@MeoCord({ cooldownStore })` names another.
  *
- * @param options.seconds - The window's length.
- * @param options.uses - Calls allowed within the window. Defaults to `1`.
- * @param options.per - `'user'` (the default), `'guild'`, `'channel'` or `'global'`. Outside a server,
- *   `'guild'` and `'channel'` count per user.
- * @param options.bypass - Exempts a call without counting it, such as one from an owner.
- * @param options.by - Counts calls apart by a value of the call, such as the account a button acts on,
- *   within the scope `per` names. It receives the call's context and the handler's params, as the
- *   handler receives them, and returns a string or number, or `undefined` to count the call as though
- *   there were no `by`. Declare the params it reads, or pass them as the type argument, and the
- *   handler's own params are checked against them. An error it throws goes to the exception filters,
- *   and no cooldown counts the call.
+ * @param options - The limit, whose calls count together, and how to exempt or tell calls apart.
+ * @throws Error when `seconds` is not positive, as the decorator applies; `CooldownError` to a call over the limit.
  *
  * @example
  * ```ts
  * @Command('daily', CommandType.SLASH)
  * @Cooldown({ seconds: 3 })
- * @Cooldown({ uses: 5, seconds: 60, bypass: context => OWNERS.has(context.getInteraction()?.user.id ?? '') })
- * async daily(interaction: ChatInputCommandInteraction) {}
+ * @Cooldown({ uses: 5, seconds: 60 })
+ * async daily(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Here are your coins.')
+ * }
  *
- * // Once an hour per user, for each game account the button checks in
- * @Command('check-in/{ownerId}/{uid}', CommandType.BUTTON)
+ * @Command('check-in/{uid}', CommandType.BUTTON)
  * @Cooldown({ seconds: 3600, by: (_context, { uid }: { uid: string }) => uid })
- * async checkIn(interaction: ButtonInteraction, { uid }: { ownerId: string; uid: string }) {}
+ * async checkIn(interaction: ButtonInteraction, { uid }: { uid: string }) {
+ *   await respond(interaction).send(`Checked in ${uid}.`)
+ * }
  * ```
+ *
+ * @pipeline cooldown-check for a cooldown without `by`, before a message's params are fetched
+ * @pipeline cooldowns after validation and pipes
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link CooldownOptions}
+ * @see {@link CooldownError}
+ * @see {@link CooldownStore}
+ * @see {@link https://meocord.dev/docs/latest/cooldowns | Cooldowns}
  */
 export function Cooldown(options: CooldownOptions & { by?: undefined }): ClassDecorator & MethodDecorator
 export function Cooldown<P extends object = Record<string, unknown>>(

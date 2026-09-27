@@ -25,41 +25,47 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
 }
 
 /**
- * Handles a discord.js client event on a controller or service, every time it is emitted.
+ * Handles a discord.js client event every time it is emitted, on a controller or a service.
  *
- * The handler's parameters are typed from discord.js's `ClientEvents`. It runs through the same
- * pipeline as a command, so `@UseGuard` applies to it, and an error it throws is logged without
- * stopping the bot. The instance is resolved when the first event arrives. Handling
- * `interactionCreate` or `messageCreate` here runs alongside MeoCord's own dispatch of them.
+ * Use it for gateway events MeoCord has no handler type for, such as a member joining or a channel being
+ * created. For commands, components, messages and reactions, use {@link Command}, `@MessageHandler` or
+ * `@ReactionHandler`, which route them.
+ *
+ * @remarks
+ * The handler's parameters are typed from discord.js's `ClientEvents`. It runs through the pipeline, so global
+ * guards apply to it, and an error it throws is logged without stopping the bot. Handling `interactionCreate`
+ * or `messageCreate` here runs alongside MeoCord's own dispatch of them.
  *
  * @param event - The client event to handle, such as `'guildMemberAdd'`.
  *
  * @example
- * ```typescript
- * @Controller()
- * export class WelcomeController {
- *   constructor(private readonly welcome: WelcomeService) {}
- *
- *   @On('guildMemberAdd')
- *   async greet(member: GuildMember) {
- *     await this.welcome.send(member)
- *   }
+ * ```ts
+ * @On('guildMemberAdd')
+ * async greet(member: GuildMember) {
+ *   await member.send(`Welcome to ${member.guild.name}!`)
  * }
  * ```
+ *
+ * @pipeline handler with the global guards, interceptors and filters that apply to events
+ * @group Decorators
+ * @category Handlers
+ * @see {@link Once}
+ * @see {@link https://meocord.dev/docs/latest/gateway-events | Gateway events}
  */
 export function On<E extends keyof ClientEvents>(event: E) {
   return eventDecorator(event, false)
 }
 
 /**
- * Handles a discord.js client event on a controller or service, the first time it is emitted only.
+ * Handles a discord.js client event the first time it is emitted only, on a controller or a service.
  *
- * Otherwise the same as {@link On}.
+ * Use it for one-off work on an event, such as warming a cache once the client is ready. For every emission,
+ * use {@link On}; for work at startup and shutdown, a service's `onReady` and `onShutdown` hooks.
  *
  * @param event - The client event to handle, such as `'clientReady'`.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Service()
  * export class CacheWarmer {
  *   @Once('clientReady')
@@ -68,6 +74,12 @@ export function On<E extends keyof ClientEvents>(event: E) {
  *   }
  * }
  * ```
+ *
+ * @pipeline handler with the global guards, interceptors and filters that apply to events
+ * @group Decorators
+ * @category Handlers
+ * @see {@link On}
+ * @see {@link https://meocord.dev/docs/latest/gateway-events | Gateway events}
  */
 export function Once<E extends keyof ClientEvents>(event: E) {
   return eventDecorator(event, true)

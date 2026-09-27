@@ -7,33 +7,47 @@ import { type ExecutionContextType } from '@src/common/execution-context.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 
 /**
- * Marks a class as an interceptor, for use with {@link UseInterceptor}. The class implements
- * `InterceptorInterface`. One instance is shared across calls.
+ * Marks a class as an interceptor, which wraps a handler to act before and after it.
  *
- * An interceptor runs for every kind of handler it is applied to unless `types` limits it. A global
- * interceptor from `@MeoCord({ interceptors })` also runs around `@On` and `@Once` event handlers.
+ * Use it on a class that implements `InterceptorInterface`, then apply the class with {@link UseInterceptor}
+ * or `@MeoCord({ interceptors })`: for timing, logging, caching, or turning one error into another. To stop
+ * a call before it runs, use a {@link Guard}; to handle an error, an exception filter ({@link Catch}).
  *
- * @param options.types - The context types the interceptor runs for, as `ExecutionContext.getType()`
- *   reports them; for any other call it is skipped. Every type when omitted; an empty list, or
- *   `['autocomplete']`, which interceptors never run for, throws. A subclass inherits the types of the
- *   class it extends unless it declares its own.
+ * @remarks
+ * `intercept` continues with `next.handle()`, which resolves to what the handler returns; not calling it
+ * skips the handler, and calling it twice runs the handler twice. One instance is shared by every call, so
+ * it reads each use's params with `context.getParams()`.
+ *
+ * @throws Error when `types` is empty or only `['autocomplete']`, which interceptors never run for.
  *
  * @example
- * ```typescript
- * @Interceptor()
- * export class TimingInterceptor implements InterceptorInterface {
+ * ```ts
+ * @Interceptor({ types: ['interaction'] })
+ * export class AuditInterceptor implements InterceptorInterface {
  *   async intercept(context: ExecutionContext, next: CallHandler): Promise<unknown> {
- *     const started = performance.now()
- *     try {
- *       return await next.handle()
- *     } finally {
- *       console.log(`${context.getHandlerName()} took ${Math.round(performance.now() - started)} ms`)
- *     }
+ *     const result = await next.handle()
+ *     console.log(`${context.getInteraction()?.user.id} ran ${context.getHandlerName()}`)
+ *     return result
  *   }
  * }
  * ```
+ *
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link UseInterceptor}
+ * @see {@link https://meocord.dev/docs/latest/interceptors | Interceptors}
  */
-export function Interceptor(options: { types?: readonly ExecutionContextType[] } = {}) {
+export function Interceptor(
+  options: {
+    /**
+     * The context types the interceptor runs for, as `ExecutionContext.getType()` reports them; it is skipped for
+     * any other call. A subclass inherits them unless it declares its own.
+     *
+     * @defaultValue every type
+     */
+    types?: readonly ExecutionContextType[]
+  } = {},
+) {
   return function (target: new (...args: any[]) => InterceptorInterface) {
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Interceptor')
@@ -41,27 +55,35 @@ export function Interceptor(options: { types?: readonly ExecutionContextType[] }
 }
 
 /**
- * Runs interceptors around a handler, or around every handler of a controller, after the handler's
- * guards allow the call. Global interceptors from `@MeoCord({ interceptors })` run first, then the
- * controller's, then the method's; the first listed is outermost.
+ * Runs interceptors around a handler, or around every handler of a controller.
  *
- * Interceptors run when a handler is dispatched, or run with `TestingModule.invoke` in a test. A
- * controller method called directly runs its guards but no interceptors. Autocomplete handlers run
- * none.
+ * Use it for work that wraps the call: measuring it, logging it, caching its result, or mapping its error.
+ * To decide whether the call runs, use {@link UseGuard}; to handle an error only, {@link UseFilter}.
  *
- * @param interceptors - Interceptor classes, or `{ provide, params? }` to hand `params` to the
- *   interceptor through `context.getParams()`. Any other entry is refused when the decorator applies.
+ * @remarks
+ * Interceptors run once the guards allow the call, and wrap validation, pipes, the cooldown count and the
+ * handler. The global ones run outermost, then the controller's, then the method's, and within one list the
+ * first is outermost. A controller method called directly runs no interceptors, and neither does an
+ * autocomplete handler.
+ *
+ * @param interceptors - Interceptor classes, or `{ provide, params? }` to give one use its params, which the
+ *   interceptor reads with `context.getParams()`.
+ * @throws Error when an entry is neither an interceptor class nor `{ provide, params? }`, as the decorator applies.
  *
  * @example
- * ```typescript
- * @Controller()
+ * ```ts
+ * @Command('profile', CommandType.SLASH)
  * @UseInterceptor(TimingInterceptor)
- * export class ProfileController {
- *   @Command('profile', CommandType.SLASH)
- *   @UseInterceptor({ provide: CacheInterceptor, params: { ttl: 30_000 } })
- *   async profile(interaction: ChatInputCommandInteraction) {}
+ * async profile(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Your profile.')
  * }
  * ```
+ *
+ * @pipeline interceptors after the guards, around everything up to the handler
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link Interceptor}
+ * @see {@link https://meocord.dev/docs/latest/interceptors | Interceptors}
  */
 export function UseInterceptor<const T extends readonly unknown[]>(
   ...interceptors: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => InterceptorInterface> }
