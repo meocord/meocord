@@ -129,7 +129,7 @@ structured enough for the generator. On hover the whole comment fits a screen, a
  */
 ````
 
-- **Summary:** the first paragraph, one sentence on one line. A function or decorator starts with a verb, a type
+- **Summary:** the first paragraph, one sentence. A function or decorator starts with a verb, a type
   with a noun phrase. The reference shows the first paragraph as the summary, so a second sentence starts the next
   paragraph.
 - **When to use:** the paragraphs after it, at most three sentences: what it is for, and what to use instead,
