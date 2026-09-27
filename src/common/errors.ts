@@ -30,7 +30,11 @@ export class GuardDeniedError extends Error {
   }
 }
 
-/** What a {@link UserError} carries besides its message. */
+/**
+ * What a {@link UserError} carries besides its message.
+ *
+ * @group Types
+ */
 export interface UserErrorOptions {
   /** Names the error, for a filter or presenter to branch on, or to look a translation up by. */
   code?: string
@@ -51,10 +55,16 @@ export interface UserErrorOptions {
  *
  * @example
  * ```typescript
- * if (balance < price) {
- *   throw new UserError(`You need ${price - balance} more coins.`, { code: 'shop.poor', context: { missing: price - balance } })
+ * function charge(balance: number, price: number): number {
+ *   if (balance < price) {
+ *     throw new UserError(`You need ${price - balance} more coins.`, { code: 'shop.poor', context: { missing: price - balance } })
+ *   }
+ *   return balance - price
  * }
  * ```
+ *
+ * @group Responses
+ * @category Errors
  */
 export class UserError extends Error {
   /** Names the error, for a filter or presenter to branch on. */
@@ -235,7 +245,11 @@ export class MessageUsageError extends Error {
   }
 }
 
-/** The scope a cooldown counts calls in. */
+/**
+ * The scope a cooldown counts calls in.
+ *
+ * @group Types
+ */
 export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
 
 /**
@@ -243,6 +257,14 @@ export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
  * so a filter, a presenter or a translator can replace it by catching `CooldownError`.
  *
  * @param retryAfterMs - How long until the next call is allowed.
+ *
+ * @example
+ * ```ts
+ * cooldownMessage(12_000) // 'Slow down: try again in 12s.'
+ * cooldownMessage(90_000) // 'Slow down: try again in 1m 30s.'
+ * ```
+ *
+ * @group Utilities
  */
 export function cooldownMessage(retryAfterMs: number): string {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000))
@@ -266,6 +288,9 @@ export function cooldownMessage(retryAfterMs: number): string {
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @category Errors
  */
 export class CooldownError extends Error {
   /**
@@ -281,7 +306,22 @@ export class CooldownError extends Error {
   }
 }
 
-/** The answer the built-in fallback gives a call {@link CooldownStoreError} refused. */
+/**
+ * The answer the built-in fallback gives a call {@link CooldownStoreError} refused.
+ *
+ * @example
+ * ```ts
+ * @Catch(CooldownStoreError)
+ * export class StoreDownFilter implements ExceptionFilter<CooldownStoreError> {
+ *   async catch(error: CooldownStoreError, context: ExecutionContext) {
+ *     // MeoCord's words, and where to follow the outage
+ *     await context.response?.error(error, { message: `${cooldownStoreMessage()} Status: https://status.example.com` })
+ *   }
+ * }
+ * ```
+ *
+ * @group Utilities
+ */
 export function cooldownStoreMessage(): string {
   return "Cooldowns can't be checked right now: try again shortly."
 }
@@ -302,6 +342,9 @@ export function cooldownStoreMessage(): string {
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @category Errors
  */
 export class CooldownStoreError extends Error {
   /**

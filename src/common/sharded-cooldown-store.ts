@@ -44,11 +44,16 @@ function managerChannel(): CooldownChannel | undefined {
  *
  * @example
  * ```ts
- * import { ShardedCooldownStore } from 'meocord/common'
- *
- * @MeoCord({ controllers: [...], clientOptions: {...}, cooldownStore: ShardedCooldownStore })
+ * @MeoCord({
+ *   controllers: [],
+ *   clientOptions: { intents: [GatewayIntentBits.Guilds] },
+ *   cooldownStore: ShardedCooldownStore,
+ * })
  * export default class App {}
  * ```
+ *
+ * @group Utilities
+ * @category Cooldown stores
  */
 export class ShardedCooldownStore extends CooldownStore {
   private readonly local = new MemoryCooldownStore()

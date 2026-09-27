@@ -148,7 +148,8 @@ structured enough for the generator. On hover the whole comment fits a screen, a
 - **`@group`:** the section of the API reference, and its URL. Every public symbol has one of `Controllers`,
   `Decorators`, `Responses`, `Utilities`, `Testing`, `Configuration`, `CLI`, `Types`.
 - **`@category`:** an optional subgroup: for `Decorators`, `App`, `Controllers`, `Handlers`, `Pipeline stages` or
-  `Params`; for `Testing`, `Module`, `Mocks` or `Inspection`.
+  `Params`; for `Responses`, `Errors` or `Presenters`; for `Utilities`, `Localisation` or `Cooldown stores`; for
+  `Testing`, `Module`, `Mocks` or `Inspection`.
 - **`@see`:** up to four related symbols, `{@link Symbol}`, or guide pages by their `https://meocord.dev/docs/latest/…`
   URL.
 - **`@deprecated`** links its replacement; **`@internal`** marks an export that is not public API.

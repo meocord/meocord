@@ -11,13 +11,23 @@ import {
 /**
  * Runs a Lua script on the server, as a client's `EVAL` does: the script, the keys it touches, and its
  * arguments. Resolves to the script's reply.
+ *
+ * @group Types
  */
 export type RedisEval = (script: string, keys: string[], args: string[]) => Promise<unknown>
 
-/** Runs a script the server already holds, by its SHA1, as a client's `EVALSHA` does. */
+/**
+ * Runs a script the server already holds, by its SHA1, as a client's `EVALSHA` does.
+ *
+ * @group Types
+ */
 export type RedisEvalSha = (sha: string, keys: string[], args: string[]) => Promise<unknown>
 
-/** How a {@link RedisCooldownStore} names its keys and runs its script. */
+/**
+ * How a {@link RedisCooldownStore} names its keys and runs its script.
+ *
+ * @group Types
+ */
 export interface RedisCooldownStoreOptions {
   /** Put before every key the store writes. Defaults to `meocord:cooldown:`. */
   prefix?: string
@@ -125,17 +135,19 @@ const DEFAULT_PREFIX = 'meocord:cooldown:'
  * @example
  * ```ts
  * import { createClient } from 'redis'
- * import { RedisCooldownStore } from 'meocord/common'
  *
  * const redis = await createClient({ url: process.env.REDIS_URL }).connect()
  *
  * @MeoCord({
- *   controllers: [...],
- *   clientOptions: {...},
+ *   controllers: [],
+ *   clientOptions: { intents: [GatewayIntentBits.Guilds] },
  *   cooldownStore: RedisCooldownStore.using((script, keys, args) => redis.eval(script, { keys, arguments: args })),
  * })
  * export default class App {}
  * ```
+ *
+ * @group Utilities
+ * @category Cooldown stores
  */
 export class RedisCooldownStore extends CooldownStore {
   private readonly prefix: string

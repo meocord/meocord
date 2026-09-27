@@ -41,19 +41,31 @@ import { type ResponseContext, type ResponseView } from '@src/interface/index.js
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { type ResolvedTheme, themeForInteraction } from '@src/core/theme-scope.js'
 
-/** The flags a message sent through `respond()` can ask for. */
+/**
+ * The flags a message sent through `respond()` can ask for.
+ *
+ * @group Responses
+ */
 export type ResponseFlags = BitFieldResolvable<
   'Ephemeral' | 'SuppressEmbeds' | 'SuppressNotifications' | 'IsComponentsV2',
   MessageFlags.Ephemeral | MessageFlags.SuppressEmbeds | MessageFlags.SuppressNotifications | MessageFlags.IsComponentsV2
 >
 
-/** The flags an edit through `respond()` can ask for. */
+/**
+ * The flags an edit through `respond()` can ask for.
+ *
+ * @group Responses
+ */
 export type ResponseEditFlags = BitFieldResolvable<
   'SuppressEmbeds' | 'IsComponentsV2',
   MessageFlags.SuppressEmbeds | MessageFlags.IsComponentsV2
 >
 
-/** A message sent with `send()` or `followUp()`: text, or reply options with the flags it can take. */
+/**
+ * A message sent with `send()` or `followUp()`: text, or reply options with the flags it can take.
+ *
+ * @group Responses
+ */
 export type ResponsePayload =
   | string
   | (Omit<InteractionReplyOptions, 'flags' | 'withResponse' | 'ephemeral'> & {
@@ -66,13 +78,25 @@ export type ResponsePayload =
       ephemeral?: boolean
     })
 
-/** An edit made with `edit()`: text, or edit options with the flags an edit can take. */
+/**
+ * An edit made with `edit()`: text, or edit options with the flags an edit can take.
+ *
+ * @group Responses
+ */
 export type ResponseEditPayload = string | (Omit<InteractionEditReplyOptions, 'flags'> & { flags?: ResponseEditFlags })
 
-/** Where an interaction's answer stands. */
+/**
+ * Where an interaction's answer stands.
+ *
+ * @group Responses
+ */
 export type ResponsePhase = 'unanswered' | 'deferred' | 'replied'
 
-/** Options for {@link ResponseState.error}. */
+/**
+ * Options for {@link ResponseState.error}.
+ *
+ * @group Responses
+ */
 export interface ResponseErrorOptions {
   /** What the user is told. Defaults to a `UserError`'s own message, or a generic sentence. */
   message?: string
@@ -93,7 +117,11 @@ export interface ResponseLockOptions {
   disable?: 'all' | 'clicked' | 'none'
 }
 
-/** Options for one message sent with `send()`, `edit()` or `followUp()`. */
+/**
+ * Options for one message sent with `send()`, `edit()` or `followUp()`.
+ *
+ * @group Responses
+ */
 export interface ResponseSendOptions {
   /**
    * Whether an embed with no colour and a Components V2 container with no accent take the theme's
@@ -102,7 +130,11 @@ export interface ResponseSendOptions {
   fill?: boolean
 }
 
-/** One Discord call made through a response state, as the testing helpers report it. */
+/**
+ * One Discord call made through a response state, as the testing helpers report it.
+ *
+ * @group Responses
+ */
 export interface ResponseCall {
   method:
     | 'deferReply'
@@ -224,6 +256,8 @@ function toJson(value: unknown): Record<string, unknown> {
 /**
  * How one interaction is answered: the single place its replies, edits and follow-ups go through, so
  * each call picks the right Discord method for where the answer stands. Get it with `respond()`.
+ *
+ * @group Responses
  */
 export interface ResponseState {
   /** Where the interaction happened, and whether the bot can reach the channel there. */
@@ -876,6 +910,8 @@ export function responseOf(interaction: RepliableInteraction): InteractionRespon
  *
  * @example
  * ```typescript
+ * constructor(private readonly profiles: ProfileService) {}
+ *
  * @Command('profile', CommandType.SLASH)
  * async profile(interaction: ChatInputCommandInteraction) {
  *   await respond(interaction).acknowledge()
@@ -883,6 +919,8 @@ export function responseOf(interaction: RepliableInteraction): InteractionRespon
  *   await respond(interaction).send({ embeds: [card] })
  * }
  * ```
+ *
+ * @group Responses
  */
 export function respond(interaction: Interaction): ResponseState {
   if (!interaction.isRepliable()) {

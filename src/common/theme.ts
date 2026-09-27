@@ -49,6 +49,15 @@ function assign(name: LegacyColor, value: ColorResolvable): void {
  * @deprecated Read `useTheme().colors`, and set the colours in `@MeoCord({ theme })`: `primaryColor` is
  * `colors.primary`, `successColor` `colors.success`, `infoColor` `colors.info`, `errorColor` `colors.danger` and
  * `warningColor` `colors.warning`.
+ *
+ * @example
+ * ```ts
+ * // Both colour the embed with the call's primary colour; write the second in new code
+ * new EmbedBuilder().setColor(Theme.primaryColor)
+ * new EmbedBuilder().setColor(useTheme().colors.primary)
+ * ```
+ *
+ * @group Responses
  */
 export class Theme {
   /** @deprecated Read `useTheme().colors.primary`; set `colors.primary` in `@MeoCord({ theme })`. */

@@ -293,14 +293,19 @@ const stores = new WeakMap<ThemeCache, ThemeResolverCaches>()
  * ```ts
  * @Service()
  * export class GuildSettings {
- *   constructor(private readonly themes: ThemeCache) {}
+ *   readonly themes = new Map<string, ThemeOverride>()
  *
- *   async setColour(guildId: string, primary: string) {
- *     await this.db.saveTheme(guildId, { colors: { primary } })
- *     this.themes.invalidateGuild(guildId)
+ *   constructor(private readonly cache: ThemeCache) {}
+ *
+ *   setColour(guildId: string, primary: HexColorString) {
+ *     this.themes.set(guildId, { colors: { primary } })
+ *     // The next call in this server looks its theme up again, rather than waiting for ttlSeconds
+ *     this.cache.invalidateGuild(guildId)
  *   }
  * }
  * ```
+ *
+ * @group Utilities
  */
 export class ThemeCache {
   /**

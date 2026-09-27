@@ -184,11 +184,14 @@ export function themeForInteraction(interaction: object): ResolvedTheme | Promis
  *
  * @example
  * ```ts
- * import { useTheme } from 'meocord/common'
- *
- * const { colors, emojis } = useTheme()
- * await respond(interaction).send({ embeds: [{ description: `${emojis.success} Saved`, color: resolveColor(colors.success) }] })
+ * @Command('save', CommandType.SLASH)
+ * async save(interaction: ChatInputCommandInteraction) {
+ *   const { colors, emojis } = useTheme()
+ *   await respond(interaction).send({ embeds: [{ description: `${emojis.success} Saved`, color: resolveColor(colors.success) }] })
+ * }
  * ```
+ *
+ * @group Responses
  */
 export function useTheme(): ResolvedTheme {
   return scope.getStore()?.theme ?? ambient?.theme() ?? defaults
@@ -205,12 +208,17 @@ export function useTheme(): ResolvedTheme {
  *
  * @example
  * ```ts
- * const collector = message.createMessageComponentCollector({ time: 60_000 })
- * collector.on('collect', bindTheme(async (click: ButtonInteraction) => {
- *   const { emojis } = useTheme() // the handler's theme, @UseTheme included
- *   await click.reply(`${emojis.success} Picked`)
- * }))
+ * @MessageHandler('poll')
+ * async poll(message: Message) {
+ *   const collector = message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60_000 })
+ *   collector.on('collect', bindTheme(async (click: ButtonInteraction) => {
+ *     const { emojis } = useTheme() // the handler's theme, @UseTheme included
+ *     await click.reply(`${emojis.success} Picked`)
+ *   }))
+ * }
  * ```
+ *
+ * @group Responses
  */
 export function bindTheme<F extends (...args: any[]) => unknown>(fn: F): F {
   const theme = useTheme()

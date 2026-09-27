@@ -1,6 +1,10 @@
 import { type Guild, type Interaction, Locale } from 'discord.js'
 
-/** The plural categories `Intl.PluralRules` selects between. */
+/**
+ * The plural categories `Intl.PluralRules` selects between.
+ *
+ * @group Types
+ */
 export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other'
 
 /**
@@ -9,10 +13,16 @@ export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other'
  *
  * An object whose keys are all plural category names is always read as a plural, never as a group of
  * messages named `one`, `other` and so on.
+ *
+ * @group Types
  */
 export type PluralMessage = { readonly other: string } & Readonly<Partial<Record<Exclude<PluralCategory, 'other'>, string>>>
 
-/** A message catalog: messages, plurals, and nested groups of them, keyed by name. */
+/**
+ * A message catalog: messages, plurals, and nested groups of them, keyed by name.
+ *
+ * @group Types
+ */
 export interface CatalogShape {
   readonly [key: string]: string | PluralMessage | CatalogShape
 }
@@ -25,7 +35,11 @@ type IsPlural<T> = T extends object
     : false
   : false
 
-/** Every message key of a catalog: the dotted path to each message or plural. */
+/**
+ * Every message key of a catalog: the dotted path to each message or plural.
+ *
+ * @group Types
+ */
 export type MessageKey<C> = {
   [K in keyof C & string]: C[K] extends string
     ? K
@@ -34,7 +48,11 @@ export type MessageKey<C> = {
       : `${K}.${MessageKey<C[K]>}`
 }[keyof C & string]
 
-/** The keys whose message is a plain string, as command names and descriptions need. */
+/**
+ * The keys whose message is a plain string, as command names and descriptions need.
+ *
+ * @group Types
+ */
 export type StringMessageKey<C> = {
   [K in keyof C & string]: C[K] extends string ? K : IsPlural<C[K]> extends true ? never : `${K}.${StringMessageKey<C[K]>}`
 }[keyof C & string]
@@ -70,12 +88,16 @@ type ParamsArgs<M> = [keyof MessageParams<M>] extends [never] ? [params?: Record
 /**
  * Translates a key into one locale's message, with the key and params type-checked against the
  * default catalog.
+ *
+ * @group Types
  */
 export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>) => string
 
 /**
  * What a locale other than the default provides: any part of the default catalog, with any wording.
  * A missing message falls back to a related locale, then to the default.
+ *
+ * @group Types
  */
 export type LocaleCatalog<C> = {
   readonly [K in keyof C]?: C[K] extends string ? string : IsPlural<C[K]> extends true ? PluralMessage : LocaleCatalog<C[K]>
@@ -119,6 +141,9 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
  *   warnings: { one: '{count} warning', other: '{count} warnings' },
  * })
  * ```
+ *
+ * @group Utilities
+ * @category Localisation
  */
 export function defineCatalog<const T extends CatalogShape>(catalog: T): T {
   return catalog
@@ -137,6 +162,8 @@ export function defineCatalog<const T extends CatalogShape>(catalog: T): T {
  *
  * @example
  * ```ts
+ * const enUS = defineCatalog({ ban: { done: 'Banned {user}.' } })
+ *
  * @Service()
  * export class BanService {
  *   constructor(private readonly t: Translator<typeof enUS>) {}
@@ -146,6 +173,9 @@ export function defineCatalog<const T extends CatalogShape>(catalog: T): T {
  *   }
  * }
  * ```
+ *
+ * @group Utilities
+ * @category Localisation
  */
 export abstract class Translator<C = CatalogShape> {
   /** The locale whose catalog is the default. */
@@ -331,10 +361,10 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
  *
  * @example
  * ```ts
- * // src/i18n.ts
- * import enUS from '@src/locales/en-US'
- * import id from '@src/locales/id'
+ * const enUS = defineCatalog({ ban: { description: 'Ban a member', done: 'Banned {user}.' } })
+ * const id = { ban: { description: 'Blokir anggota', done: '{user} diblokir.' } }
  *
+ * // At module scope: command builders read it when their class is decorated
  * export const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id } })
  *
  * new SlashCommandBuilder()
@@ -342,8 +372,11 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
  *   .setDescription(t.default('ban.description'))
  *   .setDescriptionLocalizations(t.localizations('ban.description'))
  *
- * await interaction.reply(t.for(interaction)('ban.done', { user: target.toString() }))
+ * export const banned = (interaction: ChatInputCommandInteraction, target: User) => t.for(interaction)('ban.done', { user: target.toString() })
  * ```
+ *
+ * @group Utilities
+ * @category Localisation
  */
 export function createTranslator<
   const Locales extends Readonly<Record<string, CatalogShape>>,

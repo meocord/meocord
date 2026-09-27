@@ -17,11 +17,15 @@ export function markExplained(error: unknown): void {
  *
  * @example
  * ```typescript
- * // src/main.ts
- * bootstrap().catch(error => {
- *   if (!isExplainedError(error)) logger.error('Error during startup:', error)
- * })
+ * // As src/main.ts starts the app: an error MeoCord explained is already logged
+ * export function start(app: MeoCordApplication, logger: Logger) {
+ *   app.start().catch((error: unknown) => {
+ *     if (!isExplainedError(error)) logger.error('Error during startup:', error)
+ *   })
+ * }
  * ```
+ *
+ * @group Utilities
  */
 export function isExplainedError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as Record<symbol, unknown>)[EXPLAINED] === true
