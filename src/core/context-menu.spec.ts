@@ -66,6 +66,7 @@ describe('context menu commands', () => {
     expect(() => {
       @Controller()
       class Mismatched {
+        // @ts-expect-error the compiler refuses it first; startup refuses what reaches it untyped
         @Command('Report', ReportUserBuilder)
         report(_interaction: MessageContextMenuCommandInteraction) {}
       }

@@ -282,6 +282,47 @@ function verifyThemeAugmentation(): void {
   }
 }
 
+/**
+ * Types a context menu handler from its builder's setType(), as an app imports discord.js and meocord: a handler of
+ * the other kind must fail to compile, its interaction imported as a type, and the builder must survive a
+ * declaration emit. A bundling change that dropped the augmentation of discord.js would pass the framework's own tests.
+ */
+function verifyContextMenuKinds(): void {
+  const probe = path.join(appDir, 'src', 'context-menu-probe.ts')
+  const tsconfig = path.join(appDir, 'tsconfig.context-menu-probe.json')
+  writeFileSync(
+    probe,
+    `import {\n  ApplicationCommandType,\n  ContextMenuCommandBuilder,\n  type MessageContextMenuCommandInteraction,\n` +
+      `  type UserContextMenuCommandInteraction,\n} from 'discord.js'\nimport { Command, CommandBuilder, Controller } from 'meocord/decorator'\n` +
+      `import { CommandType } from 'meocord/enum'\n\n@CommandBuilder(CommandType.CONTEXT_MENU)\nexport class ProbeBuilder {\n` +
+      `  build(commandName: string) {\n    return new ContextMenuCommandBuilder().setType(ApplicationCommandType.User).setName(commandName)\n  }\n}\n\n` +
+      `@Controller()\nexport class ProbeController {\n  @Command('Probe', ProbeBuilder)\n` +
+      `  async user(interaction: UserContextMenuCommandInteraction) {\n    void interaction.targetUser\n  }\n\n` +
+      `  // @ts-expect-error the builder registers a user command, so a message interaction never reaches it\n` +
+      `  @Command('Probe', ProbeBuilder)\n  async message(interaction: MessageContextMenuCommandInteraction) {\n` +
+      `    void interaction.targetMessage\n  }\n}\n`,
+  )
+  writeFileSync(
+    tsconfig,
+    `${JSON.stringify(
+      {
+        extends: './tsconfig.json',
+        compilerOptions: { noEmit: false, declaration: true, emitDeclarationOnly: true, outDir: path.join(workDir, 'context-menu-declarations') },
+        include: ['src/context-menu-probe.ts'],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  try {
+    inApp("a context menu handler typed from its builder's setType()", 'tsc', '-p', 'tsconfig.json')
+    inApp('a context menu builder, emitted as a declaration', 'tsc', '-p', 'tsconfig.context-menu-probe.json')
+  } finally {
+    rmSync(probe)
+    rmSync(tsconfig)
+  }
+}
+
 /** Reads the deprecated Theme, which the app's lint reports as a warning naming what replaces it, and nothing else. */
 function verifyDeprecatedWarning(): void {
   const file = path.join(appDir, 'src', 'deprecated-probe.ts')
@@ -392,6 +433,7 @@ function main(): void {
     verifyTestsKeepEnvOut()
     verifyAssetTypesBesideRsbuild()
     verifyThemeAugmentation()
+    verifyContextMenuKinds()
     verifyDeprecatedWarning()
     verifyCycleWarning()
     console.log('')

@@ -35,7 +35,7 @@ export enum ControllerType {
 export enum CommandType {
   /** Chat input command, or one subcommand of it. */
   SLASH = 'SLASH',
-  /** User or message context menu command. */
+  /** User or message context menu command, the handler typed with the kind its builder's `setType()` names. */
   CONTEXT_MENU = 'CONTEXT_MENU',
   /** Activity launch command (`ApplicationCommandType.PrimaryEntryPoint`). */
   PRIMARY_ENTRY_POINT = 'PRIMARY_ENTRY_POINT',

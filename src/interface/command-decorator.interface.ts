@@ -17,6 +17,7 @@ import {
   type SlashCommandSubcommandsOnlyBuilder,
 } from 'discord.js'
 import { CommandType } from '@src/enum/index.js'
+import { type ContextMenuInteractionOf } from '@src/interface/context-menu-kind.js'
 
 /**
  * The command types registered with Discord, which take a builder: slash, context menu and entry point commands.
@@ -151,7 +152,7 @@ export type CommandInteractionType<
   T extends CommandBuilderConstructor<CommandType.SLASH>
     ? ChatInputCommandInteraction
     : T extends CommandBuilderConstructor<CommandType.CONTEXT_MENU>
-      ? UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction
+      ? ContextMenuInteractionOf<ReturnType<InstanceType<T>['build']>>
       : T extends CommandBuilderConstructor<CommandType.PRIMARY_ENTRY_POINT>
         ? PrimaryEntryPointCommandInteraction
         : T extends keyof ComponentInteractionMap

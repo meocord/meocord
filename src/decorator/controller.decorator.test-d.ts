@@ -67,6 +67,25 @@ class ReportBuilder implements CommandBuilderBase<CommandType.CONTEXT_MENU> {
   }
 }
 
+@CommandBuilder(CommandType.CONTEXT_MENU)
+class QuoteBuilder implements CommandBuilderBase<CommandType.CONTEXT_MENU> {
+  build(commandName: string) {
+    return new ContextMenuCommandBuilder().setType(ApplicationCommandType.Message).setName(commandName)
+  }
+}
+
+declare const eitherKind: boolean
+
+// Its kind is only known at runtime
+@CommandBuilder(CommandType.CONTEXT_MENU)
+class EitherBuilder implements CommandBuilderBase<CommandType.CONTEXT_MENU> {
+  build(commandName: string) {
+    return new ContextMenuCommandBuilder()
+      .setName(commandName)
+      .setType(eitherKind ? ApplicationCommandType.User : ApplicationCommandType.Message)
+  }
+}
+
 @CommandBuilder(CommandType.PRIMARY_ENTRY_POINT)
 class LaunchBuilder implements CommandBuilderBase<CommandType.PRIMARY_ENTRY_POINT> {
   build(commandName: string): PrimaryEntryPointCommandData {
@@ -97,7 +116,13 @@ describe('CommandInteractionType', () => {
     expectTypeOf<
       CommandInteractionType<CommandType.SLASH, typeof PingBuilder>
     >().toEqualTypeOf<ChatInputCommandInteraction>()
-    expectTypeOf<CommandInteractionType<CommandType.CONTEXT_MENU, typeof ReportBuilder>>().toEqualTypeOf<
+    expectTypeOf<
+      CommandInteractionType<CommandType.CONTEXT_MENU, typeof ReportBuilder>
+    >().toEqualTypeOf<UserContextMenuCommandInteraction>()
+    expectTypeOf<
+      CommandInteractionType<CommandType.CONTEXT_MENU, typeof QuoteBuilder>
+    >().toEqualTypeOf<MessageContextMenuCommandInteraction>()
+    expectTypeOf<CommandInteractionType<CommandType.CONTEXT_MENU, typeof EitherBuilder>>().toEqualTypeOf<
       UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction
     >()
     expectTypeOf<
@@ -143,20 +168,33 @@ describe('@Command', () => {
     expectTypeOf<Accepted>().toBeObject()
   })
 
-  it('lets a context menu handler declare the one kind its builder registers, or either, but no other interaction', () => {
+  it("types a context menu handler with the kind its builder's setType() names, and refuses the other", () => {
     class ContextMenus {
       @Command('report', ReportBuilder)
       reportUser(_interaction: UserContextMenuCommandInteraction) {
         // asserted at the type level only
       }
 
-      @Command('quote', ReportBuilder)
+      @Command('quote', QuoteBuilder)
+      quote(_interaction: MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      // Taking either kind accepts the one the builder names
+      @Command('report', ReportBuilder)
+      reportAny(_interaction: UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      // @ts-expect-error the builder registers a user command, so a message interaction never reaches it
+      @Command('report', ReportBuilder)
       reportMessage(_interaction: MessageContextMenuCommandInteraction) {
         // asserted at the type level only
       }
 
-      @Command('either', CommandType.CONTEXT_MENU)
-      either(_interaction: UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction) {
+      // @ts-expect-error the builder registers a message command, so a user interaction never reaches it
+      @Command('quote', QuoteBuilder)
+      quoteUser(_interaction: UserContextMenuCommandInteraction) {
         // asserted at the type level only
       }
 
@@ -168,6 +206,28 @@ describe('@Command', () => {
     }
 
     expectTypeOf<ContextMenus>().toBeObject()
+  })
+
+  it('lets a handler declare either kind, or one, when the compiler cannot tell which its builder registers', () => {
+    class Unknown {
+      @Command('either', EitherBuilder)
+      either(_interaction: UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      // Checked against the builder as the bot starts
+      @Command('either', EitherBuilder)
+      one(_interaction: MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      @Command('any', CommandType.CONTEXT_MENU)
+      any(_interaction: UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+    }
+
+    expectTypeOf<Unknown>().toBeObject()
   })
 
   it('rejects a handler typed for a different select menu', () => {
