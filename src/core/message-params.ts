@@ -96,9 +96,16 @@ export function usageOf(route: Pick<MessageRoute, 'tokens' | 'flags'>, start: st
 
 /** The issue for a word that is not a value of its param's type. */
 function wrongType(item: Item, types: Record<string, MessageParamType> | undefined): MessageUsageIssue {
-  const choices = choicesOf(item.type)
-  const expected = choices ? `one of ${choices.join(', ')}` : `a valid ${types?.[item.type]?.label ?? LABELS[item.type] ?? item.type}`
+  const expected = choicesOf(item.type) ? paramTypeLabel(item.type, types) : `a valid ${paramTypeLabel(item.type, types)}`
   return { param: item.key, message: `${item.label}: "${item.word}" is not ${expected}` }
+}
+
+/** What a param of a type takes, in words: `whole number`, `one of asc, desc`, an app type's label, or `text`. */
+export function paramTypeLabel(type: string | undefined, types: Record<string, MessageParamType> | undefined): string {
+  const choices = type === undefined ? undefined : choicesOf(type)
+  if (choices) return `one of ${choices.join(', ')}`
+  const key = type ?? 'string'
+  return types?.[key]?.label ?? LABELS[key] ?? key
 }
 
 /**
@@ -341,7 +348,7 @@ export function messageCommandHooks(
  * Orders two routes of one handler by which names it best: its own pattern before an alias, then the more
  * specific, then the one that sorts first, so declaration order never decides.
  */
-function primaryFirst(a: MessageRoute, b: MessageRoute): number {
+export function primaryFirst(a: MessageRoute, b: MessageRoute): number {
   if ((a.aliasOf === undefined) !== (b.aliasOf === undefined)) return a.aliasOf === undefined ? -1 : 1
   if (a.specificity !== b.specificity) return b.specificity - a.specificity
   return a.pattern < b.pattern ? -1 : a.pattern > b.pattern ? 1 : 0

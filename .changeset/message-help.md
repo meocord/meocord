@@ -1,0 +1,7 @@
+---
+'meocord': minor
+---
+
+Message commands have a built-in help command, off unless asked for: `@MeoCord({ messages: { prefix: '!', help: true } })` answers `!help` with the commands the caller can use where they asked, one line each with its handler's `description`, and `!help <command>` with one command's usage, params, aliases and where it works. `help: { command, aliases }` names other words. The list leaves out a handler with a guard on its method or controller, since it runs no guards, and one whose new `hidden: true` option asks to be left out; named, either is shown. `!help` for words with no handler of their own lists their subcommands, and an unknown name or nothing to list gets a line saying so. It answers only after a prefix or mention, and an app's own `help` handler always runs instead, with a warning at startup. With `replyEmoji` the reply begins with the theme's `emojis.info`.
+
+The reply is plain English text. A presenter's new optional `messageHelp(help, message)` method writes it instead, from `MessageHelp`, what the built-in found. `HandlerRegistry.messageHelp(message, query?)` gives the same model to a help command of the app's own, with help on or off, and `MessageHandlerEntry.hidden` says whether a handler asked to be left out. `hidden` also leaves a subcommand out of the usage listing a message naming only a parent gets.

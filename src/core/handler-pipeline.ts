@@ -489,11 +489,16 @@ export async function handleUnroutedError(
   error: unknown,
   options: RunOptions = {},
 ): Promise<void> {
+  return runInAppTheme(container, args, () => answerUnrouted(container, args, error, options))
+}
+
+/** Runs an answer to a call no handler takes, such as the built-in help, in the app's theme for where it came from. */
+export async function runInAppTheme<T>(container: Container, args: readonly unknown[], answer: () => Promise<T>): Promise<T> {
   const theme = beginCallTheme(container, args)
-  if (!theme) return answerUnrouted(container, args, error, options)
+  if (!theme) return answer()
   return runInThemeScope(theme.scope, async () => {
     await theme.ready
-    return answerUnrouted(container, args, error, options)
+    return answer()
   })
 }
 

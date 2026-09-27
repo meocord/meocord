@@ -1083,7 +1083,31 @@ async mute(message: Message, { target, duration, reason }: { target: GuildMember
 
 ### A help command
 
-MeoCord does not reply to `!help` itself, since help is where bots differ most: embeds, pages, categories. [`HandlerRegistry`](#handler-discovery) gives what one needs. Each message command is listed once, with its `command` words, `aliases`, `description`, `scope`, `usage(prefix)` and `matches(words)`:
+`@MeoCord({ messages: { prefix: '!', help: true } })` turns on a built-in `!help`. It lists the message commands the caller can use where they asked, one line each, with the `description` each handler gives, and `!help <command>` shows one, by its words or an alias:
+
+```
+!help          ->  Commands:
+                   !config get <key> — Reads a setting.
+                   !mute <target> [duration] [reason…] — Times a member out.
+                   Type !help <command> for one command's usage.
+!help mute     ->  Usage: !mute <target> [duration] [reason…]
+                   Times a member out.
+                   target: member · duration (optional): length of time, such as 10m · reason (optional): text
+                   Also: !m
+                   Works in servers only.
+```
+
+- It is off unless asked for, and answers only after a prefix or a mention, as usage replies do. `help: { command: 'commands', aliases: ['h'] }` names other words.
+- Its list leaves out a handler with a guard, on its method or its controller, since the list runs no guards and must not name what a caller may be refused, and one whose options say `hidden: true`. Named, either is shown. A command that works only in servers, by its `scope` or a `member`, `role` or `channel` param, is left out of the list in a DM.
+- `!help config`, for words with no handler of their own, lists their subcommands. A name no command has, and nothing to list, get a line saying so.
+- An app's own handler for the word, `@MessageHandler('help …')`, always runs instead, and the bot warns at startup that the built-in never answers it.
+- With `replyEmoji`, the reply begins with the theme's `emojis.info`. It is not deleted, since the caller asked for it, and a reply over 2,000 characters is sent as several.
+
+The reply is plain English text. To write it another way, in an embed or in the app's languages, give the app's [presenter](#presenters) a `messageHelp(help, message)` method: `help` is a `MessageHelp`, what the built-in found, and the method returns the text or `message.reply` options.
+
+#### Your own `!help`
+
+A help command of the app's own gets the same model from [`HandlerRegistry`](#handler-discovery), whether `messages.help` is on or off. `messageHelp(message, query?)` applies the same rules, so reachability and guards are not reimplemented:
 
 ```typescript
 import { HandlerRegistry } from 'meocord/core'
@@ -1092,24 +1116,18 @@ import { HandlerRegistry } from 'meocord/core'
 export class HelpMessageController {
   constructor(private readonly handlers: HandlerRegistry) {}
 
-  // !help lists the commands; !help mute, or !help m, shows one
   @MessageHandler('help {command...?}', { description: 'Lists the commands, or shows one.' })
   async help(message: Message, { command }: { command?: string }) {
-    const commands = this.handlers.list({ kind: 'message' }).filter(entry => entry.command)
-    const one = command ? commands.find(entry => entry.matches(command)) : undefined
-    if (command && !one) {
-      await message.reply(`No command is called ${command}.`)
-      return
-    }
-    const lines = one
-      ? [one.usage('!'), one.description, one.aliases.length ? `Also: ${one.aliases.join(', ')}` : undefined]
-      : commands.map(entry => `\`${entry.usage('!')}\` ${entry.description ?? ''}`)
-    await message.reply(lines.filter(Boolean).join('\n'))
+    const help = await this.handlers.messageHelp(message, command)
+    if (help.kind === 'list')
+      await message.reply(help.commands.map(entry => `\`${entry.usage}\` ${entry.description ?? ''}`).join('\n'))
+    else if (help.kind === 'command') await message.reply(help.commands.map(entry => entry.usage).join('\n'))
+    else await message.reply(help.kind === 'unknown' ? `No command is called ${help.query}.` : 'Nothing to show here.')
   }
 }
 ```
 
-`usage('!')` gives `!mute <target> [duration] [reason…]`, the text a usage error shows. `matches` compares in any case unless the handler or the app is case-sensitive.
+`HandlerRegistry.list({ kind: 'message' })` also gives each message command's `command` words, `aliases`, `description`, `scope`, `hidden`, `usage(prefix)` and `matches(words)`, for anything else built from them.
 
 ### Prefixes
 

@@ -10,6 +10,7 @@ import {
   type APIComponentInContainer,
   Message,
   MessageReaction,
+  type MessageReplyOptions,
   type PartialUser,
   User,
 } from 'discord.js'
@@ -345,6 +346,15 @@ export interface ResponsePresenter {
 
   /** The view shown for an error. */
   error(context: ResponseContext, error: PresentedError): ResponseView
+
+  /**
+   * The reply to the built-in `help` message command, from what it found; without this method MeoCord writes it in
+   * plain text. Return text, or the options `message.reply` takes, such as an embed.
+   *
+   * @param help - What the caller asked about and what they can use, as {@link MessageHelp} describes it.
+   * @param message - The message that asked for help.
+   */
+  messageHelp?(help: MessageHelp, message: Message): string | MessageReplyOptions | Promise<string | MessageReplyOptions>
 }
 
 /**
@@ -516,6 +526,99 @@ export interface MessageCommandOptions {
    * @defaultValue `false`
    */
   replyEmoji?: boolean
+  /**
+   * Answers `!help` with the message commands the caller can use, and `!help <command>` with one of them, from the
+   * `description` each handler gives. `true` uses the word `help`; `{ command, aliases }` names other words. It
+   * answers only after a prefix or a mention, and an app's own handler for the word runs instead. The reply's text
+   * comes from the presenter's `messageHelp` when it has one.
+   * @defaultValue `false`
+   */
+  help?: boolean | MessageHelpOptions
+}
+
+/**
+ * The words the built-in help command answers to, as `@MeoCord({ messages: { help } })` takes them.
+ *
+ * @group Configuration
+ * @category App options
+ * @see {@link MessageCommandOptions}
+ */
+export interface MessageHelpOptions {
+  /**
+   * The word that asks for help, after a prefix or mention.
+   * @defaultValue `'help'`
+   */
+  command?: string
+  /** Other words that ask for it, such as `'commands'`. */
+  aliases?: readonly string[]
+}
+
+/**
+ * What the built-in help command found, for a presenter's `messageHelp` to write.
+ *
+ * `list` is every command the caller can use here; `command` is the one a `!help <command>` names; `parent` is the
+ * subcommands of the words it names; `unknown` is a name no command has; `empty` is nothing to list.
+ *
+ * @example
+ * ```ts
+ * @Service()
+ * export class HelpPresenter implements ResponsePresenter {
+ *   loading = ({ theme }: ResponseContext) => ({ text: 'Working on it…', emoji: theme.emojis.loading })
+ *   error = (_context: ResponseContext, { message }: PresentedError) => ({ text: message })
+ *
+ *   messageHelp(help: MessageHelp) {
+ *     if (help.kind !== 'list') return help.kind === 'unknown' ? `No "${help.query}" here.` : 'Ask a moderator.'
+ *     return help.commands.map(entry => `${entry.usage}: ${entry.description ?? ''}`).join('\n')
+ *   }
+ * }
+ * ```
+ *
+ * @group Types
+ * @see {@link MessageHelpEntry}
+ * @see {@link ResponsePresenter}
+ */
+export type MessageHelp =
+  | { kind: 'list'; commands: MessageHelpEntry[]; invocation: string }
+  | { kind: 'command'; commands: MessageHelpEntry[]; invocation: string }
+  | { kind: 'parent'; subcommands: MessageHelpEntry[]; invocation: string }
+  | { kind: 'unknown'; query: string; invocation: string }
+  | { kind: 'empty'; reason: 'none' | 'server-only'; invocation: string }
+
+/**
+ * One message command as the built-in help shows it: how to type it, what it does, and where it works.
+ *
+ * @group Types
+ * @see {@link MessageHelp}
+ */
+export interface MessageHelpEntry {
+  /** The command as the caller types it here, such as `!mute <target> [duration] [reason…]`. */
+  usage: string
+  /** The words that name the command, such as `mute`, or `''` for a pattern that begins with a param. */
+  command: string
+  /** What the command does, from its handler's `description`. */
+  description?: string
+  /** Its aliases as the caller types them, such as `!m`. */
+  aliases: string[]
+  /** Where it works; a command with a `member`, `role` or `channel` param works in servers only. */
+  scope: MessageScope
+  /** Each param and flag, with what it takes. */
+  params: MessageHelpParam[]
+  /** The class and method that handle it, by name. */
+  handler: { controller: string; method: string }
+}
+
+/**
+ * One param or flag of a {@link MessageHelpEntry}, with what it takes in words.
+ *
+ * @group Types
+ */
+export interface MessageHelpParam {
+  /** Its name as the usage shows it, such as `duration`, or `--bots` for a flag. */
+  name: string
+  /** What it takes, such as `whole number`, `one of asc, desc` or `text`. */
+  label: string
+  /** Whether it can be left out. */
+  optional: boolean
 }
 
 /**
@@ -794,7 +897,7 @@ export interface MessageHandlerOptions {
    * `ban {target:member}` also takes `!b @ana`. `HandlerRegistry` lists the handler once, with its aliases.
    */
   aliases?: readonly string[]
-  /** What the command does, for a help listing read from `HandlerRegistry`. */
+  /** What the command does, shown by the built-in help and by `HandlerRegistry`. */
   description?: string
   /**
    * Where the command works; `'any'` by default. A message sent elsewhere gets a usage reply saying
@@ -802,6 +905,12 @@ export interface MessageHandlerOptions {
    * works in servers only, whatever this says.
    */
   scope?: MessageScope
+  /**
+   * Leaves the command out of the built-in help's list and of a parent's list of subcommands. It still runs, and
+   * `!help <command>` still shows it by name.
+   * @defaultValue `false`
+   */
+  hidden?: boolean
 }
 
 /**
