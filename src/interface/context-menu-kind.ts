@@ -14,7 +14,8 @@ declare module 'discord.js' {
      *
      * With MeoCord, the builder also remembers the kind for the compiler, so a `@Command` handler of this builder
      * receives `UserContextMenuCommandInteraction` or `MessageContextMenuCommandInteraction`, and one declaring the
-     * other kind fails to compile. Nothing changes at runtime.
+     * other kind fails to compile. Nothing changes at runtime. Leave `build()`'s return type to be inferred: written
+     * out as `ContextMenuCommandBuilder`, it drops the kind, and the handler is checked only as the bot starts.
      *
      * @param type - `ApplicationCommandType.User` or `ApplicationCommandType.Message`.
      */
