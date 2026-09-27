@@ -2886,9 +2886,9 @@ it('has no overlapping component patterns', () => {
 ```
 
 `resolveRoute` returns the `controller`, the `handler` method and its name as `method`, the
-`params` the pattern captured, as text, and `values`, the params as the handler receives them, a
-[typed customId param](#typed-customid-params) as its value — or `undefined` when no route handles the
-customId or message. A
+`params` the pattern captured, as text — or `undefined` when no route handles the customId or message. A
+route with a [typed customId param](#typed-customid-params) adds `values`, the params as its handler
+receives them, each typed one as its value. A
 message never resolves to a `@MessageHandler()` listener, which runs for every message. For an app
 that reads prefixes from a function, pass the one the message has, `{ content, prefix: '?' }`, and
 pass `botId` for a message that mentions the bot.
