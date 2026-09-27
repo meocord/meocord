@@ -17,10 +17,10 @@ function mockTheme(overrides: unknown, where: string): ResolvedTheme {
 }
 
 /**
- * Makes a whole theme for a test: MeoCord's defaults with `overrides` merged over them, frozen, as `useTheme()` reads it.
+ * Makes a whole theme for a test: MeoCord's defaults with `overrides` merged over them, frozen.
  *
- * Pass it where code takes a theme, run code in it with {@link withTheme}, or compare against it. `createMockTheme()`
- * is the theme a testing module with no theme reads.
+ * It is the theme as `useTheme()` reads it: pass it where code takes a theme, run code in it with {@link withTheme},
+ * or compare against it. `createMockTheme()` is the theme a testing module with no theme reads.
  *
  * @remarks
  * When the app adds tokens to the theme, `overrides` gives them, as `@MeoCord({ theme })` does, since MeoCord has no

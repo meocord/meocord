@@ -14,12 +14,18 @@ import { ComponentType, ModalSubmitFields } from 'discord.js'
  * ```ts
  * import { expect } from 'vitest'
  *
- * const interaction = createMockInteraction(ModalSubmitInteraction, {
- *   customId: 'feedback/bugs',
- *   fields: createModalFields({ body: 'It crashed', area: ['login'] }),
- * })
- * expect(interaction.fields.getTextInputValue('body')).toBe('It crashed')
- * expect(interaction.fields.getStringSelectValues('area')).toEqual(['login'])
+ * @Controller()
+ * class FeedbackController {
+ *   @Command('feedback/{topic}', CommandType.MODAL_SUBMIT)
+ *   async submit(interaction: ModalSubmitInteraction, { topic, body }: { topic: string; body: string }) {
+ *     await respond(interaction).send(`Thanks: ${topic}, ${body}`)
+ *   }
+ * }
+ * const module = MeoCordTestingModule.create({ controllers: [FeedbackController] }).compile()
+ * const fields = createModalFields({ body: 'It crashed' })
+ * const interaction = createMockInteraction(ModalSubmitInteraction, { customId: 'feedback/bugs', fields })
+ * await module.invoke(FeedbackController, 'submit', interaction)
+ * expect(getResponse(interaction).calls[0].payload).toMatchObject({ content: 'Thanks: bugs, It crashed' })
  * ```
  *
  * @group Testing
