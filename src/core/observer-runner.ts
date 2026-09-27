@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
-import { CooldownError, CommandNotFoundError, GuardDeniedError, UserError, ValidationError } from '@src/common/errors.js'
+import { CooldownError, CommandNotFoundError, GuardDeniedError, MessageUsageError, UserError, ValidationError } from '@src/common/errors.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
 import { Logger } from '@src/common/logger.js'
 import { type DispatchObserver, type DispatchOutcome, type DispatchResult } from '@src/interface/observer.interface.js'
@@ -102,7 +102,7 @@ export function responsePhaseOf(context: ExecutionContext): ResponsePhase | unde
 export function outcomeOf(error: unknown): DispatchOutcome {
   if (error instanceof GuardDeniedError) return 'denied'
   if (error instanceof CooldownError) return 'cooldown'
-  if (error instanceof ValidationError) return 'invalid'
+  if (error instanceof ValidationError || error instanceof MessageUsageError) return 'invalid'
   if (error instanceof UserError) return 'refused'
   if (error instanceof CommandNotFoundError) return 'not-found'
   return 'error'
