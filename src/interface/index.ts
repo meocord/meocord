@@ -647,7 +647,7 @@ export interface MessageHelpParam {
  *
  * @group Configuration
  * @category App options
- * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.1/message-params | Message params}
  */
 export interface MessageParamType<T = unknown> {
   /** A noun such as `hex colour`, read in "is not a valid hex colour". Defaults to the type's key. */
