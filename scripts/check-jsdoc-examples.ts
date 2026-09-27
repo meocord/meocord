@@ -280,15 +280,15 @@ function main(): void {
     })
   }
 
-  // The examples, the fixtures and the built package, in one program. An example that augments a module, as a theme's
-  // own tokens do, gets a program of its own, so its augmentation cannot change the types another example sees; each
-  // reuses what the shared program parsed.
+  // The examples, the fixtures and the built package, in one program. An example that augments a module or the global
+  // scope, as a theme's own tokens do, gets a program of its own, so its augmentation cannot change the types another
+  // example sees; each reuses what the shared program parsed.
   const host = ts.createCompilerHost(compilerOptions)
   const readFile = host.readFile.bind(host)
   const fileExists = host.fileExists.bind(host)
   host.readFile = file => files.get(path.resolve(file))?.code ?? readFile(file)
   host.fileExists = file => files.has(path.resolve(file)) || fileExists(file)
-  const augmenting = [...files.keys()].filter(file => /\bdeclare\s+module\b/.test(files.get(file)!.code))
+  const augmenting = [...files.keys()].filter(file => /\bdeclare\s+(module|global)\b/.test(files.get(file)!.code))
   const shared = ts.createProgram(
     [...files.keys()].filter(file => !augmenting.includes(file)).concat(fixturesFile),
     compilerOptions,
