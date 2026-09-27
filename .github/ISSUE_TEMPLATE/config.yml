@@ -7,5 +7,5 @@ contact_links:
     url: https://github.com/meocord/meocord/security/advisories/new
     about: Report privately. Never open a public issue for a vulnerability.
   - name: Documentation
-    url: https://github.com/meocord/meocord#readme
-    about: The README covers controllers, guards, testing, and deployment.
+    url: https://meocord.dev
+    about: The guides and the API reference, for each version, on meocord.dev.

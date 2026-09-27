@@ -35,7 +35,7 @@
     "type": "git",
     "url": "git+https://github.com/meocord/meocord.git"
   },
-  "homepage": "https://github.com/meocord/meocord#readme",
+  "homepage": "https://meocord.dev",
   "bugs": {
     "url": "https://github.com/meocord/meocord/issues"
   },

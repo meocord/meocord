@@ -15,6 +15,8 @@
 
 If you know NestJS, the shape will feel familiar.
 
+**Documentation:** [meocord.dev](https://meocord.dev)
+
 > **Upgrading from 3.x or 4.0?** Follow the [migration guide](https://github.com/meocord/meocord/blob/main/docs/MIGRATING.md).
 
 ---
