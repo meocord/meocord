@@ -597,7 +597,7 @@ export interface MessageHelpEntry {
   command: string
   /** What the command does, from its handler's `description`. */
   description?: string
-  /** Its aliases as the caller types them, such as `!m`. */
+  /** Its aliases and other spellings, as the caller types them, such as `!m`. */
   aliases: string[]
   /** Where it works; a command with a `member`, `role` or `channel` param works in servers only. */
   scope: MessageScope
@@ -906,8 +906,8 @@ export interface MessageHandlerOptions {
    */
   scope?: MessageScope
   /**
-   * Leaves the command out of the built-in help's list and of a parent's list of subcommands. It still runs, and
-   * `!help <command>` still shows it by name.
+   * Leaves the command out of the built-in help's list and of a parent's list of subcommands. It is not a secret:
+   * it still runs, a misuse still gets its usage, and `!help <command>` still shows it when named.
    * @defaultValue `false`
    */
   hidden?: boolean

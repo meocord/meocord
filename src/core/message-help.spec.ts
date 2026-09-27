@@ -131,6 +131,19 @@ describe('the built-in help', () => {
     expect(replies(await send(client, '!help purge'))).toEqual(['Usage: !purge <count> [--bots]\ncount: whole number · --bots (optional): on when given'])
   })
 
+  it('answers a query typed as an example by the command its leading words name, and lists other spellings', async () => {
+    @Controller()
+    class Cards {
+      @MessageHandler('card show {id}')
+      @MessageHandler('card view {id}')
+      show() {}
+    }
+    const client = await startApp({ controllers: [Moderation, Cards], messages: HELP })
+
+    expect(replies(await send(client, '!help purge 5'))).toEqual(['Usage: !purge <count> [--bots]\ncount: whole number · --bots (optional): on when given'])
+    expect(replies(await send(client, '!help card view'))).toEqual(['Usage: !card show <id>\nid: text\nAlso: !card view'])
+  })
+
   it('shows a guarded or hidden command when named, and lists a parent without its guarded subcommands', async () => {
     const client = await startApp({ controllers: [Moderation], messages: HELP })
 
@@ -194,7 +207,28 @@ describe('the built-in help', () => {
 
     expect((await send(client, '!help')).reply).not.toHaveBeenCalled()
     expect(ran).toEqual(['own'])
-    expect(logged.warn.flat().join(' ')).toContain('OwnHelp.help handles "help", which runs instead')
+    expect(logged.warn.flat().join(' ')).toContain('OwnHelp.help ("help") takes "!help", which runs it instead')
+  })
+
+  it('warns for any handler the help message reaches, and not for one only another start reaches', async () => {
+    const shadowing = (pattern: string, options: { aliases?: string[]; prefix?: string } = {}) => {
+      @Controller()
+      class Topic {
+        @MessageHandler(pattern, options)
+        topic() {}
+      }
+      return Topic
+    }
+    const warned = async (controller: unknown) => {
+      logged.warn.length = 0
+      await startApp({ controllers: [controller], messages: HELP })
+      return logged.warn.flat().join(' ')
+    }
+
+    expect(await warned(shadowing('help {topic?}'))).toContain('Topic.topic ("help {topic?}") takes "!help"')
+    expect(await warned(shadowing('help {command}'))).toContain('Topic.topic ("help {command}") takes "!help"')
+    expect(await warned(shadowing('guide {topic...?}', { aliases: ['help'] }))).toContain('takes "!help"')
+    expect(await warned(shadowing('help {topic?}', { prefix: '?' }))).not.toContain('takes')
   })
 
   it('warns at startup when no message can ask for help', async () => {
