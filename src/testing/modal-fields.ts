@@ -1,23 +1,30 @@
 import { ComponentType, ModalSubmitFields } from 'discord.js'
 
 /**
- * Builds the `fields` of a submitted modal, as discord.js does when a user submits one, for a mock
- * `ModalSubmitInteraction`. A string is a text input's value; an array is a select's chosen values.
+ * Builds the `fields` of a submitted form, as discord.js does when a user submits one.
  *
- * discord.js keeps the `ModalSubmitFields` constructor private, so tests cannot build one directly.
+ * Use it for a mock `ModalSubmitInteraction`: discord.js keeps the `ModalSubmitFields` constructor private, so a test
+ * cannot build one directly.
  *
- * @param values - Each field's value, keyed by its customId.
- * @returns Fields that `getTextInputValue`, `getStringSelectValues` and a handler's input all read.
+ * @param values - Each field's value, keyed by its customId: a string for a text input, an array for a select's
+ *   chosen values.
+ * @returns Fields that `getTextInputValue`, `getStringSelectValues` and a handler's params all read.
  *
  * @example
  * ```ts
+ * import { expect } from 'vitest'
+ *
  * const interaction = createMockInteraction(ModalSubmitInteraction, {
  *   customId: 'feedback/bugs',
- *   fields: createModalFields({ body: 'It crashed' }),
+ *   fields: createModalFields({ body: 'It crashed', area: ['login'] }),
  * })
- *
- * await module.invoke(FeedbackController, 'feedback', interaction) // params: { topic: 'bugs', body: 'It crashed' }
+ * expect(interaction.fields.getTextInputValue('body')).toBe('It crashed')
+ * expect(interaction.fields.getStringSelectValues('area')).toEqual(['login'])
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockInteraction}
  */
 export function createModalFields(values: Record<string, string | string[]>): ModalSubmitFields {
   const components = Object.entries(values).map(([customId, value]) => ({
