@@ -885,7 +885,7 @@ A pattern that cannot be read — `{rest...}` before another word, a required wo
 
 ### Typed params
 
-A param can name a type, `{name:type}`. Its word is turned into that value before any guard runs, so every stage and the handler receive members and numbers rather than text:
+A param can name a type, `{name:type}`. Its word is read as that type before any guard runs, and the handler receives members and numbers rather than text. A member, user, role or channel reaches the guards as an `EntityRef`, and is fetched once they let the call through, as described below:
 
 ```typescript
 import { type GuildMember, type Message } from 'discord.js'
