@@ -26,6 +26,9 @@ import { copyLayer } from '@src/core/theme-scope.js'
  *   async refund(interaction: ChatInputCommandInteraction) {}
  * }
  * ```
+ *
+ * @group Decorators
+ * @category Controllers
  */
 export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator {
   return function (target: object, propertyKey?: string | symbol) {

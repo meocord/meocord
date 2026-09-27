@@ -1,4 +1,8 @@
-/** How many calls a cooldown allows, and in how long a window. */
+/**
+ * How many calls a cooldown allows, and in how long a window.
+ *
+ * @group Types
+ */
 export interface CooldownLimit {
   /** Calls allowed within the window. */
   uses: number
@@ -6,20 +10,32 @@ export interface CooldownLimit {
   windowMs: number
 }
 
-/** Whether a call may run, and if not, how long until one may. */
+/**
+ * Whether a call may run, and if not, how long until one may.
+ *
+ * @group Types
+ */
 export interface CooldownVerdict {
   allowed: boolean
   /** `0` when allowed; otherwise how long until the oldest call in the window leaves it. */
   retryAfterMs: number
 }
 
-/** One cooldown a call counts against: the key it counts under, and its limit. */
+/**
+ * One cooldown a call counts against: the key it counts under, and its limit.
+ *
+ * @group Types
+ */
 export interface CooldownEntry {
   key: string
   limit: CooldownLimit
 }
 
-/** Whether a call may run against every cooldown it counts against, and if not, which refused it. */
+/**
+ * Whether a call may run against every cooldown it counts against, and if not, which refused it.
+ *
+ * @group Types
+ */
 export interface CooldownBatchVerdict extends CooldownVerdict {
   /** The index of the entry that refused the call; with several, the one with the longest wait. */
   blocked?: number
@@ -35,18 +51,25 @@ export interface CooldownBatchVerdict extends CooldownVerdict {
  *
  * @example
  * ```ts
+ * // Your database's query: trims, counts and records a key's calls in one transaction that locks the key
+ * export abstract class CooldownQueries {
+ *   abstract consume(key: string, uses: number, windowMs: number): Promise<CooldownVerdict>
+ * }
+ *
  * @Service()
- * export class PostgresCooldownStore extends CooldownStore {
- *   constructor(private readonly db: DatabaseService) {
+ * export class DatabaseCooldownStore extends CooldownStore {
+ *   constructor(private readonly queries: CooldownQueries) {
  *     super()
  *   }
  *
  *   consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
- *     // Trims, counts and records the key's calls in one transaction that locks the key
- *     return this.db.consumeCooldown(key, limit.uses, limit.windowMs)
+ *     return this.queries.consume(key, limit.uses, limit.windowMs)
  *   }
  * }
  * ```
+ *
+ * @group Utilities
+ * @category Cooldown stores
  */
 export abstract class CooldownStore {
   /**
@@ -148,6 +171,31 @@ function verdictOf(entry: CallTimes, { uses, windowMs }: CooldownLimit, now: num
   return times.length - head < uses ? { allowed: true, retryAfterMs: 0 } : { allowed: false, retryAfterMs: times[times.length - uses] + windowMs - now }
 }
 
+/**
+ * Counts cooldown calls in this process's memory: the store `@Cooldown` uses unless `@MeoCord({ cooldownStore })`
+ * names another.
+ *
+ * It suits a bot in one process. Its counts start again on a restart, and with process sharding each shard counts
+ * on its own; for those, use {@link ShardedCooldownStore} or {@link RedisCooldownStore}.
+ *
+ * @remarks
+ * The window slides, and stacked cooldowns are counted together: a call is recorded against every key only if all
+ * allow it. Keys whose calls have all left their window are dropped once a minute. `testCooldownStore` checks
+ * other stores against the behaviour this one defines.
+ *
+ * @example
+ * ```ts
+ * const store = new MemoryCooldownStore()
+ * const limit = { uses: 1, windowMs: 3_000 }
+ *
+ * await store.consume('daily:42', limit) // { allowed: true, retryAfterMs: 0 }
+ * await store.consume('daily:42', limit) // { allowed: false, retryAfterMs: 3000 }, or just under
+ * ```
+ *
+ * @group Utilities
+ * @category Cooldown stores
+ * @see {@link CooldownStore}
+ */
 export class MemoryCooldownStore extends CooldownStore {
   private readonly calls = new Map<string, CallTimes>()
   private sweeper?: ReturnType<typeof setInterval>

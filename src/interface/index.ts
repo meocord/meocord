@@ -207,6 +207,9 @@ export interface InterceptorInterface {
 /**
  * What a presenter renders: MeoCord turns it into an embed, or into a Components V2 container on a
  * Components V2 message.
+ *
+ * @group Responses
+ * @category Presenters
  */
 export interface ResponseView {
   /** The main text. */
@@ -225,7 +228,12 @@ export interface ResponseView {
   components?: (APIComponentInContainer | JSONEncodable<APIComponentInContainer>)[]
 }
 
-/** What a presenter knows about the interaction it renders for. */
+/**
+ * What a presenter knows about the interaction it renders for.
+ *
+ * @group Responses
+ * @category Presenters
+ */
 export interface ResponseContext {
   /** The interaction being answered. */
   interaction: Interaction
@@ -240,7 +248,12 @@ export interface ResponseContext {
   theme: DeepReadonly<MeoCordTheme>
 }
 
-/** An error a presenter styles: the words a filter chose, and the error itself. */
+/**
+ * An error a presenter styles: the words a filter chose, and the error itself.
+ *
+ * @group Responses
+ * @category Presenters
+ */
 export interface PresentedError {
   /** What the user is told. */
   message: string
@@ -274,6 +287,9 @@ export interface PresentedError {
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @category Presenters
  */
 export interface ResponsePresenter {
   /** The view shown while a handler under `@Defer` works. */

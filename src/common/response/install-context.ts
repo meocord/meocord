@@ -2,6 +2,8 @@ import { ApplicationIntegrationType, type BaseInteraction, InteractionContextTyp
 
 /**
  * Where an interaction happened, as {@link getInstallContext} reports it.
+ *
+ * @group Types
  */
 export interface InstallContext {
   /**
@@ -30,11 +32,17 @@ export interface InstallContext {
  *
  * @example
  * ```typescript
- * const { where, botInstalled } = getInstallContext(interaction)
- * if (where === 'guild' && !botInstalled) {
- *   // A user-installed command in a server without the bot: answer through the interaction only
+ * @Command('rank', CommandType.SLASH)
+ * async rank(interaction: ChatInputCommandInteraction) {
+ *   const { where, botInstalled } = getInstallContext(interaction)
+ *   // A user-installed command in a server without the bot: it can't read the server, so it answers privately
+ *   if (where === 'guild' && !botInstalled) {
+ *     await respond(interaction).send({ content: 'Add the bot to this server to see ranks.', flags: MessageFlags.Ephemeral })
+ *   }
  * }
  * ```
+ *
+ * @group Utilities
  */
 export function getInstallContext(interaction: BaseInteraction): InstallContext {
   const owners = interaction.authorizingIntegrationOwners ?? {}
