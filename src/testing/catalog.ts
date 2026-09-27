@@ -20,21 +20,32 @@ function at(catalog: CatalogShape, key: string): unknown {
 }
 
 /**
- * Checks that every locale translates every message, for teams that want no fallback in production.
- * It reports, for each locale, the messages it lacks, the messages the default catalog does not have,
- * and the plural forms its language needs but a plural lacks, such as `few` for Russian.
+ * Checks that every locale translates every message, and throws listing each gap, locale by locale.
+ *
+ * Use it in a test for a team that wants no fallback in production. It reports the messages a locale lacks, the
+ * messages the default catalog doesn't have, and the plural forms a language needs but a plural lacks, such as
+ * `few` for Russian.
  *
  * @param translator - A translator made by `createTranslator`.
- * @throws An error listing every gap, locale by locale; nothing when the catalogs are complete.
+ * @throws Error listing every gap; nothing when the catalogs are complete.
  *
  * @example
  * ```ts
- * import { t } from '@src/i18n'
+ * import { it } from 'vitest'
  *
- * it('translates everything', () => {
+ * const t = createTranslator({
+ *   default: 'en-US',
+ *   locales: { 'en-US': { greet: 'Hello' }, id: { greet: 'Halo' } },
+ * })
+ * it('translates every message', () => {
  *   expectCompleteCatalog(t)
  * })
  * ```
+ *
+ * @group Testing
+ * @category Inspection
+ * @see {@link createTranslator}
+ * @see {@link https://meocord.dev/docs/latest/localisation | Localisation}
  */
 export function expectCompleteCatalog(translator: Translator<any>): void {
   const catalogs = (translator as unknown as { [CATALOGS]?: Partial<Record<string, CatalogShape>> })[CATALOGS]

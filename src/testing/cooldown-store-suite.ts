@@ -10,10 +10,18 @@ interface Expectation {
   toBeLessThanOrEqual(expected: number): void
 }
 
-/** The test framework the suite registers its cases with: its `describe`, `it` and `expect`. */
+/**
+ * The test framework {@link testCooldownStore} registers its cases with: its `describe`, `it` and `expect`.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface CooldownStoreSuiteFramework {
+  /** Groups the cases under the store's name. */
   describe: (name: string, body: () => void) => void
+  /** Registers one case, with its timeout in milliseconds. */
   it: (name: string, body: () => Promise<void>, timeout?: number) => void
+  /** The framework's assertions; Vitest's and Jest's both fit. */
   expect: (actual: unknown) => Expectation
 }
 
@@ -23,17 +31,16 @@ const CASE_TIMEOUT_MS = 10_000
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
- * Checks that a `CooldownStore` counts calls as `MemoryCooldownStore` does, for a store you write yourself
- * over a database, or one you configure. It registers one `describe` of cases with the test framework you
- * pass, so it runs under Vitest, Jest or any runner with the same three functions.
+ * Checks that a `CooldownStore` counts calls as `MemoryCooldownStore` does, as a suite of test cases.
  *
- * The cases cover what a shared store most often gets wrong: calls within a window, a sliding window
- * rather than fixed buckets, `retryAfterMs` counted from the oldest call still in the window, each key
- * counted on its own, calls made in the same millisecond kept apart, and several concurrent calls at the
- * limit where exactly one may pass; for a store that overrides `peekMany`, a peek that records nothing and
- * refuses with the wait `consume` gives. They use real time, since a store's clock may be its server's, with
- * windows short enough that the suite takes a few seconds. Each case asks `factory` for a store and counts
- * under keys of its own, so a store over a database that outlives the run can be checked again.
+ * Use it for a store you write over a database, or one you configure, such as Redis. It registers one `describe` of
+ * cases with the framework you pass, so it runs under Vitest, Jest or any runner with the same three functions.
+ *
+ * @remarks
+ * The cases cover what a shared store most often gets wrong: a sliding window rather than fixed buckets,
+ * `retryAfterMs` from the oldest call still in the window, calls in the same millisecond kept apart, and concurrent
+ * calls at the limit where exactly one may pass. They use real time, with windows short enough that the suite takes
+ * a few seconds, and each case counts under keys of its own.
  *
  * @param name - What the store is called in the report.
  * @param factory - Makes the store to check, once per case.
@@ -41,11 +48,15 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  *
  * @example
  * ```ts
- * import { testCooldownStore } from 'meocord/testing'
- * import { PostgresCooldownStore } from '@src/stores/postgres-cooldown.store'
+ * import { describe, expect, it } from 'vitest'
  *
- * testCooldownStore('PostgresCooldownStore', () => new PostgresCooldownStore(pool), { describe, it, expect })
+ * testCooldownStore('MemoryCooldownStore', () => new MemoryCooldownStore(), { describe, it, expect })
  * ```
+ *
+ * @group Testing
+ * @category Inspection
+ * @see {@link CooldownStore}
+ * @see {@link https://meocord.dev/docs/latest/recipes/cooldown-stores | Cooldown stores}
  */
 export function testCooldownStore(
   name: string,

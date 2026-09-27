@@ -8,22 +8,42 @@ import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { appObservers } from '@src/core/observer-runner.js'
 import { type CooldownScope } from '@src/common/errors.js'
 
-/** A guard as `@UseGuard` declares it: the class, or the class with the params set on its instance. */
+/**
+ * A guard as `@UseGuard` declares it: the class, or the class with its params.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export type InspectedGuard =
   | (new (...args: any[]) => GuardInterface)
   | { provide: new (...args: any[]) => GuardInterface; params?: Record<string, any> }
 
-/** An interceptor as `@UseInterceptor` declares it: the class, or the class with its params. */
+/**
+ * An interceptor as `@UseInterceptor` declares it: the class, or the class with its params.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export type InspectedInterceptor =
   | (new (...args: any[]) => InterceptorInterface)
   | { provide: new (...args: any[]) => InterceptorInterface; params?: Record<string, any> }
 
-/** A filter as `@UseFilter` declares it: the class, or the class with its params. */
+/**
+ * A filter as `@UseFilter` declares it: the class, or the class with its params.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export type InspectedFilter =
   | (new (...args: any[]) => ExceptionFilter<any>)
   | { provide: new (...args: any[]) => ExceptionFilter<any>; params?: Record<string, any> }
 
-/** What runs for one handler, and the metadata declared on it, as {@link inspectHandler} reports it. */
+/**
+ * What runs for one handler, and the metadata declared on it, as {@link inspectHandler} reports it.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface HandlerInspection {
   /** The controller class declaring the handler. */
   readonly controller: new (...args: any[]) => unknown
@@ -70,10 +90,18 @@ export interface HandlerInspection {
   getAll<T = unknown>(key: string | symbol): T[]
 }
 
-/** One `@Cooldown` on a handler, as {@link inspectHandler} reports it. */
+/**
+ * One `@Cooldown` on a handler, with its defaults filled in, as {@link inspectHandler} reports it.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface InspectedCooldown {
+  /** The window, in seconds. */
   readonly seconds: number
+  /** How many calls the window allows. */
   readonly uses: number
+  /** Whom the calls are counted for: `'user'`, `'channel'`, `'guild'` or `'global'`. */
   readonly per: CooldownScope
   /** Whether it exempts some callers. */
   readonly bypass: boolean
@@ -81,32 +109,50 @@ export interface InspectedCooldown {
   readonly by: boolean
 }
 
-/** What {@link inspectHandler} includes besides the handler's own metadata. */
+/**
+ * What {@link inspectHandler} includes besides the handler's own stages.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface InspectHandlerOptions {
-  /** The `@MeoCord` application class, whose global guards, interceptors and filters are included. */
+  /** The `@MeoCord` app class, whose global guards, interceptors, filters and observers come first. */
   app?: new (...args: any[]) => unknown
 }
 
 /**
- * Reports what runs when a handler is dispatched, and the metadata declared on it, without building
- * a module or running anything. Use it to check that a decorator applied the guards and metadata it
- * should.
+ * Reports what runs when a handler is dispatched, and the metadata declared on it, without running anything.
+ *
+ * Use it to check that decorators set a handler up as intended: its guards with their params, its interceptors,
+ * filters and cooldowns, in the order dispatch applies them. To check what a handler does, run it with
+ * {@link TestingModule.invoke}.
  *
  * @param controller - The controller class declaring the handler.
  * @param methodName - The handler method's name.
- * @param options - `app` to include the global guards, interceptors and filters `@MeoCord` declares.
- * @returns The handler's guards, interceptors, filters and cooldowns, in the order they apply, its
- *   message pattern, and a reader for its metadata.
+ * @param options - `app`, to put the global stages `@MeoCord` declares first.
+ * @returns The handler's stages in order, its message pattern, and readers for its metadata.
  *
  * @example
  * ```ts
- * const ban = inspectHandler(ModerationController, 'ban')
+ * import { expect } from 'vitest'
  *
- * expect(ban.guards).toEqual([RolesGuard])
- * expect(ban.get(Roles)).toEqual(['admin'])
- *
- * expect(inspectHandler(ModerationController, 'ban', { app: App }).guards).toEqual([BlocklistGuard, RolesGuard])
+ * @Controller()
+ * @UseGuard(StaffGuard)
+ * class ModerationController {
+ *   @Command('ban', CommandType.SLASH)
+ *   @UseGuard({ provide: ChannelGuard, params: { channelIds: ['123456789012345678'] } })
+ *   async ban(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send('Banned.')
+ *   }
+ * }
+ * const { guards } = inspectHandler(ModerationController, 'ban')
+ * expect(guards).toEqual([StaffGuard, { provide: ChannelGuard, params: { channelIds: ['123456789012345678'] } }])
  * ```
+ *
+ * @group Testing
+ * @category Inspection
+ * @see {@link createExecutionContext}
+ * @see {@link https://meocord.dev/docs/latest/testing-recipes#guards | Testing guards}
  */
 export function inspectHandler<C extends new (...args: any[]) => unknown>(
   controller: C,
