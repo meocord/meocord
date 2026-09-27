@@ -43,7 +43,8 @@ export async function tellDevRunner(message: DevRunnerMessage): Promise<void> {
     timer.unref()
   })
   // Bun does not call back once the dev runner is gone, where Node calls back with an error, so the wait is
-  // bounded: start() always settles. The timer is unref'd, so it never keeps the process alive by itself.
+  // bounded while the process runs. The timer is unref'd and never keeps the process alive by itself; a caller
+  // sets the exit code before sending, so it holds however the send ends.
   await Promise.race([sent, timedOut])
   clearTimeout(timer)
 }
