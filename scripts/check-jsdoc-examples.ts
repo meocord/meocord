@@ -280,14 +280,29 @@ function main(): void {
     })
   }
 
-  // The examples, the fixtures and the built package, in one program
+  // The examples, the fixtures and the built package, in one program. An example that augments a module, as a theme's
+  // own tokens do, gets a program of its own, so its augmentation cannot change the types another example sees; each
+  // reuses what the shared program parsed.
   const host = ts.createCompilerHost(compilerOptions)
   const readFile = host.readFile.bind(host)
   const fileExists = host.fileExists.bind(host)
   host.readFile = file => files.get(path.resolve(file))?.code ?? readFile(file)
   host.fileExists = file => files.has(path.resolve(file)) || fileExists(file)
-  const program = ts.createProgram([...files.keys(), fixturesFile], compilerOptions, host)
-  for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
+  const augmenting = [...files.keys()].filter(file => /\bdeclare\s+module\b/.test(files.get(file)!.code))
+  const shared = ts.createProgram(
+    [...files.keys()].filter(file => !augmenting.includes(file)).concat(fixturesFile),
+    compilerOptions,
+    host,
+  )
+  const diagnostics = [
+    ...ts.getPreEmitDiagnostics(shared),
+    ...augmenting.flatMap(file => {
+      const program = ts.createProgram({ rootNames: [file], options: compilerOptions, host, oldProgram: shared })
+      // Only its own: the package and discord.js are reported once, by the shared program
+      return ts.getPreEmitDiagnostics(program).filter(diagnostic => diagnostic.file && path.resolve(diagnostic.file.fileName) === file)
+    }),
+  ]
+  for (const diagnostic of diagnostics) {
     const file = diagnostic.file?.fileName && path.resolve(diagnostic.file.fileName)
     const example = file ? files.get(file) : undefined
     const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
