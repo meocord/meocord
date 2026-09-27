@@ -124,7 +124,7 @@ These sections moved to meocord.dev. Their headings stay here so that links from
 
 ### Store recipes
 
-[Cooldown stores](https://meocord.dev/docs/4.1/recipe-cooldown-stores) on meocord.dev.
+[Cooldown stores](https://meocord.dev/docs/4.1/recipes/cooldown-stores) on meocord.dev.
 
 ### Stack traces
 
