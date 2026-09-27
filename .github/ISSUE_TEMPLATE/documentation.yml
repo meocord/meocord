@@ -6,8 +6,8 @@ body:
     id: location
     attributes:
       label: Where
-      description: A link to the section, or the file and heading — README, migration guide or a JSDoc comment.
-      placeholder: https://github.com/meocord/meocord#testing
+      description: A link to the page or section on meocord.dev, or the file and heading — README, migration guide or a JSDoc comment.
+      placeholder: https://meocord.dev/docs/latest/testing
     validations:
       required: true
 
