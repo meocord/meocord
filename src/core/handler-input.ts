@@ -7,8 +7,9 @@ import {
   StringSelectMenuInteraction,
   UserSelectMenuInteraction,
 } from 'discord.js'
-import { getCommandMap } from '@src/decorator/controller.decorator.js'
-import { readCustomId, type RouteParamValue } from '@src/core/component-routes.js'
+import { getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
+import { type CommandType } from '@src/enum/index.js'
+import { type ComponentRoute, matchComponentRoute, type RouteParamValue } from '@src/core/component-routes.js'
 import {
   hasCustomId,
   isCustomIdRouted,
@@ -84,44 +85,46 @@ export function handlerInput(interaction: Interaction, routeParams: Record<strin
 }
 
 /**
- * The params a handler's own customId pattern captures from an interaction, as routing would: for a
- * test that calls the handler with no params of its own.
+ * Where dispatch sends an interaction's customId among a module's component routes, for a test calling one
+ * handler: the params its route captures when that handler runs, or why it does not, when another handler
+ * runs or no route matches. `undefined` when the handler has no customId route or the interaction no customId.
  */
-export function routeParamsFor(prototype: object, methodName: string, interaction: Interaction): Record<string, RouteParamValue> {
-  if (!hasCustomId(interaction)) return {}
+export function componentRouteFor(
+  routes: readonly ComponentRoute[],
+  controller: { name: string },
+  methodName: string,
+  interaction: Interaction,
+): { params: Record<string, RouteParamValue> } | { mismatch: string } | undefined {
+  if (!hasCustomId(interaction) || typeof interaction.customId !== 'string') return undefined
+  const own = routes.filter(route => route.controllerClass === controller && route.meta.methodName === methodName)
+  if (own.length === 0) return undefined
 
-  for (const [pattern, metaList] of Object.entries(getCommandMap(prototype) ?? {})) {
-    for (const meta of metaList) {
-      if (meta.methodName !== methodName || !meta.regex || !matchesCommandType(meta.type, interaction)) continue
-      const params = readCustomId(pattern, meta.regex, interaction.customId)
-      if (params) return params
-    }
+  const { customId } = interaction
+  const handler = `${controller.name}.${methodName}`
+  const accepts = (type: CommandType) => matchesCommandType(type, interaction)
+  const target = matchComponentRoute(routes, accepts, customId)
+  // A handler of the same shape as the target is one the bot refuses beside it, so neither runs over the other
+  const mine = target && own.find(route => route === target.route || sameShape(route, target.route))
+  if (mine) return { params: mine === target.route ? target.params : matchComponentRoute([mine], accepts, customId)!.params }
+  if (target) {
+    const other = `${target.route.controllerClass.name}.${target.route.meta.methodName}`
+    return { mismatch: `customId '${customId}' does not reach ${handler}: dispatch runs ${other}.` }
   }
-  return {}
+  return { mismatch: `customId '${customId}' does not match ${handler}'s route ${own.map(({ pattern }) => `'${pattern}'`).join(' or ')}.` }
 }
 
+const sameShape = (a: ComponentRoute, b: ComponentRoute): boolean => a.meta.type === b.meta.type && patternShape(a.pattern) === patternShape(b.pattern)
+
 /**
- * Why an interaction could not reach a handler through its routes, for a test calling the handler
- * directly: a customId its patterns do not match, or a command its name is not. `undefined` when it
- * could, when the handler has no route, or when the interaction carries no customId or command name.
+ * Why a command could not reach a handler by its name, for a test calling the handler directly.
+ * `undefined` when it could, when the handler has no command route, or when the interaction is not a command.
  */
-export function routeMismatch(controller: { name: string; prototype: object }, methodName: string, interaction: Interaction): string | undefined {
-  const routes = Object.entries(getCommandMap(controller.prototype) ?? {}).flatMap(([route, metas]) =>
-    metas.filter(meta => meta.methodName === methodName).map(meta => ({ route, meta })),
-  )
-  const handler = `${controller.name}.${methodName}`
-  const describe = (kind: string, value: string, candidates: { route: string }[]) =>
-    `${kind} '${value}' does not match ${handler}'s route ${candidates.map(({ route }) => `'${route}'`).join(' or ')}.`
-
-  if (hasCustomId(interaction)) {
-    const patterned = routes.filter(({ meta }) => isCustomIdRouted(meta.type) && meta.regex)
-    if (typeof interaction.customId !== 'string' || patterned.length === 0) return undefined
-    if (patterned.some(({ route, meta }) => readCustomId(route, meta.regex!, interaction.customId))) return undefined
-    return describe('customId', interaction.customId, patterned)
-  }
-
+export function commandMismatch(controller: { name: string; prototype: object }, methodName: string, interaction: Interaction): string | undefined {
   if (!interaction.isCommand()) return undefined
-  const named = routes.filter(({ meta }) => !isCustomIdRouted(meta.type))
+  const handler = `${controller.name}.${methodName}`
+  const named = Object.entries(getCommandMap(controller.prototype) ?? {}).flatMap(([route, metas]) =>
+    metas.filter(meta => meta.methodName === methodName && !isCustomIdRouted(meta.type)).map(meta => ({ route, meta })),
+  )
   if (typeof interaction.commandName !== 'string' || named.length === 0) return undefined
   // A chat command reaches the handler of its full path, or of its bare name, as dispatch tries them
   const keys = interaction.isChatInputCommand() ? resolveCommandPaths(interaction) : [interaction.commandName]
@@ -133,6 +136,6 @@ export function routeMismatch(controller: { name: string; prototype: object }, m
     const name = interaction.commandName
     return `A ${sent} context menu command '${name}' does not match ${handler}, which handles the ${handled} context menu command '${name}'.`
   }
-  return describe('command', keys[0], named)
+  return `command '${keys[0]}' does not match ${handler}'s route ${named.map(({ route }) => `'${route}'`).join(' or ')}.`
 }
 

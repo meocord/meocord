@@ -26,10 +26,11 @@ export interface ComponentRouteConflict {
 
 /**
  * Every customId-pattern route of the given controllers, most specific first, read from metadata alone.
- * Throws for two handlers whose patterns match the same customIds of one component type; one handler
- * declared under two spellings of a pattern keeps one route.
+ * Throws for two handlers whose patterns match the same customIds of one component type, unless
+ * `keepDuplicates` keeps both, for a test module the bot would refuse; one handler declared under two
+ * spellings of a pattern keeps one route.
  */
-export function buildComponentRoutes(controllerClasses: readonly ControllerClass[]): ComponentRoute[] {
+export function buildComponentRoutes(controllerClasses: readonly ControllerClass[], { keepDuplicates = false } = {}): ComponentRoute[] {
   const routes: ComponentRoute[] = []
   // By component type and pattern shape: the route that shape already has
   const seen = new Map<string, ComponentRoute>()
@@ -50,6 +51,10 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
         }
         // One handler under two spellings, such as 'card/{id}' and 'card/{cardId}', is one route
         if (earlier.controllerClass === controllerClass && earlier.meta.methodName === meta.methodName) continue
+        if (keepDuplicates) {
+          routes.push(route)
+          continue
+        }
         throw new Error(
           `"${earlier.pattern}" in ${earlier.controllerClass.name}.${earlier.meta.methodName} and "${pattern}" in ` +
             `${controllerClass.name}.${meta.methodName} match the same ${typeLabel(meta.type)} customIds, so only one ` +
