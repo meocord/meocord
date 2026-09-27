@@ -476,7 +476,7 @@ describe('TestingModule.invoke with typed message params', () => {
     const message = createMockMessage({ content: `pay <@${TARGET}> lots`, guild: createMockGuild() })
 
     await expect(module.invoke(PayController, 'pay', message)).rejects.toThrow(MessageUsageError)
-    await expect(module.invoke(PayController, 'pay', message)).rejects.toThrow('amount: "lots" is not a whole number')
+    await expect(module.invoke(PayController, 'pay', message)).rejects.toThrow('amount: "lots" is not a valid whole number')
     expect(received).toEqual([])
   })
 

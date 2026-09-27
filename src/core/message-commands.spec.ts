@@ -655,7 +655,7 @@ describe('typed message params and usage replies', () => {
       ['slowmode', { seconds: 30 }],
     ])
     expect(wrong.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ content: 'Usage: !slowmode [mode] [seconds]\nseconds: "soon" is not a whole number' }),
+      expect.objectContaining({ content: 'Usage: !slowmode [mode] [seconds]\nseconds: "soon" is not a valid whole number' }),
     )
   })
 
@@ -813,7 +813,7 @@ describe('typed message params and usage replies', () => {
 
     expect(seen).toEqual([])
     expect(message.reply).toHaveBeenCalledWith({
-      content: 'Usage: !pay <to> <amount> [note…]\namount: "lots" is not a whole number',
+      content: 'Usage: !pay <to> <amount> [note…]\namount: "lots" is not a valid whole number',
       allowedMentions: { repliedUser: false, parse: [] },
     })
     await vi.advanceTimersByTimeAsync(9_999)

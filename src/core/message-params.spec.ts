@@ -59,12 +59,12 @@ describe('typed message params', () => {
 
     expect(error.usage).toBe('!set <count> <after> <mode>')
     expect(error.issues).toEqual([
-      { param: 'count', message: 'count: "2.5" is not a whole number' },
-      { param: 'after', message: 'after: "soon" is not a length of time, such as 10m' },
+      { param: 'count', message: 'count: "2.5" is not a valid whole number' },
+      { param: 'after', message: 'after: "soon" is not a valid length of time, such as 10m' },
       { param: 'mode', message: 'mode: "turbo" is not one of fast, slow' },
     ])
     expect(error.message).toBe(
-      'Usage: !set <count> <after> <mode>\ncount: "2.5" is not a whole number\nafter: "soon" is not a length of time, such as 10m\nmode: "turbo" is not one of fast, slow',
+      'Usage: !set <count> <after> <mode>\ncount: "2.5" is not a valid whole number\nafter: "soon" is not a valid length of time, such as 10m\nmode: "turbo" is not one of fast, slow',
     )
   })
 
@@ -78,7 +78,19 @@ describe('typed message params', () => {
 
     expect(await resolveMessageParams(route, { shade: '#ff0000' }, message, '!', { color })).toEqual({ shade: 0xff0000 })
     const error = await usageError(resolveMessageParams(route, { shade: 'red' }, message, '!', { color }))
-    expect(error.issues).toEqual([{ param: 'shade', message: 'shade: "red" is not a hex colour' }])
+    expect(error.issues).toEqual([{ param: 'shade', message: 'shade: "red" is not a valid hex colour' }])
+  })
+
+  it('reads right for a label that begins with a vowel, and for a built-in type', async () => {
+    const emoji: MessageParamType<string> = { label: 'emoji', parse: word => (/^\p{Extended_Pictographic}$/u.test(word) ? word : undefined) }
+    const route = routeOf('react {with:emoji} {times:int}', { emoji })
+    const { message } = guildMessage()
+
+    const error = await usageError(resolveMessageParams(route, { with: 'smile', times: 'twice' }, message, '!', { emoji }))
+    expect(error.issues).toEqual([
+      { param: 'with', message: 'with: "smile" is not a valid emoji' },
+      { param: 'times', message: 'times: "twice" is not a valid whole number' },
+    ])
   })
 
   it('finds members by mention or ID in the cache, fetching nothing', async () => {
@@ -215,8 +227,8 @@ describe('typed lists', () => {
     const route = routeOf('sum {numbers:int...}')
     const error = await usageError(resolveMessageParams(route, { numbers: '1 two 3 four' }, guildMessage().message, '!', undefined))
     expect(error.issues).toEqual([
-      { param: 'numbers', message: 'numbers: "two" is not a whole number' },
-      { param: 'numbers', message: 'numbers: "four" is not a whole number' },
+      { param: 'numbers', message: 'numbers: "two" is not a valid whole number' },
+      { param: 'numbers', message: 'numbers: "four" is not a valid whole number' },
     ])
   })
 
@@ -252,7 +264,7 @@ describe('flags', () => {
     const error = await usageError(flagged('!purge 50 --bot --from --limit=lots --bots=maybe --bot').resolve())
     expect(error.usage).toBe('!purge <count> [--bots] [--from=<from>] [--limit=<limit>]')
     expect(error.issues).toEqual([
-      { param: 'limit', message: '--limit: "lots" is not a whole number' },
+      { param: 'limit', message: '--limit: "lots" is not a valid whole number' },
       { message: '--bot is not an option of this command' },
       { param: 'bots', message: '--bots: "maybe" is not yes or no' },
       { param: 'from', message: '--from needs a value, such as --from=<from>' },

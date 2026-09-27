@@ -36,7 +36,7 @@ const LABELS: Record<string, string> = {
   string: 'text',
   int: 'whole number',
   number: 'number',
-  bool: 'yes or no',
+  bool: 'yes or no answer',
   duration: 'length of time, such as 10m',
   member: 'member',
   user: 'user',
@@ -97,7 +97,7 @@ export function usageOf(route: Pick<MessageRoute, 'tokens' | 'flags'>, start: st
 /** The issue for a word that is not a value of its param's type. */
 function wrongType(item: Item, types: Record<string, MessageParamType> | undefined): MessageUsageIssue {
   const choices = choicesOf(item.type)
-  const expected = choices ? `one of ${choices.join(', ')}` : `a ${types?.[item.type]?.label ?? LABELS[item.type] ?? item.type}`
+  const expected = choices ? `one of ${choices.join(', ')}` : `a valid ${types?.[item.type]?.label ?? LABELS[item.type] ?? item.type}`
   return { param: item.key, message: `${item.label}: "${item.word}" is not ${expected}` }
 }
 

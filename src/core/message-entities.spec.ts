@@ -59,7 +59,7 @@ describe('reading entity params before the guards', () => {
   it('still refuses a word that is no ID, before any guard, with no request', async () => {
     const { message, users } = fresh()
     await expect(parseMessageParams(routeOf('whois {target:user}'), { target: 'ana' }, message, '!', undefined)).rejects.toThrow(
-      'target: "ana" is not a user',
+      'target: "ana" is not a valid user',
     )
     expect(users.fetch).not.toHaveBeenCalled()
   })
