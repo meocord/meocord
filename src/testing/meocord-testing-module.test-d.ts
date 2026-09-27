@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ButtonInteraction, type Client, type Message, type MessageReaction, type User } from 'discord.js'
-import { type DispatchedCall, type InvocationResult, MeoCordTestingModule } from './meocord-testing-module.js'
+import { type DispatchedCall, type InvocationResult, MeoCordTestingModule, type TestingModule, type TestingModuleBuilder } from './meocord-testing-module.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
 import { createExecutionContext } from './execution-context.js'
 import { getResponse } from './response.js'
@@ -125,5 +125,25 @@ describe('TestingModule.dispatch', () => {
   it('needs the user who reacted with a reaction', () => {
     // @ts-expect-error a reaction is dispatched with the user who reacted
     void module.dispatch({} as MessageReaction)
+  })
+})
+
+describe('fromApp', () => {
+  class App {}
+  class Extra {}
+
+  it('takes an app class and optional overrides, and returns the builder', () => {
+    expectTypeOf(MeoCordTestingModule.fromApp(App)).toEqualTypeOf<TestingModuleBuilder>()
+    MeoCordTestingModule.fromApp(App, { providers: [{ provide: 'token', useValue: 1 }], controllers: [Extra], observers: [] })
+    expectTypeOf(MeoCordTestingModule.fromApp(App).compile()).toEqualTypeOf<TestingModule>()
+  })
+
+  it('refuses what fromApp does not take', () => {
+    // @ts-expect-error the app is a class, not an instance
+    MeoCordTestingModule.fromApp(new App())
+    // @ts-expect-error services come from the app; a test replaces one by token in providers
+    MeoCordTestingModule.fromApp(App, { services: [Extra] })
+    // @ts-expect-error a provider is an object with provide, not a bare value
+    MeoCordTestingModule.fromApp(App, { providers: [42] })
   })
 })
