@@ -1,5 +1,6 @@
 import { type Message } from 'discord.js'
 import { MessageUsageError, type MessageUsageIssue } from '@src/common/errors.js'
+import { type TextParam, usageIssue } from '@src/common/meocord-text.js'
 import { type EntityRef, type MessageParamType } from '@src/interface/index.js'
 import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/message-entities.js'
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
@@ -31,17 +32,11 @@ export const BUILT_IN_TYPES = {
   channel: undefined,
 } as const
 
-/** What the usage and its issues call a value of each built-in type. */
-const LABELS: Record<string, string> = {
-  string: 'text',
-  int: 'whole number',
-  number: 'number',
-  bool: 'yes or no answer',
-  duration: 'length of time, such as 10m',
-  member: 'member',
-  user: 'user',
-  role: 'role',
-  channel: 'channel',
+/** What the issues call a value of a type: a built-in type's text, an app type's `labelKey` or `label`, or the type's key. */
+function typeLabel(type: string, types: Record<string, MessageParamType> | undefined): TextParam {
+  const own = types?.[type]
+  if (own) return own.labelKey === undefined ? (own.label ?? type) : { key: own.labelKey, fallback: own.label ?? type }
+  return type in BUILT_IN_TYPES ? { key: `meocord.types.${type}` } : type
 }
 
 /** The types that exist only in a server. */
@@ -96,16 +91,18 @@ export function usageOf(route: Pick<MessageRoute, 'tokens' | 'flags'>, start: st
 
 /** The issue for a word that is not a value of its param's type. */
 function wrongType(item: Item, types: Record<string, MessageParamType> | undefined): MessageUsageIssue {
-  const expected = choicesOf(item.type) ? paramTypeLabel(item.type, types) : `a valid ${paramTypeLabel(item.type, types)}`
-  return { param: item.key, message: `${item.label}: "${item.word}" is not ${expected}` }
+  const { label, word } = item
+  const choices = choicesOf(item.type)
+  return choices
+    ? usageIssue({ key: 'meocord.usage.notOneOf', params: { label, word, choices: { list: choices, style: 'or' } } }, item.key)
+    : usageIssue({ key: 'meocord.usage.notValid', params: { label, word, type: typeLabel(item.type, types) } }, item.key)
 }
 
 /** What a param of a type takes, in words: `whole number`, `one of asc, desc`, an app type's label, or `text`. */
-export function paramTypeLabel(type: string | undefined, types: Record<string, MessageParamType> | undefined): string {
+export function paramTypeLabel(type: string | undefined, types: Record<string, MessageParamType> | undefined): TextParam {
   const choices = type === undefined ? undefined : choicesOf(type)
-  if (choices) return `one of ${choices.join(', ')}`
-  const key = type ?? 'string'
-  return types?.[key]?.label ?? LABELS[key] ?? key
+  if (choices) return { key: 'meocord.help.oneOf', params: { choices: { list: choices, style: 'or' } } }
+  return typeLabel(type ?? 'string', types)
 }
 
 /**
@@ -117,10 +114,10 @@ export function paramTypeLabel(type: string | undefined, types: Record<string, M
 export function assertMessageScope(route: MessageRoute, message: Message, start: string): void {
   const inGuild = message.guildId !== null && message.guildId !== undefined
   if (route.scope === 'guild' && !inGuild) {
-    throw new MessageUsageError(usageOf(route, start), [{ message: 'This command works in a server only.' }], { serverOnly: true, quiet: start === '' })
+    throw new MessageUsageError(usageOf(route, start), [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet: start === '' })
   }
   if (route.scope === 'dm' && inGuild) {
-    throw new MessageUsageError(usageOf(route, start), [{ message: 'This command works in direct messages only.' }], { dmOnly: true, quiet: start === '' })
+    throw new MessageUsageError(usageOf(route, start), [usageIssue({ key: 'meocord.usage.dmOnly' })], { dmOnly: true, quiet: start === '' })
   }
 }
 
@@ -142,7 +139,7 @@ interface RefSlot {
   word: string
   kind: EntityKind | 'own'
   /** For an app's own type, what its label calls a value. */
-  noun?: string
+  noun?: TextParam
   index?: number
   ref: EntityRef<unknown>
 }
@@ -197,7 +194,7 @@ export async function parseMessageParams(
   const guild = message.guild
   const needsGuild = route.tokens.some(token => 'param' in token && token.type !== undefined && GUILD_TYPES.has(token.type))
   if (!guild && (needsGuild || items.some(item => GUILD_TYPES.has(item.type)))) {
-    throw new MessageUsageError(usage, [{ message: 'This command works in a server only.' }], { serverOnly: true, quiet })
+    throw new MessageUsageError(usage, [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet })
   }
 
   const put = (item: Item, value: unknown) => {
@@ -205,7 +202,7 @@ export async function parseMessageParams(
     else (params[item.key] as unknown[])[item.index] = value
   }
   const refs: RefSlot[] = []
-  const refer = (item: Item, kind: RefSlot['kind'], ref: EntityRef<unknown>, noun?: string) => {
+  const refer = (item: Item, kind: RefSlot['kind'], ref: EntityRef<unknown>, noun?: TextParam) => {
     refs.push({ key: item.key, label: item.label, word: item.word, kind, noun, index: item.index, ref })
     put(item, ref)
   }
@@ -220,7 +217,7 @@ export async function parseMessageParams(
     } else if (own) {
       value = await own.parse(word, message)
       if (isRef(value)) {
-        refer(item, 'own', value, own.label ?? type)
+        refer(item, 'own', value, typeLabel(type, types))
         continue
       }
     } else if (type === 'member' || type === 'user' || type === 'channel') {
@@ -280,24 +277,20 @@ export async function fetchMessageParams(parsed: ParsedMessageParams, checkCoold
   return params
 }
 
-/** The issue for a ref that names nothing: a member not in the server, a user, role or channel that does not exist. */
+/** The issue for a ref that names nothing, for each kind of ref; a new kind fails to compile until it has its own. */
 function missingEntity({ key, label, word, kind, noun, ref }: RefSlot): MessageUsageIssue {
-  return { param: key, message: `${label}: ${nothingNamed(kind, word, ref.id, noun)}` }
-}
-
-/** What the issue says after the param's label, for each kind of ref; a new kind fails to compile until it has its own. */
-function nothingNamed(kind: RefSlot['kind'], word: string, id: string, noun: string | undefined): string {
+  const { id } = ref
   switch (kind) {
     case 'member':
-      return `<@${id}> is not a member of this server`
+      return usageIssue({ key: 'meocord.usage.notMember', params: { label, id } }, key)
     case 'user':
-      return `no user has the ID ${id}`
+      return usageIssue({ key: 'meocord.usage.noUser', params: { label, id } }, key)
     case 'role':
-      return `<@&${id}> is not a role in this server`
+      return usageIssue({ key: 'meocord.usage.notRole', params: { label, id } }, key)
     case 'channel':
-      return `"${word}" is not a channel`
+      return usageIssue({ key: 'meocord.usage.notChannel', params: { label, word } }, key)
     case 'own':
-      return `"${word}" is not a valid ${noun}`
+      return usageIssue({ key: 'meocord.usage.notValid', params: { label, word, type: noun ?? '' } }, key)
     default:
       return kind satisfies never
   }
@@ -380,12 +373,14 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
   const issues: MessageUsageIssue[] = []
   const key = (name: string) => (route.caseSensitive ? name : name.toLowerCase())
   const given = new Map<string, GivenFlag>()
+  const unknown = new Set<string>()
   const text = (message.content ?? '').trim()
   for (const flag of splitFlagWords(text.slice(start.length)).flags) {
     const declared = route.flags.find(candidate => key(candidate.flag) === key(flag.name))
     if (declared) given.set(declared.flag, flag)
-    else if (!issues.some(issue => issue.message.startsWith(`--${flag.name} `))) {
-      issues.push({ message: `--${flag.name} is not an option of this command` })
+    else if (!unknown.has(flag.name)) {
+      unknown.add(flag.name)
+      issues.push(usageIssue({ key: 'meocord.usage.unknownFlag', params: { flag: flag.name } }))
     }
   }
   for (const flag of route.flags) {
@@ -394,12 +389,12 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
     delete params[flag.flag]
     if (flag.type === undefined) {
       const on = value === undefined ? given.has(flag.flag) : bool(value)
-      if (on === undefined) issues.push({ param: flag.flag, message: `${label}: "${value}" is not yes or no` })
+      if (on === undefined) issues.push(usageIssue({ key: 'meocord.usage.notYesNo', params: { label, value: value! } }, flag.flag))
       else params[flag.flag] = on
     } else if (!given.has(flag.flag)) {
-      if (!flag.optional) issues.push({ param: flag.flag, message: `${label} is missing` })
+      if (!flag.optional) issues.push(usageIssue({ key: 'meocord.usage.missing', params: { param: label } }, flag.flag))
     } else if (!value) {
-      issues.push({ param: flag.flag, message: `${label} needs a value, such as ${label}=<${flag.flag}>` })
+      issues.push(usageIssue({ key: 'meocord.usage.flagNeedsValue', params: { label, flag: flag.flag } }, flag.flag))
     } else {
       items.push({ key: flag.flag, label, type: flag.type, word: value })
     }
@@ -417,9 +412,9 @@ export function missingParams(route: MessageRoute, given: number): MessageUsageI
   const missing = after
     .slice(given)
     .filter((token): token is ParamToken => 'param' in token && !token.optional)
-    .map(token => ({ param: token.param, message: `${token.param} is missing` }))
+    .map(token => usageIssue({ key: 'meocord.usage.missing', params: { param: token.param } }, token.param))
   if (missing.length > 0) return missing
-  return [{ message: 'The command has more words than it takes' }]
+  return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
 }
 
 /** Whether a route's params need resolving: it declares a type for one, or has flags. */

@@ -42,6 +42,7 @@ export type RsbuildConfig = RsbuildCoreConfig
 import { ReactionHandlerAction } from '@src/enum/controller.enum.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
 import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.interface.js'
+import { type MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 /**
  * What a guard implements: `canActivate`, which decides whether the handler runs.
@@ -522,7 +523,7 @@ export interface MessageCommandOptions {
   /**
    * Begins every text reply MeoCord sends to a message with the theme's `emojis.warning`: a command's usage, a
    * guard's or validation's reason, and a `UserError`'s message, an `@On` listener's of a message event included.
-   * The emoji is the call's, so it follows `@UseTheme`.
+   * The emoji is the call's resolved theme's, so it follows `@UseTheme` and `themeFor`.
    * @defaultValue `false`
    */
   replyEmoji?: boolean
@@ -615,11 +616,33 @@ export interface MessageHelpEntry {
 export interface MessageHelpParam {
   /** Its name as the usage shows it, such as `duration`, or `--bots` for a flag. */
   name: string
-  /** What it takes, such as `whole number`, `one of asc, desc` or `text`. */
+  /** What it takes, such as `whole number`, `one of asc, desc` or `text`, in the server's language where the app translates it. */
   label: string
   /** Whether it can be left out. */
   optional: boolean
 }
+
+/**
+ * MeoCord's own texts for users, in English, by key under `meocord`: usage replies, the built-in help, cooldown
+ * refusals, the fallback's answers and the default presenter's views.
+ *
+ * Translate any of them by adding a `meocord` group to a catalog; a text a locale leaves out stays in English. A key
+ * MeoCord lacks, or a `{param}` its English text lacks, fails to compile.
+ *
+ * @example
+ * ```ts
+ * const enUS = defineCatalog({ ping: 'Pong!' })
+ * const id = {
+ *   ping: 'Pong!',
+ *   meocord: { usage: { heading: 'Cara pakai: {usage}', missing: '{param} belum diisi' } },
+ * }
+ * export const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id } })
+ * ```
+ *
+ * @group Types
+ * @see {@link https://meocord.dev/docs/4.1/localisation | Localisation}
+ */
+export type MeoCordMessages = (typeof MEOCORD_MESSAGES)['meocord']
 
 /**
  * A param type an app adds for its message patterns, such as `{accent:color}`: it reads a word as a value.
@@ -652,6 +675,11 @@ export interface MessageHelpParam {
 export interface MessageParamType<T = unknown> {
   /** A noun such as `hex colour`, read in "is not a valid hex colour". Defaults to the type's key. */
   label?: string
+  /**
+   * A message key of the app's catalog, such as `types.color`, whose text is the label in each reply's language.
+   * It needs `@MeoCord({ i18n })`, and the default catalog must have the message.
+   */
+  labelKey?: string
   /**
    * The value a word stands for, or `undefined` when it stands for none. It runs before the handler's guards,
    * so a caller they refuse can reach it: it should not call Discord. For something that needs a request,

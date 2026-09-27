@@ -44,6 +44,7 @@ import {
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { claimAmbientAppTheme, registerClientTheme } from '@src/core/theme-runtime.js'
+import { registerClientTranslator } from '@src/common/meocord-text.js'
 
 /**
  * Recursively binds a class and all its constructor dependencies to the container in singleton scope.
@@ -187,7 +188,7 @@ export class MeoCordFactory {
 
     // Bound before the app's classes, so a class that injects it gets this instance; filled once they are bound
     const appClasses: (new (...args: any[]) => unknown)[] = []
-    container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, options.messages))
+    container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, options.messages, () => options.i18n))
     container
       .bind(ShardContext)
       .toConstantValue(
@@ -305,6 +306,7 @@ export class MeoCordFactory {
       // A bot runs one app, whose theme code outside any call then reads
       claimAmbientAppTheme(container)
       registerClientTheme(discordClient, container)
+      registerClientTranslator(discordClient, options.i18n)
     }
 
     return new MeoCordApp(

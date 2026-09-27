@@ -38,6 +38,42 @@ describe('expectCompleteCatalog', () => {
     )
   })
 
+  it("leaves MeoCord's own texts to their English fallback, reporting only a key MeoCord lacks", () => {
+    const id = { ...{ ban: { description: 'Blokir anggota', done: '{user} diblokir.' }, warnings: { other: '{count} peringatan' } } }
+    const t = createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': { ...enUS, meocord: { usage: { heading: 'How to use: {usage}' } } },
+        id: { ...id, meocord: { usage: { missing: '{param} belum diisi' } } },
+        // A catalog loaded from JSON is checked only at runtime, so it can misspell one of MeoCord's keys.
+        ja: { ...id, meocord: { usage: { headng: '使い方: {usage}' } } } as never,
+      },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow('The catalogs are incomplete:\n  ja: meocord.usage.headng is not one of MeoCord\'s texts')
+  })
+
+  it("requires every locale that is not English to translate each of MeoCord's own texts, with meocord: true", () => {
+    const meocord = { usage: { heading: 'Cara pakai: {usage}' } }
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': enUS, 'en-GB': {}, id: { ban: { description: 'Blokir', done: '{user} diblokir.' }, warnings: { other: '{count}' }, meocord } },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow('  en-GB: missing ban.description; missing ban.done; missing warnings')
+    const report = (() => {
+      try {
+        expectCompleteCatalog(t, { meocord: true })
+      } catch (error) {
+        return (error as Error).message
+      }
+    })()!
+    const id = report.split('\n').find(line => line.startsWith('  id: '))!
+    expect(id).toContain('missing meocord.usage.headingMany; missing meocord.usage.missing')
+    expect(id).not.toContain('missing meocord.usage.heading;')
+    expect(report).not.toMatch(/en-GB: .*meocord/)
+  })
+
   it('refuses a translator it cannot read', () => {
     expect(() => expectCompleteCatalog({} as Translator)).toThrow('takes a translator made by createTranslator')
   })

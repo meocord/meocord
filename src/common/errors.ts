@@ -1,4 +1,5 @@
 import { type StandardSchemaV1Issue } from '@src/interface/standard-schema.interface.js'
+import { type MeoCordText, renderText } from '@src/common/meocord-text.js'
 
 /**
  * Thrown by a guard to deny a call and tell the user why.
@@ -187,7 +188,7 @@ export class ValidationError extends Error {
 export interface MessageUsageIssue {
   /** The param it is about, if it is about one. */
   param?: string
-  /** What is wrong, for the user. */
+  /** What is wrong, for the user, in English; the fallback answers in the server's language where the app translates it. */
   message: string
 }
 
@@ -217,6 +218,7 @@ export interface MessageUsageIssue {
  * @group Responses
  * @category Errors
  * @see {@link MessageHandler}
+ * @see {@link translateError}
  * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
 export class MessageUsageError extends Error {
@@ -237,17 +239,17 @@ export class MessageUsageError extends Error {
     readonly issues: MessageUsageIssue[],
     { serverOnly = false, dmOnly = false, quiet = false }: { serverOnly?: boolean; dmOnly?: boolean; quiet?: boolean } = {},
   ) {
-    super(
-      serverOnly || dmOnly
-        ? issues.map(issue => issue.message).join('\n')
-        : // A usage of several lines, such as a parent's subcommands, starts below its heading, so each reads alike
-          [usage.includes('\n') ? `Usage:\n${usage}` : `Usage: ${usage}`, ...issues.map(issue => issue.message)].join('\n'),
-    )
+    super(serverOnly || dmOnly ? issues.map(issue => issue.message).join('\n') : [renderText(undefined, undefined, usageHeading(usage)), ...issues.map(issue => issue.message)].join('\n'))
     this.name = 'MessageUsageError'
     this.serverOnly = serverOnly
     this.dmOnly = dmOnly
     this.quiet = quiet
   }
+}
+
+/** The heading of a usage reply: one usage after it, or several, such as a parent's subcommands, each on a line below it. */
+export function usageHeading(usage: string): MeoCordText {
+  return usage.includes('\n') ? { key: 'meocord.usage.headingMany', params: { usages: usage } } : { key: 'meocord.usage.heading', params: { usage } }
 }
 
 /**
@@ -258,10 +260,10 @@ export class MessageUsageError extends Error {
 export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
 
 /**
- * What a blocked caller is told, such as "Slow down: try again in 12s."
+ * What a blocked caller is told in English, such as "Slow down: try again in 12s."
  *
- * This is the one place the text is written, so a filter, a presenter or a translator can replace it by catching
- * `CooldownError`.
+ * An app translates it with a `meocord.cooldown` group in its catalogs, and {@link translateError} gives it in a
+ * user's language; a filter that catches `CooldownError` can word it otherwise.
  *
  * @param retryAfterMs - How long until the next call is allowed.
  *
@@ -274,9 +276,16 @@ export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
  * @group Utilities
  */
 export function cooldownMessage(retryAfterMs: number): string {
-  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000))
-  const wait = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${seconds % 60 ? ` ${seconds % 60}s` : ''}`
-  return `Slow down: try again in ${wait}.`
+  return renderText(undefined, undefined, cooldownText(retryAfterMs))
+}
+
+/** The text of a cooldown's wait, by whole seconds, minutes and seconds, or whole minutes. */
+export function cooldownText(retryAfterMs: number): MeoCordText {
+  const total = Math.max(1, Math.ceil(retryAfterMs / 1000))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (minutes === 0) return { key: 'meocord.cooldown.seconds', params: { seconds } }
+  return seconds === 0 ? { key: 'meocord.cooldown.wholeMinutes', params: { minutes } } : { key: 'meocord.cooldown.minutes', params: { minutes, seconds } }
 }
 
 /**
@@ -316,7 +325,10 @@ export class CooldownError extends Error {
 }
 
 /**
- * The answer the built-in fallback gives a call {@link CooldownStoreError} refused.
+ * The answer the built-in fallback gives a call {@link CooldownStoreError} refused, in English.
+ *
+ * An app translates it as `meocord.cooldown.storeDown` in its catalogs, and {@link translateError} gives it in a
+ * user's language.
  *
  * @example
  * ```ts
@@ -332,7 +344,7 @@ export class CooldownError extends Error {
  * @group Utilities
  */
 export function cooldownStoreMessage(): string {
-  return "Cooldowns can't be checked right now: try again shortly."
+  return renderText(undefined, undefined, { key: 'meocord.cooldown.storeDown' })
 }
 
 /**

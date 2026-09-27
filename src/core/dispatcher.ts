@@ -47,6 +47,8 @@ import {
   runInAppTheme,
 } from '@src/core/handler-pipeline.js'
 import { computeMessageHelp, helpInvocation, helpWords, isListable, matchHelpRequest, renderMessageHelp, splitReply } from '@src/core/message-help.js'
+import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
+import { Translator } from '@src/common/translator.js'
 import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
@@ -516,14 +518,17 @@ export class Dispatcher {
     const starts = known ?? (await messageStarts(this.messageOptions, message, this.options.botUserId(message)))
     const request = matchHelpRequest(message.content, starts, words, this.messageOptions.caseSensitive ?? false)
     if (!request) return false
+    // In the server's language, as the channel reads it, or the default in a DM
+    const render = textRenderer(this.container.isBound(Translator) ? this.container.get(Translator) : undefined, messageLocale(message))
     const help = computeMessageHelp(
       this.messageRoutes,
       { ...request, starts, invocation: helpInvocation(request.start, this.messageOptions.help) },
       this.messageOptions.types,
+      render,
     )
     await runInAppTheme(this.container, [message], async () => {
       const presenter = appPresenterOf(this.container)
-      const written = presenter?.messageHelp ? await presenter.messageHelp(help, message) : this.helpText(renderMessageHelp(help))
+      const written = presenter?.messageHelp ? await presenter.messageHelp(help, message) : this.helpText(renderMessageHelp(help, render))
       const replies = typeof written === 'string' ? splitReply(written).map(content => ({ content })) : [written]
       try {
         for (const reply of replies) await message.reply({ allowedMentions: { repliedUser: false, parse: [] }, ...reply })

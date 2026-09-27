@@ -17,6 +17,7 @@ import {
 } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { UserError } from '@src/common/errors.js'
+import { textFor } from '@src/common/meocord-text.js'
 import { getInstallContext, type InstallContext } from '@src/common/response/install-context.js'
 import {
   flagNames,
@@ -155,7 +156,6 @@ export interface ResponseCall {
   error?: unknown
 }
 
-const DEFAULT_ERROR = 'An error occurred while executing the command.'
 const ALREADY_ACKNOWLEDGED = 40060
 const TOKEN_EXPIRED = new Set([50027, 10015])
 /**
@@ -810,7 +810,7 @@ export class InteractionResponse implements ResponseState {
   async error(error: unknown, options: ResponseErrorOptions = {}, { ifUnanswered = false }: { ifUnanswered?: boolean } = {}): Promise<void> {
     // A UserError is the user's own mistake: its message, for them alone, unless told otherwise
     const own = error instanceof UserError
-    const { message = own ? error.message : DEFAULT_ERROR, visibility = own ? 'private' : 'reply' } = options
+    const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
     const theme = await themeForInteraction(this.interaction)
     try {
       await this.acknowledging?.catch(() => undefined)

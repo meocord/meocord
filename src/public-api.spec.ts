@@ -66,6 +66,7 @@ const PUBLIC_API: Record<string, string[]> = {
     'isExplainedError',
     'respond',
     'route',
+    'translateError',
     'useTheme',
   ],
   'meocord/enum': ['CommandType', 'MetadataKey', 'ReactionHandlerAction'],
