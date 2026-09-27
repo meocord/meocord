@@ -76,8 +76,8 @@ export class UserError extends Error {
  *
  * @remarks
  * Only global filters see it, since no handler ran, so its `ExecutionContext` has no handler. A button, select
- * menu or modal no route takes is left to another listener, such as a collector, for 1.5 seconds before it is
- * raised; a command no handler takes is raised at once.
+ * menu or modal no route takes is left for 1.5 seconds to any other listener on the client, such as a
+ * collector, before it is raised; with no other listener, and for a command, it is raised at once.
  *
  * @example
  * ```ts
