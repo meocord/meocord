@@ -325,9 +325,15 @@ jobs:
   # run before it, but in a job of their own that can only read the repository: code they install
   # never runs where the publishing identity can be requested.
   # Only for a push to main or beta, or a manual re-run: never for a pull request or a queued merge.
+  # Its needs are checked one by one rather than by the implicit success(), which also requires every job
+  # further up to have run: the slow scenarios job, which "Test" reports, is skipped on a push by design.
   release-checks:
     name: Release checks
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.lint.result == 'success' && needs.test-result.result == 'success' &&
+      needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success'
     needs: [lint, test-result, coverage, build, windows]
     runs-on: ubuntu-latest
     permissions:
@@ -431,9 +437,16 @@ jobs:
 
   # Publishes, and only that: it installs nothing beyond the repository's frozen lockfile and runs
   # no generated application, since any step here can request the token npm publishes with.
+  # Its needs are checked one by one, as the release checks' are, so the slow scenarios job skipped on a
+  # push does not skip the release, and one that did not succeed, the release checks above all, stops it.
   release:
     name: Release
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.lint.result == 'success' && needs.test-result.result == 'success' &&
+      needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success' &&
+      needs.release-checks.result == 'success'
     needs: [lint, test-result, coverage, build, windows, release-checks]
     runs-on: ubuntu-latest
     environment: Production
