@@ -141,7 +141,24 @@ function sentenceCount(text: string): number {
   return plain.split(/(?<=[.!?])\s+(?=[A-Z`@'"(])/).filter(sentence => sentence.trim() !== '').length
 }
 
-/** An interface's own properties and methods with no comment of their own, which the reference would show blank. */
+/** Whether a declaration has a comment of its own with text, not only tags. */
+const commented = (declaration: ts.Node) =>
+  ts.getJSDocCommentsAndTags(declaration).some(doc => ts.isJSDoc(doc) && (ts.getTextOfJSDocComment(doc.comment) ?? '').trim() !== '')
+
+/**
+ * The signatures of an overloaded function or method with no comment of their own, numbered from 1: the reference
+ * shows each signature apart, with its own comment.
+ */
+function uncommentedOverloads(declarations: readonly ts.Declaration[] | undefined): number[] {
+  const signatures = (declarations ?? []).filter(declaration => ts.isFunctionDeclaration(declaration) || ts.isMethodSignature(declaration) || ts.isMethodDeclaration(declaration))
+  if (signatures.length < 2) return []
+  return signatures.flatMap((signature, index) => (commented(signature) ? [] : [index + 1]))
+}
+
+/**
+ * An interface's own properties and methods with no comment of their own, which the reference would show blank, and
+ * each overload of a method that has none.
+ */
 function undocumentedMembers(checker: ts.TypeChecker, symbol: ts.Symbol): string[] {
   if (!(symbol.flags & ts.SymbolFlags.Interface)) return []
   const own = new Set<ts.Node>(symbol.declarations)
@@ -149,8 +166,10 @@ function undocumentedMembers(checker: ts.TypeChecker, symbol: ts.Symbol): string
     .getPropertiesOfType(checker.getDeclaredTypeOfSymbol(symbol))
     .filter(member => member.declarations?.some(declaration => own.has(declaration.parent)))
     .filter(member => !member.getJsDocTags(checker).some(tag => tag.name === 'internal'))
-    .filter(member => ts.displayPartsToString(member.getDocumentationComment(checker)).trim() === '')
-    .map(member => member.name)
+    .flatMap(member => {
+      if (ts.displayPartsToString(member.getDocumentationComment(checker)).trim() === '') return [member.name]
+      return uncommentedOverloads(member.declarations).map(number => `${member.name} (signature ${number})`)
+    })
 }
 
 /** The names a module exports, from a file in the program. */
@@ -256,12 +275,13 @@ function main(): void {
     const sentences = sentenceCount(item.summary)
     if (sentences === 0) problems.push(`${item.name}: it has no summary; the comment's first paragraph is its summary.`)
     if (sentences > 1) {
-      problems.push(
-        `${item.name}: its summary, the first paragraph, is ${sentences} sentences; end it after the first, and start the ` +
-          `next paragraph, when to use it, after a blank line.`,
-      )
+      problems.push(`${item.name}: its summary is ${sentences} sentences; start a new paragraph after the first.`)
     }
     if (!item.isType && item.examples.length === 0) problems.push(`${item.name}: it has no @example; only a type may skip one.`)
+    const overloads = uncommentedOverloads(item.symbol.declarations)
+    if (overloads.length > 0) {
+      problems.push(`${item.name}: its signature ${overloads.join(' and ')} ${overloads.length > 1 ? 'have' : 'has'} no comment of ${overloads.length > 1 ? 'their' : 'its'} own.`)
+    }
     const blank = undocumentedMembers(checker, item.symbol)
     if (blank.length > 0) {
       const [verb, own] = blank.length > 1 ? ['have no comments', 'their'] : ['has no comment', 'its']

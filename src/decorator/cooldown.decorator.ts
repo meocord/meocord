@@ -65,6 +65,13 @@ export interface CooldownByDecorator<P> {
  * @see {@link https://meocord.dev/docs/latest/cooldowns | Cooldowns}
  */
 export function Cooldown(options: CooldownOptions & { by?: undefined }): ClassDecorator & MethodDecorator
+/**
+ * Limits how often a handler runs, counting calls apart by a value `by` reads from each call, such as the account a
+ * button acts on.
+ *
+ * @param options - The limit, whose calls count together, and `by`; the handler's params are checked against what
+ *   `by` reads.
+ */
 export function Cooldown<P extends object = Record<string, unknown>>(
   options: CooldownOptions<P> & { by: NonNullable<CooldownOptions<P>['by']> },
 ): CooldownByDecorator<P>
