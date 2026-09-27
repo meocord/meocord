@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { type ClientEvents, type RESTPostAPIApplicationCommandsJSONBody } from 'discord.js'
+import { type ClientEvents, type Message, type RESTPostAPIApplicationCommandsJSONBody } from 'discord.js'
 import { type MetadataDecorator } from '@src/common/metadata.js'
 import { HandlerExecutionContext } from '@src/common/execution-context.js'
 import {
@@ -10,8 +10,17 @@ import {
 } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { CommandType } from '@src/enum/index.js'
-import { type MessageCommandOptions, type MessageHandlerOptions, type MessageScope } from '@src/interface/index.js'
-import { commandWordsOf, type MessagePattern, parseMessagePattern } from '@src/core/message-routes.js'
+import { type MessageCommandOptions, type MessageHandlerOptions, type MessageHelp, type MessageScope } from '@src/interface/index.js'
+import {
+  afterStart,
+  buildMessageRoutes,
+  commandWordsOf,
+  type MessagePattern,
+  type MessageRoute,
+  messageStarts,
+  parseMessagePattern,
+} from '@src/core/message-routes.js'
+import { computeMessageHelp, helpInvocation } from '@src/core/message-help.js'
 import { usageOf } from '@src/core/message-params.js'
 
 type HandlerClass = new (...args: any[]) => unknown
@@ -128,6 +137,8 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
   description: string | undefined
   /** Where the command works, from its `scope` option. */
   scope: MessageScope
+  /** Whether its `hidden` option leaves it out of help and of a parent's list of subcommands. */
+  hidden: boolean
   /**
    * The command as a user types it, after `prefix`: `usage('!')` gives `!ban <target> [duration] [reason…]`.
    * `undefined` for a handler that takes every message.
@@ -230,7 +241,7 @@ function messageCommand(
   pattern: string | undefined,
   options: MessageHandlerOptions,
   messages: MessageCommandOptions,
-): Pick<MessageHandlerEntry, 'command' | 'aliases' | 'description' | 'scope' | 'usage' | 'matches'> {
+): Pick<MessageHandlerEntry, 'command' | 'aliases' | 'description' | 'scope' | 'hidden' | 'usage' | 'matches'> {
   let parsed: MessagePattern | undefined
   try {
     parsed = pattern === undefined ? undefined : parseMessagePattern(pattern)
@@ -250,6 +261,7 @@ function messageCommand(
     aliases,
     description: options.description,
     scope: options.scope ?? 'any',
+    hidden: options.hidden ?? false,
     usage: (prefix = '') => parsed && usageOf(parsed, prefix),
     matches: words => names.has(key(words)),
   }
@@ -288,6 +300,7 @@ function messageCommand(
  */
 export class HandlerRegistry {
   private entries?: HandlerEntry[]
+  private messageRoutes?: MessageRoute[]
 
   /**
    * @param classes - The controllers and services to read handlers from. The factory fills the list
@@ -312,6 +325,44 @@ export class HandlerRegistry {
         (filter.kind === undefined || entry.kind === filter.kind) &&
         (filter.controller === undefined || entry.controller === filter.controller),
     ) as Extract<HandlerEntry, { kind: K }>[]
+  }
+
+  /**
+   * Works out what the built-in help would answer a message, for a help command of your own.
+   *
+   * It lists the message commands the author can use where the message was sent, or describes the one `query`
+   * names, with the same rules the built-in follows: hidden and guarded handlers are left out of lists, and shown
+   * when named. It works whether `messages.help` is on or off.
+   *
+   * @param message - The message asking for help; its start, author and place decide what is listed.
+   * @param query - The command asked about, such as `ban` or `config set`; leave it out to list them all.
+   * @returns The help, as the presenter's `messageHelp` receives it.
+   *
+   * @example
+   * ```ts
+   * @MessageHandler('help {command...?}')
+   * async help(message: Message, { command }: { command?: string }) {
+   *   const help = await this.handlers.messageHelp(message, command)
+   *   if (help.kind === 'list') await message.reply(help.commands.map(entry => `**${entry.usage}** ${entry.description ?? ''}`).join('\n'))
+   *   else await message.reply(help.kind === 'unknown' ? `No command is called ${help.query}.` : 'Ask a moderator.')
+   * }
+   * ```
+   */
+  async messageHelp(message: Message, query?: string): Promise<MessageHelp> {
+    this.messageRoutes ??= buildMessageRoutes([...this.classes], this.messages)
+    const starts = await messageStarts(this.messages, message, message.client?.user?.id)
+    const text = (message.content ?? '').trim()
+    const rest = afterStart(text, starts.prefixes.filter(prefix => prefix !== ''), starts.mention, this.messages.caseSensitive ?? false)
+    // The start the message used, else the one a caller would type: the app's first prefix, or a mention
+    const start =
+      rest !== undefined
+        ? text.slice(0, text.length - rest.length)
+        : (starts.prefixes.find(prefix => prefix !== '') ?? (starts.mention ? `<@${starts.mention}> ` : ''))
+    return computeMessageHelp(
+      this.messageRoutes,
+      { start, query: query?.trim() ?? '', starts, invocation: helpInvocation(start, this.messages.help) },
+      this.messages.types,
+    )
   }
 
   private collect(): HandlerEntry[] {

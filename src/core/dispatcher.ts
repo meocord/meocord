@@ -37,7 +37,17 @@ import {
   matchComponentRoute,
   type RouteParamValue,
 } from '@src/core/component-routes.js'
-import { handleUnroutedError, type HandlerOutcome, handlerStages, observeUnclaimed, type RunOptions, runHandler } from '@src/core/handler-pipeline.js'
+import {
+  appPresenterOf,
+  handleUnroutedError,
+  type HandlerOutcome,
+  observeUnclaimed,
+  type RunOptions,
+  runHandler,
+  runInAppTheme,
+} from '@src/core/handler-pipeline.js'
+import { computeMessageHelp, helpInvocation, helpWords, isListable, matchHelpRequest, renderMessageHelp, splitReply } from '@src/core/message-help.js'
+import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
 import {
@@ -46,7 +56,10 @@ import {
   matchMessageSubcommands,
   matchMessageRoute,
   type MessageRoute,
+  type MessageStarts,
+  messageStarts,
   messageStartsFor,
+  usesAppPrefix,
 } from '@src/core/message-routes.js'
 import { messageCommandHooks, subcommandUsageError } from '@src/core/message-params.js'
 import { CommandNotFoundError } from '@src/common/errors.js'
@@ -119,9 +132,6 @@ interface Call {
   record?: DispatchRecorder
 }
 
-/** Whether a message route's controller and method have no guards, as the pipeline collects them, inherited ones included. */
-const isUnguarded = (route: MessageRoute): boolean => handlerStages(route.controllerClass.prototype as object, route.method).guards.length === 0
-
 /**
  * Routes interactions, messages and reactions to the handlers that take them, as the bot does, and runs
  * each through its pipeline. The app and the testing module share it, so a test routes exactly as the bot.
@@ -148,11 +158,36 @@ export class Dispatcher {
     this.fallback = options.fallback
     // Built now, so a pattern that cannot be read or two that match the same messages stop the bot before login
     this.messageRoutes = buildMessageRoutes([...this.controllerClasses], this.messageOptions)
+    this.warnUnreachableHelp()
     this.messageListeners = this.controllerClasses.flatMap(controllerClass =>
       getMessageHandlers(controllerClass.prototype)
         .filter(handler => handler.pattern === undefined)
         .map(({ method }) => ({ controllerClass, method })),
     )
+  }
+
+  /**
+   * Warns when `messages.help` is on but never answers: a handler of the app's takes its word, which always runs
+   * instead, or the app has no prefix and takes no mention, so no message can ask for it.
+   */
+  private warnUnreachableHelp(): void {
+    const words = helpWords(this.messageOptions.help)
+    if (words.length === 0) return
+    for (const route of this.messageRoutes) {
+      const [only] = route.tokens
+      const word = route.tokens.length === 1 && only && 'literal' in only ? words.find(candidate => candidate.toLowerCase() === only.literal.toLowerCase()) : undefined
+      if (word !== undefined) {
+        this.logger.warn(
+          `messages.help is on, but ${route.controllerClass.name}.${route.method} handles "${word}", which runs instead, ` +
+            `so the built-in help never answers it. Turn help off, or give the handler another word.`,
+        )
+      }
+    }
+    const { prefix, mention } = this.messageOptions
+    const prefixes = typeof prefix === 'function' ? ['function'] : prefix === undefined ? [] : [prefix].flat()
+    if (!mention && prefixes.every(candidate => candidate === '')) {
+      this.logger.warn('messages.help is on, but the app has no prefix and takes no mention, so no message can ask for help.')
+    }
   }
 
   /** The call for one event: the fallback, told of each error that reaches it when there is a recorder. */
@@ -443,11 +478,12 @@ export class Dispatcher {
           const named = matchMessageCommand(this.messageRoutes, message.content, starts)
           if (named) target = { ...named, params: {} }
         }
-        // A parent with no handler of its own lists its subcommands; one a guard protects is left out, since
-        // the listing runs no guards and must not name what a caller may be refused
-        const listing = target ? undefined : matchMessageSubcommands(this.messageRoutes, message.content, starts, isUnguarded)
+        // No handler took it: the built-in help, then a parent with no handler of its own, which lists its
+        // subcommands; one a guard protects is left out, since neither runs guards nor may name what they refuse
+        const answered = !target && (await this.answerHelp(message, usesAppPrefix(this.messageRoutes) ? starts : undefined))
+        const listing = target || answered ? undefined : matchMessageSubcommands(this.messageRoutes, message.content, starts, isListable)
         if (listing) throw subcommandUsageError(listing)
-      }
+      } else await this.answerHelp(message)
     } catch (error) {
       await handleUnroutedError(this.container, [message], error, this.runOptions(call))
     }
@@ -460,6 +496,40 @@ export class Dispatcher {
     for (const { controllerClass, method } of this.messageListeners) {
       await this.invokeHandler(this.getInstance(controllerClass), method, [message], call)
     }
+  }
+
+  /**
+   * Answers a message that asks the built-in help, when `messages.help` is on and no handler took the message:
+   * through the presenter's `messageHelp` when it has one, else in plain text. `known` is the message's starts
+   * when they hold the app's prefixes already. Whether it answered.
+   */
+  private async answerHelp(message: Message, known?: MessageStarts): Promise<boolean> {
+    const words = helpWords(this.messageOptions.help)
+    if (words.length === 0) return false
+    const starts = known ?? (await messageStarts(this.messageOptions, message, this.options.botUserId(message)))
+    const request = matchHelpRequest(message.content, starts, words, this.messageOptions.caseSensitive ?? false)
+    if (!request) return false
+    const help = computeMessageHelp(
+      this.messageRoutes,
+      { ...request, starts, invocation: helpInvocation(request.start, this.messageOptions.help) },
+      this.messageOptions.types,
+    )
+    await runInAppTheme(this.container, [message], async () => {
+      const presenter = appPresenterOf(this.container)
+      const written = presenter?.messageHelp ? await presenter.messageHelp(help, message) : this.helpText(renderMessageHelp(help))
+      const replies = typeof written === 'string' ? splitReply(written).map(content => ({ content })) : [written]
+      try {
+        for (const reply of replies) await message.reply({ allowedMentions: { repliedUser: false, parse: [] }, ...reply })
+      } catch (failure) {
+        this.logger.debug(`Could not answer a help request: ${String(failure)}`)
+      }
+    })
+    return true
+  }
+
+  /** The built-in help's text, begun with the theme's info emoji when `replyEmoji` is on, as usage replies begin with its warning. */
+  private helpText(text: string): string {
+    return this.messageOptions.replyEmoji ? `${useTheme().emojis.info} ${text}` : text
   }
 
   /**

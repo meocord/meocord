@@ -45,6 +45,10 @@ export interface MessageRoute {
   flags: FlagToken[]
   /** The handler's own pattern, when this route is one of its aliases. */
   aliasOf?: string
+  /** What the command does, from the handler's `description`. */
+  description?: string
+  /** Whether the handler asked to be left out of help and of a parent's list of subcommands. */
+  hidden: boolean
 }
 
 /** What a message may start with to reach a route that uses the app's prefixes. */
@@ -60,7 +64,7 @@ export interface MessageStarts {
 }
 
 /** Whether a route's scope lets it run where the message was sent. */
-const fitsScope = (scope: MessageScope, inGuild: boolean | undefined) => inGuild === undefined || scope === 'any' || (scope === 'guild') === inGuild
+export const fitsScope = (scope: MessageScope, inGuild: boolean | undefined) => inGuild === undefined || scope === 'any' || (scope === 'guild') === inGuild
 
 const PARAM = /^\{(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\.\.\.)?(\?)?\}$/
 const FLAG = /^\{--(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\?)?\}$/
@@ -216,6 +220,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
         }
         assertScope(own.scope, parsed)
         assertMention(own)
+        if (own.hidden !== undefined && typeof own.hidden !== 'boolean') throw new Error(`hidden is true or false, not ${JSON.stringify(own.hidden)}.`)
         aliases = aliasPatterns(pattern, parsed.tokens, own.aliases)
       } catch (error) {
         throw new Error(`@MessageHandler('${pattern}') in ${controllerClass.name}.${method}: ${(error as Error).message}`)
@@ -227,6 +232,8 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
         mentionOnly: own.mention === 'only',
         caseSensitive: own.caseSensitive ?? options.caseSensitive ?? false,
         scope: own.scope ?? 'any',
+        description: own.description,
+        hidden: own.hidden ?? false,
       }
       routes.push({ ...shared, pattern, ...parsed })
       for (const alias of aliases) routes.push({ ...shared, pattern: alias, ...parseMessagePattern(alias), aliasOf: pattern })
@@ -367,7 +374,7 @@ export function staticMessageStarts(
 }
 
 /** The text after the longest start the message begins with, or `undefined` when it begins with none. */
-function afterStart(text: string, prefixes: readonly string[], mention: string | undefined, caseSensitive: boolean): string | undefined {
+export function afterStart(text: string, prefixes: readonly string[], mention: string | undefined, caseSensitive: boolean): string | undefined {
   const starts = [
     ...prefixes.map(prefix => ({ start: prefix, exact: caseSensitive })),
     ...(mention ? [`<@${mention}>`, `<@!${mention}>`].map(start => ({ start, exact: true })) : []),

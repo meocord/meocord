@@ -42,6 +42,21 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
   if (deleteUsageRepliesAfter !== undefined && !(typeof deleteUsageRepliesAfter === 'number' && deleteUsageRepliesAfter >= 0 && Number.isFinite(deleteUsageRepliesAfter))) {
     throw new TypeError('@MeoCord({ messages: { deleteUsageRepliesAfter } }) takes a number of seconds, or 0 to keep usage replies.')
   }
+  const { help } = messages
+  // One word each, since help is asked for by its first word
+  const isWord = (value: unknown) => typeof value === 'string' && /^\S+$/.test(value)
+  if (
+    help !== undefined &&
+    typeof help !== 'boolean' &&
+    !(
+      typeof help === 'object' &&
+      help !== null &&
+      (help.command === undefined || isWord(help.command)) &&
+      (help.aliases === undefined || (Array.isArray(help.aliases) && help.aliases.every(isWord)))
+    )
+  ) {
+    throw new TypeError('@MeoCord({ messages: { help } }) takes true, false, or { command, aliases } of single words.')
+  }
   for (const [name, type] of Object.entries(types ?? {})) {
     if (name in BUILT_IN_TYPES) throw new TypeError(`@MeoCord({ messages: { types } }): "${name}" is a built-in type; give yours another name.`)
     if (typeof type?.parse !== 'function') {
@@ -87,7 +102,7 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
  * @param options.presenter - The `ResponsePresenter` that styles loading and error views, resolved once
  *   from the container. Without one, MeoCord's own styling is used.
  * @param options.messages - How message commands start and match across the app: the `prefix`, a mention of the
- *   bot, `mention: 'only'`, the app's own param `types` and how usage replies look; see {@link MessageCommandOptions}.
+ *   bot, `mention: 'only'`, the app's own param `types`, how usage replies look, and the built-in `help`; see {@link MessageCommandOptions}.
  * @param options.observers - `@Observer` classes told about every dispatched call once it has settled,
  *   with its outcome and duration, in the order listed. The call never waits for them.
  * @param options.warnUnanswered - Warns, once per handler, when a handler finishes without answering
