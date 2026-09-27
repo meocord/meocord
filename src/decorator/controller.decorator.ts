@@ -19,7 +19,7 @@ import {
 import { isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
-import { isSegmentType } from '@src/core/scalar-types.js'
+import { choicesOf, isSegmentType, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 
 const COMMAND_METADATA_KEY = Symbol('commands')
@@ -296,6 +296,9 @@ export function createRegexFromPattern(pattern: string): {
 
     if (type !== undefined) {
       if (!isSegmentType(type)) throw new Error(`Invalid pattern "${pattern}": ${segmentTypeProblem(param, type)}`)
+      if (choicesOf(type)?.includes('')) {
+        throw new Error(`Invalid pattern "${pattern}": {${param}:${type}} lists an empty word to choose from, which no segment can be.`)
+      }
       if (type !== 'string') types[param] = type
     }
 
@@ -316,7 +319,7 @@ export function createRegexFromPattern(pattern: string): {
   // more exactly than one leaving it to a parameter. Fewer parameters breaks a tie
   // between equal-length patterns, so the ranking is total and never falls back to
   // declaration order.
-  const specificity = routeSpecificity({ literals: literalLength, params: params.length })
+  const specificity = routeSpecificity({ literals: literalLength, params: params.length, typed: Object.keys(types).length })
   return { regex, params, types, specificity }
 }
 
@@ -579,9 +582,39 @@ export function getAutocompleteHandlers(controller: any): AutocompleteMetadata[]
   return [...handlers].sort((a, b) => Number(Boolean(b.optionName)) - Number(Boolean(a.optionName)))
 }
 
-/** A pattern with its param names blanked, so two patterns that match the same customIds read the same. */
+/** A segment type as patterns compare it: `''` for text, choices in one order. */
+const typeKey = (type: string | undefined): string =>
+  type === undefined || type === 'string' ? '' : (choicesOf(type)?.slice().sort().join('|') ?? type)
+
+/**
+ * A pattern with its param names blanked and its types kept, so two patterns that match the same customIds
+ * read the same, and a typed param and a text one do not.
+ */
 export function patternShape(pattern: string): string {
-  return pattern.replace(PLACEHOLDER_PATTERN, '{}')
+  return pattern.replace(PLACEHOLDER_PATTERN, (_, _name: string, type?: string) => (typeKey(type) ? `{:${typeKey(type)}}` : '{}'))
+}
+
+/** The type of a segment that is a param, `''` for text; `undefined` for a literal segment. */
+function segmentParamType(segment: string): string | undefined {
+  const match = new RegExp(`^${PLACEHOLDER_PATTERN.source}$`).exec(segment)
+  return match ? typeKey(match[2]) : undefined
+}
+
+/** Whether a segment's two readings can both take one value: a literal, text, or a typed param. */
+function segmentsOverlap(left: string, right: string): boolean {
+  const [a, b] = [segmentParamType(left), segmentParamType(right)]
+  if (a === undefined && b === undefined) return left === right
+  if (a === undefined || b === undefined) {
+    const [type, literal] = a === undefined ? [b!, left] : [a, right]
+    return type === '' || parseSegment(type, literal) !== undefined
+  }
+  if (a === '' || b === '' || a === b) return true
+  // Words to choose from overlap another type when one of them is a value of it
+  const [wordsA, wordsB] = [choicesOf(a), choicesOf(b)]
+  if (wordsA) return wordsA.some(word => parseSegment(b, word) !== undefined)
+  if (wordsB) return wordsB.some(word => parseSegment(a, word) !== undefined)
+  // Of the scalar types, only a whole number and a number share values
+  return (a === 'int' && b === 'number') || (a === 'number' && b === 'int')
 }
 
 /**
@@ -589,7 +622,6 @@ export function patternShape(pattern: string): string {
  * @returns Each ambiguous pair once, in the order the patterns were given.
  */
 export function findAmbiguousRoutes(patterns: string[]): [string, string][] {
-  const isParam = (segment: string): boolean => PLACEHOLDER_PATTERN.test(segment)
   const segmentsOf = (pattern: string): string[] => pattern.split(PARAM_SEPARATOR)
   const collisions: [string, string][] = []
 
@@ -599,13 +631,7 @@ export function findAmbiguousRoutes(patterns: string[]): [string, string][] {
       const right = segmentsOf(patterns[j])
       if (left.length !== right.length) continue
 
-      const disjoint = left.some((segment, index) => {
-        PLACEHOLDER_PATTERN.lastIndex = 0
-        const leftIsParam = isParam(segment)
-        PLACEHOLDER_PATTERN.lastIndex = 0
-        const rightIsParam = isParam(right[index])
-        return !leftIsParam && !rightIsParam && segment !== right[index]
-      })
+      const disjoint = left.some((segment, index) => !segmentsOverlap(segment, right[index]))
 
       if (!disjoint) collisions.push([patterns[i], patterns[j]])
     }
