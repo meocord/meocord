@@ -21,6 +21,7 @@ import { CommandType, ReactionHandlerAction } from '@src/enum/index.js'
 import { CommandNotFoundError, MessageUsageError, UserError } from '@src/common/errors.js'
 import { type DispatchObserver, type ExceptionFilter, type ReactionHandlerOptions } from '@src/interface/index.js'
 import { type DispatchedCall, MeoCordTestingModule } from './meocord-testing-module.js'
+import { resolveRoute } from './routing.js'
 import { createChatInputOptions, createMock, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
 
 const calls: string[] = []
@@ -192,6 +193,29 @@ describe('TestingModule.dispatch', () => {
 
     expect(result.error).toBeInstanceOf(MessageUsageError)
     expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Usage: !roll <sides>') }))
+  })
+
+  it("answers a parent with no handler with its subcommands' usage, which no handler, resolveRoute or invoke takes", async () => {
+    @Controller()
+    class Settings {
+      @MessageHandler('settings get {key}')
+      get() {}
+
+      @MessageHandler('settings set {key} {value}')
+      set() {}
+    }
+    @MeoCord({ controllers: [Settings], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class SettingsApp {}
+    const module = MeoCordTestingModule.create({ app: SettingsApp, controllers: [Settings] }).compile()
+    const message = createMockMessage({ content: '!settings' })
+
+    const result = await module.dispatch(message)
+
+    expect(result.error).toBeInstanceOf(MessageUsageError)
+    expect(result.handlers).toEqual([])
+    expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Usage: !settings get <key>\n!settings set <key> <value>' }))
+    expect(resolveRoute(SettingsApp, { content: '!settings' })).toBeUndefined()
+    await expect(module.invoke(Settings, 'get', createMockMessage({ content: '!settings' }))).rejects.toThrow("does not match Settings.get's pattern")
   })
 
   it('skips a message from a bot, as the bot does', async () => {

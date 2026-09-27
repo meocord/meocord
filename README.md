@@ -1050,6 +1050,15 @@ The reply is deleted after 10 seconds; `@MeoCord({ messages: { deleteUsageReplie
 
 The error is a `MessageUsageError` from `meocord/common`, carrying `usage` and `issues`, and goes through the handler's [exception filters](#exception-filters) first, so a filter can answer it in the app's own words or language. A message with no prefix or mention is never taken for a command: in an app without a prefix, `pay @ana lots` is chat that happens to begin with a command's word, and gets no reply.
 
+A message that names only a command's leading words, such as `!config` when `config set …` and `config get …` exist, or an unknown subcommand, `!config reset`, gets the usage of each subcommand it could reach, one line each, sorted:
+
+```
+!config              ->  Usage: !config get <key>
+                         !config set <key> <value…>
+```
+
+A handler of its own, `config` or `config {key}`, still takes such a message. The listing runs no guards, so a subcommand with a guard, on its method or its controller, is left out of it on purpose: it would name what a caller may be refused. It still answers its own usage when named. A parent with no subcommand left to list gets no reply. The listing is a `MessageUsageError` whose `usage` holds its lines, and it goes to the app's global filters, then the fallback.
+
 ### Aliases, descriptions and scope
 
 A handler's options say more about its command:

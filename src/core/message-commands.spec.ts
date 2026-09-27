@@ -14,7 +14,7 @@ import {
   Validate,
 } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { type ExecutionContext, GuardDeniedError, MessageUsageError } from '@src/common/index.js'
+import { applyDecorators, type ExecutionContext, GuardDeniedError, MessageUsageError } from '@src/common/index.js'
 import {
   type CallHandler,
   type ExceptionFilter,
@@ -878,6 +878,190 @@ describe('typed message params and usage replies', () => {
     const message = await sendIn(client, `!pay <@${TARGET}> lots`)
 
     expect(caught).toEqual(['!pay <to> <amount> [note…]'])
+    expect(message.reply).not.toHaveBeenCalled()
+  })
+})
+
+describe('a command named by its leading words alone', () => {
+  const ran: string[] = []
+
+  @Guard()
+  class AdminOnly implements GuardInterface {
+    canActivate() {
+      return false
+    }
+  }
+
+  @Controller()
+  class Config {
+    @MessageHandler('config set {key} {value...}')
+    set() {
+      ran.push('set')
+    }
+
+    @MessageHandler('config get {key}', { aliases: ['cfg get'] })
+    get() {
+      ran.push('get')
+    }
+
+    @MessageHandler('config reset-db')
+    @UseGuard(AdminOnly)
+    reset() {
+      ran.push('reset')
+    }
+  }
+
+  /** The text of the first reply a message got, or `undefined` for none. */
+  const replyText = (message: Message) => {
+    const [sent] = vi.mocked(message.reply).mock.calls[0] ?? []
+    return typeof sent === 'string' ? sent : (sent as { content?: string } | undefined)?.content
+  }
+
+  beforeEach(() => {
+    ran.length = 0
+  })
+
+  it('answers with the usage of every subcommand the caller could reach, leaving out guarded ones', async () => {
+    const client = await startApp({ controllers: [Config], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+
+    const message = await send(client, '!config')
+
+    expect(replyText(message)).toBe('Usage: !config get <key>\n!config set <key> <value…>')
+    expect(ran).toEqual([])
+  })
+
+  it('answers an unknown subcommand with the same listing, naming nothing a guard left out', async () => {
+    const client = await startApp({ controllers: [Config], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+
+    const message = await send(client, '!config nope x')
+
+    expect(replyText(message)).toBe('Usage: !config get <key>\n!config set <key> <value…>')
+  })
+
+  it("lists an alias's subcommands as typed, and a deeper parent's only", async () => {
+    @Controller()
+    class Admin {
+      @MessageHandler('admin user ban {target}')
+      ban() {}
+
+      @MessageHandler('admin user kick {target}')
+      kick() {}
+
+      @MessageHandler('admin role add {name}')
+      add() {}
+    }
+    const client = await startApp({ controllers: [Config, Admin], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+
+    expect(replyText(await send(client, '!cfg'))).toBe('Usage: !cfg get <key>')
+    expect(replyText(await send(client, '!admin'))).toBe('Usage: !admin role add <name>\n!admin user ban <target>\n!admin user kick <target>')
+    expect(replyText(await send(client, '!admin user'))).toBe('Usage: !admin user ban <target>\n!admin user kick <target>')
+  })
+
+  it('leaves a route that matches to run, as before', async () => {
+    @Controller()
+    class Bare {
+      @MessageHandler('config')
+      config() {
+        ran.push('config')
+      }
+
+      @MessageHandler('config {key}')
+      show() {
+        ran.push('show')
+      }
+    }
+    const client = await startApp({ controllers: [Config, Bare], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+
+    const bare = await send(client, '!config')
+    const key = await send(client, '!config colour')
+
+    expect(ran).toEqual(['config', 'show'])
+    expect(bare.reply).not.toHaveBeenCalled()
+    expect(key.reply).not.toHaveBeenCalled()
+  })
+
+  it('stays silent for chat, an unknown command, and a parent whose subcommands are all guarded', async () => {
+    @Controller()
+    @UseGuard(AdminOnly)
+    class Locked {
+      @MessageHandler('vault open {code}')
+      open() {}
+    }
+    const client = await startApp({ controllers: [Config, Locked], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+
+    for (const content of ['config', 'hello there', '!weather today', '!vault']) {
+      expect((await send(client, content)).reply).not.toHaveBeenCalled()
+    }
+  })
+
+  it('reads guards as the pipeline does: inherited, through applyDecorators, and stopped by inheritStages: false', async () => {
+    @UseGuard(AdminOnly)
+    abstract class Guarded {}
+
+    @Controller()
+    class Inherits extends Guarded {
+      @MessageHandler('ops restart {service}')
+      restart() {}
+    }
+
+    @Controller({ inheritStages: false })
+    class Opts extends Guarded {
+      @MessageHandler('ops status {service}')
+      status() {}
+    }
+
+    const AdminCommand = () => applyDecorators(UseGuard(AdminOnly))
+    @Controller()
+    class Composed {
+      @MessageHandler('ops purge {service}')
+      @AdminCommand()
+      purge() {}
+    }
+    const client = await startApp({ controllers: [Inherits, Opts, Composed], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+
+    expect(replyText(await send(client, '!ops'))).toBe('Usage: !ops status <service>')
+  })
+
+  it("lists only what starts the way the message did, in its case, and fits where it was sent", async () => {
+    @Controller()
+    class Mixed {
+      @MessageHandler('team join {name}', { mention: 'only' })
+      join() {}
+
+      @MessageHandler('team leave {name}', { scope: 'guild' })
+      leave() {}
+
+      @MessageHandler('team list {page}', { caseSensitive: true })
+      list() {}
+    }
+    const client = await startApp({ controllers: [Mixed], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
+    const dm = async (content: string) => {
+      const message = createMockMessage({ content, guild: null })
+      Object.assign(message.author, { bot: false, id: 'user-1' })
+      await Promise.all(client.rawListeners('messageCreate').map(listener => (listener as (m: unknown) => unknown)(message)))
+      return message
+    }
+
+    expect(replyText(await send(client, '!team'))).toBe('Usage: !team leave <name>\n!team list <page>')
+    expect(replyText(await send(client, `<@${BOT_ID}> team`))).toBe(`Usage: <@${BOT_ID}> team join <name>`)
+    expect(replyText(await send(client, '!TEAM'))).toBe('Usage: !team leave <name>')
+    expect(replyText(await dm('!team'))).toBe('Usage: !team join <name>\n!team list <page>')
+  })
+
+  it("goes to the app's filters, with every usage line", async () => {
+    const caught: unknown[] = []
+
+    @Catch(MessageUsageError)
+    class UsageFilter implements ExceptionFilter<MessageUsageError> {
+      catch(error: MessageUsageError) {
+        caught.push([error.usage, error.issues])
+      }
+    }
+    const client = await startApp({ controllers: [Config], messages: { prefix: '!' }, filters: [UsageFilter] })
+
+    const message = await send(client, '!config')
+
+    expect(caught).toEqual([['!config get <key>\n!config set <key> <value…>', []]])
     expect(message.reply).not.toHaveBeenCalled()
   })
 })
