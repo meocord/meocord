@@ -9,6 +9,7 @@ import {
   LabelBuilder,
 } from 'discord.js'
 import { respond } from '@src/common/index.js'
+import { responseOf } from '@src/common/response/response-state.js'
 import { createDiscordError, createMockInteraction, createMockMessage, getResponse } from '@src/testing/index.js'
 
 describe('getResponse', () => {
@@ -91,6 +92,19 @@ describe('getResponse', () => {
         ['deferUpdate', false],
         ['editReply', true],
         ['message.edit', false],
+      ])
+    })
+
+    it('records a refused cleanup that respond() swallows: the deferral a denied call leaves is not deleted', async () => {
+      const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'report' })
+      await respond(interaction).acknowledge()
+      interaction.deleteReply.mockRejectedValueOnce(createDiscordError(10008))
+
+      await expect(responseOf(interaction).abandon()).resolves.toBeUndefined()
+
+      expect(getResponse(interaction).calls).toEqual([
+        { method: 'deferReply', payload: { flags: 0 } },
+        { method: 'deleteReply', payload: undefined, error: refusal(10008) },
       ])
     })
 
