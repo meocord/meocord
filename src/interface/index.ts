@@ -845,9 +845,11 @@ export interface CommandRegistrationConfig {
  */
 export interface CommandBuilderOptions {
   /**
-   * Guilds this command is registered to, in place of the configured scope. A command whose list is
-   * empty after dropping blank ids is not registered at all, rather than falling back to global.
-   * Under a development guild, it goes there with every other command.
+   * The servers this command is registered to, in place of the configured scope. A command whose list is
+   * empty after dropping blank ids is not registered at all, rather than falling back to global. Under a
+   * development server, it goes there with every other command.
+   *
+   * @defaultValue the configured scope
    */
   guilds?: (string | undefined)[]
 }

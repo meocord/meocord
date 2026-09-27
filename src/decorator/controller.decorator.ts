@@ -349,47 +349,43 @@ type RouteAccepts<N, T, P> =
     : unknown
 
 /**
- * Decorator to register command methods in a controller.
+ * Routes a command, a component or a modal submission to the method it decorates.
  *
- * @param commandName - What the command is addressed by. Commands registered with
- *   Discord use their name, and a subcommand its full path — `settings notify email`,
- *   parts separated by a space, the way Discord displays it. Components use a customId
- *   pattern, where `{name}` captures one `/`-separated segment, or a {@link Route}
- *   made from one, which also builds the customIds it matches. With a route, each key
- *   the handler's params require must be one of its params, or a select menu's choice.
- * @param builderOrType - A command builder class, or a `CommandType` for a handler that
- *   registers nothing of its own: every component, and every subcommand of a command
- *   whose builder already describes it.
+ * Use it for each interaction a controller handles: a slash or context menu command by its name or
+ * subcommand path, and a button, select menu or modal by its customId pattern or a `route()`. For an
+ * option's suggestions, use {@link Autocomplete}; for a message command, `@MessageHandler`.
+ *
+ * @remarks
+ * A subcommand's path is its parts separated by a space, as Discord shows it: `settings notify email`. In a
+ * customId pattern, `{name}` captures one `/`-separated segment into the handler's params; with a route, the
+ * keys the handler's params require are checked against it when the code compiles. Two component handlers of
+ * one type whose patterns match the same ids stop the bot at startup.
+ *
+ * @param name - The command's name or subcommand path, or a component's customId pattern or route.
+ * @param builderOrType - A command builder class, which registers the command with Discord, or a
+ *   `CommandType` for a handler that registers nothing: a component, or a subcommand its command's builder
+ *   describes.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Command('help', CommandType.SLASH)
- * public async handleHelp(interaction: ChatInputCommandInteraction) {
- *   await interaction.reply('This is the help command!')
- * }
- *
- * @Command('settings notify email', CommandType.SLASH)
- * public async handleNotifyEmail(interaction: ChatInputCommandInteraction, { enabled }) {
- *   await interaction.reply(`Email notifications ${enabled ? 'on' : 'off'}`)
+ * async help(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Here is how to use me.')
  * }
  *
  * @Command('stats/{id}', CommandType.BUTTON)
- * public async handleStats(interaction: ButtonInteraction, { id }) {
- *   await interaction.reply(`Fetching stats for ID: ${id}`);
- * }
- *
- * const ticket = route('ticket/{id}')
- *
- * @Command(ticket, CommandType.BUTTON)
- * public async handleTicket(interaction: ButtonInteraction, { id }) {
- *   await interaction.reply(`Ticket ${id}`)
- * }
- *
- * @Command('assign/{taskId}', CommandType.USER_SELECT_MENU)
- * public async handleAssign(interaction: UserSelectMenuInteraction, { taskId }) {
- *   await interaction.reply(`Assigned ${interaction.users.size} user(s) to ${taskId}`)
+ * async stats(interaction: ButtonInteraction, { id }: { id: string }) {
+ *   await respond(interaction).send(`Stats for ${id}.`)
  * }
  * ```
+ *
+ * @pipeline handler after every stage the call passed
+ * @group Decorators
+ * @category Handlers
+ * @see {@link CommandBuilder}
+ * @see {@link route}
+ * @see {@link https://meocord.dev/docs/latest/command-types | Command types}
+ * @see {@link https://meocord.dev/docs/latest/component-routing | Component routing}
  */
 export function Command<
   CBC extends BuildableCommandType,
@@ -491,22 +487,35 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
 }
 
 /**
- * Registers an autocomplete handler for an option of a chat input command.
+ * Suggests values for an option of a chat input command as the user types.
  *
- * Enable it on the option with `setAutocomplete(true)` and answer with `interaction.respond()`.
+ * Use it for an option with more possible values than a fixed list of choices holds, such as a search over
+ * your own data. Enable it on the option with `setAutocomplete(true)` in the command's builder.
  *
- * @param commandPath - The command, such as `search` or `settings notify email` for a subcommand.
- * @param optionName - The option to complete. Omit to handle every option, branching on
+ * @remarks
+ * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs
+ * its class and global guards and its filters, but no interceptors; a guard must not answer, and returning
+ * `false` closes the menu with an empty list.
+ *
+ * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
+ * @param optionName - The option to complete. Leave it out to handle every option, branching on
  *   `interaction.options.getFocused(true)`.
  *
  * @example
- * ```typescript
- * @Autocomplete('search', 'query')
- * async completeQuery(interaction: AutocompleteInteraction) {
+ * ```ts
+ * @Autocomplete('fruit', 'name')
+ * async completeFruit(interaction: AutocompleteInteraction) {
  *   const { value } = interaction.options.getFocused(true)
- *   await interaction.respond(this.search(value).map(name => ({ name, value: name })))
+ *   const names = ['apple', 'banana', 'cherry'].filter(name => name.startsWith(value))
+ *   await interaction.respond(names.map(name => ({ name, value: name })))
  * }
  * ```
+ *
+ * @pipeline handler after the guards, with no interceptors
+ * @group Decorators
+ * @category Handlers
+ * @see {@link Command}
+ * @see {@link https://meocord.dev/docs/latest/autocomplete | Autocomplete}
  */
 export function Autocomplete<R extends void | Promise<void>>(commandPath: string, optionName?: string) {
   return function <P extends Record<string, any>>(

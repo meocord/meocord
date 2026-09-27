@@ -11,21 +11,36 @@ import { perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runne
 export type CooldownKey = string | number
 
 /**
- * What `@Cooldown` takes. `P` is the handler's second parameter, as `by` receives it.
+ * What `@Cooldown` takes: the limit, whose calls count together, and how to exempt or tell calls apart.
+ *
+ * `P` is the handler's second parameter, as `by` receives it.
+ *
+ * @group Types
+ * @see {@link Cooldown}
  */
 export interface CooldownOptions<P = Record<string, unknown>> {
-  /** The window's length. */
+  /** The window's length, in seconds. */
   seconds: number
-  /** Calls allowed within the window. @defaultValue `1` */
+  /**
+   * Calls allowed within the window.
+   *
+   * @defaultValue `1`
+   */
   uses?: number
-  /** Whose calls are counted together. @defaultValue `'user'` */
+  /**
+   * Whose calls are counted together: `'user'`, `'guild'`, `'channel'` or `'global'`. Outside a server,
+   * `'guild'` and `'channel'` count per user.
+   *
+   * @defaultValue `'user'`
+   */
   per?: CooldownScope
   /** Exempts a call, such as one from an owner, without counting it. */
   bypass?: (context: ExecutionContext) => boolean | Promise<boolean>
   /**
-   * Counts calls apart by a value of the call, such as the account a button acts on, within the
-   * scope `per` names. It receives the handler's params as the handler does, after validation and
-   * pipes. Returning `undefined` counts the call as though there were no `by`.
+   * Counts calls apart by a value of the call, such as the account a button acts on, within the scope `per`
+   * names. It receives the handler's params as the handler does, after validation and pipes, and returns
+   * `undefined` to count the call as though there were no `by`. Declare the params it reads, and the
+   * handler's are checked against them; an error it throws goes to the exception filters.
    */
   by?: (context: ExecutionContext, params: P) => CooldownKey | undefined | Promise<CooldownKey | undefined>
 }

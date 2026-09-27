@@ -99,18 +99,21 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
 }
 
 /**
- * Marks a class as a guard, for use with {@link UseGuard}. The class implements `GuardInterface`.
+ * Marks a class as a guard, which decides whether a handler runs.
  *
- * A guard runs for every kind of handler it is applied to unless `types` limits it. A global guard
- * from `@MeoCord({ guards })` also runs before `@On` and `@Once` event handlers, so a guard that reads
- * an interaction should declare `types: ['interaction']`.
+ * Use it on a class that implements `GuardInterface`, then apply the class with {@link UseGuard} or
+ * `@MeoCord({ guards })`. For facts about the handler a guard reads, use `createMetadata`; to limit how
+ * often a handler runs, use {@link Cooldown} instead.
  *
- * @param options.types - The context types the guard runs for, as `ExecutionContext.getType()`
- *   reports them; for any other call it is skipped. Every type when omitted; an empty list throws.
- *   A subclass inherits the types of the class it extends unless it declares its own.
+ * @remarks
+ * `canActivate` returns `true` to let the call through and `false` to stop it silently; throwing
+ * `GuardDeniedError` tells the user why. A new instance is made for every call unless the guard is bound
+ * once, in `services` or `providers`, when each call still reads its own `params`.
+ *
+ * @throws Error when `types` is empty, as the decorator applies.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Guard({ types: ['interaction'] })
  * export class OwnerOnlyGuard implements GuardInterface {
  *   canActivate(interaction: ButtonInteraction, { ownerId }: { ownerId: string }): boolean {
@@ -118,8 +121,26 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
  *   }
  * }
  * ```
+ *
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link UseGuard}
+ * @see {@link GuardDeniedError}
+ * @see {@link ExecutionContext}
+ * @see {@link https://meocord.dev/docs/latest/guards | Guards}
  */
-export function Guard(options: { types?: readonly ExecutionContextType[] } = {}) {
+export function Guard(
+  options: {
+    /**
+     * The context types the guard runs for, as `ExecutionContext.getType()` reports them; it is skipped for
+     * any other call. A subclass inherits them unless it declares its own. A global guard also runs before
+     * `@On` handlers, so one that reads an interaction declares `['interaction']`.
+     *
+     * @defaultValue every type
+     */
+    types?: readonly ExecutionContextType[]
+  } = {},
+) {
   return function (target: any) {
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Guard')
@@ -128,22 +149,35 @@ export function Guard(options: { types?: readonly ExecutionContextType[] } = {})
 }
 
 /**
- * Runs guards before a method, or before every method of a class; the method runs only when every
- * guard's `canActivate` returns true.
+ * Runs guards before a handler, or before every handler of a controller.
  *
- * @param entries - Guard classes, or `{ provide, params? }` to set `params` as properties on the guard
- *   instance, and as `this.params`, before it runs. A guard that declares `declare readonly params?: P`
- *   has `params` checked against `P`; one that declares none takes any. Any other entry is refused when
- *   the decorator applies.
+ * Use it to decide whether a call may run at all: who may use a command, where, or on whose message. To
+ * limit how often a handler runs, use {@link Cooldown}; to check its input, {@link Validate}.
+ *
+ * @remarks
+ * The handler runs only when every guard allows the call. On a controller, the guards apply to every
+ * handler it declares or inherits and to every handler of a class that extends it. A guard that declares
+ * `declare readonly params?: P` has its `params` checked against `P` when the code compiles.
+ *
+ * @param entries - Guard classes, or `{ provide, params? }` to give one use of a guard its params.
+ * @throws Error when an entry is neither a guard class nor `{ provide, params? }`, as the decorator applies.
  *
  * @example
- * ```typescript
- * @Command('profile/{id}', CommandType.BUTTON)
- * @UseGuard({ provide: RateLimitGuard, params: { limit: 2, window: 3000 } }, OwnerOnlyGuard)
- * async showProfile(interaction: ButtonInteraction, { id }: { id: string }) {
- *   await interaction.reply(`Profile ${id}`)
+ * ```ts
+ * @Command('trade', CommandType.SLASH)
+ * @UseGuard(StaffGuard, { provide: ChannelGuard, params: { channelIds: ['123456789012345678'] } })
+ * async trade(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Trade opened.')
  * }
  * ```
+ *
+ * @pipeline guards after the global guards from `@MeoCord({ guards })`, a controller's before a method's
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link Guard}
+ * @see {@link GuardDeniedError}
+ * @see {@link ExecutionContext}
+ * @see {@link https://meocord.dev/docs/latest/guards | Guards}
  */
 export function UseGuard<const T extends readonly unknown[]>(
   ...entries: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => GuardInterface> }

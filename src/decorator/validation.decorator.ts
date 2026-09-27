@@ -42,35 +42,47 @@ type AcceptsInput<P, Input> = [P] extends [NoInput]
   : { 'The handler params do not match the validated input; mark keys a separate @UsePipe produces Piped<T>': Input }
 
 /**
- * Validates a handler's input with a Standard Schema before it runs, so it receives typed, valid
- * values or does not run at all. Any library implementing the Standard Schema interface works: zod,
- * valibot, arktype and others.
+ * Validates a handler's input with a Standard Schema before it runs.
  *
- * The input is one object: a chat command's options, or a component's customId params and a modal's
- * fields. The handler receives the schema's output, so its defaults and coercions apply. Invalid input
- * throws a `ValidationError` listing each issue, which is answered privately.
+ * Use it so a handler receives typed, valid values or does not run at all: a command's options, a
+ * component's customId params, a modal's fields or a message command's params. Any Standard Schema library
+ * works, such as zod, valibot or arktype. To transform one value, use {@link UsePipe}.
  *
- * Validation runs after guards and inside interceptors, then pipes run on single values: those given
- * here first, then `@UsePipe`'s, in order. The handler's second parameter is checked against the
- * result. A handler takes one `@Validate`; a second is refused, so combine the schemas into one.
+ * @remarks
+ * The handler receives the schema's output, so its defaults and coercions apply, and its second parameter is
+ * checked against that output. Invalid input throws a `ValidationError` listing each issue, answered only to
+ * the caller. A handler takes one `@Validate`: combine schemas into one.
  *
  * @param schema - A Standard Schema for the whole input object.
- * @param options - `pipes` maps an output key to a pipe, or to several applied in order.
+ * @throws Error when `schema` is not a Standard Schema, or the handler already has a `@Validate`, as the decorator applies.
  *
  * @example
  * ```ts
+ * import { z } from 'zod'
+ *
  * @Command('remind', CommandType.SLASH)
  * @Validate(z.object({ minutes: z.number().int().min(1).max(1440) }))
- * async remind(interaction: ChatInputCommandInteraction, { minutes }: { minutes: number }) {}
- *
- * @Command('profile/{uid}', CommandType.BUTTON)
- * @Validate(z.object({ uid: z.string().regex(/^\d{9,10}$/) }), { pipes: { uid: AccountPipe } })
- * async profile(interaction: ButtonInteraction, { uid }: { uid: Account }) {}
+ * async remind(interaction: ChatInputCommandInteraction, { minutes }: { minutes: number }) {
+ *   await respond(interaction).send(`I'll remind you in ${minutes} minutes.`)
+ * }
  * ```
+ *
+ * @pipeline validation after the guards and the fetch, inside the interceptors
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link UsePipe}
+ * @see {@link ValidationError}
+ * @see {@link https://meocord.dev/docs/latest/validation | Validation and pipes}
  */
 export function Validate<S extends StandardSchemaV1, const Pipes extends SchemaPipes<S> = Record<never, never>>(
   schema: S,
-  options: { pipes?: Pipes } = {},
+  options: {
+    /**
+     * Pipes for single values of the schema's output, by key: one pipe, or several applied in order. They run
+     * before the key's `@UsePipe` pipes.
+     */
+    pipes?: Pipes
+  } = {},
 ) {
   if (typeof schema?.['~standard']?.validate !== 'function') {
     throw new Error('@Validate takes a Standard Schema, such as a zod, valibot or arktype schema.')
@@ -103,22 +115,36 @@ type AcceptsPiped<P, K extends string, Out> = [P] extends [NoInput]
   : Record<`The handler params have no "${K}"`, P>
 
 /**
- * Runs pipes on one value of a handler's input, after `@Validate` and its own pipes, to turn it into
- * what the handler works with. With several pipes, each receives the previous one's result. Works
- * without `@Validate` too.
+ * Runs pipes on one value of a handler's input, to turn it into what the handler works with.
  *
- * With `@Validate`, mark the handler param `Piped<T>`, or give the pipe to `@Validate` itself.
+ * Use it to trim, parse or look up a single option, customId param or field, such as an account ID into the
+ * account. To check the whole input first, use {@link Validate}; its own `pipes` option does the same for the
+ * schema's output.
  *
- * @param key - The input key: a command option, customId param or modal field name.
- * @param pipes - Pipe classes, or `{ provide, params? }` to hand `params` to the pipe through
- *   `context.getParams()`. Any other entry is refused when the decorator applies.
+ * @remarks
+ * Pipes run after `@Validate` and its pipes, in the order listed, each receiving the previous one's result.
+ * With `@Validate`, mark the handler's param `Piped<T>`. One instance of a pipe is shared by every call.
+ *
+ * @param key - The input key: a command option, customId param, modal field or message param name.
+ * @param pipes - Pipe classes, or `{ provide, params? }` to give one use its params, which the pipe reads with
+ *   `context.getParams()`.
+ * @throws Error when an entry is neither a pipe class nor `{ provide, params? }`, as the decorator applies.
  *
  * @example
  * ```ts
- * @Command('profile/{uid}', CommandType.BUTTON)
- * @UsePipe('uid', AccountPipe)
- * async profile(interaction: ButtonInteraction, { uid }: { uid: Account }) {}
+ * @Command('say', CommandType.SLASH)
+ * @UsePipe('text', TrimPipe)
+ * async say(interaction: ChatInputCommandInteraction, { text }: { text: string }) {
+ *   await respond(interaction).send(text)
+ * }
  * ```
+ *
+ * @pipeline pipes after validation
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link Pipe}
+ * @see {@link Validate}
+ * @see {@link https://meocord.dev/docs/latest/validation | Validation and pipes}
  */
 export function UsePipe<K extends string, const Pipes extends readonly [PipeEntryOf, ...PipeEntryOf[]]>(
   key: K,
@@ -137,18 +163,29 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
 }
 
 /**
- * Marks a class as a pipe, for use with `@Validate(schema, { pipes })` or {@link UsePipe}. The class
- * implements `PipeInterface`. One instance is shared across calls.
+ * Marks a class as a pipe, which turns one input value into what the handler works with.
+ *
+ * Use it on a class that implements `PipeInterface`, then apply the class with {@link UsePipe} or
+ * `@Validate(schema, { pipes })`. To reject input by its shape, a schema with {@link Validate} says why more
+ * precisely; a pipe throws to stop the call.
+ *
+ * @remarks
+ * One instance is shared by every call, and it can inject services, such as the one that looks an account up.
  *
  * @example
  * ```ts
  * @Pipe()
- * export class TrimPipe implements PipeInterface<string, string> {
+ * export class LowercasePipe implements PipeInterface<string, string> {
  *   transform(value: string): string {
- *     return value.trim()
+ *     return value.toLowerCase()
  *   }
  * }
  * ```
+ *
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link UsePipe}
+ * @see {@link https://meocord.dev/docs/latest/validation | Validation and pipes}
  */
 export function Pipe() {
   return function (target: new (...args: any[]) => PipeInterface) {

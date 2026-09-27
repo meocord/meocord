@@ -8,28 +8,33 @@ import { type CommandBuilderOptions } from '@src/interface/index.js'
 export const BUILDER_GUILDS = Symbol('meocord:builder-guilds')
 
 /**
- * Marks a class as the builder for a Discord command, for use with `@Command`.
+ * Marks a class as a command's builder, which describes the command MeoCord registers with Discord.
+ *
+ * Use it for each slash or context menu command, and pass the class to `@Command` in place of a
+ * `CommandType`. A subcommand handler, or a component's, takes a `CommandType` instead and registers nothing.
+ *
+ * @remarks
+ * `build(commandName)` returns the discord.js builder, named with the name `@Command` gives. The options are
+ * read when the class is decorated, after `meocord.config.ts` has loaded `.env`, so they can name environment
+ * values.
  *
  * @param commandType - The type of command the class builds.
- * @param options - `guilds` registers this command to those guilds only, in place of the configured
- *   scope. It is read when the class is decorated, which is after `meocord.config.ts` has loaded `.env`.
+ * @param options - Where the command is registered, in place of the configured scope.
  *
  * @example
- * ```typescript
+ * ```ts
  * @CommandBuilder(CommandType.SLASH)
  * export class PingCommandBuilder implements CommandBuilderBase {
  *   build(commandName: string): SlashCommandBuilder {
  *     return new SlashCommandBuilder().setName(commandName).setDescription('Replies with pong')
  *   }
  * }
- *
- * @CommandBuilder(CommandType.SLASH, { guilds: [process.env.STAFF_GUILD_ID] })
- * export class BanCommandBuilder implements CommandBuilderBase {
- *   build(commandName: string): SlashCommandBuilder {
- *     return new SlashCommandBuilder().setName(commandName).setDescription('Bans a member')
- *   }
- * }
  * ```
+ *
+ * @group Decorators
+ * @category Handlers
+ * @see {@link Command}
+ * @see {@link https://meocord.dev/docs/latest/command-registration | Command registration}
  */
 export function CommandBuilder<T extends BuildableCommandType>(commandType: T, options: CommandBuilderOptions = {}) {
   return function (target: new () => CommandBuilderBase<T>) {

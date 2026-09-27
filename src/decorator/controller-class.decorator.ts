@@ -4,34 +4,36 @@ import { guardOwnHandlersWithBaseGuards } from '@src/decorator/guard.decorator.j
 import { makeInjectable } from '@src/util/injectable.util.js'
 
 /**
- * Marks a class as a controller, to be listed in `@MeoCord({ controllers })`.
+ * Marks a class as a controller, whose methods handle commands, components, messages, reactions or events.
  *
- * Class-level `@UseGuard`, `@UseInterceptor`, `@UseFilter` and `@Cooldown` on a class it extends also
- * apply to the handlers it declares: its own class stages run first, then each base's, then the
- * method's. Handlers it inherits get the same chain.
+ * Use it on every class of handlers, and list the class in `@MeoCord({ controllers })`. Logic the handlers
+ * share, such as database access, belongs in a service it injects.
  *
- * @param options - `inheritStages: false` to limit the handlers this class declares to its own class
- *   and method stages. Handlers it inherits keep their base's stages either way.
+ * @remarks
+ * A controller's class-level guards, interceptors, filters and cooldowns apply to every handler it declares or
+ * inherits, and to every handler of a class that extends it: a handler runs its own class's first, then each
+ * base's, then the method's. `inheritStages: false` keeps the handlers a subclass declares to its own stages.
+ *
+ * @param options - Whether the handlers it declares take the stages of the classes it extends.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Controller()
- * export class PingSlashController {
- *   constructor(private pingService: PingService) {}
+ * export class ProfileSlashController {
+ *   constructor(private readonly profiles: ProfileService) {}
  *
- *   @Command('ping', PingCommandBuilder)
- *   async ping(interaction: ChatInputCommandInteraction) {
- *     await interaction.reply(await this.pingService.handlePing())
+ *   @Command('profile', CommandType.SLASH)
+ *   async profile(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send({ embeds: [await this.profiles.render(interaction.user.id)] })
  *   }
  * }
- *
- * // StaffGuard guards `ban`, declared here, as well as every handler StaffController declares
- * @Controller()
- * export class BanController extends StaffController {
- *   @Command('ban', BanCommandBuilder)
- *   async ban(interaction: ChatInputCommandInteraction) {}
- * }
  * ```
+ *
+ * @group Decorators
+ * @category Controllers
+ * @see {@link Command}
+ * @see {@link ControllerOptions}
+ * @see {@link https://meocord.dev/docs/latest/how-a-handler-runs | How a call runs}
  */
 export function Controller(options: ControllerOptions = {}) {
   return function (target: abstract new (...args: any[]) => unknown) {

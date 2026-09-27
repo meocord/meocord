@@ -6,22 +6,33 @@ import { assertStageEntries } from '@src/core/stage-scope.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 
 /**
- * Marks a class as an exception filter that handles the given error types, matched with
- * `instanceof`. With no types, it handles every error. The class implements `ExceptionFilter`; one
- * instance is shared across calls.
+ * Marks a class as an exception filter for the given error types.
+ *
+ * Use it on a class that implements `ExceptionFilter`, then apply the class with {@link UseFilter} or
+ * `@MeoCord({ filters })`, to answer an error your own way. For a mistake the user can fix, throwing
+ * `UserError` is often enough: the built-in fallback answers it with its message.
+ *
+ * @remarks
+ * Errors are matched with `instanceof`; with no types, the filter handles every error. One instance is
+ * shared by every call.
  *
  * @param errorTypes - The error classes the filter handles.
  *
  * @example
- * ```typescript
- * @Catch(RateLimitedError)
- * export class RateLimitedFilter implements ExceptionFilter<RateLimitedError> {
- *   async catch(error: RateLimitedError, context: ExecutionContext) {
- *     // Private, and right wherever the answer stands: a reply, the deferred reply edited, or a follow-up
- *     await context.response?.error(error, { message: `Slow down: try again in ${error.retryAfter}s.` })
+ * ```ts
+ * @Catch(CooldownError)
+ * export class WaitFilter implements ExceptionFilter<CooldownError> {
+ *   async catch(error: CooldownError, context: ExecutionContext) {
+ *     const seconds = Math.ceil(error.retryAfterMs / 1000)
+ *     await context.response?.error(error, { message: `Slow down: try again in ${seconds}s.` })
  *   }
  * }
  * ```
+ *
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link UseFilter}
+ * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
  */
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
   return function (target: new (...args: any[]) => ExceptionFilter<any>) {
@@ -31,29 +42,36 @@ export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[
 }
 
 /**
- * Applies exception filters to a handler, or to every handler of a controller. They handle errors
- * from the handler, its interceptors and its guards.
+ * Applies exception filters to a handler, or to every handler of a controller.
  *
- * The filter closest to the handler wins: the method's filters, then the controller's, then global
- * ones from `@MeoCord({ filters })`; within one level, the first whose `@Catch` matches, in the order
- * listed. An error no filter handles goes to the built-in fallback, which logs it and tells the user
- * something went wrong. Under `TestingModule.invoke`, such an error rejects instead. Filters apply to
- * dispatched handlers and under `invoke`; a controller method called directly throws as it would
- * without them.
+ * Use it to answer the errors a handler's stages or the handler throw in your own way. To answer every
+ * handler's errors, list the filters in `@MeoCord({ filters })` instead.
  *
- * @param filters - Filter classes, or `{ provide, params? }` to hand `params` to the filter through
- *   `context.getParams()`. Any other entry is refused when the decorator applies.
+ * @remarks
+ * The method's filters are tried first, then the controller's, then the global ones; within one list, the
+ * first whose `@Catch` matches handles the error. An error no filter handles goes to the built-in fallback,
+ * which answers the user; under `TestingModule.invoke` it rejects instead. A controller method called
+ * directly throws as it would without filters.
+ *
+ * @param filters - Filter classes, or `{ provide, params? }` to give one use its params, which the filter
+ *   reads with `context.getParams()`.
+ * @throws Error when an entry is neither a filter class nor `{ provide, params? }`, as the decorator applies.
  *
  * @example
- * ```typescript
- * @Controller()
- * @UseFilter(RateLimitedFilter)
- * export class ProfileController {
- *   @Command('profile', CommandType.SLASH)
- *   @UseFilter(ProfileNotFoundFilter)
- *   async profile(interaction: ChatInputCommandInteraction) {}
+ * ```ts
+ * @Command('daily', CommandType.SLASH)
+ * @Cooldown({ seconds: 86_400 })
+ * @UseFilter(CooldownFilter)
+ * async daily(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Here are your coins.')
  * }
  * ```
+ *
+ * @pipeline filters around every stage and the handler
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link Catch}
+ * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
  */
 export function UseFilter<const T extends readonly unknown[]>(
   ...filters: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => ExceptionFilter<any>> }

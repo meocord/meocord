@@ -4,19 +4,27 @@ import { type ProviderToken } from '@src/interface/provider.interface.js'
 /**
  * Injects what a token provides into a constructor parameter.
  *
- * A parameter typed as a class is injected by that type and needs no decorator; use `@Inject` for a
- * value provided under a string, a symbol or a token from `createToken`, or to inject a different class
- * than the parameter's type.
+ * Use it for a value provided under a string, a symbol or a `createToken` token, such as a database pool made
+ * by a factory, or to inject a different class than the parameter's type. A parameter typed as a class is
+ * injected by its type, and needs no decorator.
  *
  * @param token - The token a provider in `@MeoCord({ providers })` is bound under.
  *
  * @example
  * ```ts
+ * const GREETING = createToken<string>('GREETING')
+ *
  * @Service()
- * export class NotesStore {
- *   constructor(@Inject(DATABASE) private readonly db: Pool) {}
+ * export class Greeter {
+ *   constructor(@Inject(GREETING) private readonly greeting: string) {}
  * }
  * ```
+ *
+ * @group Decorators
+ * @category Params
+ * @see {@link Service}
+ * @see {@link createToken}
+ * @see {@link https://meocord.dev/docs/latest/services | Services}
  */
 export function Inject(
   token: ProviderToken,

@@ -4,21 +4,51 @@ import { perHandler, sourcePrototype } from '@src/core/guard-runner.js'
 import { getAutocompleteHandlers, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 
-/** How `@Defer` acknowledges and locks an interaction. */
+/**
+ * How `@Defer` acknowledges an interaction and locks a component's message.
+ *
+ * @group Types
+ * @see {@link Defer}
+ */
 export interface DeferOptions {
-  /** Makes a command's deferred reply private. */
+  /**
+   * Makes a command's deferred reply private.
+   *
+   * @defaultValue `false`
+   */
   ephemeral?: boolean
 
-  /** Sends new messages without notifying: the first reply, when there was time to answer before deferring, and follow-ups. */
+  /**
+   * Sends new messages without notifying: the first reply, when there was time to answer before deferring,
+   * and follow-ups.
+   *
+   * @defaultValue `false`
+   */
   suppressNotifications?: boolean
 
-  /** Which controls of a component's message to disable while the handler runs. */
+  /**
+   * Which controls of a component's message to disable while the handler runs: every one, the one clicked, or
+   * none, which also leaves out the loading view.
+   *
+   * @defaultValue `'all'`
+   */
   disable?: 'all' | 'clicked' | 'none'
 
-  /** `'eager'` acknowledges at once; `'auto'` only if nothing answered after `after` milliseconds. */
+  /**
+   * When to acknowledge: `'eager'` at once, or `'auto'` only if nothing answered after `after` milliseconds, so
+   * a fast handler answers with a single reply. `'auto'` suits a handler that waits on I/O: a timer cannot fire
+   * while synchronous work blocks the event loop.
+   *
+   * @defaultValue `'eager'`
+   */
   mode?: 'eager' | 'auto'
 
-  /** How long `'auto'` waits before acknowledging, in milliseconds. */
+  /**
+   * How long `'auto'` waits before acknowledging, in milliseconds. It never waits past 2.5 seconds after the
+   * interaction was created.
+   *
+   * @defaultValue `1500`
+   */
   after?: number
 }
 
