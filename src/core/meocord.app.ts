@@ -35,6 +35,7 @@ import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
+import { tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
@@ -184,6 +185,9 @@ export class MeoCordApp implements MeoCordApplication {
   /** Whether a failed login set the process exit code, so a later successful one knows to clear it. */
   private static failedLoginSetExitCode = false
 
+  /** Whether `meocord start --dev` was told the bot could not log in, so a later login tells it the bot is online. */
+  private static toldDevRunnerLoginFailed = false
+
   /**
    * Resolves the app's providers, makes its listed services, registers the Discord event handlers
    * and logs the bot in.
@@ -280,11 +284,17 @@ export class MeoCordApp implements MeoCordApplication {
         process.exitCode = 1
         MeoCordApp.failedLoginSetExitCode = true
       }
+      await tellDevRunner({ meocord: 'login-failed' })
+      MeoCordApp.toldDevRunnerLoginFailed = true
       throw error
     }
     if (MeoCordApp.failedLoginSetExitCode && process.exitCode === 1) {
       process.exitCode = undefined
       MeoCordApp.failedLoginSetExitCode = false
+    }
+    if (MeoCordApp.toldDevRunnerLoginFailed) {
+      MeoCordApp.toldDevRunnerLoginFailed = false
+      await tellDevRunner({ meocord: 'online' })
     }
     this.logger.log('Bot is online!')
   }

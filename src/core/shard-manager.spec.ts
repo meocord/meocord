@@ -26,6 +26,7 @@ const {
   ShardManager,
 } = await import('@src/core/shard-manager.js')
 const { BUNDLE_ENTRY_KEY } = await import('@src/util/bundle-entry.util.js')
+const { DEV_RUNNER_ENV } = await import('@src/util/dev-runner.util.js')
 
 /** A shard as the manager uses it: spawn, send, kill, and the events discord.js emits. */
 class FakeShard extends EventEmitter {
@@ -416,6 +417,62 @@ describe('ShardManager', () => {
       process.emit('SIGINT')
 
       expect(shards[0].sent).toEqual([{ meocord: 'shutdown' }])
+    })
+  })
+
+  // `meocord start --dev` ends its watch session on this: a code change cannot fix a login Discord refused
+  describe('under meocord start --dev', () => {
+    const originalSend = process.send
+    const order: unknown[] = []
+    const send = vi.fn((message: unknown, _handle: unknown, _options: unknown, callback?: () => void) => {
+      order.push(message)
+      callback?.()
+      return true
+    })
+
+    beforeEach(() => {
+      process.env[DEV_RUNNER_ENV] = '1'
+      process.send = send as unknown as typeof process.send
+    })
+
+    afterEach(() => {
+      delete process.env[DEV_RUNNER_ENV]
+      process.send = originalSend
+      send.mockClear()
+      order.length = 0
+    })
+
+    it('tells the dev runner the bot could not log in before exiting, when Discord refuses the token', async () => {
+      const { manager, exit } = setup({ shards: 1 })
+      exit.mockImplementation(code => void order.push(code))
+      failingRest(manager, Object.assign(new Error('401: Unauthorized'), { status: 401 }))
+
+      await manager.start()
+
+      expect(order).toEqual([{ meocord: 'login-failed' }, 1])
+    })
+
+    it('tells it before exiting when a shard reports that it cannot log in', async () => {
+      const { manager, shards, exit } = setup({ shards: 1 })
+      await manager.start()
+      exit.mockImplementation(code => void order.push(code))
+
+      shards[0].emit('message', { meocord: 'fatal', code: 'TokenInvalid', message: 'An invalid token was provided.' })
+      await vi.waitFor(() => expect(exit).toHaveBeenCalled())
+
+      expect(order).toEqual([{ meocord: 'login-failed' }, 1])
+    })
+
+    it('tells it nothing when the shards stop on a signal', async () => {
+      const { manager, shards, exit } = setup({ shards: 1 })
+      await manager.start()
+
+      const stopped = manager.stop()
+      shards[0].die(0)
+      await stopped
+
+      expect(exit).toHaveBeenCalledWith(0)
+      expect(send).not.toHaveBeenCalled()
     })
   })
 })

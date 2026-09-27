@@ -158,7 +158,9 @@ The token is read from the environment rather than written into `meocord.config.
 which is committed — `.env` is gitignored so a token cannot be pushed by accident.
 Building needs no token; only starting does. A token Discord refuses, or none at all, stops
 `start` and `register` with a line saying so and where to get a new one: Developer Portal →
-your application → Bot → Reset Token.
+your application → Bot → Reset Token. Under `start --dev`, a bot that cannot log in ends the
+watch session with exit code 1, as no code change fixes it; after any other exit, it waits for
+the next change and starts the bot again.
 
 ### Quick Example
 
