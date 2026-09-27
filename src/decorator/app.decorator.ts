@@ -38,9 +38,6 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
   if (mention !== undefined && typeof mention !== 'boolean' && mention !== 'only') {
     throw new TypeError("@MeoCord({ messages: { mention } }) takes true, false or 'only'.")
   }
-  if (mention === 'only' && prefix !== undefined) {
-    throw new TypeError("@MeoCord({ messages }) has mention: 'only', which starts every command with a mention, and a prefix; remove one.")
-  }
   const { types, deleteUsageRepliesAfter } = messages
   if (deleteUsageRepliesAfter !== undefined && !(typeof deleteUsageRepliesAfter === 'number' && deleteUsageRepliesAfter >= 0 && Number.isFinite(deleteUsageRepliesAfter))) {
     throw new TypeError('@MeoCord({ messages: { deleteUsageRepliesAfter } }) takes a number of seconds, or 0 to keep usage replies.')

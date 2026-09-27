@@ -309,6 +309,35 @@ describe('message commands', () => {
     expect(calls).toEqual([['ping'], ['roll', { sides: 6, note: undefined }]])
   })
 
+  it("starts commands in a DM as usual under mention: 'only': after the prefix, or as the message is without one", async () => {
+    @Controller()
+    class Help {
+      @MessageHandler('help')
+      async help() {
+        calls.push(['help'])
+      }
+    }
+    const inDm = async (client: Client, content: string) => {
+      const message = createMockMessage({ content, guild: null })
+      Object.assign(message.author, { bot: false, id: 'user-1' })
+      await Promise.all(client.rawListeners('messageCreate').map(listener => (listener as (m: unknown) => unknown)(message)))
+    }
+
+    const prefixed = await startApp({ controllers: [Help], messages: { prefix: '!', mention: 'only' } })
+    await inDm(prefixed, '!help')
+    await send(prefixed, '!help')
+    await send(prefixed, 'help')
+    await send(prefixed, `<@${BOT_ID}> help`)
+    expect(calls).toEqual([['help'], ['help']])
+
+    calls.length = 0
+    const bare = await startApp({ controllers: [Help], messages: { mention: 'only' } })
+    await inDm(bare, 'help')
+    await send(bare, 'help')
+    await inDm(bare, `<@${BOT_ID}> help`)
+    expect(calls).toEqual([['help'], ['help']])
+  })
+
   it("starts a handler with mention: 'only' by a mention alone, beside the app's prefix and whatever its mention", async () => {
     @Controller()
     class Split {
@@ -415,7 +444,7 @@ describe('message command startup errors', () => {
     expect(declare({ prefix: 1 })).toThrow('@MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function')
     expect(declare({ prefix: ['!', 2] })).toThrow('@MeoCord({ messages: { prefix } })')
     expect(declare({ mention: 'yes' })).toThrow("@MeoCord({ messages: { mention } }) takes true, false or 'only'.")
-    expect(declare({ mention: 'only', prefix: '!' })).toThrow("has mention: 'only', which starts every command with a mention, and a prefix")
+    expect(declare({ mention: 'only', prefix: '!' })).not.toThrow()
     expect(declare({ prefix: ['!', '?'], mention: true, caseSensitive: false })).not.toThrow()
     expect(declare({ mention: 'only' })).not.toThrow()
   })

@@ -188,6 +188,9 @@ describe('resolveRoute for messages', () => {
     expect(resolveRoute(MentionedApp, { content: 'roll 6', botId: '111' })).toBeUndefined()
     expect(resolveRoute(Prefixed, { content: '<@111> status', botId: '111' })?.method).toBe('status')
     expect(resolveRoute(Prefixed, { content: '!status', botId: '111' })).toBeUndefined()
+    // A DM starts as usual
+    expect(resolveRoute(MentionedApp, { content: 'roll 6', botId: '111', dm: true })?.method).toBe('roll')
+    expect(resolveRoute(Prefixed, { content: '!status', botId: '111', dm: true })?.method).toBe('status')
   })
 
   it('takes the prefix a message has when the app reads prefixes from a function', () => {

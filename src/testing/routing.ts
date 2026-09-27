@@ -26,6 +26,12 @@ export interface MessageToResolve {
   prefix?: MessagePrefix
   /** The bot's user id, so a mention of it counts as a start when the app accepts one. */
   botId?: string
+  /**
+   * Whether the message is a direct message, where only handlers whose scope fits run, and `mention: 'only'`
+   * does not apply. Without it the message may be from anywhere, and a mention alone starts what it starts in a
+   * server.
+   */
+  dm?: boolean
 }
 
 /** The handler a component interaction or a message reaches. */
