@@ -205,8 +205,9 @@ export interface InterceptorInterface {
 }
 
 /**
- * What a presenter renders: MeoCord turns it into an embed, or into a Components V2 container on a
- * Components V2 message.
+ * What a presenter renders for a loading view or an error.
+ *
+ * MeoCord turns it into an embed, or into a Components V2 container on a Components V2 message.
  *
  * @group Responses
  * @category Presenters
@@ -269,10 +270,13 @@ export interface PresentedError {
 }
 
 /**
- * Styles MeoCord's answers for an application: the loading view `@Defer` shows, and the error view
- * `respond(interaction).error()` shows. It decides how they look, not what they say: filters and the
- * built-in fallback choose the words. Register one with `@MeoCord({ presenter })`; it is resolved once
- * from the container, so it can inject services such as a `Translator`.
+ * Styles MeoCord's own answers: the loading view `@Defer` shows, and the error view `respond().error()` shows.
+ *
+ * Implement it to give those views your bot's look, and register it with `@MeoCord({ presenter })`. It decides how
+ * they look, not what they say: filters and the built-in fallback choose the words.
+ *
+ * @remarks
+ * It is resolved once from the container, so it can inject services such as a `Translator`.
  *
  * @example
  * ```ts

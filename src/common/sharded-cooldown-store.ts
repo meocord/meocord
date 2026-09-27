@@ -32,15 +32,17 @@ function managerChannel(): CooldownChannel | undefined {
 }
 
 /**
- * A `CooldownStore` for process sharding that needs no database: each shard asks the shard manager, which
- * counts every shard's calls in its own memory, so `'user'` and `'global'` cooldowns are exact across the
- * shards on one host. Outside process sharding, where one process runs every shard, it counts in that
- * process, which is exact too. A handler's stacked cooldowns go to the manager as one message.
+ * A `CooldownStore` for process sharding that needs no database.
  *
- * Counts live in the manager's memory, so they start again when the whole bot restarts, as the in-memory
- * store's do; a shard that restarts keeps them. A manager that does not answer is a store failure, which
- * `@MeoCord({ cooldownStoreFailure })` decides: refuse the call, or let it through uncounted. For counts
- * that outlive a restart, or bots on several hosts, use `RedisCooldownStore`.
+ * Use it so `'user'` and `'global'` cooldowns are exact across the shards on one host: each shard asks the shard
+ * manager, which counts every shard's calls in its memory. For counts that outlive a restart, or bots on several
+ * hosts, use `RedisCooldownStore`.
+ *
+ * @remarks
+ * Outside process sharding, where one process runs every shard, it counts in that process, which is exact too. A
+ * handler's stacked cooldowns go to the manager as one message. Counts live in the manager's memory, so they start
+ * again when the whole bot restarts; a shard that restarts keeps them. A manager that does not answer is a store
+ * failure, which `@MeoCord({ cooldownStoreFailure })` decides: refuse the call, or let it through uncounted.
  *
  * @example
  * ```ts

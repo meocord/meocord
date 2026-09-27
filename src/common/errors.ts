@@ -39,13 +39,16 @@ export interface UserErrorOptions {
 }
 
 /**
- * A mistake the user can fix, such as too few coins or an account that does not exist, rather than a
- * fault in the bot. Throw it from a handler, a pipe, a service or a guard: the built-in fallback shows
- * its message to the user who made the call, privately for an interaction and as a reply to a message,
- * and logs it only at debug level. Observers see the outcome `'refused'`.
+ * A mistake the user can fix, such as too few coins, rather than a fault in the bot.
  *
- * `code` and `context` let an exception filter or a presenter phrase it otherwise, such as in the
- * user's language: a presenter's `error()` receives the error with the interaction.
+ * Throw it from a handler, a pipe, a service or a guard to tell the user what to change; for a fault in the bot, throw
+ * any other error. The built-in fallback shows its message to the user who made the call, privately for an interaction
+ * and as a reply to a message.
+ *
+ * @remarks
+ * It is logged only at debug level, and observers see the outcome `'refused'`. `code` and `context` let an exception
+ * filter or a presenter phrase it otherwise, such as in the user's language: a presenter's `error()` receives the
+ * error with the interaction.
  *
  * @example
  * ```typescript
@@ -207,8 +210,10 @@ export class MessageUsageError extends Error {
 export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
 
 /**
- * What a blocked caller is told: "Slow down: try again in 12s." The one place this text is written,
- * so a filter, a presenter or a translator can replace it by catching `CooldownError`.
+ * What a blocked caller is told, such as "Slow down: try again in 12s."
+ *
+ * This is the one place the text is written, so a filter, a presenter or a translator can replace it by catching
+ * `CooldownError`.
  *
  * @param retryAfterMs - How long until the next call is allowed.
  *
@@ -227,8 +232,10 @@ export function cooldownMessage(retryAfterMs: number): string {
 }
 
 /**
- * Thrown when a `@Cooldown` blocks a call, so the handler does not run. The built-in fallback answers
- * only the caller, with {@link cooldownMessage}; a filter can catch it to answer otherwise.
+ * Thrown when a `@Cooldown` blocks a call, so the handler does not run.
+ *
+ * Catch it in a filter to answer the caller your own way. Without one, the built-in fallback answers only the caller,
+ * with {@link cooldownMessage}.
  *
  * @example
  * ```ts
@@ -281,11 +288,15 @@ export function cooldownStoreMessage(): string {
 }
 
 /**
- * Thrown when the cooldown store fails to answer, by rejecting or within `cooldownStoreTimeoutMs`, and
- * `@MeoCord({ cooldownStoreFailure })` is `'deny'`, its default: the call is refused, as a cooldown that
- * cannot be checked is not known to allow it. The built-in fallback answers only the caller, with
- * {@link cooldownStoreMessage}; a filter can catch it to answer otherwise, or in the user's language.
- * MeoCord logs the failure once per outage, with its cause, and again when the store answers.
+ * Thrown when the cooldown store fails and `@MeoCord({ cooldownStoreFailure })` is `'deny'`, its default.
+ *
+ * Catch it in a filter to word the refusal your own way, or in the user's language. Without one, the built-in fallback
+ * answers only the caller, with {@link cooldownStoreMessage}.
+ *
+ * @remarks
+ * The store fails when it rejects or does not answer within `cooldownStoreTimeoutMs`. The call is refused, since a
+ * cooldown that cannot be checked is not known to allow it. MeoCord logs the failure once per outage, with its cause,
+ * and again when the store answers.
  *
  * @example
  * ```ts

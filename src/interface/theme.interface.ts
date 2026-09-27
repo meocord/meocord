@@ -1,15 +1,19 @@
 import { type ButtonStyle, type ColorResolvable } from 'discord.js'
 
 /**
- * A button style a theme role maps to: one of Discord's four coloured styles. Link and premium buttons have none.
+ * A button style a theme role maps to: one of Discord's four coloured styles.
+ *
+ * Link and premium buttons have no role.
  *
  * @group Types
  */
 export type ThemeButtonStyle = ButtonStyle.Primary | ButtonStyle.Secondary | ButtonStyle.Success | ButtonStyle.Danger
 
 /**
- * The colours a theme names by role: embeds, containers' accent and MeoCord's own views take theirs from here.
- * Augment it to add roles of the app's own; see {@link MeoCordTheme}.
+ * The colours a theme names by role.
+ *
+ * Embeds, containers' accent and MeoCord's own views take theirs from here. Augment it to add roles of the app's own;
+ * see {@link MeoCordTheme}.
  *
  * @group Types
  */
@@ -29,41 +33,56 @@ export interface ThemeColors {
 }
 
 /**
- * The emojis a theme names by role: a unicode emoji, or a custom one written `<:name:id>` or `<a:name:id>`.
- * Augment it to add roles of the app's own; see {@link MeoCordTheme}.
+ * The emojis a theme names by role.
+ *
+ * Each is a unicode emoji, or a custom one written `<:name:id>` or `<a:name:id>`. Augment it to add roles of the app's
+ * own; see {@link MeoCordTheme}.
  *
  * @group Types
  */
 export interface ThemeEmojis {
   /** Shown while a deferred call is still working. */
   loading: string
+  /** Something went as asked. */
   success: string
+  /** Something needs the user's attention, or was refused because of what they did. */
   warning: string
+  /** Something failed, a fault in the bot rather than the user. */
   danger: string
+  /** Information, with no action needed. */
   info: string
 }
 
 /**
- * The button style each role maps to, for the app's own buttons. Warning and info have no Discord style of their
- * own. Augment it to add roles of the app's own; see {@link MeoCordTheme}.
+ * The button style each role maps to, for the app's own buttons.
+ *
+ * Warning and info have no Discord style of their own. Augment it to add roles of the app's own; see
+ * {@link MeoCordTheme}.
  *
  * @group Types
  */
 export interface ThemeButtons {
+  /** The action the app most expects, such as Submit. */
   primary: ThemeButtonStyle
+  /** A secondary action, such as Cancel or Back. */
   neutral: ThemeButtonStyle
+  /** An action that confirms or approves, such as Approve. */
   success: ThemeButtonStyle
+  /** An action that removes or refuses, such as Delete or Reject. */
   danger: ThemeButtonStyle
 }
 
 /**
- * A theme: design tokens by role, in three groups. MeoCord gives each of its roles a default, so an app sets only
- * what it changes. What code reads is the resolved theme, `DeepReadonly<MeoCordTheme>`, with every role present.
+ * A theme: design tokens by role, in three groups.
  *
- * An app adds tokens of its own by augmenting these interfaces from a module, a file with an import, since a
- * `declare module` in a file without one replaces `meocord/interface` rather than extending it. A new role goes in
- * its group's interface and a new group here; each group is an interface of its own because a property declared
- * twice must keep one type. The app's own tokens have no default, so its root theme sets them.
+ * MeoCord gives each of its roles a default, so an app sets only what it changes. What code reads is the resolved
+ * theme, `DeepReadonly<MeoCordTheme>`, with every role present.
+ *
+ * @remarks
+ * An app adds tokens of its own by augmenting these interfaces from a module, a file with an import, since a `declare
+ * module` in a file without one replaces `meocord/interface` rather than extending it. A new role goes in its group's
+ * interface and a new group here; each group is an interface of its own because a property declared twice must keep
+ * one type. The app's own tokens have no default, so its root theme sets them.
  *
  * @example
  * ```ts
@@ -83,8 +102,11 @@ export interface ThemeButtons {
  * @group Types
  */
 export interface MeoCordTheme {
+  /** Colours by role. */
   colors: ThemeColors
+  /** Emojis by role. */
   emojis: ThemeEmojis
+  /** Button styles by role. */
   buttons: ThemeButtons
 }
 
@@ -117,8 +139,10 @@ interface DefaultedRoles {
 }
 
 /**
- * Names MeoCord keeps for roles it may add to any group, so that a role an app adds today never collides with one
- * MeoCord adds later. An app that takes one is told so by {@link RootTheme}.
+ * Names MeoCord keeps for roles it may add to any group.
+ *
+ * They keep a role an app adds today from colliding with one MeoCord adds later. An app that takes one is told so by
+ * {@link RootTheme}.
  *
  * @group Types
  */
@@ -160,10 +184,11 @@ type ReservedTaken = {
 }[keyof DefaultedRoles & keyof MeoCordTheme]
 
 /**
- * The app's theme, as `@MeoCord({ theme })` takes it: every token the app added is required, since MeoCord has no
- * default for it, and MeoCord's own roles are optional. When the app has added a role MeoCord reserves (see
- * {@link ReservedThemeRole}), it is instead a type naming each one, so the root theme fails to compile with the
- * roles to rename.
+ * The app's theme, as `@MeoCord({ theme })` takes it.
+ *
+ * Every token the app added is required, since MeoCord has no default for it, and MeoCord's own roles are optional.
+ * When the app has added a role MeoCord reserves ({@link ReservedThemeRole}), it is instead a type naming each one, so
+ * the root theme fails to compile with the roles to rename.
  *
  * @group Configuration
  * @category App options
@@ -178,6 +203,7 @@ export type RootTheme = [ReservedTaken] extends [never]
  * @group Types
  */
 export interface GuildThemeTarget {
+  /** The server the call came from. */
   guild: { id: string }
 }
 
@@ -187,14 +213,19 @@ export interface GuildThemeTarget {
  * @group Types
  */
 export interface UserThemeTarget {
+  /** The user who made the call. */
   user: { id: string }
 }
 
 /**
- * Themes that depend on where a call comes from, as `@MeoCord({ themeFor })` takes them: each resolver returns part
- * of a theme, or `undefined` or `null` for none, at once or as a promise. A server's theme goes over the handler's, and a
- * user's over the server's. Each result is cached, so a resolver runs once per server or user until the cache
- * expires; `ThemeCache` clears it sooner.
+ * Themes that depend on where a call comes from, as `@MeoCord({ themeFor })` takes them.
+ *
+ * Each resolver returns part of a theme, or `undefined` or `null` for none, at once or as a promise. A server's theme
+ * goes over the handler's, and a user's over the server's.
+ *
+ * @remarks
+ * Each result is cached, so a resolver runs once per server or user until the cache expires; `ThemeCache` clears it
+ * sooner.
  *
  * @group Configuration
  * @category App options

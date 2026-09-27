@@ -8,21 +8,28 @@ export function markExplained(error: unknown): void {
 }
 
 /**
- * Whether MeoCord has already logged what went wrong and what to do about it, such as Discord refusing
- * the bot token or a privileged intent at login. The error is the one discord.js raised, unchanged; logging it again
- * would only repeat the explanation with a stack trace.
+ * Whether MeoCord has already logged what went wrong and what to do about it.
+ *
+ * Use it where a bot logs a startup failure, so an error MeoCord explained, such as Discord refusing the bot token or
+ * a privileged intent at login, is not logged twice. The error is the one discord.js raised, unchanged.
  *
  * @param error - An error `app.start()` rejected with.
  * @returns `true` when MeoCord explained the error.
  *
  * @example
  * ```typescript
- * // As src/main.ts starts the app: an error MeoCord explained is already logged
- * export function start(app: MeoCordApplication, logger: Logger) {
- *   app.start().catch((error: unknown) => {
- *     if (!isExplainedError(error)) logger.error('Error during startup:', error)
- *   })
+ * // src/main.ts, as a generated app has it
+ * declare const app: MeoCordApplication
+ * const logger = new Logger()
+ *
+ * async function bootstrap() {
+ *   await app.start()
  * }
+ *
+ * // An error MeoCord explained, such as a token Discord refused, is already logged
+ * bootstrap().catch(error => {
+ *   if (!isExplainedError(error)) logger.error('Error during startup:', error)
+ * })
  * ```
  *
  * @group Utilities

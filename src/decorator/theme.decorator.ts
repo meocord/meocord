@@ -5,13 +5,15 @@ import { CLASS_THEME, METHOD_THEME, THEMED_CLASSES } from '@src/core/theme-runti
 import { copyLayer } from '@src/core/theme-scope.js'
 
 /**
- * Sets part of the theme for a controller's handlers, or for one handler. It is merged over the app's theme from
- * `@MeoCord({ theme })`: a class's over its base class's, and a method's over its class's. Only what it names
- * changes; every other role keeps the value beneath it.
+ * Sets part of the theme for a controller's handlers, or for one handler.
  *
- * A subclass inherits its base class's `@UseTheme`, unless a class at or above the one declaring the handler has
- * `@Controller({ inheritStages: false })`, which stops inheritance as it does for guards. Each token is checked when
- * the decorator applies, so a bad one stops the bot before it logs in.
+ * Use it where a controller or a handler looks different from the rest of the app. Only what it names changes; every
+ * other role keeps the value beneath it.
+ *
+ * @remarks
+ * It is merged over the app's theme: a class's over its base class's, and a method's over its class's. A subclass
+ * inherits its base class's, unless `@Controller({ inheritStages: false })` stops it, as for guards. A bad token stops
+ * the bot before it logs in.
  *
  * @param theme - The roles to change, in any of the theme's groups, MeoCord's or the app's.
  * @throws Error naming each token that is not valid, and when a class or method already has a `@UseTheme`.
@@ -23,7 +25,9 @@ import { copyLayer } from '@src/core/theme-scope.js'
  * export class ShopController {
  *   @Command('refund', CommandType.SLASH)
  *   @UseTheme({ colors: { primary: '#E3606D' }, emojis: { loading: '💸' } })
- *   async refund(interaction: ChatInputCommandInteraction) {}
+ *   async refund(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send({ embeds: [new EmbedBuilder().setDescription('Refund started.')] })
+ *   }
  * }
  * ```
  *

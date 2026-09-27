@@ -21,11 +21,13 @@ export interface InstallContext {
 }
 
 /**
- * Reports where an interaction happened and whether the bot is present there, from Discord's
- * `context` and the integrations that authorized the interaction.
+ * Reports where an interaction happened and whether the bot is present there.
  *
- * A user-installed app can be used in servers the bot is not in, and in direct messages between
- * users; there, only the interaction's own methods (`reply`, `editReply`, `followUp`) reach the user.
+ * Use it in a handler a user-installed app runs: such an app can be used in servers the bot is not in, and in direct
+ * messages between users, where only the interaction's own methods (`reply`, `editReply`, `followUp`) reach the user.
+ *
+ * @remarks
+ * It reads Discord's `context` and the integrations that authorized the interaction.
  *
  * @param interaction - The interaction to inspect.
  * @returns Where it happened, and whether the bot is present there.

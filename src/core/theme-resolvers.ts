@@ -285,9 +285,10 @@ export function lookupLayers(
 const stores = new WeakMap<ThemeCache, ThemeResolverCaches>()
 
 /**
- * An app's cache of the themes `@MeoCord({ themeFor })` looked up, by server and by user. Inject it to clear a
- * result once the theme it came from changes, so the next call looks it up again rather than waiting for the result
- * to expire. Each app has its own.
+ * An app's cache of the themes `@MeoCord({ themeFor })` looked up, by server and by user.
+ *
+ * Inject it to clear a result once the theme it came from changes, so the next call looks it up again rather than
+ * waiting for the result to expire. Each app has its own.
  *
  * @example
  * ```ts

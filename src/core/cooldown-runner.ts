@@ -90,9 +90,10 @@ function scopeId(per: CooldownScope, first: unknown): string {
 }
 
 /**
- * What a call gets when the cooldown store throws, rejects or does not answer in time, set by
- * `@MeoCord({ cooldownStoreFailure })`: `'deny'`, the default, refuses it with `CooldownStoreError`, and
- * `'allow'` runs it uncounted.
+ * What a call gets when the cooldown store throws, rejects or does not answer in time.
+ *
+ * Set it with `@MeoCord({ cooldownStoreFailure })`: `'deny'`, the default, refuses the call with `CooldownStoreError`,
+ * and `'allow'` runs it uncounted.
  *
  * @group Configuration
  * @category App options

@@ -9,10 +9,12 @@ export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other'
 
 /**
  * A message with a form per plural category, chosen by the `count` param through `Intl.PluralRules`.
- * `other` is required, since every language has it. `{count}` interpolates like any param.
  *
- * An object whose keys are all plural category names is always read as a plural, never as a group of
- * messages named `one`, `other` and so on.
+ * `other` is required, since every language has it, and `{count}` interpolates like any param.
+ *
+ * @remarks
+ * An object whose keys are all plural category names is always read as a plural, never as a group of messages named
+ * `one`, `other` and so on.
  *
  * @group Types
  */
@@ -78,8 +80,9 @@ export type MessageParams<M> = M extends string
 type ParamsArgs<M> = [keyof MessageParams<M>] extends [never] ? [params?: Record<string, never>] : [params: MessageParams<M>]
 
 /**
- * Translates a key into one locale's message, with the key and params type-checked against the
- * default catalog.
+ * Translates a key into one locale's message.
+ *
+ * The key and its params are type-checked against the default catalog.
  *
  * @group Types
  */
@@ -87,7 +90,8 @@ export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: ParamsAr
 
 /**
  * What a locale other than the default provides: any part of the default catalog, with any wording.
- * A missing message falls back to a related locale, then to the default.
+ *
+ * A message it leaves out falls back to a related locale, then to the default.
  *
  * @group Types
  */
@@ -119,8 +123,9 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
   : { 'The default catalog has lost its message types: wrap the catalog in defineCatalog(...) or add `as const`': never }
 
 /**
- * Declares a message catalog in its own module, keeping each message's text as its type so the params
- * it takes can be checked. The default locale's catalog needs it, or `as const`; other locales do not.
+ * Declares a message catalog, keeping each message's text as its type so the params it takes can be checked.
+ *
+ * The default locale's catalog needs it, or `as const`; other locales do not.
  *
  * @param catalog - Messages, plurals and nested groups of them.
  * @returns The catalog, unchanged.
@@ -142,13 +147,14 @@ export function defineCatalog<const T extends CatalogShape>(catalog: T): T {
 }
 
 /**
- * Translates messages from one catalog per locale, typed by the default one. Make one with
- * `createTranslator` at module scope, so command builders can use it, and pass it to
- * `@MeoCord({ i18n })` to inject it as `Translator` too.
+ * Translates messages from one catalog per locale, typed by the default one.
  *
- * A locale is resolved to the catalog that serves it: the exact locale, then another of the same
- * language (`es-419` to `es-ES`, `en-GB` to `en-US`), then the default. A message missing from that
- * catalog is looked up the same way.
+ * Make one with `createTranslator` at module scope, so command builders can use it, and pass it to `@MeoCord({ i18n
+ * })` to inject it as `Translator` too.
+ *
+ * @remarks
+ * A locale is resolved to the catalog that serves it: the exact locale, then another of the same language (`es-419` to
+ * `es-ES`, `en-GB` to `en-US`), then the default. A message missing from that catalog is looked up the same way.
  *
  * @typeParam C - The default catalog, whose keys and params every locale is checked against.
  *
@@ -339,24 +345,19 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
 }
 
 /**
- * Creates the application's translator from one catalog per locale. Keys, params and plurals are
- * typed by the default catalog; every other locale may leave messages out, which then fall back.
+ * Creates the application's translator from one catalog per locale.
  *
- * Create it at module scope: command builders run when their class is decorated, before any
- * container exists, and use it for names and descriptions. Pass the same instance to
- * `@MeoCord({ i18n })` to inject it as `Translator`.
+ * Create it at module scope: command builders run when their class is decorated, before any container exists, and use
+ * it for names and descriptions. Pass the same instance to `@MeoCord({ i18n })` to inject it as `Translator`.
  *
  * @param options.default - The locale whose catalog is the reference and the last fallback.
  * @param options.locales - A catalog per discord.js `Locale`, including the default's.
- * @returns The translator.
  * @throws When the default locale has no catalog, or a key is not a Discord locale.
  *
  * @example
  * ```ts
  * const enUS = defineCatalog({ ban: { description: 'Ban a member', done: 'Banned {user}.' } })
  * const id = { ban: { description: 'Blokir anggota', done: '{user} diblokir.' } }
- *
- * // At module scope: command builders read it when their class is decorated
  * export const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id } })
  *
  * new SlashCommandBuilder()
@@ -364,7 +365,10 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
  *   .setDescription(t.default('ban.description'))
  *   .setDescriptionLocalizations(t.localizations('ban.description'))
  *
- * export const banned = (interaction: ChatInputCommandInteraction, target: User) => t.for(interaction)('ban.done', { user: target.toString() })
+ * @Command('ban', CommandType.SLASH)
+ * async ban(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send(t.for(interaction)('ban.done', { user: interaction.user.toString() }))
+ * }
  * ```
  *
  * @group Utilities
