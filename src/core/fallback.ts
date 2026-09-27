@@ -7,6 +7,8 @@ import { describeInteraction } from '@src/util/interaction.util.js'
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { useTheme } from '@src/core/theme-scope.js'
+import { errorText } from '@src/common/translate-error.js'
+import { interactionLocale, messageLocale, translatorOfClient } from '@src/common/meocord-text.js'
 import { type MessageCommandOptions } from '@src/interface/index.js'
 
 /** The app's message options the fallback's replies to messages follow. */
@@ -78,15 +80,16 @@ export const DEFAULT_USAGE_REPLY_SECONDS = 10
 
 /**
  * Replies to a message with what the command answers it, its usage, a guard's reason or what is wrong with
- * the input, then deletes the reply after the app's `deleteUsageRepliesAfter` seconds, unless `0`. A reply or
- * deletion that fails, for a missing permission or a message already gone, is logged and left.
+ * the input, in the server's language, then deletes the reply after the app's `deleteUsageRepliesAfter` seconds,
+ * unless `0`. A reply or deletion that fails, for a missing permission or a message already gone, is logged and left.
  */
 async function answerUsage(error: Error, context: ExecutionContext, logger: Logger, options: MessageReplyOptions | undefined): Promise<void> {
   const message = context.getMessage()
   if (!message) return
   const seconds = options?.deleteUsageRepliesAfter ?? DEFAULT_USAGE_REPLY_SECONDS
   try {
-    const reply = await message.reply({ content: replyText(error.message, options?.replyEmoji), allowedMentions: { repliedUser: false, parse: [] } })
+    const text = errorText(error, translatorOfClient(message.client), messageLocale(message))
+    const reply = await message.reply({ content: replyText(text, options?.replyEmoji), allowedMentions: { repliedUser: false, parse: [] } })
     if (seconds > 0) {
       setTimeout(() => {
         reply.delete().catch(failure => logger.debug(`Could not delete a reply to a command: ${String(failure)}`))
@@ -146,19 +149,21 @@ export function createFallback(logger: Logger, messageOptions: () => MessageRepl
       return
     }
 
+    // MeoCord's own answers are in the user's language, as they alone see them
+    const said = () => errorText(error, translatorOfClient(interaction.client), interactionLocale(interaction))
     if (error instanceof CommandNotFoundError) {
       logger.warn(error.message)
       // Moot if a collector or another listener answered it meanwhile
-      await responseOf(interaction).error(error, { message: 'Command not found!' }, { ifUnanswered: true })
+      await responseOf(interaction).error(error, { message: said() }, { ifUnanswered: true })
     } else if (error instanceof GuardDeniedError) {
       logger.debug(`Denied ${describeInteraction(interaction)}: ${error.message}`)
       await respond(interaction).error(error, { message: error.message, visibility: 'private' })
     } else if (error instanceof CooldownError) {
       logger.debug(`Cooldown (${error.per}) blocked ${describeInteraction(interaction)} for ${error.retryAfterMs} ms`)
-      await respond(interaction).error(error, { message: error.message, visibility: 'private' })
+      await respond(interaction).error(error, { message: said(), visibility: 'private' })
     } else if (error instanceof CooldownStoreError) {
       logger.debug(`Cooldown store down; refused ${describeInteraction(interaction)}`)
-      await respond(interaction).error(error, { message: error.message, visibility: 'private' })
+      await respond(interaction).error(error, { message: said(), visibility: 'private' })
     } else if (error instanceof UserError) {
       // The caller's own mistake, which only they need to see, and no fault to log
       logger.debug(`Refused ${describeInteraction(interaction)}: ${error.message}`)

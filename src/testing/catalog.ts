@@ -1,4 +1,5 @@
 import { type CatalogShape, CATALOGS, type Translator } from '@src/common/translator.js'
+import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 interface Leaf { key: string; plural: boolean }
 
@@ -19,6 +20,9 @@ function at(catalog: CatalogShape, key: string): unknown {
   return key.split('.').reduce<unknown>((current, part) => (current as Record<string, unknown> | undefined)?.[part], catalog)
 }
 
+const MEOCORD_KEYS = new Set(leaves(MEOCORD_MESSAGES).map(({ key }) => key))
+const isMeoCordKey = (key: string) => key.startsWith('meocord.')
+
 /**
  * Checks that every locale translates every message, and throws listing each gap, locale by locale.
  *
@@ -26,7 +30,12 @@ function at(catalog: CatalogShape, key: string): unknown {
  * messages the default catalog doesn't have, and the plural forms a language needs but a plural lacks, such as
  * `few` for Russian.
  *
+ * @remarks
+ * MeoCord's own texts, a catalog's `meocord` group, fall back to English by design, so only a key MeoCord lacks is
+ * reported. With `meocord: true`, every locale other than an English one must translate each of them as well.
+ *
  * @param translator - A translator made by `createTranslator`.
+ * @param options.meocord - Whether every locale that is not English must translate each of MeoCord's own texts.
  * @throws Error listing every gap; nothing when the catalogs are complete.
  *
  * @example
@@ -40,6 +49,9 @@ function at(catalog: CatalogShape, key: string): unknown {
  * it('translates every message', () => {
  *   expectCompleteCatalog(t)
  * })
+ * it("translates MeoCord's own texts too", () => {
+ *   expectCompleteCatalog(t, { meocord: true })
+ * })
  * ```
  *
  * @group Testing
@@ -47,11 +59,11 @@ function at(catalog: CatalogShape, key: string): unknown {
  * @see {@link createTranslator}
  * @see {@link https://meocord.dev/docs/4.1/localisation | Localisation}
  */
-export function expectCompleteCatalog(translator: Translator<any>): void {
+export function expectCompleteCatalog(translator: Translator<any>, options: { meocord?: boolean } = {}): void {
   const catalogs = (translator as unknown as { [CATALOGS]?: Partial<Record<string, CatalogShape>> })[CATALOGS]
   if (!catalogs) throw new Error('expectCompleteCatalog takes a translator made by createTranslator.')
 
-  const reference = leaves(catalogs[translator.defaultLocale] ?? {})
+  const reference = leaves(catalogs[translator.defaultLocale] ?? {}).filter(({ key }) => !isMeoCordKey(key))
   const referenceKeys = new Set(reference.map(({ key }) => key))
   const gaps: string[] = []
 
@@ -69,8 +81,13 @@ export function expectCompleteCatalog(translator: Translator<any>): void {
         if (missing.length > 0) problems.push(`${key} lacks ${missing.join(', ')}`)
       }
     }
+    if (options.meocord && !locale.startsWith('en-')) {
+      for (const key of MEOCORD_KEYS) if (at(catalog, key) === undefined) problems.push(`missing ${key}`)
+    }
     for (const { key } of leaves(catalog)) {
-      if (!referenceKeys.has(key)) problems.push(`${key} is not in the default catalog`)
+      if (isMeoCordKey(key)) {
+        if (!MEOCORD_KEYS.has(key)) problems.push(`${key} is not one of MeoCord's texts`)
+      } else if (!referenceKeys.has(key)) problems.push(`${key} is not in the default catalog`)
     }
 
     if (problems.length > 0) gaps.push(`  ${locale}: ${problems.join('; ')}`)

@@ -12,7 +12,7 @@ import {
 } from '@src/interface/index.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
-import { type Translator } from '@src/common/translator.js'
+import { type CatalogShape, CATALOGS, lookup, type Translator } from '@src/common/translator.js'
 import { type CooldownStore } from '@src/common/cooldown-store.js'
 import { type Provider } from '@src/interface/provider.interface.js'
 import { providerMap } from '@src/core/providers.js'
@@ -25,7 +25,7 @@ import { assertValidTheme } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 
 /** Refuses a `messages` option of the wrong type where the app is declared, rather than at the first message. */
-function assertMessageOptions(messages: MessageCommandOptions | undefined): void {
+function assertMessageOptions(messages: MessageCommandOptions | undefined, i18n: Translator<any> | undefined): void {
   if (!messages) return
   const { prefix, mention, caseSensitive } = messages
   const isText = (value: unknown) => typeof value === 'string'
@@ -62,6 +62,18 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
     if (typeof type?.parse !== 'function') {
       throw new TypeError(`@MeoCord({ messages: { types } }): "${name}" needs a parse(word, message) function.`)
     }
+    if (type.labelKey !== undefined) assertLabelKey(name, type.labelKey, i18n)
+  }
+}
+
+/** Refuses a type's `labelKey` that no message of the app's default catalog has, as it would be shown as the key. */
+function assertLabelKey(name: string, labelKey: unknown, i18n: Translator<any> | undefined): void {
+  const where = `@MeoCord({ messages: { types } }): "${name}" has labelKey`
+  if (typeof labelKey !== 'string') throw new TypeError(`${where} ${String(labelKey)}; it takes a message key, such as 'types.${name}'.`)
+  if (!i18n) throw new TypeError(`${where} '${labelKey}', which needs @MeoCord({ i18n }).`)
+  const catalogs = (i18n as unknown as { [CATALOGS]?: Partial<Record<string, CatalogShape>> })[CATALOGS]
+  if (catalogs && typeof lookup(catalogs[i18n.defaultLocale], labelKey) !== 'string') {
+    throw new TypeError(`${where} '${labelKey}', which the default catalog has no message for.`)
   }
 }
 
@@ -169,7 +181,7 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     assertObservers(`@MeoCord({ observers }) on ${target.name}`, options.observers ?? [])
     // Checked where the app is declared, so a malformed provider fails at import rather than at start
     providerMap(options.providers ?? [], '@MeoCord({ providers })')
-    assertMessageOptions(options.messages)
+    assertMessageOptions(options.messages, options.i18n)
     assertCooldownPolicy(target.name, options)
     if (options.warnUnanswered !== undefined && typeof options.warnUnanswered !== 'boolean') {
       throw new TypeError(`@MeoCord({ warnUnanswered }) on ${target.name} takes true or false.`)

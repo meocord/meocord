@@ -41,6 +41,7 @@ import {
 } from '@src/interface/index.js'
 import { ThemeCache } from '@src/core/theme-resolvers.js'
 import { claimAmbientAppTheme, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
@@ -476,7 +477,9 @@ export class TestingModule {
    */
   private registerClient(input: unknown): void {
     const client = (input as { client?: unknown } | undefined)?.client
-    if (client && typeof client === 'object') registerClientTheme(client, this.container)
+    if (!client || typeof client !== 'object') return
+    registerClientTheme(client, this.container)
+    registerClientTranslator(client, this.container.isBound(Translator) ? this.container.get(Translator) : undefined)
   }
 
   private builtComponentRoutes?: ComponentRoute[]
@@ -836,7 +839,8 @@ export class TestingModuleBuilder {
 
     // Bound first, as in the app, so a class that injects it gets this instance
     const appClasses: (new (...args: any[]) => unknown)[] = []
-    container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app)))
+    const translator = () => (container.isBound(Translator) ? container.get(Translator) : undefined)
+    container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app), translator))
     // A testing module runs as one process, so a cross-shard call runs once, here
     container.bind(ShardContext).toConstantValue(
       new ShardContext(undefined, async (service, method, args) => {

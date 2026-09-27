@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
-import { type ChatInputCommandInteraction, Locale } from 'discord.js'
-import { createTranslator, defineCatalog, type Translator } from '@src/common/index.js'
+import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
+import { createTranslator, defineCatalog, translateError, type Translator } from '@src/common/index.js'
 
 const enUS = defineCatalog({
   ban: { description: 'Ban a member', done: 'Banned {user} for {days} days.' },
@@ -103,5 +103,50 @@ describe('literal catalogs', () => {
 describe('Translator', () => {
   it('is what createTranslator returns, typed by the default catalog', () => {
     expectTypeOf(t).toEqualTypeOf<Translator<typeof enUS>>()
+  })
+})
+
+describe("MeoCord's own texts", () => {
+  it('lets any locale translate any of them, all or part', () => {
+    createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': defineCatalog({ ...enUS, meocord: { usage: { heading: 'How to use: {usage}' } } }),
+        id: { ping: 'Pong!', meocord: { usage: { missing: '{param} belum diisi' }, types: { int: 'bilangan bulat' } } },
+        ja: { meocord: { fallback: { notFound: 'コマンドが見つかりません' } } },
+      },
+    })
+  })
+
+  it('rejects a key MeoCord lacks, in the default catalog and in another locale', () => {
+    // @ts-expect-error `headng` is not one of MeoCord's texts
+    defineCatalog({ meocord: { usage: { headng: 'Usage: {usage}' } } })
+    // @ts-expect-error `headng` is not one of MeoCord's texts
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { meocord: { usage: { headng: 'Cara pakai: {usage}' } } } } })
+  })
+
+  it('rejects a {param} the English text lacks, and takes one that leaves a param out', () => {
+    // @ts-expect-error `{command}` is not a param of meocord.usage.heading
+    defineCatalog({ meocord: { usage: { heading: 'Usage: {command}' } } })
+    // @ts-expect-error `{name}` is not a param of meocord.usage.missing
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { meocord: { usage: { missing: '{name} belum diisi' } } } } })
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { meocord: { usage: { notValid: '"{word}" tidak sah' } } } } })
+  })
+
+  it('gives the translator their keys when the default catalog has them', () => {
+    const own = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ meocord: { presenter: { loading: 'Hang on…' } } }) } })
+    expectTypeOf(own.default('meocord.presenter.loading')).toEqualTypeOf<string>()
+  })
+})
+
+describe('translateError', () => {
+  it('takes an interaction, a message or a locale', () => {
+    const error = new Error('boom')
+    expectTypeOf(translateError(error, t, interaction)).toEqualTypeOf<string>()
+    translateError(error, t, {} as Message)
+    translateError(error, t, 'id')
+    translateError(error, t, Locale.Japanese)
+    // @ts-expect-error bare `en` is not a Discord locale
+    translateError(error, t, 'en')
   })
 })

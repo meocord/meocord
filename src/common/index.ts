@@ -29,6 +29,7 @@ export type { Route, RouteParams, RouteValue, RouteValues } from '@src/common/ro
 export { ShardedCooldownStore } from '@src/common/sharded-cooldown-store.js'
 export type { RedisCooldownStoreOptions, RedisEval, RedisEvalSha } from '@src/common/redis-cooldown-store.js'
 export { createTranslator, defineCatalog, Translator } from '@src/common/translator.js'
+export { translateError } from '@src/common/translate-error.js'
 export type {
   CatalogShape,
   LocaleCatalog,

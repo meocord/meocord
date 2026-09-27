@@ -8,18 +8,27 @@ import {
   TextDisplayBuilder,
 } from 'discord.js'
 import { type PresentedError, type ResponseContext, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
+import { renderText, translatorOfClient } from '@src/common/meocord-text.js'
+
+/** One of the presenter's texts, in the context's locale through the app's translator; English for a context without one. */
+const text = ({ interaction, locale }: Partial<ResponseContext>, key: string) =>
+  renderText(translatorOfClient(interaction?.client), locale, { key })
 
 /**
  * MeoCord's own presenter, styled by the call's theme: a "Working on it…" loading view with the theme's loading
  * emoji in its primary colour, and errors under "Oops!" in the colour their tone names, `warning` for the user's own
- * outcome and `danger` for a fault.
+ * outcome and `danger` for a fault. Both texts are in the user's language where the app's catalogs have it.
  */
 export const defaultPresenter: ResponsePresenter = {
-  loading: ({ theme }: ResponseContext) => ({ text: 'Working on it…', emoji: theme.emojis.loading, color: theme.colors.primary }),
-  error: ({ theme }: ResponseContext, { message, tone }: PresentedError) => ({
-    title: 'Oops!',
+  loading: (context: ResponseContext) => ({
+    text: text(context, 'meocord.presenter.loading'),
+    emoji: context.theme.emojis.loading,
+    color: context.theme.colors.primary,
+  }),
+  error: (context: ResponseContext, { message, tone }: PresentedError) => ({
+    title: text(context, 'meocord.presenter.errorTitle'),
     text: message,
-    color: theme.colors[tone],
+    color: context.theme.colors[tone],
   }),
 }
 

@@ -21,6 +21,8 @@ import {
   parseMessagePattern,
 } from '@src/core/message-routes.js'
 import { computeMessageHelp, helpInvocation } from '@src/core/message-help.js'
+import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
+import { type Translator } from '@src/common/translator.js'
 import { usageOf } from '@src/core/message-params.js'
 
 type HandlerClass = new (...args: any[]) => unknown
@@ -306,10 +308,12 @@ export class HandlerRegistry {
    * @param classes - The controllers and services to read handlers from. The factory fills the list
    *   once the app is bound; entries are read on the first {@link list}.
    * @param messages - The app's `messages` options, whose `caseSensitive` message entries' `matches` follows.
+   * @param translator - The app's translator, read when {@link messageHelp} words its labels; none for English.
    */
   constructor(
     private readonly classes: readonly HandlerClass[],
     private readonly messages: MessageCommandOptions = {},
+    private readonly translator: () => Translator<any> | undefined = () => undefined,
   ) {}
 
   /**
@@ -362,6 +366,7 @@ export class HandlerRegistry {
       this.messageRoutes,
       { start, query: query?.trim() ?? '', starts, invocation: helpInvocation(start, this.messages.help) },
       this.messages.types,
+      textRenderer(this.translator(), messageLocale(message)),
     )
   }
 

@@ -10,6 +10,8 @@ import {
 import { afterStart, commandWordsOf, fitsScope, type MessageRoute, type MessageStarts } from '@src/core/message-routes.js'
 import { isGuildType, paramTypeLabel, primaryFirst, usageOf } from '@src/core/message-params.js'
 import { splitWords } from '@src/core/message-words.js'
+import { usageHeading } from '@src/common/errors.js'
+import { type TextParam, textRenderer } from '@src/common/meocord-text.js'
 import { handlerStages } from '@src/core/handler-pipeline.js'
 
 /** The word the built-in help answers to when `messages.help` names no other. */
@@ -70,17 +72,21 @@ function effectiveScope(route: MessageRoute): MessageScope {
   return guildOnly ? 'guild' : 'any'
 }
 
+/** Renders MeoCord's texts in the language a help reply is in. */
+type Render = (text: TextParam) => string
+
 /** A route's params and flags, each with what it takes in words. */
-function paramsOf(route: MessageRoute, types: Record<string, MessageParamType> | undefined): MessageHelpParam[] {
+function paramsOf(route: MessageRoute, types: Record<string, MessageParamType> | undefined, render: Render): MessageHelpParam[] {
   const params = route.tokens.flatMap((token): MessageHelpParam[] => {
     if (!('param' in token)) return []
     const label = paramTypeLabel(token.type, types)
-    return [{ name: token.param, label: token.rest && token.type !== undefined ? helpText('listOf', { label }) : label, optional: token.optional }]
+    const list = token.rest && token.type !== undefined
+    return [{ name: token.param, label: render(list ? { key: 'meocord.help.listOf', params: { label } } : label), optional: token.optional }]
   })
   const flags = route.flags.map(
     (flag): MessageHelpParam => ({
       name: `--${flag.flag}`,
-      label: flag.type === undefined ? helpText('flagOn') : paramTypeLabel(flag.type, types),
+      label: render(flag.type === undefined ? { key: 'meocord.help.flagOn' } : paramTypeLabel(flag.type, types)),
       optional: flag.type === undefined || flag.optional,
     }),
   )
@@ -105,6 +111,7 @@ function entryOf(
   start: string,
   starts: MessageStarts,
   types: Record<string, MessageParamType> | undefined,
+  render: Render,
 ): MessageHelpEntry {
   const primary = [...handlerRoutes].sort(primaryFirst)[0]
   // Its aliases and its other spellings, each by the words that name it
@@ -120,7 +127,7 @@ function entryOf(
     ...(primary.description !== undefined && { description: primary.description }),
     aliases: [...new Set(aliases)].sort(),
     scope: effectiveScope(primary),
-    params: paramsOf(primary, types),
+    params: paramsOf(primary, types, render),
     handler: { controller: primary.controllerClass.name, method: primary.method },
   }
 }
@@ -130,15 +137,16 @@ const sortedEntries = (entries: MessageHelpEntry[]) => entries.sort((a, b) => (a
 /**
  * What help has to say for a message: every command the caller can use here, or the one `query` names, the
  * subcommands of the words it names, or that it names none. Hidden and guarded handlers are left out of lists, and
- * shown when named.
+ * shown when named. Param labels are in the language `render` writes, English by default.
  */
 export function computeMessageHelp(
   routes: readonly MessageRoute[],
   { start, query, starts, invocation }: { start: string; query: string; starts: MessageStarts; invocation: string },
   types: Record<string, MessageParamType> | undefined,
+  render: Render = textRenderer(undefined, undefined),
 ): MessageHelp {
   const fits = (route: MessageRoute) => fitsScope(effectiveScope(route), starts.inGuild)
-  const entries = (handlers: MessageRoute[][]) => sortedEntries(handlers.map(group => entryOf(group, routes, start, starts, types)))
+  const entries = (handlers: MessageRoute[][]) => sortedEntries(handlers.map(group => entryOf(group, routes, start, starts, types, render)))
 
   if (!query) {
     const listed = byHandler(routes.filter(route => fits(route) && isListable(route)))
@@ -166,7 +174,7 @@ export function computeMessageHelp(
   if (children.length > 0) return { kind: 'parent', subcommands: entries(children), invocation }
   // A query typed as an example, such as `roll 20`, names the command its leading words do
   if (asked.length > 1) {
-    const shorter = computeMessageHelp(routes, { start, query: asked.slice(0, -1).join(' '), starts, invocation }, types)
+    const shorter = computeMessageHelp(routes, { start, query: asked.slice(0, -1).join(' '), starts, invocation }, types, render)
     if (shorter.kind === 'command') return shorter
   }
   return { kind: 'unknown', query, invocation }
@@ -177,66 +185,37 @@ export function helpInvocation(start: string, help: MessageCommandOptions['help'
   return start + (helpWords(help)[0] ?? HELP_WORD)
 }
 
-/**
- * The built-in help's words, in English, each naming the values it takes as `{name}`. They are kept here, apart
- * from the renderer, so a translation of them replaces this table and nothing else.
- */
-export const HELP_TEXT = {
-  commandsHeading: 'Commands:',
-  commandsHint: "Type {invocation} <command> for one command's usage.",
-  describedCommand: '{usage} — {description}',
-  usageHeading: 'Usage:',
-  usageLine: 'Usage: {usage}',
-  param: '{name}: {label}',
-  optionalParam: '{name} (optional): {label}',
-  paramSeparator: ' · ',
-  aliases: 'Also: {aliases}',
-  aliasSeparator: ', ',
-  serverOnly: 'Works in servers only.',
-  dmOnly: 'Works in direct messages only.',
-  unknown: 'No command is called "{query}". Type {invocation} to list them.',
-  emptyHere: 'There are no commands you can use here.',
-  emptyServerOnly: 'These commands work in servers only.',
-  listOf: '{label}, one or more',
-  flagOn: 'on when given',
-} as const
-
-/** One of {@link HELP_TEXT}'s texts, with its `{name}` values filled in. */
-function helpText(key: keyof typeof HELP_TEXT, values: Record<string, string> = {}): string {
-  return HELP_TEXT[key].replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole)
-}
-
-/** The built-in help's reply, in the voice of the usage reply: plain text, a heading line, one line per command. */
-export function renderMessageHelp(help: MessageHelp): string {
+/** The built-in help's reply, in the voice of the usage reply and in the language `render` writes: a heading line, one line per command. */
+export function renderMessageHelp(help: MessageHelp, render: Render = textRenderer(undefined, undefined)): string {
+  const text = (key: string, params?: Record<string, TextParam>) => render({ key: `meocord.help.${key}`, params })
   switch (help.kind) {
     case 'list':
       return [
-        helpText('commandsHeading'),
-        ...help.commands.map(({ usage, description }) => (description ? helpText('describedCommand', { usage, description }) : usage)),
-        helpText('commandsHint', { invocation: help.invocation }),
+        text('commandsHeading'),
+        ...help.commands.map(({ usage, description }) => (description ? text('describedCommand', { usage, description }) : usage)),
+        text('commandsHint', { invocation: help.invocation }),
       ].join('\n')
     case 'command':
-      return help.commands.map(commandBlock).join('\n\n')
+      return help.commands.map(entry => commandBlock(entry, render)).join('\n\n')
     case 'parent':
-      return help.subcommands.length === 1
-        ? helpText('usageLine', { usage: help.subcommands[0].usage })
-        : [helpText('usageHeading'), ...help.subcommands.map(entry => entry.usage)].join('\n')
+      return render(usageHeading(help.subcommands.map(entry => entry.usage).join('\n')))
     case 'unknown':
-      return helpText('unknown', { query: help.query, invocation: help.invocation })
+      return text('unknown', { query: help.query, invocation: help.invocation })
     case 'empty':
-      return helpText(help.reason === 'server-only' ? 'emptyServerOnly' : 'emptyHere')
+      return text(help.reason === 'server-only' ? 'emptyServerOnly' : 'emptyHere')
   }
 }
 
 /** One command's help: its usage, what it does, its params, its aliases, and where it works. */
-function commandBlock(entry: MessageHelpEntry): string {
-  const params = entry.params.map(({ name, label, optional }) => helpText(optional ? 'optionalParam' : 'param', { name, label }))
-  const scope = entry.scope === 'guild' ? helpText('serverOnly') : entry.scope === 'dm' ? helpText('dmOnly') : undefined
+function commandBlock(entry: MessageHelpEntry, render: Render): string {
+  const text = (key: string, params?: Record<string, TextParam>) => render({ key: `meocord.help.${key}`, params })
+  const params = entry.params.map(({ name, label, optional }) => text(optional ? 'optionalParam' : 'param', { name, label }))
+  const scope = entry.scope === 'guild' ? text('serverOnly') : entry.scope === 'dm' ? text('dmOnly') : undefined
   return [
-    helpText('usageLine', { usage: entry.usage }),
+    render(usageHeading(entry.usage)),
     entry.description,
-    params.length > 0 ? params.join(HELP_TEXT.paramSeparator) : undefined,
-    entry.aliases.length > 0 ? helpText('aliases', { aliases: entry.aliases.join(HELP_TEXT.aliasSeparator) }) : undefined,
+    params.length > 0 ? text('params', { params: { list: params, style: 'unit', joiner: ' · ' } }) : undefined,
+    entry.aliases.length > 0 ? text('aliases', { aliases: { list: entry.aliases, style: 'unit' } }) : undefined,
     scope,
   ]
     .filter((line): line is string => line !== undefined)

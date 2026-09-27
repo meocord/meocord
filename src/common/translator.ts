@@ -1,4 +1,5 @@
 import { type Guild, type Interaction, Locale } from 'discord.js'
+import { type MeoCordMessages } from '@src/interface/index.js'
 
 /**
  * The plural categories `Intl.PluralRules` selects between.
@@ -107,9 +108,24 @@ export type LocaleCatalog<C> = {
   readonly [K in keyof C]?: C[K] extends string ? string : IsPlural<C[K]> extends true ? PluralMessage : LocaleCatalog<C[K]>
 }
 
+/** A translation of one of MeoCord's texts: any wording, with no `{param}` the English text lacks. */
+type OwnParamsOnly<S, E> = [Exclude<Placeholders<S>, Placeholders<E>>] extends [never]
+  ? string
+  : `MeoCord's text takes no {${Exclude<Placeholders<S>, Placeholders<E>> & string}}`
+
+/** A catalog's `meocord` group: any of MeoCord's texts, each key one MeoCord has. */
+type MeoCordGroup<T, M> = {
+  readonly [K in keyof T]: K extends keyof M ? (M[K] extends string ? OwnParamsOnly<T[K], M[K]> : MeoCordGroup<T[K], M[K]>) : never
+}
+
+/** A catalog whose `meocord` group, if it has one, translates only texts MeoCord has. */
+type MeoCordChecked<T> = { readonly [K in keyof T]: K extends 'meocord' ? MeoCordGroup<T[K], MeoCordMessages> : unknown }
+
 /** A locale's catalog with nothing the default lacks: each key is `never` where the default has none. */
 type WithinDefault<T, C> = {
-  readonly [K in keyof T]: K extends keyof C
+  readonly [K in keyof T]: K extends 'meocord'
+    ? MeoCordGroup<T[K], MeoCordMessages>
+    : K extends keyof C
     ? C[K] extends string
       ? string
       : IsPlural<C[K]> extends true
@@ -150,7 +166,7 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
  * @group Utilities
  * @category Localisation
  */
-export function defineCatalog<const T extends CatalogShape>(catalog: T): T {
+export function defineCatalog<const T extends CatalogShape>(catalog: T & MeoCordChecked<T>): T {
   return catalog
 }
 
@@ -240,6 +256,15 @@ export abstract class Translator<C = CatalogShape> {
 /** Where a translator made by `createTranslator` keeps its catalogs, for `expectCompleteCatalog` to read. */
 export const CATALOGS = Symbol('catalogs')
 
+/** How MeoCord's own texts read a translator made by `createTranslator`: the message a locale is served for a key. */
+export const FIND_MESSAGE = Symbol('findMessage')
+
+/** A message a translator serves, and the locale whose catalog has it. */
+export interface FoundMessage {
+  message: string | PluralMessage
+  locale: Locale
+}
+
 /** For a class that injects `Translator` in an app that configured none. */
 export function missingTranslatorError(cls: { name: string }): Error {
   return new Error(
@@ -252,7 +277,7 @@ const DISCORD_LOCALES: ReadonlySet<string> = new Set(Object.values(Locale))
 const languageOf = (locale: string): string => locale.split('-')[0]
 
 /** A message by its dotted key, or undefined when the catalog lacks it or the key names a group. */
-function lookup(catalog: CatalogShape | undefined, key: string): string | PluralMessage | undefined {
+export function lookup(catalog: CatalogShape | undefined, key: string): string | PluralMessage | undefined {
   let current: unknown = catalog
   for (const part of key.split('.')) {
     if (typeof current !== 'object' || current === null) return undefined
@@ -265,13 +290,22 @@ function lookup(catalog: CatalogShape | undefined, key: string): string | Plural
   return undefined
 }
 
+const plurals = new Map<string, Intl.PluralRules>()
+
+/** The form of a found message to use: a plain message itself, or a plural's form for `count` in its locale's rules. */
+export function pluralForm({ message, locale }: FoundMessage, count: unknown): string {
+  if (typeof message === 'string') return message
+  let rules = plurals.get(locale)
+  if (!rules) plurals.set(locale, (rules = new Intl.PluralRules(locale)))
+  return message[rules.select(Number(count)) as PluralCategory] ?? message.other
+}
+
 function interpolate(message: string, params: Record<string, unknown>): string {
   return message.replace(/\{(\w+)}/g, (whole, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : whole))
 }
 
 class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   readonly locales: readonly Locale[]
-  private readonly plurals = new Map<string, Intl.PluralRules>()
 
   constructor(
     readonly defaultLocale: Locale,
@@ -299,26 +333,18 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     return chain
   }
 
-  private translate(requested: string | undefined, key: string, params: Record<string, unknown> = {}): string {
+  [FIND_MESSAGE](requested: string | undefined, key: string): FoundMessage | undefined {
     for (const locale of this.chain(requested)) {
       const message = lookup(this.catalogs[locale], key)
-      if (message === undefined) continue
-      if (typeof message === 'string') return interpolate(message, params)
-
-      const count = Number(params.count)
-      const category = this.pluralRules(locale).select(count) as PluralCategory
-      return interpolate(message[category] ?? message.other, params)
+      if (message !== undefined) return { message, locale }
     }
-    return key
+    return undefined
   }
 
-  private pluralRules(locale: Locale): Intl.PluralRules {
-    let rules = this.plurals.get(locale)
-    if (!rules) {
-      rules = new Intl.PluralRules(locale)
-      this.plurals.set(locale, rules)
-    }
-    return rules
+  private translate(requested: string | undefined, key: string, params: Record<string, unknown> = {}): string {
+    const found = this[FIND_MESSAGE](requested, key)
+    if (!found) return key
+    return interpolate(pluralForm(found, params.count), params)
   }
 
   private translateTo(locale: string | undefined): Translate<C> {
@@ -389,7 +415,9 @@ export function createTranslator<
   options: {
     default: Default
     locales: Locales &
-      DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> }
+      DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> } & {
+        readonly [L in Default]: MeoCordChecked<Locales[L]>
+      }
   } & LiteralCatalog<Locales[Default]>,
 ): Translator<Locales[Default]> {
   const { default: defaultLocale, locales } = options
