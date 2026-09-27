@@ -290,6 +290,19 @@ function freeNames(code: string): Set<string> {
   return used
 }
 
+/** The TypeScript code blocks of the README, each with the README line its code starts on. */
+function readmeBlocks(): { code: string; firstLine: number }[] {
+  const lines = readFileSync(path.join(repoRoot, 'README.md'), 'utf8').split('\n')
+  const blocks: { code: string; firstLine: number }[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^```(ts|typescript)\s*$/.test(lines[i])) continue
+    const end = lines.findIndex((line, j) => j > i && line.startsWith('```'))
+    blocks.push({ code: lines.slice(i + 1, end).join('\n'), firstLine: i + 2 })
+    i = end
+  }
+  return blocks
+}
+
 function main(): void {
   const line = docsLine()
   if (process.argv.includes('--fix')) staleDocsLinks(line, true)
@@ -315,6 +328,55 @@ function main(): void {
   }
 
   const files = new Map<string, { label: string; code: string; lineOf: (number | undefined)[] }>()
+  /**
+   * Adds one snippet as a file of its own, its own imports first, then the names it uses from the package,
+   * discord.js and the fixtures. `firstLine` is where its first line stands, for reporting.
+   */
+  const addExample = (owner: string, label: string, snippet: string, firstLine = 1) => {
+    // A library the example shows, such as a schema library, is imported by the example itself, first
+    const lines = snippet.split('\n')
+    const start = Math.max(0, lines.findIndex(line => !/^import .+ from '[^']+'$/.test(line) && line.trim() !== ''))
+    const ownImports = lines.slice(0, start).filter(line => line.trim() !== '')
+    const exampleLines = lines.slice(start)
+    const { outside, members } = splitMembers(exampleLines.join('\n'))
+    const wrapped = members !== undefined
+    const outsideCount = !wrapped ? exampleLines.length : outside === '' ? 0 : outside.split('\n').length
+    const body = wrapped ? `${outside}\n@Controller()\nexport class Example {\n${members}\n}\n` : `${exampleLines.join('\n')}\n`
+    // The names the snippet's own imports bind, which are not looked up again
+    const imported = new Set(ownImports.flatMap(line => /^import (.+) from/.exec(line)![1].match(/[A-Za-z_$][\w$]*/g) ?? []))
+    const autoImports: string[] = []
+    for (const name of [...freeNames(body)].sort()) {
+      if (imported.has(name)) continue
+      const from = sources.get(name)
+      if (!from) continue
+      if (from.size > 1) {
+        problems.push(`${owner}: its example uses ${name}, which ${[...from].join(' and ')} both export; name it differently.`)
+        continue
+      }
+      const [module] = from
+      autoImports.push(`import { ${name} } from '${module === './fixtures' ? '../scripts/jsdoc-examples/fixtures.js' : module}'`)
+    }
+    // The compiled file, with the snippet's line number for each of its lines
+    const code: string[] = []
+    const lineOf: (number | undefined)[] = []
+    const add = (text: string, snippetLine?: number) => {
+      code.push(text)
+      lineOf.push(snippetLine)
+    }
+    lines.slice(0, start).forEach((line, i) => line.trim() !== '' && add(line, firstLine + i))
+    for (const line of autoImports) add(line)
+    exampleLines.slice(0, outsideCount).forEach((line, i) => add(line, firstLine + start + i))
+    if (wrapped) {
+      add('@Controller()')
+      add('export class Example {')
+      exampleLines.slice(outsideCount).forEach((line, i) => add(line, firstLine + start + outsideCount + i))
+      add('}')
+    }
+    add('export {}')
+    // Keyed by a counter: on a case-insensitive disk, UseTheme and useTheme would be one file
+    files.set(path.join(examplesDir, `${files.size}.ts`), { label, code: `${code.join('\n')}\n`, lineOf })
+  }
+
   for (const item of symbols.values()) {
     if (!item.group) continue
     if (!GROUPS.includes(item.group)) problems.push(`${item.name}: @group ${item.group} is not one of ${GROUPS.join(', ')}.`)
@@ -337,52 +399,15 @@ function main(): void {
     for (const stage of item.stages) {
       if (!STAGES.includes(stage)) problems.push(`${item.name}: @pipeline ${stage} is not one of ${STAGES.join(', ')}.`)
     }
-    item.examples.forEach((snippet, index) => {
-      // A library the example shows, such as a schema library, is imported by the example itself, first
-      const lines = snippet.split('\n')
-      const start = Math.max(0, lines.findIndex(line => !/^import .+ from '[^']+'$/.test(line) && line.trim() !== ''))
-      const ownImports = lines.slice(0, start).filter(line => line.trim() !== '')
-      const exampleLines = lines.slice(start)
-      const { outside, members } = splitMembers(exampleLines.join('\n'))
-      const wrapped = members !== undefined
-      const outsideCount = !wrapped ? exampleLines.length : outside === '' ? 0 : outside.split('\n').length
-      const body = wrapped ? `${outside}\n@Controller()\nexport class Example {\n${members}\n}\n` : `${exampleLines.join('\n')}\n`
-      // The names the snippet's own imports bind, which are not looked up again
-      const imported = new Set(ownImports.flatMap(line => /^import (.+) from/.exec(line)![1].match(/[A-Za-z_$][\w$]*/g) ?? []))
-      const autoImports: string[] = []
-      for (const name of [...freeNames(body)].sort()) {
-        if (imported.has(name)) continue
-        const from = sources.get(name)
-        if (!from) continue
-        if (from.size > 1) {
-          problems.push(`${item.name}: its example uses ${name}, which ${[...from].join(' and ')} both export; name it differently.`)
-          continue
-        }
-        const [module] = from
-        autoImports.push(`import { ${name} } from '${module === './fixtures' ? '../scripts/jsdoc-examples/fixtures.js' : module}'`)
-      }
-      // The compiled file, with the snippet's line number for each of its lines
-      const code: string[] = []
-      const lineOf: (number | undefined)[] = []
-      const add = (text: string, snippetLine?: number) => {
-        code.push(text)
-        lineOf.push(snippetLine)
-      }
-      lines.slice(0, start).forEach((line, i) => line.trim() !== '' && add(line, i + 1))
-      for (const line of autoImports) add(line)
-      exampleLines.slice(0, outsideCount).forEach((line, i) => add(line, start + i + 1))
-      if (wrapped) {
-        add('@Controller()')
-        add('export class Example {')
-        exampleLines.slice(outsideCount).forEach((line, i) => add(line, start + outsideCount + i + 1))
-        add('}')
-      }
-      add('export {}')
-      // Keyed by a counter: on a case-insensitive disk, UseTheme and useTheme would be one file
-      const label = `${item.name}: its example${item.examples.length > 1 ? ` ${index + 1}` : ''}`
-      files.set(path.join(examplesDir, `${files.size}.ts`), { label, code: `${code.join('\n')}\n`, lineOf })
-    })
+    item.examples.forEach((snippet, index) =>
+      addExample(item.name, `${item.name}: its example${item.examples.length > 1 ? ` ${index + 1}` : ''}`, snippet),
+    )
   }
+
+  // The README's TypeScript blocks: the landing page's example must compile as a reader copies it
+  readmeBlocks().forEach(({ code, firstLine }, index, blocks) =>
+    addExample('README.md', `README.md: its example${blocks.length > 1 ? ` ${index + 1}` : ''}`, code, firstLine),
+  )
 
   // The examples, the fixtures and the built package, in one program. An example that augments a module or the global
   // scope, as a theme's own tokens do, gets a program of its own, so its augmentation cannot change the types another
