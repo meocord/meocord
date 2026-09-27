@@ -173,6 +173,23 @@ describe('resolveRoute for messages', () => {
     expect(resolveRoute(DiceApp, { content: '<@111> roll 6' })).toBeUndefined()
   })
 
+  it("resolves only a mention under mention: 'only', and a handler's own mention: 'only' beside the app's prefix", () => {
+    @MeoCord({ controllers: [DiceController], clientOptions: { intents: [] }, messages: { mention: 'only' } })
+    class MentionedApp {}
+    @Controller()
+    class Status {
+      @MessageHandler('status', { mention: 'only' })
+      status() {}
+    }
+    @MeoCord({ controllers: [Status], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class Prefixed {}
+
+    expect(resolveRoute(MentionedApp, { content: '<@111> roll 6', botId: '111' })?.method).toBe('roll')
+    expect(resolveRoute(MentionedApp, { content: 'roll 6', botId: '111' })).toBeUndefined()
+    expect(resolveRoute(Prefixed, { content: '<@111> status', botId: '111' })?.method).toBe('status')
+    expect(resolveRoute(Prefixed, { content: '!status', botId: '111' })).toBeUndefined()
+  })
+
   it('takes the prefix a message has when the app reads prefixes from a function', () => {
     @MeoCord({ controllers: [DiceController], clientOptions: { intents: [] }, messages: { prefix: () => '?' } })
     class PerGuildApp {}

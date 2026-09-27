@@ -397,8 +397,13 @@ export interface MessageCommandOptions {
    * message as it is. A handler's own `prefix` replaces it.
    */
   prefix?: MessagePrefix | ((message: Message) => MessagePrefix | Promise<MessagePrefix>)
-  /** Also accepts a mention of the bot, `<@id>` or `<@!id>`, where a prefix goes. @defaultValue `false` */
-  mention?: boolean
+  /**
+   * Also accepts a mention of the bot, `<@id>` or `<@!id>`, where a prefix goes. `'only'` accepts nothing
+   * else, neither a prefix nor the message as it is, so the bot reads only messages that mention it, which
+   * Discord delivers with their text even without the privileged MessageContent intent.
+   * @defaultValue `false`
+   */
+  mention?: boolean | 'only'
   /** Matches the prefix and a pattern's literal words in the case written; param values always are. @defaultValue `false` */
   caseSensitive?: boolean
   /**
@@ -627,6 +632,11 @@ export interface MessageHandlerOptions {
    * accepts one. `false` matches the message as it is, with no prefix or mention.
    */
   prefix?: false | MessagePrefix
+  /**
+   * `'only'` starts the command with a mention of the bot and nothing else, whatever the app's prefixes, so
+   * it needs no MessageContent intent. It takes no `prefix`.
+   */
+  mention?: 'only'
   /** Overrides the app's `caseSensitive` for this handler. */
   caseSensitive?: boolean
   /**

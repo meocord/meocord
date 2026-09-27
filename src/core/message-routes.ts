@@ -35,7 +35,7 @@ export interface MessageRoute {
   pattern: string
   tokens: PatternToken[]
   specificity: number
-  /** The handler's own prefixes, `false` for none, or `undefined` for the app's. */
+  /** The handler's own prefixes, `[]` for a mention only, `false` for none, or `undefined` for the app's. */
   prefix: false | readonly string[] | undefined
   caseSensitive: boolean
   scope: MessageScope
@@ -51,6 +51,8 @@ export interface MessageStarts {
   prefixes: readonly string[]
   /** The bot's user id, when a mention of it counts as a start. */
   mention?: string
+  /** The bot's user id, for the routes a mention alone starts, whatever the app accepts. */
+  bot?: string
   /** Whether the message was sent in a server, for the routes whose scope it fits; unset fits every scope. */
   inGuild?: boolean
 }
@@ -202,6 +204,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
           )
         }
         assertScope(own.scope, parsed)
+        assertMention(own)
         aliases = aliasPatterns(pattern, parsed.tokens, own.aliases)
       } catch (error) {
         throw new Error(`@MessageHandler('${pattern}') in ${controllerClass.name}.${method}: ${(error as Error).message}`)
@@ -209,7 +212,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
       const shared = {
         controllerClass,
         method,
-        prefix: own.prefix === undefined || own.prefix === false ? own.prefix : prefixList(own.prefix),
+        prefix: own.mention === 'only' ? [] : own.prefix === undefined || own.prefix === false ? own.prefix : prefixList(own.prefix),
         caseSensitive: own.caseSensitive ?? options.caseSensitive ?? false,
         scope: own.scope ?? 'any',
       }
@@ -283,6 +286,18 @@ function assertScope(scope: unknown, { tokens, flags }: MessagePattern): void {
   if (shown) throw new Error(`scope is 'dm', but ${shown} is found only in a server.`)
 }
 
+/** Refuses a handler's `mention` other than `'only'`, and `'only'` beside its own prefix. */
+function assertMention({ mention, prefix }: { mention?: unknown; prefix?: unknown }): void {
+  if (mention === undefined) return
+  if (mention !== 'only') throw new Error(`mention is 'only', not ${JSON.stringify(mention)}; the app's mention option covers the rest.`)
+  if (prefix !== undefined) throw new Error("mention: 'only' starts the command with a mention alone, so it takes no prefix.")
+}
+
+/** The prefixes the app's options give: none at all when a mention alone starts its commands. */
+function appPrefixes(options: MessageCommandOptions, prefix: MessagePrefix | undefined): readonly string[] {
+  return options.mention === 'only' ? [] : prefixList(prefix)
+}
+
 /** Whether a route uses the app's prefixes, so they have to be known before it can match. */
 export function usesAppPrefix(routes: readonly MessageRoute[]): boolean {
   return routes.some(route => route.prefix === undefined)
@@ -300,7 +315,7 @@ export async function messageStartsFor(
   botId: string | undefined,
 ): Promise<MessageStarts> {
   if (usesAppPrefix(routes)) return messageStarts(options, message, botId)
-  return { prefixes: [], mention: options.mention ? botId : undefined, inGuild: message.guildId !== null && message.guildId !== undefined }
+  return { prefixes: [], mention: options.mention ? botId : undefined, bot: botId, inGuild: message.guildId !== null && message.guildId !== undefined }
 }
 
 /**
@@ -309,7 +324,12 @@ export async function messageStartsFor(
  */
 export async function messageStarts(options: MessageCommandOptions, message: Message, botId: string | undefined): Promise<MessageStarts> {
   const prefix = typeof options.prefix === 'function' ? await options.prefix(message) : options.prefix
-  return { prefixes: prefixList(prefix), mention: options.mention ? botId : undefined, inGuild: message.guildId !== null && message.guildId !== undefined }
+  return {
+    prefixes: appPrefixes(options, prefix),
+    mention: options.mention ? botId : undefined,
+    bot: botId,
+    inGuild: message.guildId !== null && message.guildId !== undefined,
+  }
 }
 
 /**
@@ -324,7 +344,11 @@ export function staticMessageStarts(
   if (typeof options.prefix === 'function' && prefix === undefined) {
     throw new TypeError(`${app.name} reads its prefixes from a function; pass the prefix this message has, as { content, prefix }.`)
   }
-  return { prefixes: prefixList(prefix ?? (options.prefix as MessagePrefix | undefined)), mention: options.mention ? botId : undefined }
+  return {
+    prefixes: appPrefixes(options, prefix ?? (options.prefix as MessagePrefix | undefined)),
+    mention: options.mention ? botId : undefined,
+    bot: botId,
+  }
 }
 
 /** The text after the longest start the message begins with, or `undefined` when it begins with none. */
@@ -381,6 +405,8 @@ interface MessageIndex {
   usesAppStarts: boolean
   /** The characters the routes' own prefixes begin with, in either case. */
   ownFirsts: Set<string>
+  /** Whether some route starts with a mention alone, whatever mention the app accepts. */
+  mentionOnly: boolean
 }
 
 /** Whether a param type is built in or words to choose from, whose words the word alone tells apart. */
@@ -478,6 +504,7 @@ function compileIndex(routes: readonly MessageRoute[]): MessageIndex {
       // Lowercasing a character outside ASCII can change its length, so such a prefix turns nothing away
       ownPrefixes.some(prefix => prefix === '' || prefix.charCodeAt(0) > 127),
     usesAppStarts: all.some(group => group.prefix === undefined),
+    mentionOnly: all.some(group => Array.isArray(group.prefix) && group.prefix.length === 0),
     // An empty prefix has no first character; it makes the index accept any start instead
     ownFirsts: new Set(ownPrefixes.filter(Boolean).flatMap(prefix => [prefix[0], prefix[0].toLowerCase(), prefix[0].toUpperCase()])),
   }
@@ -545,10 +572,14 @@ function paramsOf(route: MessageRoute, words: { value: string; start: number }[]
   return params
 }
 
+/** The bot id a mention of which starts the group's routes: any time for routes a mention alone starts. */
+const mentionFor = (group: RouteGroup, starts: MessageStarts) =>
+  Array.isArray(group.prefix) && group.prefix.length === 0 ? (starts.bot ?? starts.mention) : starts.mention
+
 /** Whether a message beginning with `first` can reach some route: a check of first characters, with no allocation. */
 function mayStart(index: MessageIndex, starts: MessageStarts, first: string): boolean {
   if (index.acceptsAnyStart || index.ownFirsts.has(first)) return true
-  if (starts.mention && first === '<') return true
+  if ((starts.mention || (index.mentionOnly && starts.bot)) && first === '<') return true
   if (!index.usesAppStarts) return false
   for (const prefix of starts.prefixes) {
     if (prefix === '' || prefix.charCodeAt(0) > 127) return true
@@ -596,7 +627,7 @@ export function matchMessageRoute(
     const rest =
       group.prefix === false
         ? text
-        : afterStart(text, group.prefix ?? starts.prefixes, starts.mention, group.caseSensitive)
+        : afterStart(text, group.prefix ?? starts.prefixes, mentionFor(group, starts), group.caseSensitive)
     if (!rest) continue
     // A trie is split for and walked only when its first word could lead somewhere, so an unknown command costs
     // no split, and a message naming a command with flags is not split a second time for the routes without
@@ -658,7 +689,7 @@ export function matchMessageCommand(
   let outside: { rank: number; start: string; given: number } | undefined
   for (const group of index.groups) {
     if (group.prefix === false) continue
-    const rest = afterStart(text, group.prefix ?? starts.prefixes, starts.mention, group.caseSensitive)
+    const rest = afterStart(text, group.prefix ?? starts.prefixes, mentionFor(group, starts), group.caseSensitive)
     if (!rest || rest.length === text.length) continue
     // A message whose first word names no command is not split, unless it is quoted; a flag names none
     const first = firstWordKey(rest, group.caseSensitive)

@@ -1066,15 +1066,18 @@ class App {}
 ```
 
 - `prefix` is a string, a list such as `['!', '?']`, or a function of the message returning either, which may be async — a server's own prefix, say. Without one, a pattern matches the message as it is. The longest prefix that fits is used, and a space after it is allowed: `! roll 20` works too.
-- `mention: true` also accepts a mention of the bot, `@Bot roll 20`, in place of the prefix.
+- `mention: true` also accepts a mention of the bot, `@Bot roll 20`, in place of the prefix. `mention: 'only'` accepts nothing else: a command starts with a mention of the bot, never with a prefix or as plain text.
 - `caseSensitive: true` matches the prefix and a pattern's literal words in the case written. It is off by default. Param values always keep the case they were typed in.
 
-A handler can set its own `prefix` and `caseSensitive`. Its prefix replaces the app's; a mention still counts. `prefix: false` matches the message as it is:
+A handler can set its own `prefix` and `caseSensitive`. Its prefix replaces the app's; a mention still counts. `prefix: false` matches the message as it is, and `mention: 'only'` starts that one command with a mention alone, whatever the app's prefix:
 
 ```typescript
 @MessageHandler('ping', { prefix: ['?', '??'] })   // ?ping, ??ping, @Bot ping
 @MessageHandler('good morning', { prefix: false }) // good morning, as typed
+@MessageHandler('status', { mention: 'only' })     // @Bot status, and nothing else
 ```
+
+Reading what a message says needs the privileged `MessageContent` intent, except where Discord sends the text without it: in messages that mention the bot, and in direct messages. So a command only a mention starts, or one with `scope: 'dm'`, needs no `MessageContent`, and a bot whose commands are all like that, with `messages: { mention: 'only' }`, runs without the intent and without applying for it once verified. MeoCord warns at startup only for the handlers that need it: a `@MessageHandler()` listener, and a command a prefix or plain text starts in a server.
 
 ### Which handler runs
 

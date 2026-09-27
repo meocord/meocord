@@ -32,8 +32,14 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
   if (prefix !== undefined && !isText(prefix) && typeof prefix !== 'function' && !(Array.isArray(prefix) && prefix.every(isText))) {
     throw new TypeError('@MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function of the message returning them.')
   }
-  for (const [name, value] of Object.entries({ mention, caseSensitive, replyEmoji: messages.replyEmoji })) {
+  for (const [name, value] of Object.entries({ caseSensitive, replyEmoji: messages.replyEmoji })) {
     if (value !== undefined && typeof value !== 'boolean') throw new TypeError(`@MeoCord({ messages: { ${name} } }) takes true or false.`)
+  }
+  if (mention !== undefined && typeof mention !== 'boolean' && mention !== 'only') {
+    throw new TypeError("@MeoCord({ messages: { mention } }) takes true, false or 'only'.")
+  }
+  if (mention === 'only' && prefix !== undefined) {
+    throw new TypeError("@MeoCord({ messages }) has mention: 'only', which starts every command with a mention, and a prefix; remove one.")
   }
   const { types, deleteUsageRepliesAfter } = messages
   if (deleteUsageRepliesAfter !== undefined && !(typeof deleteUsageRepliesAfter === 'number' && deleteUsageRepliesAfter >= 0 && Number.isFinite(deleteUsageRepliesAfter))) {
