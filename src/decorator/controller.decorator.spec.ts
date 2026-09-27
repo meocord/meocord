@@ -11,7 +11,7 @@ import {
 } from '@src/decorator/controller.decorator.js'
 import { Controller } from '@src/decorator/controller-class.decorator.js'
 import { CommandBuilder } from '@src/decorator/command-builder.decorator.js'
-import { SlashCommandBuilder } from 'discord.js'
+import { ApplicationCommandType, ContextMenuCommandBuilder, type MessageContextMenuCommandInteraction, SlashCommandBuilder } from 'discord.js'
 import { type ChatInputCommandInteraction } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import {
@@ -24,6 +24,7 @@ import {
   UserSelectMenuInteraction,
 } from 'discord.js'
 import { createMockInteraction } from '@src/testing/index.js'
+import { Logger } from '@src/common/logger.js'
 import { buildComponentRoutes } from '@src/core/component-routes.js'
 
 describe('@MessageHandler', () => {
@@ -568,5 +569,81 @@ describe('a builder that throws', () => {
       }
       void BanController
     }).toThrow('BanBuilder could not build "ban": Invalid string length')
+  })
+})
+
+// A subcommand is described by its command's builder: one on the path either fails to build or is registered twice
+describe('a builder on a subcommand path', () => {
+  @CommandBuilder(CommandType.SLASH)
+  class SettingsCommandBuilder {
+    build(commandName: string) {
+      return new SlashCommandBuilder().setName(commandName).setDescription('Change your settings')
+    }
+  }
+
+  const declareInstead =
+    "Declare the handler with @Command('settings notify email', CommandType.SLASH), and give the builder to " +
+    "@Command('settings')."
+
+  it('is refused naming the handler and what to declare, when building from the path fails', () => {
+    expect(() => {
+      @Controller()
+      class SettingsSlashController {
+        @Command('settings notify email', SettingsCommandBuilder)
+        async notifyEmail(_interaction: ChatInputCommandInteraction) {}
+      }
+      void SettingsSlashController
+    }).toThrow(
+      'SettingsSlashController.notifyEmail declares the builder SettingsCommandBuilder on "settings notify email", which ' +
+        'is a subcommand path: the builder of its command, "settings", describes it, and building it from the path ' +
+        `failed (Invalid string format). ${declareInstead}`,
+    )
+  })
+
+  // It works, since the builder names its command itself and registers once, so it is kept, with a warning
+  it('is warned about once, naming the handler, when the builder names its command itself', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    @CommandBuilder(CommandType.SLASH)
+    class FixedNameBuilder {
+      build() {
+        return new SlashCommandBuilder().setName('settings').setDescription('Change your settings')
+      }
+    }
+
+    @Controller()
+    class SettingsSlashController {
+      @Command('settings notify email', FixedNameBuilder)
+      async notifyEmail(_interaction: ChatInputCommandInteraction) {}
+    }
+
+    expect(getCommandMap(SettingsSlashController.prototype)['settings notify email']).toHaveLength(1)
+    expect(warn.mock.calls).toEqual([
+      [
+        'SettingsSlashController.notifyEmail declares the builder FixedNameBuilder on "settings notify email", which is ' +
+          `a subcommand path; the builder of its command, "settings", describes it. ${declareInstead}`,
+      ],
+    ])
+    warn.mockRestore()
+  })
+
+  it('leaves a context menu name with spaces alone, which Discord allows', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    @CommandBuilder(CommandType.CONTEXT_MENU)
+    class ReportMessageBuilder {
+      build(commandName: string) {
+        return new ContextMenuCommandBuilder().setName(commandName).setType(ApplicationCommandType.Message)
+      }
+    }
+
+    expect(() => {
+      @Controller()
+      class ReportController {
+        @Command('Report message', ReportMessageBuilder)
+        async report(_interaction: MessageContextMenuCommandInteraction) {}
+      }
+      void ReportController
+    }).not.toThrow()
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 })
