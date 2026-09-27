@@ -580,7 +580,7 @@ src/controllers/<type>/
 
 A builder is generated only for the three types Discord registers by name. Everything else is addressed by `customId` or, for autocomplete, by the command path it completes — there is nothing to register.
 
-Each controller gets its own builder, `<Name>CommandBuilder`, and registers a command named after it: `npx meocord g co slash Greeting` registers `/greeting`. A nested name uses its whole path, so `admin/ban` registers `/admin-ban` from `AdminBanSlashController` — Discord command names are global to the application, while folders only keep files apart. An autocomplete controller completes the slash command of the same name.
+Each controller gets its own builder, `<Name>CommandBuilder`, and registers a command named after it: `npx meocord g co slash Greeting` registers `/greeting`. A nested name uses its whole path, so `admin/ban` registers `/admin-ban` from `AdminBanSlashController` — Discord command names are global to the application, while folders only keep files apart. An autocomplete controller completes the slash command of the same name. A context-menu controller registers a user context menu command, and `--message` makes it a message one: `npx meocord g co context-menu Quote --message`.
 
 Buttons, modals, select menus and message handlers take the same name: `npx meocord g co button ticket` routes the customIds `ticket` and `ticket/{id}`, and `npx meocord g co message ping` matches `ping`. Two generated components never share a route, nor share one with the samples `meocord create` writes.
 
@@ -598,18 +598,18 @@ Directory layout is organisational only. Controllers are wired up by the `contro
 
 `@Command` binds a method to one kind of interaction, and the interaction class the handler receives follows from that. Every type Discord sends is covered.
 
-| `CommandType`             | Handler receives                                                            | Routed by  |
-| ------------------------- | --------------------------------------------------------------------------- | ---------- |
-| `SLASH`                   | `ChatInputCommandInteraction`                                               | name       |
-| `CONTEXT_MENU`            | `UserContextMenuCommandInteraction \| MessageContextMenuCommandInteraction` | name       |
-| `PRIMARY_ENTRY_POINT`     | `PrimaryEntryPointCommandInteraction`                                       | name       |
-| `BUTTON`                  | `ButtonInteraction`                                                         | `customId` |
-| `SELECT_MENU`             | `StringSelectMenuInteraction`                                               | `customId` |
-| `USER_SELECT_MENU`        | `UserSelectMenuInteraction`                                                 | `customId` |
-| `ROLE_SELECT_MENU`        | `RoleSelectMenuInteraction`                                                 | `customId` |
-| `MENTIONABLE_SELECT_MENU` | `MentionableSelectMenuInteraction`                                          | `customId` |
-| `CHANNEL_SELECT_MENU`     | `ChannelSelectMenuInteraction`                                              | `customId` |
-| `MODAL_SUBMIT`            | `ModalSubmitInteraction`                                                    | `customId` |
+| `CommandType`             | Handler receives                                                              | Routed by  |
+| ------------------------- | ----------------------------------------------------------------------------- | ---------- |
+| `SLASH`                   | `ChatInputCommandInteraction`                                                 | name       |
+| `CONTEXT_MENU`            | `UserContextMenuCommandInteraction` or `MessageContextMenuCommandInteraction` | name       |
+| `PRIMARY_ENTRY_POINT`     | `PrimaryEntryPointCommandInteraction`                                         | name       |
+| `BUTTON`                  | `ButtonInteraction`                                                           | `customId` |
+| `SELECT_MENU`             | `StringSelectMenuInteraction`                                                 | `customId` |
+| `USER_SELECT_MENU`        | `UserSelectMenuInteraction`                                                   | `customId` |
+| `ROLE_SELECT_MENU`        | `RoleSelectMenuInteraction`                                                   | `customId` |
+| `MENTIONABLE_SELECT_MENU` | `MentionableSelectMenuInteraction`                                            | `customId` |
+| `CHANNEL_SELECT_MENU`     | `ChannelSelectMenuInteraction`                                                | `customId` |
+| `MODAL_SUBMIT`            | `ModalSubmitInteraction`                                                      | `customId` |
 
 Autocomplete has its own decorator — see [Autocomplete](#autocomplete). It has no `CommandType` member, because it registers nothing and is answered with `respond()` rather than a reply. `@MessageHandler` and `@ReactionHandler` are outside `CommandType` for the same reason: `CommandType` is the set of things `@Command` can bind to, not the set of things MeoCord handles.
 
@@ -621,6 +621,22 @@ The four entity select menus are separate types because Discord sends them as se
 @Command('assign/{taskId}', CommandType.USER_SELECT_MENU)
 async assign(interaction: UserSelectMenuInteraction, { taskId }) {
   await interaction.reply(`Assigned to ${interaction.users.map(user => user.username).join(', ')}`)
+}
+```
+
+A context menu handler takes the kind of interaction its builder registers: `UserContextMenuCommandInteraction` for a builder that calls `setType(ApplicationCommandType.User)`, `MessageContextMenuCommandInteraction` for `Message`, or the union of both. The kind a builder sets is a value TypeScript cannot read, so the bot checks it as it starts: a handler that declares the other kind stops it with an error naming both. A user and a message context menu command may share a name, and each reaches its own handler.
+
+```typescript
+@CommandBuilder(CommandType.CONTEXT_MENU)
+export class QuoteCommandBuilder {
+  build() {
+    return new ContextMenuCommandBuilder().setName('Quote').setType(ApplicationCommandType.Message)
+  }
+}
+
+@Command('Quote', QuoteCommandBuilder)
+async quote(interaction: MessageContextMenuCommandInteraction) {
+  await respond(interaction).send(`> ${interaction.targetMessage.content}`)
 }
 ```
 

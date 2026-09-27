@@ -69,6 +69,8 @@ interface Scenario {
     creates?: string[]
     /** Paths, relative to cwd, that must not exist afterwards. */
     leaves?: string[]
+    /** Text each path, relative to cwd, must contain afterwards. */
+    contains?: Record<string, string[]>
     /** Whether the run must leave the directory's files as they were, outside node_modules and dist. */
     writesNothing?: boolean
     /** Paths, relative to cwd, whose content must be what it was before the run. */
@@ -371,6 +373,10 @@ async function check(scenario: Scenario): Promise<string[]> {
       if (createdBefore.has(file) || !existsSync(path.join(dir, file))) problems.push(`did not create ${file}`)
     }
     for (const file of scenario.expect.leaves ?? []) if (existsSync(path.join(dir, file))) problems.push(`created ${file}`)
+    for (const [file, texts] of Object.entries(scenario.expect.contains ?? {})) {
+      const content = existsSync(path.join(dir, file)) ? readFileSync(path.join(dir, file), 'utf8') : ''
+      for (const text of texts) if (!content.includes(text)) problems.push(`${file} does not contain "${text}"`)
+    }
     for (const [file, content] of kept) {
       if (!existsSync(path.join(dir, file)) || readFileSync(path.join(dir, file), 'utf8') !== content) problems.push(`changed ${file}`)
     }
@@ -590,6 +596,38 @@ const scenarios: Scenario[] = [
       code: 0,
       creates: ['src/controllers/slash/probe.slash.controller.ts', 'src/controllers/slash/probe.slash.controller.spec.ts', 'src/controllers/slash/builders/probe.builder.ts'],
     },
+  },
+  {
+    name: 'g co context-menu --message writes a message command, and a handler typed for it',
+    tier: 'fast',
+    argv: ['g', 'co', 'context-menu', 'Quote', '--message'],
+    expect: {
+      code: 0,
+      creates: ['src/controllers/context-menu/quote.context-menu.controller.ts', 'src/controllers/context-menu/builders/quote.builder.ts'],
+      contains: {
+        'src/controllers/context-menu/builders/quote.builder.ts': ['.setType(ApplicationCommandType.Message)'],
+        'src/controllers/context-menu/quote.context-menu.controller.ts': ['handleQuote(interaction: MessageContextMenuCommandInteraction)'],
+      },
+    },
+  },
+  {
+    name: 'g co context-menu writes a user command by default',
+    tier: 'fast',
+    argv: ['g', 'co', 'context-menu', 'Profile'],
+    expect: {
+      code: 0,
+      creates: ['src/controllers/context-menu/profile.context-menu.controller.ts'],
+      contains: {
+        'src/controllers/context-menu/builders/profile.builder.ts': ['.setType(ApplicationCommandType.User)'],
+        'src/controllers/context-menu/profile.context-menu.controller.ts': ['handleProfile(interaction: UserContextMenuCommandInteraction)'],
+      },
+    },
+  },
+  {
+    name: 'generate refuses --message for a controller that is not a context menu',
+    tier: 'fast',
+    argv: ['g', 'co', 'button', 'Probe', '--message'],
+    expect: { code: 1, says: ['--message applies to context-menu controllers only.'], writesNothing: true },
   },
   {
     name: 'g co button writes no builder',

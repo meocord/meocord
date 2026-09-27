@@ -61,4 +61,32 @@ describe('context menu commands', () => {
     await expect(module.invoke(ReportController, 'reportUser', user)).resolves.toMatchObject({ ran: true })
     expect(ran).toEqual(['user'])
   })
+
+  it('refuses at startup a handler that declares the other kind than its builder registers, naming both', () => {
+    expect(() => {
+      @Controller()
+      class Mismatched {
+        @Command('Report', ReportUserBuilder)
+        report(_interaction: MessageContextMenuCommandInteraction) {}
+      }
+      return Mismatched
+    }).toThrow(
+      'Mismatched.report takes a message context menu interaction, but ReportUserBuilder registers "Report" as a user ' +
+        "context menu command. Declare the handler's interaction as the kind the builder's setType() names.",
+    )
+  })
+
+  it("takes a handler that declares its builder's kind, or either kind", () => {
+    expect(() => {
+      @Controller()
+      class Matching {
+        @Command('Report', ReportMessageBuilder)
+        report(_interaction: MessageContextMenuCommandInteraction) {}
+
+        @Command('Report', ReportUserBuilder)
+        either(_interaction: UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction) {}
+      }
+      return Matching
+    }).not.toThrow()
+  })
 })

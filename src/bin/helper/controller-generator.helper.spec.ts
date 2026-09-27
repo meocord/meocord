@@ -93,6 +93,16 @@ describe('ControllerGeneratorHelper', () => {
       },
     )
 
+    it('writes a user context menu command by default, and a message one when asked, typing the handler to match', () => {
+      generate('Report', ControllerType.CONTEXT_MENU)
+      helper.generateController({ controllerName: 'Quote' }, ControllerType.CONTEXT_MENU, { message: true })
+
+      expect(read('context-menu', 'builders', 'report.builder.ts')).toContain('.setType(ApplicationCommandType.User)')
+      expect(read('context-menu', 'report.context-menu.controller.ts')).toContain('handleReport(interaction: UserContextMenuCommandInteraction)')
+      expect(read('context-menu', 'builders', 'quote.builder.ts')).toContain('.setType(ApplicationCommandType.Message)')
+      expect(read('context-menu', 'quote.context-menu.controller.ts')).toContain('handleQuote(interaction: MessageContextMenuCommandInteraction)')
+    })
+
     // Controllers of one type each own their builder, so generating one never touches another's.
     it('gives two slash controllers separate builders and distinct command names', () => {
       generate('Greeting', ControllerType.SLASH)
