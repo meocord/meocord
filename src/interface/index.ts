@@ -392,17 +392,26 @@ export interface ControllerOptions {
 export type MessagePrefix = string | readonly string[]
 
 /**
- * How `@MessageHandler` patterns are matched across the app, set with `@MeoCord({ messages })`.
+ * How message commands start and match across the app, set in `@MeoCord({ messages })`.
+ *
+ * Use it to give `@MessageHandler` patterns a prefix, accept a mention of the bot in its place, and add param
+ * types of the app's own. A handler sets its own start and case with {@link MessageHandlerOptions}.
  *
  * @example
  * ```ts
  * @MeoCord({
- *   controllers: [DiceController],
+ *   controllers: [],
  *   clientOptions: { intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] },
- *   messages: { prefix: '!', mention: true },
+ *   // !roll 20, or @Bot roll 20; a usage reply stays 30 seconds
+ *   messages: { prefix: '!', mention: true, deleteUsageRepliesAfter: 30 },
  * })
  * class App {}
  * ```
+ *
+ * @group Configuration
+ * @category App options
+ * @see {@link MessageHandler}
+ * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
 export interface MessageCommandOptions {
   /**
@@ -674,7 +683,29 @@ export type CheckedParams<P extends string, Declared> = string extends keyof Dec
  */
 export type MessageScope = 'guild' | 'dm' | 'any'
 
-/** What a patterned `@MessageHandler` sets for itself, over the app's `messages` options. */
+/**
+ * What one message command sets for itself, over the app's `messages` options.
+ *
+ * Use it to give a command its own prefix or case, aliases, a description for a help listing, or the places it
+ * works. The app-wide defaults are {@link MessageCommandOptions}.
+ *
+ * @example
+ * ```ts
+ * @MessageHandler('mute {target:member} {duration:duration?}', {
+ *   aliases: ['m'],
+ *   description: 'Times a member out.',
+ *   scope: 'guild',
+ * })
+ * async mute(message: Message, { target, duration }: { target: GuildMember; duration?: number }) {
+ *   await target.timeout(duration ?? 600_000)
+ * }
+ * ```
+ *
+ * @group Configuration
+ * @category App options
+ * @see {@link MessageHandler}
+ * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
+ */
 export interface MessageHandlerOptions {
   /**
    * The handler's own prefixes, in place of the app's; a mention of the bot still counts when the app
