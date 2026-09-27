@@ -180,18 +180,19 @@ export interface OnReady {
  *
  * @example
  * ```ts
- * @Service()
- * export class ServerCountReporter implements OnReady, OnShutdown {
- *   private readonly logger = new Logger(ServerCountReporter.name)
- *   private timer?: NodeJS.Timeout
+ * import { appendFile } from 'node:fs/promises'
  *
- *   onReady(client: Client<true>, { primary }: ReadyInfo) {
- *     // One process reports, however many shards run
- *     if (primary) this.timer = setInterval(() => this.logger.log(`${client.guilds.cache.size} servers`), 60_000)
+ * @Service()
+ * export class AuditLog implements OnShutdown {
+ *   private readonly pending: string[] = []
+ *
+ *   record(line: string) {
+ *     this.pending.push(line)
  *   }
  *
- *   onShutdown() {
- *     clearInterval(this.timer)
+ *   // Writes what is still buffered before the process exits
+ *   async onShutdown() {
+ *     await appendFile('audit.log', this.pending.splice(0).map(line => `${line}\n`).join(''))
  *   }
  * }
  * ```
