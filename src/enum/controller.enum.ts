@@ -37,7 +37,22 @@ export enum CommandType {
 }
 
 /**
- * Enum representing actions that can be performed on a message reaction.
+ * Whether a `@ReactionHandler` call is for a reaction added to a message or removed from it.
+ *
+ * Read it from the handler's second argument when the handler should act on one only, such as counting a vote
+ * when it is added and taking it back when it is removed.
+ *
+ * @example
+ * ```ts
+ * @ReactionHandler('👍')
+ * async vote(reaction: MessageReaction, { action }: ReactionHandlerOptions) {
+ *   const change = action === ReactionHandlerAction.ADD ? 'counted' : 'taken back'
+ *   await reaction.message.reply(`Vote ${change}.`)
+ * }
+ * ```
+ *
+ * @group Types
+ * @see {@link ReactionHandler}
  */
 export enum ReactionHandlerAction {
   /** Reaction added to a message. */

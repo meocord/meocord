@@ -69,16 +69,29 @@ export interface PatternedMessageHandlerDecorator<T, R, Pattern extends string> 
 }
 
 /**
- * Registers a listener for every message not sent by a bot. It runs after the patterned handler the
- * message matched, if any; see the overload taking a pattern for message commands.
+ * Runs the method it decorates for every message a user sends, whatever it says.
+ *
+ * Use it for work on all chat, such as logging, auto-moderation or counting activity. For a command a user
+ * types, such as `!roll 20`, give `@MessageHandler` a pattern instead.
+ *
+ * @remarks
+ * It runs after the one patterned handler the message matched, if any, and never for a message from a bot or
+ * one with no text. Reading a message's text needs the privileged `MessageContent` intent. Its guards only
+ * filter what it takes, so a denial gets no reply.
  *
  * @example
- * ```typescript
+ * ```ts
  * @MessageHandler()
- * async handleAnyMessage(message: Message) {
- *   console.log(`Received a message: ${message.content}`)
+ * async log(message: Message) {
+ *   console.log(`${message.author.username}: ${message.content}`)
  * }
  * ```
+ *
+ * @pipeline handler after every stage the call passed
+ * @group Decorators
+ * @category Handlers
+ * @see {@link ReactionHandler}
+ * @see {@link https://meocord.dev/docs/latest/messages-and-reactions | Messages and reactions}
  */
 export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boolean>>, R extends void | Promise<void>>(): (
   target: object,
@@ -87,52 +100,38 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
   _descriptor: TypedPropertyDescriptor<(message: T) => R> | TypedPropertyDescriptor<() => R>,
 ) => void
 /**
- * Registers a handler for messages matching a pattern, after the prefix `@MeoCord({ messages })`
- * configures.
+ * Runs the method it decorates for a message that matches a pattern, such as `!roll 20`, as a message command.
  *
- * A pattern is matched word by word. A literal word matches itself, in any case unless
- * `caseSensitive` is set. `{name}` captures one word, and words in quotes count as one. `{name...}`
- * captures the rest of the message as typed, at the end. `{name?}` and `{name...?}` are optional, and
- * only optional params follow one; of several, each takes a word only if it fits its type, and the
- * last takes any. `{name:type}` turns the word into a value of the type before any guard runs:
- * `int`, `number`, `bool`, `duration`, `member`, `user`, `role`, `channel`, words such as `on|off`, or
- * a type the app adds, and `{name:type...}` turns each word of the rest into one, as a list. `{--name}`
- * is a flag, `true` when the message gives `--name` after the command; `{--name:type}` takes `--name=value`,
- * required unless `?`. The params arrive as the handler's second argument, where `@Validate`, pipes
- * and `@Cooldown({ by })` see them too, and the params the handler declares are checked against them.
+ * Use it for commands users type in chat. Slash commands are usually the better choice for anything new, since
+ * Discord shows and checks their options: see {@link Command}. For every message, leave the pattern out.
  *
- * A message that names the command, after a prefix or mention, but does not fit its pattern is
- * answered with the command's usage, as a `MessageUsageError` its filters see first.
+ * @remarks
+ * A pattern is matched word by word, after the app's prefix or a mention: `{name}` captures a word,
+ * `{name...}` the rest, `{name?}` an optional word, `{name:type}` a typed value such as a number or a member,
+ * and `{--name}` a flag. Only the most specific matching pattern runs, across every controller. A message that
+ * names the command but does not fit its pattern gets the command's usage in reply, as a
+ * {@link MessageUsageError}. The params the handler declares are checked against the pattern when the code
+ * compiles.
  *
- * Only the most specific matching pattern runs, across every controller: more literal words first,
- * then a fixed number of words before a rest, then fewer params.
- *
- * @param pattern - The words to match, such as `'roll {sides} {note...?}'`.
- * @param options - The handler's own `prefix`, in place of the app's, or `false` for none;
- *   `caseSensitive`, over the app's; `aliases`, other command words; a `description` for help; and
- *   the `scope` it works in, `'guild'`, `'dm'` or `'any'`.
+ * @param pattern - The words to match, such as `'roll {sides:int} {note...?}'`.
+ * @param options - The handler's own start, case, aliases, description and scope; see {@link MessageHandlerOptions}.
+ * @throws Error at startup for a pattern that cannot be read, and for two patterns that match the same messages.
  *
  * @example
- * ```typescript
- * @MessageHandler('roll {sides:int} {note...?}')
+ * ```ts
+ * @MessageHandler('roll {sides:int} {note...?}', { aliases: ['r'] })
  * async roll(message: Message, { sides, note }: { sides: number; note?: string }) {
- *   await message.reply(`Rolling d${sides}${note ? ` (${note})` : ''}`)
- * }
- *
- * // !mute @ana spam    !m @ana 1h spam
- * @MessageHandler('mute {target:member} {duration:duration?} {reason...?}', {
- *   aliases: ['m'],
- *   description: 'Times a member out, for 10 minutes unless told otherwise.',
- * })
- * async mute(message: Message, { target, duration, reason }: { target: GuildMember; duration?: number; reason?: string }) {
- *   await target.timeout(duration ?? 600_000, reason)
- * }
- *
- * @MessageHandler('hello', { prefix: false })
- * async hello(message: Message) {
- *   await message.reply('Hello! How can I help you?')
+ *   const result = 1 + Math.floor(Math.random() * sides)
+ *   await message.reply(note ? `${result} (${note})` : String(result))
  * }
  * ```
+ *
+ * @pipeline parse the pattern's words, before the guards
+ * @pipeline handler after every stage the call passed
+ * @group Decorators
+ * @category Handlers
+ * @see {@link ParamsOf}
+ * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
  */
 export function MessageHandler<
   T extends OmitPartialGroupDMChannel<Message<boolean>>,
@@ -166,35 +165,33 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
 ) => void
 
 /**
- * Registers a handler for reactions added to or removed from a message: those with the given emoji,
- * or every reaction without one. Reactions from bots, the bot's own included, are skipped unless the
- * handler sets `bots: true`.
+ * Runs the method it decorates when a reaction with an emoji is added to or removed from a message.
  *
- * @param emoji - The emoji: the character for a standard emoji; for a custom one its id, the `<:name:id>`
- *   Discord shows for it (`\:party:` in a message), or its name. A name matches every custom emoji of that
- *   name, one from each server; an id matches that emoji alone.
- * @param settings - `bots: true` to also run for reactions from bots.
+ * Use it to act on reactions: a starboard, a poll, a role menu or approving by ✅. Leave the emoji out to run
+ * for every reaction. For clicks on a message's buttons, use {@link Command} with a customId.
+ *
+ * @remarks
+ * A standard emoji is its character, such as `'👍'`. A custom emoji is its id or the `<:name:id>` Discord
+ * shows, which match that emoji alone, or its name, which matches every custom emoji of that name. Every
+ * matching handler runs, and the reacted-to message is fetched first, so it is complete. Reactions from bots,
+ * the bot's own included, are skipped unless `bots: true` is set.
+ *
+ * @param emoji - The emoji to handle: its character, or a custom emoji's id, `<:name:id>` or name.
+ * @param settings - Whether bots' reactions reach it too; see {@link ReactionHandlerSettings}.
  *
  * @example
- * ```typescript
- * @ReactionHandler('👍')
- * async handleThumbsUpReaction(reaction: MessageReaction, { user }: ReactionHandlerOptions) {
- *   console.log(`User ${user.username} reacted with 👍`)
+ * ```ts
+ * @ReactionHandler('⭐')
+ * async star(reaction: MessageReaction, { user, action }: ReactionHandlerOptions) {
+ *   if (action === ReactionHandlerAction.ADD) await reaction.message.reply(`${user.username} starred this.`)
  * }
- *
- * // One server's custom emoji, by its id
- * @ReactionHandler('<:party:1234567890123456789>')
- * async celebrate(reaction: MessageReaction) {}
- *
- * @ReactionHandler()
- * async handleAnyReaction(reaction: MessageReaction, { user }: ReactionHandlerOptions) {
- *   console.log(`User ${user.username} reacted with ${reaction.emoji.name}`)
- * }
- *
- * // Every emoji, from users and bots alike
- * @ReactionHandler({ bots: true })
- * async relay(reaction: MessageReaction, { user }: ReactionHandlerOptions) {}
  * ```
+ *
+ * @pipeline handler after every stage the call passed
+ * @group Decorators
+ * @category Handlers
+ * @see {@link ReactionHandlerOptions}
+ * @see {@link https://meocord.dev/docs/latest/messages-and-reactions | Messages and reactions}
  */
 export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>>(
   emoji?: string,
