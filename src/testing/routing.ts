@@ -40,10 +40,11 @@ export interface ResolvedRoute {
    */
   handler: (...args: any[]) => unknown
   /**
-   * The words the pattern's params captured. A message's typed params are left as their words: dispatch
-   * and `invoke` resolve them against the message's guild.
+   * What the pattern's params captured. A component's typed params are their values, such as a number for
+   * `{count:int}`; a message's typed params are left as their words, which dispatch and `invoke` resolve
+   * against the message's guild.
    */
-  params: Record<string, string>
+  params: Record<string, string | number | boolean>
 }
 
 /** Two patterns of one component type that can both match a customId. */

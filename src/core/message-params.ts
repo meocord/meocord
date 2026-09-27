@@ -5,28 +5,9 @@ import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/messag
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
 import { type GivenFlag, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { type RunOptions } from '@src/core/handler-pipeline.js'
+import { bool, choicesOf, duration, number } from '@src/core/scalar-types.js'
 
 type ParamToken = Extract<PatternToken, { param: string }>
-
-const number = (word: string, whole: boolean): number | undefined => {
-  if (!(whole ? /^[+-]?\d+$/ : /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i).test(word)) return undefined
-  const value = Number(word)
-  return Number.isFinite(value) && (!whole || Number.isSafeInteger(value)) ? value : undefined
-}
-
-const BOOLEANS: Record<string, boolean> = { yes: true, true: true, on: true, no: false, false: false, off: false }
-
-const UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }
-
-/** A length of time written as amounts and units, such as `90s`, `2h30m` or `1.5d`, in milliseconds. */
-function duration(word: string): number | undefined {
-  const parts = word.toLowerCase().match(/(\d+(?:\.\d+)?)(ms|s|m|h|d|w)/g)
-  if (!parts || parts.join('') !== word.toLowerCase()) return undefined
-  return parts.reduce((total, part) => {
-    const [, amount, unit] = /^(\d+(?:\.\d+)?)(ms|s|m|h|d|w)$/.exec(part)!
-    return total + Number(amount) * UNIT_MS[unit]
-  }, 0)
-}
 
 /** The ID a mention or a bare snowflake names, for the mention's kind. */
 function idOf(word: string, mention: RegExp): string | undefined {
@@ -42,7 +23,7 @@ export const BUILT_IN_TYPES = {
   string: (word: string) => word,
   int: (word: string) => number(word, true),
   number: (word: string) => number(word, false),
-  bool: (word: string) => BOOLEANS[word.toLowerCase()],
+  bool,
   duration,
   member: undefined,
   user: undefined,
@@ -69,7 +50,6 @@ const GUILD_TYPES = new Set(['member', 'role', 'channel'])
 /** Whether a param type is found only in a server. */
 export const isGuildType = (type: string): boolean => GUILD_TYPES.has(type)
 
-const choicesOf = (type: string) => (type.includes('|') ? type.split('|') : undefined)
 
 /** Whether a pattern's `{name:type}` names a type: built in, words to choose from, or one the app adds. */
 export function isKnownParamType(type: string, types: Record<string, MessageParamType> | undefined): boolean {
@@ -361,7 +341,7 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
     const value = given.get(flag.flag)?.value
     delete params[flag.flag]
     if (flag.type === undefined) {
-      const on = value === undefined ? given.has(flag.flag) : BOOLEANS[value.toLowerCase()]
+      const on = value === undefined ? given.has(flag.flag) : bool(value)
       if (on === undefined) issues.push({ param: flag.flag, message: `${label}: "${value}" is not yes or no` })
       else params[flag.flag] = on
     } else if (!given.has(flag.flag)) {

@@ -1,15 +1,21 @@
 import { type CommandType } from '@src/enum/index.js'
 import { type CommandMetadata } from '@src/interface/index.js'
-import { findAmbiguousRoutes, getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
+import { createRegexFromPattern, findAmbiguousRoutes, getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
 import { decodeRouteParams } from '@src/common/route.js'
+import { parseSegment } from '@src/core/scalar-types.js'
 
 export type ControllerClass = new (...args: any[]) => any
+
+/** A customId param as its handler gets it: text, or the value of its type, such as a number for `{count:int}`. */
+export type RouteParamValue = string | number | boolean
 
 /** A `@Command` route matched by customId pattern. */
 export interface ComponentRoute {
   controllerClass: ControllerClass
   meta: CommandMetadata<string>
   pattern: string
+  /** The type of each typed param, such as `int` for `{count:int}`; untyped params are text. */
+  types: Record<string, string>
 }
 
 /** Two patterns of one component type that can both match a customId. */
@@ -34,7 +40,7 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
       if (!Array.isArray(metaArray)) continue
       for (const meta of metaArray) {
         if (!meta.regex) continue
-        const route = { controllerClass, meta, pattern }
+        const route = { controllerClass, meta, pattern, types: typesOf(pattern) }
         const key = `${meta.type}\0${patternShape(pattern)}`
         const earlier = seen.get(key)
         if (!earlier) {
@@ -60,19 +66,45 @@ const typeLabel = (type: CommandType): string => type.toLowerCase().replaceAll('
 
 /**
  * The route dispatch runs for a customId: the first, in rank order, whose type `acceptsType` allows
- * and whose pattern matches, with the captured params.
+ * and whose pattern matches, with the captured params, a typed param as its value. A segment that is not
+ * a value of its param's type does not match, so the next route is tried.
  */
 export function matchComponentRoute(
   routes: readonly ComponentRoute[],
   acceptsType: (type: CommandType) => boolean,
   customId: string,
-): { route: ComponentRoute; params: Record<string, string> } | undefined {
+): { route: ComponentRoute; params: Record<string, RouteParamValue> } | undefined {
   for (const route of routes) {
     if (!acceptsType(route.meta.type)) continue
-    const match = route.meta.regex!.exec(customId)
-    if (match) return { route, params: decodeRouteParams(match.groups) }
+    const params = readCustomId(route.pattern, route.meta.regex!, customId)
+    if (params) return { route, params }
   }
   return undefined
+}
+
+const typesByPattern = new Map<string, Record<string, string>>()
+
+/** The typed params of a customId pattern, read once per pattern. */
+function typesOf(pattern: string): Record<string, string> {
+  let types = typesByPattern.get(pattern)
+  if (!types) typesByPattern.set(pattern, (types = createRegexFromPattern(pattern).types))
+  return types
+}
+
+/**
+ * The params `pattern`, compiled as `regex`, captures from a customId, each typed param as its value:
+ * `undefined` when the customId does not match, or a segment is not a value of its param's type.
+ */
+export function readCustomId(pattern: string, regex: RegExp, customId: string): Record<string, RouteParamValue> | undefined {
+  const match = regex.exec(customId)
+  if (!match) return undefined
+  const params: Record<string, RouteParamValue> = decodeRouteParams(match.groups)
+  for (const [name, type] of Object.entries(typesOf(pattern))) {
+    const value = parseSegment(type, params[name] as string) as RouteParamValue | undefined
+    if (value === undefined) return undefined
+    params[name] = value
+  }
+  return params
 }
 
 /** Pattern pairs that can match one customId, compared only within a component type, as dispatch does. */

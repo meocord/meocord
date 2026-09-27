@@ -750,9 +750,39 @@ async handle(interaction: ButtonInteraction, { id, action }: { id: string; actio
 new ButtonBuilder().setCustomId(ticket.build({ id: 42, action: 'close' })) // 'ticket/42/close'
 ```
 
-`build` takes exactly the pattern's params: a missing or unknown one fails to compile, and a route without params takes nothing. The handler's params are checked against the route too: each key they require must be one of its params, or a select menu's choice such as `values`, so `{ ticketId }` against `route('ticket/{id}')` fails to compile. A modal's handler may name its fields beside them, and a command's options are not checked. Value types are not checked here, since `@Validate` and pipes change them; `@Validate` checks those. Values may be strings, numbers or bigints. A `/` or `%` inside a value is encoded as `%2F` or `%25`, and handlers receive it decoded, so a value never spills into the next segment. An empty value, or a customId longer than Discord's 100 characters, throws.
+`build` takes exactly the pattern's params: a missing or unknown one fails to compile, and a route without params takes nothing. The handler's params are checked against the route too: each key they require must be one of its params, or a select menu's choice such as `values`, so `{ ticketId }` against `route('ticket/{id}')` fails to compile. A modal's handler may name its fields beside them, and a command's options are not checked. An untyped param's value type is not checked here, since `@Validate` and pipes change it; `@Validate` checks it. A [typed param](#typed-customid-params) is checked, and `build` takes a value of its type. An untyped param's value may be a string, a number or a bigint. A `/` or `%` inside a value is encoded as `%2F` or `%25`, and handlers receive it decoded, so a value never spills into the next segment. An empty value, or a customId longer than Discord's 100 characters, throws.
 
 A route is ranked, and checked for duplicates, exactly as its pattern string would be, and `` `${ticket}` `` gives the pattern back. Plain string patterns keep working beside routes.
+
+</details>
+
+<details>
+<summary><b>Typed customId params</b></summary>
+
+#### Typed customId params
+
+A customId param can name a type, `{name:type}`, as a [message command's](#typed-params) does. Its segment is read as that type with the same parsers, and the handler receives the value:
+
+```typescript
+export const counter = route('counter/{count:int}')
+
+@Command(counter, CommandType.BUTTON)
+async count(interaction: ButtonInteraction, { count }: { count: number }) {
+  await respond(interaction).send({ components: [row(new ButtonBuilder().setCustomId(counter.build({ count: count + 1 })).setLabel(`${count + 1}`))] })
+}
+```
+
+| Type                       | Gives             | A segment such as     |
+| -------------------------- | ----------------- | --------------------- |
+| none, or `string`          | `string`          | `abc`                 |
+| `int`, `number`            | `number`          | `42`, `-3`; `2.5`     |
+| `bool`                     | `boolean`         | `true`, `false`, `on` |
+| words, such as `asc\|desc` | `'asc' \| 'desc'` | `asc`, as written     |
+
+- A segment that is not a value of its type does not match, so the next route is tried, and a customId no route takes is [not found](#when-nothing-matches).
+- `route(pattern).build()` takes a value of each typed param's type, and throws for one that would not read back, such as `1.5` for an `int`.
+- The handler's typed params are checked against the pattern, for a route and for a plain string pattern: `{ count: string }` for `{count:int}` fails to compile. Untyped params stay unchecked, since `@Validate` and pipes change them.
+- A customId holds text the bot wrote, with no message to read a member, user, role or channel from, so `{target:member}` stops the bot where it is declared, as does any other type: write `{target}` for its ID, and fetch it in the handler.
 
 </details>
 
