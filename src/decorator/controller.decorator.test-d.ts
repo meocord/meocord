@@ -143,6 +143,33 @@ describe('@Command', () => {
     expectTypeOf<Accepted>().toBeObject()
   })
 
+  it('lets a context menu handler declare the one kind its builder registers, or either, but no other interaction', () => {
+    class ContextMenus {
+      @Command('report', ReportBuilder)
+      reportUser(_interaction: UserContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      @Command('quote', ReportBuilder)
+      reportMessage(_interaction: MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      @Command('either', CommandType.CONTEXT_MENU)
+      either(_interaction: UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction) {
+        // asserted at the type level only
+      }
+
+      // @ts-expect-error a chat input interaction never reaches a context menu handler
+      @Command('report', ReportBuilder)
+      chat(_interaction: ChatInputCommandInteraction) {
+        // asserted at the type level only
+      }
+    }
+
+    expectTypeOf<ContextMenus>().toBeObject()
+  })
+
   it('rejects a handler typed for a different select menu', () => {
     class Rejected {
       // @ts-expect-error a user select menu handler cannot take a string select menu

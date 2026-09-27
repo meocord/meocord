@@ -5,6 +5,6 @@ import { CommandType } from 'meocord/enum'
 @CommandBuilder(CommandType.CONTEXT_MENU)
 export class {{builderClassName}} {
   build() {
-    return new ContextMenuCommandBuilder().setName('{{commandName}}').setType(ApplicationCommandType.User)
+    return new ContextMenuCommandBuilder().setName('{{commandName}}').setType(ApplicationCommandType.{{contextMenuType}})
   }
 }

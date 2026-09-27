@@ -1,10 +1,13 @@
 import 'reflect-metadata'
 import {
+  ApplicationCommandType,
   type AutocompleteInteraction,
   Message,
+  MessageContextMenuCommandInteraction,
   MessageReaction,
   type OmitPartialGroupDMChannel,
   type PartialMessageReaction,
+  UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CheckedParams, type MessageHandlerOptions, type ReactionHandlerOptions, type ReactionHandlerSettings } from '@src/interface/index.js'
@@ -360,6 +363,20 @@ type RouteCheckedType =
   | CommandType.CHANNEL_SELECT_MENU
   | CommandType.MENTIONABLE_SELECT_MENU
 
+/** Either kind of context menu interaction, which a context menu command's handler is typed with. */
+type ContextMenuInteraction = UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction
+
+/**
+ * The handler a command's interaction type allows. A context menu handler's interaction is checked as a method's
+ * parameter is, so it may declare the one kind its builder registers, which startup checks against the builder;
+ * every other handler takes exactly its interaction type.
+ */
+type Handles<I, Args extends unknown[], R> = [I] extends [ContextMenuInteraction]
+  ? [ContextMenuInteraction] extends [I]
+    ? { handle(interaction: I, ...args: Args): R }['handle']
+    : (interaction: I, ...args: Args) => R
+  : (interaction: I, ...args: Args) => R
+
 /**
  * Allows the handler when each key its params require is one a call to it gets: a param of its route, or a
  * select menu's choice. Value types are left to `@Validate`. Plain strings, commands, whose params are their
@@ -412,7 +429,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * A subcommand's path is its parts separated by a space, as Discord shows it: `settings notify email`. In a
  * customId pattern, `{name}` captures one `/`-separated segment into the handler's params; with a route, the
  * keys the handler's params require are checked against it when the code compiles. Two component handlers of
- * one type whose patterns match the same ids stop the bot at startup.
+ * one type whose patterns match the same ids stop the bot at startup. A context menu handler may declare the kind of
+ * interaction its builder registers, which the bot checks as it starts.
  *
  * @param name - The command's name or subcommand path, or a component's customId pattern or route.
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
@@ -450,8 +468,8 @@ export function Command<
     target: object,
     propertyKey: string,
     _descriptor: (
-      | TypedPropertyDescriptor<(interaction: CommandInteractionType<CBC, T>, params: P) => R>
-      | TypedPropertyDescriptor<(interaction: CommandInteractionType<CBC, T>) => R>
+      | TypedPropertyDescriptor<Handles<CommandInteractionType<CBC, T>, [params: P], R>>
+      | TypedPropertyDescriptor<Handles<CommandInteractionType<CBC, T>, [], R>>
       | TypedPropertyDescriptor<() => R>
     ) &
       RouteAccepts<N, T, P> &
@@ -468,7 +486,7 @@ export function Command<
         throw new Error(`Invalid interaction type passed to @Command for method: ${propertyKey}`)
       }
 
-      return originalMethod.apply(this, [interaction, params])
+      return (originalMethod as (...args: unknown[]) => R).apply(this, [interaction, params])
     }
 
     // This class's own map, inherited routes included
@@ -500,6 +518,9 @@ export function Command<
       if (!(commandType in CommandType)) {
         throw new Error(`Metadata for 'commandType' is missing on builder ${builderOrType.name}`)
       }
+      if (commandType === CommandType.CONTEXT_MENU) {
+        assertContextMenuKind(target, propertyKey, builderOrType.name, commandName, builderInstance)
+      }
     } else {
       commandType = builderOrType
     }
@@ -528,6 +549,28 @@ export function Command<
 
     Reflect.defineMetadata(COMMAND_METADATA_KEY, commands, target)
   }
+}
+
+/** The interaction class Discord sends for each context menu kind. */
+const CONTEXT_MENU_INTERACTIONS = new Map<unknown, { kind: ApplicationCommandType; name: string }>([
+  [UserContextMenuCommandInteraction, { kind: ApplicationCommandType.User, name: 'user' }],
+  [MessageContextMenuCommandInteraction, { kind: ApplicationCommandType.Message, name: 'message' }],
+])
+
+/**
+ * Refuses a context menu handler that declares the other kind's interaction than its builder registers, read from
+ * the decorator metadata an app emits. A handler typed with the union, or without that metadata, is not checked.
+ */
+function assertContextMenuKind(target: object, propertyKey: string, builderName: string, commandName: string, built: unknown): void {
+  const declared = CONTEXT_MENU_INTERACTIONS.get((Reflect.getMetadata('design:paramtypes', target, propertyKey) as unknown[] | undefined)?.[0])
+  const registered = (built as { type?: ApplicationCommandType } | undefined)?.type
+  if (!declared || registered === undefined || declared.kind === registered) return
+  const kind = registered === ApplicationCommandType.User ? 'user' : 'message'
+  throw new Error(
+    `${target.constructor.name}.${propertyKey} takes a ${declared.name} context menu interaction, but ${builderName} ` +
+      `registers "${commandName}" as a ${kind} context menu command. Declare the handler's interaction as the kind the ` +
+      `builder's setType() names.`,
+  )
 }
 
 /**

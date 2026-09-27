@@ -86,11 +86,13 @@ export class GeneratorCLI {
         ),
       )
       .addArgument(new Argument('<name>', 'Name of the controller'))
-      .action(async (type, name) => {
+      .option('--message', 'For a context-menu controller: a message context menu command, rather than a user one')
+      .action(async (type, name, options: { message?: boolean }) => {
         await this.handleGenerateComponent({
           component: 'controller',
           type: type as ControllerType,
           name,
+          message: options.message === true,
         })
       })
 
@@ -173,6 +175,7 @@ export class GeneratorCLI {
     component: string
     name: string
     type?: ControllerType
+    message?: boolean
   }): Promise<void> {
     const { component, type } = args
     let { name } = args
@@ -207,7 +210,12 @@ export class GeneratorCLI {
           await wait(100)
           process.exit(1)
         }
-        await this.handleGenerateController({ name, type })
+        if (args.message && type !== ControllerType.CONTEXT_MENU) {
+          this.logger.error('--message applies to context-menu controllers only.')
+          await wait(100)
+          process.exit(1)
+        }
+        await this.handleGenerateController({ name, type, message: args.message === true })
         break
 
       case 'service':
@@ -247,9 +255,9 @@ export class GeneratorCLI {
     }
   }
 
-  private async handleGenerateController(args: { name: string; type: ControllerType }): Promise<void> {
+  private async handleGenerateController(args: { name: string; type: ControllerType; message: boolean }): Promise<void> {
     try {
-      this.controllerGeneratorHelper.generateController({ controllerName: args.name }, args.type)
+      this.controllerGeneratorHelper.generateController({ controllerName: args.name }, args.type, { message: args.message })
     } catch (error) {
       this.logger.error(`Error generating controller: ${error instanceof Error ? error.message : String(error)}`)
       await wait(100)
