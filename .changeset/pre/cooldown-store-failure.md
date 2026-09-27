@@ -16,4 +16,4 @@ Cooldowns survive a failing store, and count a handler's stacked cooldowns in on
 - **`ShardedCooldownStore`** treats a manager that does not answer as a store failure, handled by `cooldownStoreFailure`, rather than counting in the shard.
 - **`testCooldownStore`** checks the batch path too: a batch is counted at once and names the longest wait, and for a store that overrides `consumeMany`, a refused batch records nothing and concurrent batches at the limit let exactly one through.
 
-See [Smaller changes](https://github.com/meocord/meocord/blob/main/docs/MIGRATING.md#smaller-changes) in the upgrade guide.
+See [Smaller changes](https://meocord.dev/docs/4.1/migrating#smaller-changes) in the upgrade guide.

@@ -9,7 +9,7 @@ import { MeoCordTestingModule } from '@src/testing/index.js'
  * which fails once the rejected form starts compiling.
  */
 
-/** The part of OpenTelemetry's tracer the README's tracing example uses. */
+/** The part of OpenTelemetry's tracer the observers guide's tracing example uses. */
 interface Span {
   setAttribute(key: string, value: string): this
   end(): void
@@ -136,7 +136,7 @@ describe('@Observer', () => {
     void App
   })
 
-  it("compiles the README's tracing example", () => {
+  it("compiles the observers guide's tracing example", () => {
     // The call's own span, from the moment it arrives, whatever the outcome
     @Observer()
     class CallSpanObserver implements DispatchObserver {

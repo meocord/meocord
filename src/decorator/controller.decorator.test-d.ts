@@ -39,7 +39,7 @@ class PingBuilder implements CommandBuilderBase<CommandType.SLASH> {
 }
 
 // Adding an option narrows the chain to SlashCommandOptionsOnlyBuilder, and a subcommand to
-// SlashCommandSubcommandsOnlyBuilder. The README's first example is the options case.
+// SlashCommandSubcommandsOnlyBuilder. The docs' first slash command is the options case.
 @CommandBuilder(CommandType.SLASH)
 export class GreetBuilder implements CommandBuilderBase<CommandType.SLASH> {
   build(commandName: string) {

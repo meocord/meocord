@@ -169,7 +169,7 @@ jobs:
       - name: Run the slow CLI scenarios
         run: bun run cli:scenarios --tier slow
 
-  # RedisCooldownStore's script, run on a real server through both clients the README shows. The spec
+  # RedisCooldownStore's script, run on a real server through both clients the docs show. The spec
   # skips itself without REDIS_URL, so the other test jobs need no server.
   redis:
     name: Redis

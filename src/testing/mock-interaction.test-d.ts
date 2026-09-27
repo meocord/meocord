@@ -210,7 +210,7 @@ describe('createMockChannel', () => {
     expectTypeOf(thread.members.add).toBeFunction()
   })
 
-  it('lets a text channel create a mocked thread, as the README shows', () => {
+  it('lets a text channel create a mocked thread, as the mocks guide shows', () => {
     const channel = createMockChannel(TextChannel)
     const thread = createMockChannel(ThreadChannel)
     // discord.js types a created thread as public or private, not as the ThreadChannel class

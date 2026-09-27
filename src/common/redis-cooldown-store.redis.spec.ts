@@ -12,7 +12,7 @@ import { COOLDOWN_POLICY, handlerCooldowns, peekCooldowns } from '@src/core/cool
 import { createMockInteraction, MeoCordTestingModule, testCooldownStore } from '@src/testing/index.js'
 
 /**
- * RedisCooldownStore's script on a real server, through both clients the README shows. Runs where
+ * RedisCooldownStore's script on a real server, through both clients the docs show. Runs where
  * REDIS_URL names one, as CI's Redis job does: `REDIS_URL=redis://localhost:6379 bun run test`.
  */
 const url = process.env.REDIS_URL
