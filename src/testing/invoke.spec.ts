@@ -210,6 +210,65 @@ describe('TestingModule.invoke', () => {
       expect(log).not.toContain('profile:undefined')
     })
 
+    it('rejects a customId dispatch gives another handler, naming the one that runs', async () => {
+      @Controller()
+      class AnyCard {
+        @Command('card/{id}', CommandType.BUTTON)
+        async open(_interaction: ButtonInteraction) {
+          log.push('open')
+        }
+      }
+      @Controller()
+      class SummaryCard {
+        @Command('card/summary', CommandType.BUTTON)
+        async show(_interaction: ButtonInteraction) {
+          log.push('show')
+        }
+      }
+      const module = MeoCordTestingModule.create({ controllers: [AnyCard, SummaryCard] }).compile()
+
+      await expect(module.invoke(AnyCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'card/summary' }))).rejects.toThrow(
+        "customId 'card/summary' does not reach AnyCard.open: dispatch runs SummaryCard.show.",
+      )
+      await module.invoke(AnyCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'card/7' }))
+      expect(log).toEqual(['open'])
+    })
+
+    it('gives a handler declared under two spellings the params of the one dispatch picks', async () => {
+      const got: unknown[] = []
+      @Controller()
+      class Card {
+        @Command('card/{id:int}', CommandType.BUTTON)
+        @Command('card/{id}', CommandType.BUTTON)
+        async open(_interaction: ButtonInteraction, { id }: { id: number | string }) {
+          got.push(id)
+        }
+      }
+      const module = MeoCordTestingModule.create({ controllers: [Card] }).compile()
+
+      await module.invoke(Card, 'open', createMockInteraction(ButtonInteraction, { customId: 'card/5' }))
+      await module.invoke(Card, 'open', createMockInteraction(ButtonInteraction, { customId: 'card/last' }))
+      expect(got).toEqual([5, 'last'])
+    })
+
+    it('accepts a customId a handler shares with a sibling subclass, as neither runs over the other', async () => {
+      abstract class BaseCard {
+        @Command('base/{id}', CommandType.BUTTON)
+        async open(_interaction: ButtonInteraction, { id }: { id: string }) {
+          log.push(`${this.constructor.name}:${id}`)
+        }
+      }
+      @Controller()
+      class LeftCard extends BaseCard {}
+      @Controller()
+      class RightCard extends BaseCard {}
+      const module = MeoCordTestingModule.create({ controllers: [LeftCard, RightCard] }).compile()
+
+      await module.invoke(LeftCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'base/1' }))
+      await module.invoke(RightCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'base/2' }))
+      expect(log).toEqual(['LeftCard:1', 'RightCard:2'])
+    })
+
     it('rejects a command name the handler is not registered for', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'greeting' })
 

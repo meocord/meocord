@@ -27,7 +27,9 @@ import {
   runHandler,
 } from '@src/core/handler-pipeline.js'
 import { setPresenter } from '@src/common/response/presenter.js'
-import { handlerInput, routeMismatch, routeParamsFor } from '@src/core/handler-input.js'
+import { commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
+import { buildComponentRoutes, type ComponentRoute } from '@src/core/component-routes.js'
+import { hasCustomId } from '@src/util/interaction.util.js'
 import {
   type DispatchObserver,
   type ExceptionFilter,
@@ -405,8 +407,8 @@ export class TestingModule {
    *   handler's params. With an interaction alone, the params are built as dispatch builds them: a
    *   command's or an autocomplete's options, or the handler's customId params with a modal's fields or
    *   a select menu's choices.
-   *   An interaction's customId or command name must be one dispatch could route to the handler; a mock
-   *   built without one is not checked. With a message alone, a patterned `@MessageHandler` gets the
+   *   An interaction's customId or command name must be one dispatch routes to the handler, ranking
+   *   every handler of the module as the bot does; a mock built without one is not checked. With a message alone, a patterned `@MessageHandler` gets the
    *   params its pattern captures from the content, after the prefix of the module's `app`, with typed
    *   params resolved as dispatch resolves them, from the message's guild caches first; a message
    *   without content gets `{}`. A word that is not a value of its type, and a prefixed message that names
@@ -441,12 +443,15 @@ export class TestingModule {
     const instance = this.container.get(controller) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[methodName] !== 'function') throw new Error(`${controller.name}.${methodName} is not a method.`)
     const [first] = args as unknown[]
-    const mismatch = first instanceof BaseInteraction ? routeMismatch(controller, methodName, first as Interaction) : undefined
+    const interaction = first instanceof BaseInteraction ? (first as Interaction) : undefined
+    // The handler dispatch gives the customId to, among every handler of the module
+    const component = interaction && hasCustomId(interaction) ? componentRouteFor(this.componentRoutes(), controller, methodName, interaction) : undefined
+    const mismatch = component && 'mismatch' in component ? component.mismatch : interaction && commandMismatch(controller, methodName, interaction)
     if (mismatch) throw new Error(mismatch)
     let hooks: Pick<RunOptions, 'parseArgs' | 'fetchArgs'> = {}
     let callArgs =
-      args.length === 1 && first instanceof BaseInteraction
-        ? [first, handlerInput(first as Interaction, routeParamsFor(controller.prototype as object, methodName, first as Interaction)).params]
+      args.length === 1 && interaction
+        ? [interaction, handlerInput(interaction, component && 'params' in component ? component.params : {}).params]
         : (args as unknown[])
     if (args.length === 1 && first instanceof Message) {
       const input = await messageParamsFor(controller, methodName, first, this.messageOptions, this.controllers)
@@ -472,6 +477,13 @@ export class TestingModule {
   private registerClient(input: unknown): void {
     const client = (input as { client?: unknown } | undefined)?.client
     if (client && typeof client === 'object') registerClientTheme(client, this.container)
+  }
+
+  private builtComponentRoutes?: ComponentRoute[]
+
+  /** The module's component routes, ranked as dispatch ranks them, with any the bot would refuse as duplicates. */
+  private componentRoutes(): ComponentRoute[] {
+    return (this.builtComponentRoutes ??= buildComponentRoutes(this.controllers, { keepDuplicates: true }))
   }
 
   private dispatcher?: Dispatcher
