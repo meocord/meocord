@@ -21,15 +21,32 @@ type Choices<T extends string> = T extends `${infer Word}|${infer Rest}` ? Word 
 /** The value a typed customId segment gives its handler: a number, a boolean, or one of the words to choose from. */
 type SegmentValue<T extends string> = T extends 'int' | 'number' ? number : T extends 'bool' ? boolean : T extends `${string}|${string}` ? Choices<T> : string
 
-/** The params a pattern names, as a union of their names; `never` for a pattern with none. */
+/**
+ * The names of a customId pattern's params, as a union, such as `'id' | 'page'` for `'list/{id}/{page:int}'`.
+ *
+ * `never` for a pattern with none. For the values `build` takes, use {@link RouteValues}.
+ *
+ * @group Types
+ * @see {@link route}
+ */
 export type RouteParams<T extends string> = RouteParamSpecs<T>['name']
 
-/** A value a route's untyped param takes: its text, or a number or snowflake written as its digits. */
+/**
+ * A value `build` takes for an untyped customId param: its text, or a number or snowflake written as its digits.
+ *
+ * @group Types
+ * @see {@link RouteValues}
+ */
 export type RouteValue = string | number | bigint
 
 /**
- * The values a route's `build` takes: one for each of its params, and no others. A typed param takes a value of
- * its type, such as a number for `{count:int}`.
+ * The values a route's `build` takes, one for each of its params and no others.
+ *
+ * A typed param takes a value of its type, such as a number for `{count:int}` or one of the words for
+ * `{order:asc|desc}`; an untyped one takes any {@link RouteValue}.
+ *
+ * @group Types
+ * @see {@link Route}
  */
 export type RouteValues<T extends string> = {
   [S in RouteParamSpecs<T> as S['name']]: S['type'] extends 'string' ? RouteValue : SegmentValue<S['type']>
@@ -37,8 +54,12 @@ export type RouteValues<T extends string> = {
 
 
 /**
- * A component's customId pattern, as `route` makes it: pass it to `@Command` in place of the pattern's text,
- * and `build` the customIds that reach it.
+ * A component's customId pattern with a typed `build`, as {@link route} makes it.
+ *
+ * Pass it to `@Command` in place of the pattern's text, and `build` the customIds that reach its handler.
+ *
+ * @group Types
+ * @see {@link route}
  */
 export interface Route<T extends string = string> {
   /** The pattern, as written. */
@@ -72,28 +93,40 @@ export function decodeRouteParams(groups: Record<string, string> | undefined): R
 }
 
 /**
- * Makes a typed route from a customId pattern, so one declaration serves the handler and the ids that
- * reach it. `@Command(route, type)` takes it as it takes the pattern's text, with the same ranking and
- * duplicate rules, and `route.build({ ... })` writes a customId, with each param's value in its segment.
- * A missing or unknown param fails to compile.
+ * Makes a typed route from a customId pattern, so one declaration serves the handler and the ids that reach it.
  *
- * @param pattern - The customId pattern, where `{name}` captures one `/`-separated segment.
+ * Use it for a button, select menu or modal whose customId carries values, such as a ticket's ID. A plain
+ * string pattern works too, with nothing to check the ids a builder writes.
+ *
+ * @remarks
+ * `@Command(route, type)` takes it as it takes the pattern's text, with the same ranking and duplicate rules.
+ * `route.build({ ... })` writes a customId with each param's value in its segment; a missing or unknown param
+ * fails to compile, and a typed param takes a value of its type.
+ *
+ * @param pattern - The customId pattern, where `{name}` captures one `/`-separated segment and `{name:int}` a
+ *   typed one.
  * @returns A route whose `build` takes a value for each param.
- * @throws When the pattern cannot be read, as `@Command` would throw for it.
+ * @throws Error when the pattern cannot be read, as `@Command` would throw for it.
  *
  * @example
  * ```ts
- * import { route } from 'meocord/common'
- *
- * export const closeTicket = route('ticket/{id}/close')
+ * const closeTicket = route('ticket/{id:int}/close')
  *
  * @Command(closeTicket, CommandType.BUTTON)
- * async close(interaction: ButtonInteraction, { id }: { id: string }) {
- *   await interaction.reply(`Closed ticket ${id}`)
+ * async close(interaction: ButtonInteraction, { id }: { id: number }) {
+ *   await interaction.reply(`Closed ticket #${id}.`)
  * }
  *
- * new ButtonBuilder().setCustomId(closeTicket.build({ id: 42 })).setLabel('Close') // 'ticket/42/close'
+ * @Command('ticket', CommandType.SLASH)
+ * async open(interaction: ChatInputCommandInteraction) {
+ *   const close = new ButtonBuilder().setCustomId(closeTicket.build({ id: 42 })).setLabel('Close').setStyle(ButtonStyle.Danger)
+ *   await interaction.reply({ components: [new ActionRowBuilder<ButtonBuilder>().addComponents(close)] })
+ * }
  * ```
+ *
+ * @group Utilities
+ * @see {@link Route}
+ * @see {@link https://meocord.dev/docs/4.1/components | Buttons, selects and modals}
  */
 export function route<const T extends string>(pattern: T): Route<T> {
   const { params, types } = createRegexFromPattern(pattern)
