@@ -1,7 +1,7 @@
-import { Collection, type GuildMember, type TextChannel, type User } from 'discord.js'
+import { Collection, type GuildMember, type Role, type TextChannel, type User } from 'discord.js'
 import { Controller, MessageHandler } from '@src/decorator/index.js'
 import { MessageUsageError } from '@src/common/errors.js'
-import { type EntityRef } from '@src/interface/index.js'
+import { type EntityRef, type MessageParamType } from '@src/interface/index.js'
 import { buildMessageRoutes, type MessageRoute } from '@src/core/message-routes.js'
 import { fetchMessageParams, parseMessageParams } from '@src/core/message-params.js'
 import { createMockGuild, createMockMessage } from '@src/testing/index.js'
@@ -10,13 +10,13 @@ const ID = (n: number) => String(100_000_000_000_000_000n + BigInt(n))
 const ids = (count: number, from = 0) => Array.from({ length: count }, (_, i) => ID(from + i))
 const member = (id: string) => ({ id, user: { id } }) as unknown as GuildMember
 
-function routeOf(pattern: string): MessageRoute {
+function routeOf(pattern: string, types?: Record<string, MessageParamType>): MessageRoute {
   @Controller()
   class Only {
     @MessageHandler(pattern)
     handle() {}
   }
-  return buildMessageRoutes([Only])[0]
+  return buildMessageRoutes([Only], { types })[0]
 }
 
 /** A message in a guild with nothing cached, whose fetches are recorded. */
@@ -122,6 +122,25 @@ describe('fetching entity params after the guards', () => {
     const channels = await parseMessageParams(routeOf('lock {targets:channel...}'), { targets: ids(20, 300).join(' ') }, message, '!', undefined)
     await fetchMessageParams(channels)
     expect(most).toBe(20)
+  })
+
+  it('names a role deleted while the guards ran, and a value of an app\'s own type that resolves to nothing', async () => {
+    const role = { id: ID(23), name: 'mods' } as Role
+    const guild = createMockGuild({ roles: [role] })
+    const message = createMockMessage({ content: 'x', guild })
+    const ticket: MessageParamType = { label: 'ticket', parse: word => ({ id: word, cached: undefined, resolve: () => Promise.resolve(undefined) }) }
+    const parsed = await parseMessageParams(routeOf('check {r:role} {t:ticket}', { ticket }), { r: `<@&${ID(23)}>`, t: 'T-9' }, message, '!', { ticket })
+    guild.roles.cache.delete(ID(23))
+
+    const error = await fetchMessageParams(parsed).then(
+      () => undefined,
+      (thrown: unknown) => thrown as MessageUsageError,
+    )
+
+    expect(error!.issues).toEqual([
+      { param: 'r', message: `r: <@&${ID(23)}> is not a role in this server` },
+      { param: 't', message: 't: "T-9" is not a valid ticket' },
+    ])
   })
 
   it('names each member, user or channel that does not exist, after the guards', async () => {

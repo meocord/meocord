@@ -134,6 +134,8 @@ interface RefSlot {
   label: string
   word: string
   kind: EntityKind | 'own'
+  /** For an app's own type, what its label calls a value. */
+  noun?: string
   index?: number
   ref: EntityRef<unknown>
 }
@@ -196,8 +198,8 @@ export async function parseMessageParams(
     else (params[item.key] as unknown[])[item.index] = value
   }
   const refs: RefSlot[] = []
-  const refer = (item: Item, kind: RefSlot['kind'], ref: EntityRef<unknown>) => {
-    refs.push({ key: item.key, label: item.label, word: item.word, kind, index: item.index, ref })
+  const refer = (item: Item, kind: RefSlot['kind'], ref: EntityRef<unknown>, noun?: string) => {
+    refs.push({ key: item.key, label: item.label, word: item.word, kind, noun, index: item.index, ref })
     put(item, ref)
   }
 
@@ -211,7 +213,7 @@ export async function parseMessageParams(
     } else if (own) {
       value = await own.parse(word, message)
       if (isRef(value)) {
-        refer(item, 'own', value)
+        refer(item, 'own', value, own.label ?? type)
         continue
       }
     } else if (type === 'member' || type === 'user' || type === 'channel') {
@@ -271,11 +273,27 @@ export async function fetchMessageParams(parsed: ParsedMessageParams, checkCoold
   return params
 }
 
-/** The issue for a ref that names nothing: a member not in the server, a user or channel that does not exist. */
-function missingEntity({ key, label, word, kind, ref }: RefSlot): MessageUsageIssue {
-  if (kind === 'member') return { param: key, message: `${label}: <@${ref.id}> is not a member of this server` }
-  if (kind === 'user') return { param: key, message: `${label}: no user has the ID ${ref.id}` }
-  return { param: key, message: `${label}: "${word}" is not a ${kind === 'channel' ? 'channel' : 'value of its type'}` }
+/** The issue for a ref that names nothing: a member not in the server, a user, role or channel that does not exist. */
+function missingEntity({ key, label, word, kind, noun, ref }: RefSlot): MessageUsageIssue {
+  return { param: key, message: `${label}: ${nothingNamed(kind, word, ref.id, noun)}` }
+}
+
+/** What the issue says after the param's label, for each kind of ref; a new kind fails to compile until it has its own. */
+function nothingNamed(kind: RefSlot['kind'], word: string, id: string, noun: string | undefined): string {
+  switch (kind) {
+    case 'member':
+      return `<@${id}> is not a member of this server`
+    case 'user':
+      return `no user has the ID ${id}`
+    case 'role':
+      return `<@&${id}> is not a role in this server`
+    case 'channel':
+      return `"${word}" is not a channel`
+    case 'own':
+      return `"${word}" is not a valid ${noun}`
+    default:
+      return kind satisfies never
+  }
 }
 
 /**
