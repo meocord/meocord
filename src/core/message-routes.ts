@@ -151,9 +151,16 @@ function compareShapes(a: PatternToken[], b: PatternToken[]): number {
 }
 
 /** Whether two routes accept exactly the same messages. */
-function sameMessages(a: MessageRoute, b: MessageRoute): boolean {
+function sameMessages(a: MessageRoute, b: MessageRoute, appMentionOnly: boolean): boolean {
+  // A route started as the app's are starts with a mention alone when the app's mention is 'only'
   const startsOf = (route: MessageRoute) =>
-    route.prefix === undefined ? 'app' : route.prefix === false ? 'none' : JSON.stringify([...route.prefix].sort())
+    route.prefix === undefined
+      ? appMentionOnly
+        ? '[]'
+        : 'app'
+      : route.prefix === false
+        ? 'none'
+        : JSON.stringify([...route.prefix].sort())
   if (startsOf(a) !== startsOf(b) || a.tokens.length !== b.tokens.length) return false
   // One for servers and one for direct messages never both fit a message
   if ((a.scope === 'guild' && b.scope === 'dm') || (a.scope === 'dm' && b.scope === 'guild')) return false
@@ -226,7 +233,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
   for (let i = 0; i < routes.length; i++) {
     for (let j = i + 1; j < routes.length; j++) {
       const [a, b] = [routes[i], routes[j]]
-      if (!sameMessages(a, b)) continue
+      if (!sameMessages(a, b, options.mention === 'only')) continue
       // One handler under two spellings, such as 'hello' and 'Hello', is one route, its pattern's over an alias's
       if (a.controllerClass === b.controllerClass && a.method === b.method) {
         if (a.aliasOf && !b.aliasOf) routes[i] = b

@@ -389,6 +389,22 @@ describe('message route ranking', () => {
     expect(build('status', { mention: 'only' })).not.toThrow()
   })
 
+  it("refuses a handler's mention: 'only' beside the same pattern the app's mention: 'only' starts alike", () => {
+    @Controller()
+    class Own {
+      @MessageHandler('status', { mention: 'only' })
+      status() {}
+    }
+    @Controller()
+    class App {
+      @MessageHandler('status')
+      status() {}
+    }
+    expect(() => buildMessageRoutes([Own, App], { mention: 'only' })).toThrow(/match the same messages, so only one of them could ever run/)
+    // Under the app's prefix, one starts with a mention and the other with the prefix, so both can run
+    expect(() => buildMessageRoutes([Own, App], { prefix: '!' })).not.toThrow()
+  })
+
   it('keeps handlers of one pattern in scopes that do not overlap, and picks by where the message was sent', () => {
     @Controller()
     class Help {

@@ -642,6 +642,20 @@ describe('gateway event handlers', () => {
       expect(warning).toContain("only messages that mention the bot and direct messages carry their text; messages: { mention: 'only' } needs none.")
     })
 
+    it("leaves mention: 'only' out of the MessageContent warning when only a listener needs the intent", async () => {
+      @Controller()
+      class Listening {
+        @MessageHandler()
+        everything(_message: Message) {}
+      }
+
+      await startApp({ controllers: [Listening] }, { intents: [GatewayIntentBits.GuildMessages] })
+
+      const [warning] = logged.warn.map(args => String(args[0])).filter(text => text.includes('MessageContent'))
+      expect(warning).toContain('only messages that mention the bot and direct messages carry their text.')
+      expect(warning).not.toContain("mention: 'only'")
+    })
+
     it('says nothing when the client options cover every handler', async () => {
       @Controller()
       class Chat {
