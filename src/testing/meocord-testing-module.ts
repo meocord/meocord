@@ -69,15 +69,23 @@ import {
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 
+/**
+ * What a testing module is built from: the classes a test needs, and the app whose global stages apply.
+ *
+ * @group Testing
+ * @category Module
+ * @see {@link MeoCordTestingModule}
+ */
 export interface TestingModuleOptions {
+  /** The controllers the module builds, with every class they inject. */
   controllers?: (new (...args: any[]) => any)[]
+  /** Providers for what those classes inject, in any shape `@MeoCord({ providers })` takes. */
   providers?: Provider[]
 
   /**
-   * The `@MeoCord` application class, whose global `guards`, `interceptors` and `filters` `invoke`
-   * applies with each handler's own, whose `i18n` translator is injected as `Translator`, and whose
-   * `presenter` styles what `respond()` shows. Its controllers and services are not registered; list
-   * them here. Its `observers` are told about each call.
+   * The `@MeoCord` app class, whose global guards, interceptors and filters run with each handler's own, and whose
+   * translator, presenter, message options, theme and observers the module uses. Its controllers and services are not
+   * registered: list them in `controllers` and `providers`.
    */
   app?: new (...args: any[]) => unknown
 
@@ -88,7 +96,12 @@ export interface TestingModuleOptions {
   observers?: (new (...args: any[]) => DispatchObserver)[]
 }
 
-/** The names of a class's instance methods. */
+/**
+ * The names of a class's instance methods, as {@link TestingModule.invoke} takes them.
+ *
+ * @group Testing
+ * @category Module
+ */
 export type HandlerName<C extends new (...args: any[]) => unknown> = {
   [K in keyof InstanceType<C>]: InstanceType<C>[K] extends (...args: any[]) => unknown ? K : never
 }[keyof InstanceType<C>] &
@@ -107,7 +120,12 @@ type HandlerArgs<C extends new (...args: any[]) => unknown, M extends HandlerNam
         : A
     : never
 
-/** How a call made with `TestingModule.invoke` ended. */
+/**
+ * How a call made with {@link TestingModule.invoke} ended.
+ *
+ * @group Testing
+ * @category Module
+ */
 export interface InvocationResult {
   /** Whether the handler ran; `false` when a guard denied the call or an interceptor skipped it. */
   ran: boolean
@@ -116,17 +134,28 @@ export interface InvocationResult {
   error?: unknown
 }
 
-/** How `TestingModule.init` prepares the module. */
+/**
+ * How {@link TestingModule.init} prepares the module.
+ *
+ * @group Testing
+ * @category Module
+ */
 export interface TestingModuleInitOptions {
   /**
-   * Also run every `onReady` hook, once, in dependency order, as the bot does once it is online.
-   * `true` hands each hook a mock client from `createMockClient` and `{ primary: true }`; an object
-   * sets either.
+   * Also runs every `onReady` hook, once, in dependency order, as the bot does once it is online. `true` hands each
+   * hook a mock client from `createMockClient` and `{ primary: true }`; an object sets either.
+   *
+   * @defaultValue `false`
    */
   ready?: boolean | { client?: Client<true>; primary?: boolean }
 }
 
-/** One handler `TestingModule.dispatch` ran, and how its call ended. */
+/**
+ * One handler {@link TestingModule.dispatch} ran, and how its call ended.
+ *
+ * @group Testing
+ * @category Module
+ */
 export interface DispatchedHandler {
   /** The handler's controller. */
   controller: new (...args: any[]) => unknown
@@ -138,7 +167,12 @@ export interface DispatchedHandler {
   error?: unknown
 }
 
-/** What `TestingModule.dispatch` did with an interaction, a message or a reaction. */
+/**
+ * What {@link TestingModule.dispatch} did with an interaction, a message or a reaction.
+ *
+ * @group Testing
+ * @category Module
+ */
 export interface DispatchedCall extends InvocationResult {
   /** Whether any handler ran. */
   ran: boolean
@@ -151,14 +185,48 @@ export interface DispatchedCall extends InvocationResult {
   handlers: DispatchedHandler[]
 }
 
-/** How an event sent with `TestingModule.emit` was handled. */
+/**
+ * How an event sent with {@link TestingModule.emit} was handled.
+ *
+ * @group Testing
+ * @category Module
+ */
 export interface EmitResult {
   /** How many `@On` and `@Once` handlers ran; a handler a guard denied is not counted. */
   ran: number
 }
 
 /**
- * Resolved test module. Retrieve instances via `.get()`.
+ * A compiled testing module, which runs handlers as the bot does and resolves the classes it built.
+ *
+ * Use `invoke` to run a handler you name, `dispatch` to send an input through the bot's routing, and `emit` for a
+ * gateway event. {@link getResponse} then reports what a handler sent.
+ *
+ * @remarks
+ * Each compiled module has its own container: its own services, cooldown counts and theme cache. `init({ ready:
+ * true })` and `close()` run the lifecycle hooks, as the bot does when it starts and stops.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * @Controller()
+ * class TicketController {
+ *   @Command('ticket/{id}/close', CommandType.BUTTON)
+ *   async close(interaction: ButtonInteraction, { id }: { id: string }) {
+ *     await respond(interaction).send(`Ticket ${id} closed.`)
+ *   }
+ * }
+ * const module = MeoCordTestingModule.create({ controllers: [TicketController] }).compile()
+ * const { handlers } = await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'ticket/7/close' }))
+ * expect(handlers).toEqual([{ controller: TicketController, method: 'close', ran: true }])
+ * ```
+ *
+ * @group Testing
+ * @category Module
+ * @see {@link MeoCordTestingModule}
+ * @see {@link getResponse}
+ * @see {@link https://meocord.dev/docs/latest/invoke-and-dispatch | Invoke and dispatch}
  */
 export class TestingModule {
   constructor(
@@ -565,8 +633,32 @@ function messagesOf(app: object | undefined): MessageCommandOptions | undefined 
 }
 
 /**
- * Builder returned by `MeoCordTestingModule.create()`.
- * Call `.compile()` to get the resolved `TestingModule`.
+ * Builds a testing module, with stand-ins for the providers, stages and theme a test replaces.
+ *
+ * Use its `override*` methods before `compile()` to replace what a handler depends on, then run the handler with the
+ * {@link TestingModule} it returns.
+ *
+ * @example
+ * ```ts
+ * @Controller()
+ * class ProfileController {
+ *   constructor(private readonly profiles: ProfileService) {}
+ *   @Command('profile', CommandType.SLASH)
+ *   @UseGuard(StaffGuard)
+ *   async profile(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send({ embeds: [await this.profiles.render(interaction.user.id)] })
+ *   }
+ * }
+ * const module = MeoCordTestingModule.create({ controllers: [ProfileController] })
+ *   .overrideProvider(ProfileService).useValue({ render: async () => new EmbedBuilder().setTitle('Ada') })
+ *   .overrideGuard(StaffGuard).useValue({ canActivate: () => true })
+ *   .compile()
+ * ```
+ *
+ * @group Testing
+ * @category Module
+ * @see {@link MeoCordTestingModule}
+ * @see {@link https://meocord.dev/docs/latest/testing | The testing module}
  */
 export class TestingModuleBuilder {
   private readonly overrides = new Map<unknown, Provider>()
@@ -855,23 +947,41 @@ export class TestingModuleBuilder {
 }
 
 /**
- * Entry point for building isolated test modules.
+ * Builds testing modules: the classes a test needs, in a container of their own, with no Discord connection.
+ *
+ * Use it for a controller, or anything MeoCord resolves for you: a service with injected dependencies, a guard, an
+ * interceptor, a presenter. A service that takes plain values needs no module; build it with `new`.
  *
  * @example
- * ```typescript
- * import { MeoCordTestingModule, createMockFn } from 'meocord/testing'
+ * ```ts
+ * import { expect } from 'vitest'
  *
- * const module = MeoCordTestingModule.create({
- *   controllers: [PingController],
- *   providers: [
- *     { provide: PingService, useValue: { handlePing: createMockFn().mockResolvedValue('pong') } },
- *   ],
- * }).compile()
- *
- * const controller = module.get(PingController)
+ * @Controller()
+ * class PingController {
+ *   @Command('ping', CommandType.SLASH)
+ *   async ping(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send('pong')
+ *   }
+ * }
+ * const module = MeoCordTestingModule.create({ controllers: [PingController] }).compile()
+ * const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
+ * await module.invoke(PingController, 'ping', interaction)
+ * expect(getResponse(interaction).calls[0].method).toBe('reply')
  * ```
+ *
+ * @group Testing
+ * @category Module
+ * @see {@link TestingModuleBuilder}
+ * @see {@link TestingModule}
+ * @see {@link https://meocord.dev/docs/latest/testing | The testing module}
  */
 export class MeoCordTestingModule {
+  /**
+   * Starts building a testing module from the classes a test needs.
+   *
+   * @param options - The controllers, providers, observers and app the module is built from.
+   * @returns The builder, to override what the test replaces before `compile()`.
+   */
   static create(options: TestingModuleOptions): TestingModuleBuilder {
     return new TestingModuleBuilder(options)
   }

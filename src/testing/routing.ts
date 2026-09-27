@@ -9,13 +9,23 @@ import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { buildMessageRoutes, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
 import { type MessageCommandOptions, type MessagePrefix } from '@src/interface/index.js'
 
-/** The command types routed by customId pattern: buttons, select menus and modals. */
+/**
+ * The command types routed by a `customId` pattern: buttons, select menus and modals.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export type ComponentCommandType = Exclude<
   CommandType,
   CommandType.SLASH | CommandType.CONTEXT_MENU | CommandType.PRIMARY_ENTRY_POINT
 >
 
-/** A message, for {@link resolveRoute}. */
+/**
+ * A message, as {@link resolveRoute} takes it.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface MessageToResolve {
   /** The message's text, prefix included. */
   content: string
@@ -28,7 +38,12 @@ export interface MessageToResolve {
   botId?: string
 }
 
-/** The handler a component interaction or a message reaches. */
+/**
+ * The handler a component interaction or a message reaches, as {@link resolveRoute} reports it.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface ResolvedRoute {
   /** The controller class declaring the handler. */
   controller: ControllerClass
@@ -46,9 +61,16 @@ export interface ResolvedRoute {
   params: Record<string, string>
 }
 
-/** Two patterns of one component type that can both match a customId. */
+/**
+ * Two patterns of one component type that can both match a `customId`, as {@link findRouteConflicts} reports them.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface RouteConflict {
+  /** The component type both patterns are declared for. */
   type: ComponentCommandType
+  /** The two patterns. */
   patterns: [string, string]
 }
 
@@ -67,29 +89,41 @@ function controllersOf(app: ControllerClass): ControllerClass[] {
 }
 
 /**
- * Resolves which handler a component's customId or a message's content reaches, the way dispatch
- * does: across every controller the application registers, most specific pattern first. A
- * component is matched within its type; a message after the prefix `@MeoCord({ messages })`
- * configures, and never to a `@MessageHandler()` listener, which runs for every message.
+ * Resolves which handler a component's `customId` or a message's content reaches, as dispatch routes it.
  *
- * Reads decorator metadata only, so it runs in a plain unit test with no Discord client, config
- * or container. It checks routing alone: guards are not run, and whether the controller's
- * dependencies are bound is for `MeoCordTestingModule` to test.
+ * Use it to check routing alone, in a plain unit test: it reads decorator metadata, with no client, config or
+ * container, and runs no guard. To run the handler it reaches, use {@link TestingModule.dispatch}.
+ *
+ * @remarks
+ * It routes across every controller the app registers, most specific pattern first: a component within its type, a
+ * message after the app's prefix, and never to a `@MessageHandler()` listener, which runs for every message.
  *
  * @param app - The application class decorated with `@MeoCord`.
- * @param input - The component type and the customId it carries, or the message's `content`, with
- *   the `prefix` it has when the app reads prefixes from a function, and the `botId` a mention names.
- * @returns The handler that runs, or `undefined` when no route handles the input.
+ * @param input - The component type and its `customId`, or the message's content with its prefix and the bot's id.
+ * @returns The handler that runs, with the params it captures, or `undefined` when no route handles the input.
  * @throws TypeError for a message to an app whose prefix is a function, when no `prefix` is given.
  *
  * @example
  * ```ts
- * const route = resolveRoute(App, { type: CommandType.BUTTON, customId: 'profile/111/8000' })
- * expect(route?.handler).toBe(ProfileController.prototype.showProfile)
- * expect(route?.params).toEqual({ ownerId: '111', uid: '8000' })
+ * import { expect } from 'vitest'
  *
- * expect(resolveRoute(App, { content: '!roll 20 for luck' })?.params).toEqual({ sides: '20', note: 'for luck' })
+ * @Controller()
+ * class ProfileController {
+ *   @Command('profile/{uid}', CommandType.BUTTON)
+ *   async show(interaction: ButtonInteraction, { uid }: { uid: string }) {
+ *     await respond(interaction).send(`Profile ${uid}`)
+ *   }
+ * }
+ * @MeoCord({ controllers: [ProfileController], clientOptions: { intents: [] } })
+ * class App {}
+ * const route = resolveRoute(App, { type: CommandType.BUTTON, customId: 'profile/8000' })
+ * expect([route?.handler, route?.params]).toEqual([ProfileController.prototype.show, { uid: '8000' }])
  * ```
+ *
+ * @group Testing
+ * @category Inspection
+ * @see {@link findRouteConflicts}
+ * @see {@link https://meocord.dev/docs/latest/components | Buttons, selects and modals}
  */
 export function resolveRoute(
   app: ControllerClass,
@@ -116,16 +150,33 @@ export function resolveRoute(
 }
 
 /**
- * Finds component patterns that can match the same customId, which MeoCord otherwise only warns
- * about at startup. Patterns are compared within a component type, as dispatch does.
+ * Finds component patterns that can match the same `customId`, which MeoCord otherwise only warns about at startup.
+ *
+ * Use it in a test to keep the warning from reaching production: two patterns that trade a literal for a parameter
+ * in opposite places both take one id, and neither is more specific. Patterns are compared within a component type.
  *
  * @param app - The application class decorated with `@MeoCord`.
- * @returns Each conflicting pattern pair, with its component type.
+ * @returns Each pair of patterns that can match the same `customId`, with its component type.
  *
  * @example
  * ```ts
- * expect(findRouteConflicts(App)).toEqual([])
+ * import { expect } from 'vitest'
+ *
+ * @Controller()
+ * class CardController {
+ *   @Command('card/{id}/open', CommandType.BUTTON)
+ *   async open(interaction: ButtonInteraction) { await respond(interaction).send('Opened.') }
+ *   @Command('card/new/{kind}', CommandType.BUTTON)
+ *   async create(interaction: ButtonInteraction) { await respond(interaction).send('Created.') }
+ * }
+ * @MeoCord({ controllers: [CardController], clientOptions: { intents: [] } })
+ * class App {}
+ * expect(findRouteConflicts(App)).toHaveLength(1)
  * ```
+ *
+ * @group Testing
+ * @category Inspection
+ * @see {@link resolveRoute}
  */
 export function findRouteConflicts(app: ControllerClass): RouteConflict[] {
   return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app))) as RouteConflict[]

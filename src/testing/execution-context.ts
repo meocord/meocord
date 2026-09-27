@@ -1,6 +1,11 @@
 import { type ExecutionContext, type ExecutionContextType, HandlerExecutionContext } from '@src/common/execution-context.js'
 
-/** What {@link createExecutionContext} describes besides the handler. */
+/**
+ * What {@link createExecutionContext} describes besides the handler.
+ *
+ * @group Testing
+ * @category Inspection
+ */
 export interface ExecutionContextOptions {
   /** The handler's arguments, such as the interaction and its params. */
   args?: unknown[]
@@ -20,21 +25,36 @@ export interface ExecutionContextOptions {
 }
 
 /**
- * Builds the `ExecutionContext` a guard, interceptor or filter receives for one handler, so it can be
- * tested on its own. Metadata is read from the real controller, as it is at runtime.
+ * Builds the `ExecutionContext` a guard, interceptor or filter receives for one handler, to test it on its own.
+ *
+ * Use it for a stage that reads the handler's metadata, its params or the call's arguments, without building a
+ * module. The metadata is read from the real controller, as it is at runtime.
  *
  * @param controller - The controller class declaring the handler.
  * @param methodName - The handler method's name.
- * @param options - The call's arguments, the guard's params and the call type.
+ * @param options - The call's arguments, the stage's params, the handler's params and the call type.
  * @returns The context for that call.
  *
  * @example
  * ```ts
- * const interaction = createMockInteraction(ChatInputCommandInteraction)
- * const context = createExecutionContext(ModerationController, 'ban', { args: [interaction] })
+ * import { expect } from 'vitest'
  *
- * expect(new RolesGuard(context).canActivate(interaction)).toBe(false)
+ * @Controller()
+ * class StatsController {
+ *   @Command('stats', CommandType.SLASH)
+ *   async stats(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send('Stats.')
+ *   }
+ * }
+ * const interaction = createMockInteraction(ChatInputCommandInteraction)
+ * const context = createExecutionContext(StatsController, 'stats', { args: [interaction] })
+ * expect(context.getInteraction()).toBe(interaction)
  * ```
+ *
+ * @group Testing
+ * @category Inspection
+ * @see {@link inspectHandler}
+ * @see {@link ExecutionContext}
  */
 export function createExecutionContext<C extends new (...args: any[]) => unknown>(
   controller: C,
