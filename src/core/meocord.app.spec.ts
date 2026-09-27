@@ -38,7 +38,7 @@ import { createChatInputOptions, createMockInteraction, createModalFields, resol
 import { Autocomplete, Command, Controller, MeoCord, MessageHandler, ReactionHandler, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordApp, shutdownAndExit } from '@src/core/meocord.app.js'
-import { DEV_RUNNER_ENV } from '@src/util/dev-runner.util.js'
+import { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } from '@src/util/dev-runner.util.js'
 
 /** The text of the error embed the first call to a reply method sent. */
 function errorShown(method: { mock: { calls: unknown[][] } }): string | undefined {
@@ -200,6 +200,21 @@ describe('MeoCordApp', () => {
           await app.start()
 
           expect(send.mock.calls.map(([message]) => message)).toEqual([{ meocord: 'login-failed' }, { meocord: 'online' }])
+        })
+
+        // Bun does not call back once the dev runner is gone
+        it('still rejects when the message to the dev runner never calls back', async () => {
+          vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+          send.mockImplementationOnce(() => true)
+          mockClient.login.mockRejectedValueOnce(new Error('An invalid token was provided.'))
+          const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'bad-token')
+
+          const started = app.start()
+          const rejected = expect(started).rejects.toThrow('An invalid token was provided.')
+          await vi.advanceTimersByTimeAsync(DEV_RUNNER_SEND_TIMEOUT_MS)
+          await rejected
+          expect(process.exitCode).toBe(1)
+          vi.useRealTimers()
         })
 
         it('tells a process the dev runner did not start nothing', async () => {

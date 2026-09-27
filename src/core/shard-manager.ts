@@ -205,6 +205,8 @@ export class ShardManager implements MeoCordApplication {
   /** Exits 1 for a bot that could not log in, telling `meocord start --dev` first so it ends its watch session. */
   private exitForLogin(): void | Promise<void> {
     if (!underDevRunner()) return this.exit(1)
+    // Set first, so the process exits 1 even if it ends while the message is still on its way
+    process.exitCode = 1
     return tellDevRunner({ meocord: 'login-failed' }).then(() => this.exit(1))
   }
 

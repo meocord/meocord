@@ -26,7 +26,7 @@ const {
   ShardManager,
 } = await import('@src/core/shard-manager.js')
 const { BUNDLE_ENTRY_KEY } = await import('@src/util/bundle-entry.util.js')
-const { DEV_RUNNER_ENV } = await import('@src/util/dev-runner.util.js')
+const { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } = await import('@src/util/dev-runner.util.js')
 
 /** A shard as the manager uses it: spawn, send, kill, and the events discord.js emits. */
 class FakeShard extends EventEmitter {
@@ -438,8 +438,27 @@ describe('ShardManager', () => {
     afterEach(() => {
       delete process.env[DEV_RUNNER_ENV]
       process.send = originalSend
+      process.exitCode = undefined
       send.mockClear()
       order.length = 0
+      vi.useRealTimers()
+    })
+
+    // Bun does not call back once the dev runner is gone, and the process may end before the timeout does
+    it('sets exit code 1 before telling it, and exits 1 when the message never calls back', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      send.mockImplementationOnce(() => true)
+      const { manager, exit } = setup({ shards: 1 })
+      failingRest(manager, Object.assign(new Error('401: Unauthorized'), { status: 401 }))
+
+      const started = manager.start()
+      await vi.waitFor(() => expect(send).toHaveBeenCalled())
+      expect(process.exitCode).toBe(1)
+      expect(exit).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(DEV_RUNNER_SEND_TIMEOUT_MS)
+      await started
+      expect(exit).toHaveBeenCalledWith(1)
     })
 
     it('tells the dev runner the bot could not log in before exiting, when Discord refuses the token', async () => {

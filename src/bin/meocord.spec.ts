@@ -20,7 +20,7 @@ vi.mock('node:child_process', async importOriginal => ({
 
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>()
-  return { ...actual, default: { ...actual }, existsSync: vi.fn().mockReturnValue(true) }
+  return { ...actual, default: { ...actual }, existsSync: vi.fn().mockReturnValue(true), watch: vi.fn(actual.watch) }
 })
 
 vi.mock('@src/util/meocord-source-config.util.js', async importOriginal => {
@@ -29,7 +29,7 @@ vi.mock('@src/util/meocord-source-config.util.js', async importOriginal => {
 })
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, watch } from 'node:fs'
 import { FORCE_STOP_GRACE_MS, MeoCordCLI } from '@src/bin/meocord.js'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
 import { namePathProblem, nextStepFor } from '@src/bin/generator.js'
@@ -417,6 +417,36 @@ describe('spawning the application', () => {
         handler(child, 'once', 'exit')(1)
 
         expect(exitSpy).not.toHaveBeenCalled()
+      })
+
+      it("ends the session through startDev's own ending, which closes the watchers before exiting", async () => {
+        const fsWatcher = { close: vi.fn() }
+        vi.mocked(watch).mockReturnValueOnce(fsWatcher as never)
+        const closeBuild = vi.fn(async () => {})
+        let afterBuild = () => {}
+        const cli = new MeoCordCLI() as unknown as {
+          startDev: () => Promise<void>
+          clearConsole: () => void
+          relayStopSignals: () => void
+          compileConfig: () => Promise<void>
+          createBundler: () => Promise<unknown>
+        }
+        vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
+        vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
+        vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
+        vi.spyOn(cli, 'createBundler').mockResolvedValue({
+          rsbuild: { onAfterBuild: (callback: () => void) => (afterBuild = callback), build: async () => ({ close: closeBuild }) },
+        })
+
+        await cli.startDev()
+        afterBuild()
+        const child = spawnMock.mock.results.at(-1)?.value as Child
+        handler(child, 'on', 'message')({ meocord: 'login-failed' })
+        handler(child, 'once', 'exit')(1)
+
+        await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
+        expect(fsWatcher.close).toHaveBeenCalled()
+        expect(closeBuild.mock.invocationCallOrder[0]).toBeLessThan(exitSpy.mock.invocationCallOrder[0])
       })
 
       it('runs the application with a channel for it, and production without one', async () => {
