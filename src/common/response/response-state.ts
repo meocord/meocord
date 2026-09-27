@@ -151,6 +151,8 @@ export interface ResponseCall {
     | 'message.edit'
   /** What was sent, as that method received it; none for a deferral or a deletion. */
   payload?: unknown
+  /** What the call rejected with, such as the `DiscordAPIError` for a refused call; absent when it succeeded. */
+  error?: unknown
 }
 
 const DEFAULT_ERROR = 'An error occurred while executing the command.'
@@ -415,8 +417,16 @@ export class InteractionResponse implements ResponseState {
     else if (this.interaction.deferred && this.phase === 'unanswered') this.phase = 'deferred'
   }
 
-  private record(method: ResponseCall['method'], payload?: unknown): void {
-    this.calls.push({ method, payload })
+  /** Makes a Discord call, recorded as it is made so the order stays as issued, and marked with its error if it rejects. */
+  private async call<T>(method: ResponseCall['method'], payload: unknown, run: () => Promise<T>): Promise<T> {
+    const call: ResponseCall = { method, payload }
+    this.calls.push(call)
+    try {
+      return await run()
+    } catch (error) {
+      call.error = error
+      throw error
+    }
   }
 
   private flagsFor(step: ResponseStep, requested: MessageFlagsResolvable | undefined, v2 = this.v2): number {
@@ -438,11 +448,10 @@ export class InteractionResponse implements ResponseState {
     try {
       if (answersWithOwnMessage(this.interaction)) {
         const flags = this.flagsFor('deferReply', ephemeral ? MessageFlags.Ephemeral : 0)
-        this.record('deferReply', { flags })
-        await this.interaction.deferReply({ flags })
+        await this.call('deferReply', { flags }, () => this.interaction.deferReply({ flags }))
       } else if ('deferUpdate' in this.interaction) {
-        this.record('deferUpdate')
-        await this.interaction.deferUpdate()
+        const target = this.interaction
+        await this.call('deferUpdate', undefined, () => target.deferUpdate())
       }
       this.phase = 'deferred'
     } catch (error) {
@@ -631,8 +640,7 @@ export class InteractionResponse implements ResponseState {
     const onlyDeferred = this.calls.every(call => call.method === 'deferReply')
     if (this.phase !== 'deferred' || !answersWithOwnMessage(this.interaction) || !onlyDeferred) return
     try {
-      this.record('deleteReply')
-      await this.interaction.deleteReply()
+      await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
     } catch (error) {
       logger.debug(`Could not delete the deferred reply: ${String(error)}`)
     }
@@ -664,22 +672,22 @@ export class InteractionResponse implements ResponseState {
       if (!hasEphemeral(requested)) return this.editMessage(body)
       // A private deferral is already what the flag asks for, which an edit cannot take
       if (this.interaction.ephemeral) return this.editMessage({ ...body, flags: requested & ~MessageFlags.Ephemeral })
-      this.record('deleteReply')
-      await this.interaction.deleteReply()
+      await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
       this.phase = 'replied'
     }
     const flags = this.withSuppression(this.flagsFor('followUp', body.flags, false))
     const sent = forMode(body, hasComponentsV2(flags))
-    this.record('followUp', { ...sent, flags })
-    return (await this.interaction.followUp({ ...sent, flags } as InteractionReplyOptions)) as Message
+    const message = await this.call('followUp', { ...sent, flags }, () =>
+      this.interaction.followUp({ ...sent, flags } as InteractionReplyOptions),
+    )
+    return message as Message
   }
 
   async delete(): Promise<void> {
     await this.acknowledging
     this.sync()
     if (this.phase === 'unanswered') throw new Error('There is no answer to delete: the interaction has not been answered.')
-    this.record('deleteReply')
-    await this.interaction.deleteReply()
+    await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
   }
 
   async modal(modal: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData): Promise<void> {
@@ -694,8 +702,8 @@ export class InteractionResponse implements ResponseState {
       )
     }
     if (!('showModal' in this.interaction)) throw new Error('This interaction cannot show a modal.')
-    this.record('showModal', modal)
-    await this.interaction.showModal(modal)
+    const target = this.interaction
+    await this.call('showModal', modal, () => target.showModal(modal))
     this.phase = 'replied'
   }
 
@@ -738,10 +746,9 @@ export class InteractionResponse implements ResponseState {
     const flags = this.withSuppression(this.flagsFor('reply', body.flags, false))
     this.v2 = hasComponentsV2(flags)
     const sent = forMode(body, this.v2)
-    this.record('reply', { ...sent, flags })
-    const response = await this.interaction.reply({ ...sent, flags, withResponse: true } as InteractionReplyOptions & {
-      withResponse: true
-    })
+    const response = await this.call('reply', { ...sent, flags }, () =>
+      this.interaction.reply({ ...sent, flags, withResponse: true } as InteractionReplyOptions & { withResponse: true }),
+    )
     this.phase = 'replied'
     this.lastMessage = response?.resource?.message ?? this.lastMessage
     return this.lastMessage
@@ -754,8 +761,8 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('update', body.flags) | this.keptFlags(body)
     this.v2 ||= hasComponentsV2(flags)
     const sent = this.withAttachments(forMode(body, this.v2))
-    this.record('update', { ...sent, flags })
-    const response = await this.interaction.update({ ...sent, flags, withResponse: true } as never)
+    const target = this.interaction
+    const response = await this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never))
     this.phase = 'replied'
     this.lastMessage = (response as { resource?: { message?: Message } })?.resource?.message ?? this.lastMessage
     return this.lastMessage
@@ -774,15 +781,13 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('edit', body.flags) | this.keptFlags(body)
     this.v2 ||= hasComponentsV2(flags)
     const sent = { ...this.withAttachments(forMode(body, this.v2)), flags }
-    this.record('editReply', sent)
     try {
-      this.lastMessage = await this.interaction.editReply(sent as InteractionEditReplyOptions)
+      this.lastMessage = await this.call('editReply', sent, () => this.interaction.editReply(sent as InteractionEditReplyOptions))
     } catch (error) {
       const message = this.message
       const expired = Date.now() - this.interaction.createdTimestamp >= TOKEN_EXPIRED_AFTER_MS
       if (!TOKEN_EXPIRED.has(errorCode(error) as number) || !expired || !this.location.botInstalled || !message) throw error
-      this.record('message.edit', sent)
-      this.lastMessage = await message.edit(sent as never)
+      this.lastMessage = await this.call('message.edit', sent, () => message.edit(sent as never))
     }
     this.phase = 'replied'
     // What is on the locked message now, for a restore to tell whether something else changed it since
