@@ -38,6 +38,7 @@ import { createChatInputOptions, createMockInteraction, createModalFields, resol
 import { Autocomplete, Command, Controller, MeoCord, MessageHandler, ReactionHandler, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordApp, shutdownAndExit } from '@src/core/meocord.app.js'
+import { DEV_RUNNER_ENV } from '@src/util/dev-runner.util.js'
 
 /** The text of the error embed the first call to a reply method sent. */
 function errorShown(method: { mock: { calls: unknown[][] } }): string | undefined {
@@ -161,6 +162,55 @@ describe('MeoCordApp', () => {
         await app.start()
 
         expect(process.exitCode).toBe(3)
+      })
+
+      // `meocord start --dev` ends its watch session on this: a code change cannot fix a login Discord refused
+      describe('under meocord start --dev', () => {
+        const originalSend = process.send
+        const send = vi.fn((_message: unknown, _handle: unknown, _options: unknown, callback?: () => void) => {
+          callback?.()
+          return true
+        })
+
+        beforeEach(() => {
+          process.env[DEV_RUNNER_ENV] = '1'
+          process.send = send as unknown as typeof process.send
+        })
+
+        afterEach(() => {
+          delete process.env[DEV_RUNNER_ENV]
+          process.send = originalSend
+          send.mockClear()
+        })
+
+        it('tells the dev runner the bot could not log in', async () => {
+          mockClient.login.mockRejectedValueOnce(new Error('An invalid token was provided.'))
+          const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'bad-token')
+
+          await app.start().catch(() => {})
+
+          expect(send).toHaveBeenCalledWith({ meocord: 'login-failed' }, undefined, {}, expect.any(Function))
+        })
+
+        it('tells it the bot is online when a retry logs in', async () => {
+          mockClient.login.mockRejectedValueOnce(new Error('Discord unreachable'))
+          const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token')
+
+          await app.start().catch(() => {})
+          await app.start()
+
+          expect(send.mock.calls.map(([message]) => message)).toEqual([{ meocord: 'login-failed' }, { meocord: 'online' }])
+        })
+
+        it('tells a process the dev runner did not start nothing', async () => {
+          delete process.env[DEV_RUNNER_ENV]
+          mockClient.login.mockRejectedValueOnce(new Error('An invalid token was provided.'))
+          const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'bad-token')
+
+          await app.start().catch(() => {})
+
+          expect(send).not.toHaveBeenCalled()
+        })
       })
 
       it('leaves the exit code alone when the login succeeds', async () => {

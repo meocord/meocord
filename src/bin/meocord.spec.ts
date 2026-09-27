@@ -345,9 +345,11 @@ describe('spawning the application', () => {
       expect(first.kill).toHaveBeenCalled()
       expect(spawnMock).not.toHaveBeenCalled()
 
-      const onExit = first.once.mock.calls.find(([event]) => event === 'exit')?.[1] as () => void
+      // The listener the restart added, after removing the one watching for an exit of its own
+      const onExit = first.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
       onExit()
 
+      expect(first.removeAllListeners).toHaveBeenCalledWith('exit')
       expect(spawnMock).toHaveBeenCalledTimes(1)
     })
 
@@ -369,6 +371,63 @@ describe('spawning the application', () => {
       watcher().restartApp()
 
       expect(spawnMock).toHaveBeenCalledTimes(1)
+    })
+
+    describe('when the application exits on its own', () => {
+      type Child = ReturnType<typeof createChild>
+      const launch = (cli: { restartApp: () => void }) => {
+        cli.restartApp()
+        return spawnMock.mock.results.at(-1)?.value as Child
+      }
+      const handler = (child: Child, method: 'on' | 'once', event: string) =>
+        (child[method].mock.calls.find(([name]) => name === event)?.[1] ?? (() => {})) as (...args: unknown[]) => void
+      const warned = (cli: unknown) => vi.mocked((cli as { logger: { warn: (text: string) => void } }).logger.warn).mock.calls.flat()
+
+      // Discord refused the login, so no change to the code can bring the bot online: watching on would hide it
+      it('ends the watch session with its code when the bot could not log in', () => {
+        const cli = watcher()
+        const child = launch(cli)
+
+        handler(child, 'on', 'message')({ meocord: 'login-failed' })
+        handler(child, 'once', 'exit')(1)
+
+        expect(exitSpy).toHaveBeenCalledWith(1)
+      })
+
+      it('keeps watching after an exit a code change can fix, says so, and runs the next build', () => {
+        const cli = watcher()
+        const child = launch(cli)
+
+        handler(child, 'once', 'exit')(1)
+        child.exitCode = 1
+
+        expect(exitSpy).not.toHaveBeenCalled()
+        expect(warned(cli)).toContainEqual(expect.stringContaining('The application exited with code 1; waiting for changes'))
+        spawnMock.mockClear()
+        cli.restartApp()
+        expect(spawnMock).toHaveBeenCalledTimes(1)
+      })
+
+      it('keeps watching when a retry logged in after a failed login', () => {
+        const cli = watcher()
+        const child = launch(cli)
+
+        handler(child, 'on', 'message')({ meocord: 'login-failed' })
+        handler(child, 'on', 'message')({ meocord: 'online' })
+        handler(child, 'once', 'exit')(1)
+
+        expect(exitSpy).not.toHaveBeenCalled()
+      })
+
+      it('runs the application with a channel for it, and production without one', async () => {
+        watcher().restartApp()
+        expect(lastSpawn().options.stdio).toEqual(['inherit', 'inherit', 'inherit', 'ipc'])
+        expect((lastSpawn().options.env as NodeJS.ProcessEnv).MEOCORD_DEV_RUNNER).toBe('1')
+
+        await new MeoCordCLI().startProd()
+        expect(lastSpawn().options.stdio).toBe('inherit')
+        expect((lastSpawn().options.env as NodeJS.ProcessEnv).MEOCORD_DEV_RUNNER).toBeUndefined()
+      })
     })
   })
 })

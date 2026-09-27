@@ -11,6 +11,7 @@ import { bundleEntry } from '@src/util/bundle-entry.util.js'
 import { FORCE_REGISTER_ENV } from '@src/util/registration-mode.util.js'
 import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
 import { isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
+import { tellDevRunner, underDevRunner } from '@src/util/dev-runner.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 
 
@@ -77,10 +78,10 @@ export class ShardManager implements MeoCordApplication {
     const { token, config } = this.options
     if (!token?.trim()) {
       this.logger.error(tokenMessage(token))
-      return this.exit(1)
+      return this.exitForLogin()
     }
     this.logger.log('Starting shards in separate processes...')
-    if (!(await this.register())) return this.exit(1)
+    if (!(await this.register())) return this.exitForLogin()
 
     process.on('SIGINT', () => void this.stop())
     process.on('SIGTERM', () => void this.stop())
@@ -96,7 +97,7 @@ export class ShardManager implements MeoCordApplication {
       } else {
         this.logger.error('Could not ask Discord how many shards to run; check discordToken:', error)
       }
-      return this.exit(1)
+      return this.exitForLogin()
     }
 
     const file = bundleEntry()
@@ -198,7 +199,13 @@ export class ShardManager implements MeoCordApplication {
         `configuration and start again.`,
     )
     this.killAll()
-    this.exit(1)
+    void this.exitForLogin()
+  }
+
+  /** Exits 1 for a bot that could not log in, telling `meocord start --dev` first so it ends its watch session. */
+  private exitForLogin(): void | Promise<void> {
+    if (!underDevRunner()) return this.exit(1)
+    return tellDevRunner({ meocord: 'login-failed' }).then(() => this.exit(1))
   }
 
   /**

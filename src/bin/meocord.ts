@@ -19,6 +19,7 @@ import { configureCommandHelp, ensureReady } from '@src/util/meocord-cli.util.js
 import { resolveOwnVersion } from '@src/util/package-version.util.js'
 import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
+import { DEV_RUNNER_ENV, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
 import packageJson from '../../package.json' with { type: 'json' }
 import { fileURLToPath } from 'url'
 import {
@@ -596,6 +597,9 @@ copies or substantial portions of the Software.
   /** Whether a watch session is stopping, when a rebuild must not start the application again. */
   private stopping = false
 
+  /** Ends a watch session with an exit code; `startDev` also closes its watchers first. */
+  private endDevSession: (code: number) => void = code => process.exit(code)
+
   /**
    * Replaces the running application with one built from the current sources.
    *
@@ -609,26 +613,52 @@ copies or substantial portions of the Software.
     this.appProcess = null
 
     if (!stillRunning(previous)) {
-      this.appProcess = this.spawnApp()
+      this.appProcess = this.launchDevApp()
       return
     }
 
     previous.removeAllListeners('exit')
     previous.once('exit', () => {
-      if (!this.stopping) this.appProcess = this.spawnApp()
+      if (!this.stopping) this.appProcess = this.launchDevApp()
     })
     previous.kill()
   }
 
-  /** Runs the built application. Both start modes use it, so watch mode launches the bundle exactly as production does. */
-  private spawnApp(): ChildProcess {
+  /**
+   * Runs the application for a watch session. When it exits on its own because the bot could not log in, which no
+   * code change fixes, the session ends with its code; after any other exit, the next build starts it again.
+   */
+  private launchDevApp(): ChildProcess {
+    const child = this.spawnApp({ devRunner: true })
+    let loginFailed = false
+    child.on('message', message => {
+      if (isDevRunnerMessage(message)) loginFailed = message.meocord === 'login-failed'
+    })
+    child.once('exit', (code, signal) => {
+      // An exit the session asked for, to restart or to stop, is not the application's own
+      if (this.appProcess !== child || this.stopping) return
+      if (loginFailed) {
+        this.logger.error('The bot could not log in, and no code change fixes that; stopping watch mode.')
+        return this.endDevSession(code ?? 1)
+      }
+      this.logger.warn(`The application exited with ${code === null ? signal : `code ${code}`}; waiting for changes.`)
+    })
+    return child
+  }
+
+  /**
+   * Runs the built application. Both start modes use it, so watch mode launches the bundle exactly as production does.
+   *
+   * @param options.devRunner - Gives the application a channel to tell watch mode whether the bot could log in.
+   */
+  private spawnApp({ devRunner = false } = {}): ChildProcess {
     const sourceMaps = loadMeoCordCliConfig()?.sourceMappedStacks !== false
     const { command, args } = buildAppCommand(this.runtime, this.mainJSPath, { sourceMaps })
 
     return spawn(command, args, {
       cwd: this.projectRoot,
-      env: { ...process.env, ...this.appEnv },
-      stdio: 'inherit',
+      env: { ...process.env, ...this.appEnv, ...(devRunner && { [DEV_RUNNER_ENV]: '1' }) },
+      stdio: devRunner ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
     })
   }
 
@@ -676,17 +706,25 @@ copies or substantial portions of the Software.
         }, 300)
       })
 
+      const stopWatching = () => {
+        this.stopping = true
+        clearTimeout(debounceWatcher)
+        fsWatcher.close()
+      }
+      const finish = async (code: number | null) => {
+        await watching?.close()
+        process.exit(code ?? 0)
+      }
+      this.endDevSession = code => {
+        stopWatching()
+        void finish(code)
+      }
+
       this.relayStopSignals(
         () => this.appProcess,
         () => {
-          this.stopping = true
-          clearTimeout(debounceWatcher)
-          fsWatcher.close()
+          stopWatching()
           const app = this.appProcess
-          const finish = async (code: number | null) => {
-            await watching?.close()
-            process.exit(code ?? 0)
-          }
           if (stillRunning(app)) app.on('exit', code => void finish(code))
           else void finish(0)
         },
