@@ -24,6 +24,7 @@ import {
   focusedOptionName,
   hasCustomId,
   matchesCommandType,
+  matchesHandler,
   resolveCommandPaths,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
@@ -263,7 +264,7 @@ export class Dispatcher {
       for (const controllerClass of this.controllerClasses) {
         const controllerInstance = this.getInstance(controllerClass)
         const commandMap = getCommandMap(controllerInstance)
-        const commandMetadata = commandMap?.[path]?.find(meta => matchesCommandType(meta.type, interaction))
+        const commandMetadata = commandMap?.[path]?.find(meta => matchesHandler(meta, interaction))
         if (!commandMetadata) continue
 
         await this.executeCommand(controllerInstance, commandMetadata, interaction, call)

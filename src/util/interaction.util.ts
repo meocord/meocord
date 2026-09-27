@@ -48,6 +48,20 @@ export function matchesCommandType(type: CommandType, interaction: unknown): boo
 }
 
 /**
+ * Whether an interaction is one a handler takes: of its command type, and for a context menu, of the kind
+ * its builder registers, so a User and a Message command of the same name each reach their own handler.
+ */
+export function matchesHandler(handler: { type: CommandType; builder?: unknown }, interaction: unknown): boolean {
+  if (!matchesCommandType(handler.type, interaction)) return false
+  const registered = (handler.builder as { type?: unknown } | undefined)?.type
+  return (
+    handler.type !== CommandType.CONTEXT_MENU ||
+    registered === undefined ||
+    (interaction as { commandType?: unknown }).commandType === registered
+  )
+}
+
+/**
  * Whether a command type is routed by customId pattern: components carry an application-defined
  * customId, while commands are matched by the name Discord registered.
  */
