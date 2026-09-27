@@ -50,4 +50,15 @@ describe('context menu commands', () => {
 
     expect(ran).toEqual(['message', 'user'])
   })
+
+  it("refuses to invoke a handler with the other kind's interaction, as dispatch would never send it there", async () => {
+    const module = MeoCordTestingModule.create({ controllers: [ReportController] }).compile()
+    const user = createMockInteraction(UserContextMenuCommandInteraction, { commandName: 'Report' })
+
+    await expect(module.invoke(ReportController, 'reportMessage', user)).rejects.toThrow(
+      "A user context menu command 'Report' does not match ReportController.reportMessage, which handles the message context menu command 'Report'.",
+    )
+    await expect(module.invoke(ReportController, 'reportUser', user)).resolves.toMatchObject({ ran: true })
+    expect(ran).toEqual(['user'])
+  })
 })
