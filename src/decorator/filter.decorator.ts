@@ -32,7 +32,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseFilter}
- * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
+ * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
  */
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
   return function (target: new (...args: any[]) => ExceptionFilter<any>) {
@@ -71,7 +71,7 @@ export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[
  * @group Decorators
  * @category Pipeline stages
  * @see {@link Catch}
- * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
+ * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
  */
 export function UseFilter<const T extends readonly unknown[]>(
   ...filters: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => ExceptionFilter<any>> }

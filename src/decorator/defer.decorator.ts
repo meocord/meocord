@@ -34,7 +34,7 @@ import { DEFER_OPTIONS, deferMisuseError, type DeferOptions, nonInteractionHandl
  * @category Pipeline stages
  * @see {@link DeferOptions}
  * @see {@link respond}
- * @see {@link https://meocord.dev/docs/latest/defer | Deferring}
+ * @see {@link https://meocord.dev/docs/4.1/defer | Deferring}
  */
 export function Defer(options: DeferOptions = {}): MethodDecorator {
   return (target: object, propertyKey: string | symbol) => {

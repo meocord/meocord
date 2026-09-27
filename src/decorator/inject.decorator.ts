@@ -24,7 +24,7 @@ import { type ProviderToken } from '@src/interface/provider.interface.js'
  * @category Params
  * @see {@link Service}
  * @see {@link createToken}
- * @see {@link https://meocord.dev/docs/latest/services | Services}
+ * @see {@link https://meocord.dev/docs/4.1/services | Services}
  */
 export function Inject(
   token: ProviderToken,

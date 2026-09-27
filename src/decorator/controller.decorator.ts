@@ -455,8 +455,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * @category Handlers
  * @see {@link CommandBuilder}
  * @see {@link route}
- * @see {@link https://meocord.dev/docs/latest/slash-commands | Slash commands}
- * @see {@link https://meocord.dev/docs/latest/components | Buttons, selects and modals}
+ * @see {@link https://meocord.dev/docs/4.1/slash-commands | Slash commands}
+ * @see {@link https://meocord.dev/docs/4.1/components | Buttons, selects and modals}
  */
 export function Command<
   CBC extends BuildableCommandType,
@@ -612,7 +612,7 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @group Decorators
  * @category Handlers
  * @see {@link Command}
- * @see {@link https://meocord.dev/docs/latest/autocomplete | Autocomplete}
+ * @see {@link https://meocord.dev/docs/4.1/autocomplete | Autocomplete}
  */
 export function Autocomplete<R extends void | Promise<void>>(commandPath: string, optionName?: string) {
   return function <P extends Record<string, any>>(

@@ -127,7 +127,7 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
  * @see {@link UseGuard}
  * @see {@link GuardDeniedError}
  * @see {@link ExecutionContext}
- * @see {@link https://meocord.dev/docs/latest/guards | Guards}
+ * @see {@link https://meocord.dev/docs/4.1/guards | Guards}
  */
 export function Guard(
   options: {
@@ -177,7 +177,7 @@ export function Guard(
  * @see {@link Guard}
  * @see {@link GuardDeniedError}
  * @see {@link ExecutionContext}
- * @see {@link https://meocord.dev/docs/latest/guards | Guards}
+ * @see {@link https://meocord.dev/docs/4.1/guards | Guards}
  */
 export function UseGuard<const T extends readonly unknown[]>(
   ...entries: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => GuardInterface> }
