@@ -1,5 +1,5 @@
 import { type Locale } from 'discord.js'
-import { CATALOGS, FIND_MESSAGE, type FoundMessage, lookup, pluralForm, type Translator } from '@src/common/translator.js'
+import { type CatalogShape, CATALOGS, type FoundMessage, languageOf, LOCALE_CHAIN, lookup, pluralForm, type Translator } from '@src/common/translator.js'
 import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 import { type MessageUsageIssue } from '@src/common/errors.js'
 
@@ -24,10 +24,36 @@ export interface MeoCordText {
 export type TextLocale = string | undefined
 
 /** A translator that serves messages by locale, as `createTranslator` makes. */
-interface Finder { [FIND_MESSAGE](requested: string | undefined, key: string): FoundMessage | undefined }
+interface Catalogs {
+  [CATALOGS]: Partial<Record<string, CatalogShape>>
+  [LOCALE_CHAIN](requested: string | undefined): Locale[]
+}
 
-const canFind = (translator: Translator<any> | undefined): translator is Translator<any> & Finder =>
-  translator !== undefined && CATALOGS in translator && FIND_MESSAGE in translator
+const hasCatalogs = (translator: Translator<any> | undefined): translator is Translator<any> & Catalogs =>
+  translator !== undefined && CATALOGS in translator && LOCALE_CHAIN in translator
+
+const ENGLISH = 'en-US' as Locale
+
+/**
+ * The message a text is in for `locale`, and whether it is the app's: the app's catalogs down the locale's chain, with
+ * MeoCord's English as the English catalog. An English request reads it after the app's English catalogs and before a
+ * default in another language; any other request reads it last.
+ */
+function findText(translator: Translator<any> | undefined, locale: TextLocale, key: string): (FoundMessage & { own: boolean }) | undefined {
+  const english = () => {
+    const message = lookup(MEOCORD_MESSAGES, key)
+    return message === undefined ? undefined : { message, locale: ENGLISH, own: false }
+  }
+  if (!hasCatalogs(translator)) return english()
+  const englishFirst = locale !== undefined && languageOf(locale) === 'en' && languageOf(translator.defaultLocale) !== 'en'
+  for (const served of translator[LOCALE_CHAIN](locale)) {
+    const beforeDefault = englishFirst && served === translator.defaultLocale ? english() : undefined
+    if (beforeDefault) return beforeDefault
+    const message = lookup(translator[CATALOGS][served], key)
+    if (message !== undefined) return { message, locale: served, own: true }
+  }
+  return english()
+}
 
 const lists = new Map<string, Intl.ListFormat>()
 
@@ -39,20 +65,18 @@ function listIn(locale: string, style: 'or' | 'unit', items: readonly string[]):
 }
 
 /**
- * A text in `locale`: the app's catalogs down the locale's chain, then MeoCord's English. A list in MeoCord's
- * English is joined with commas, as it reads; in an app's catalog, in the words of the locale that has it.
+ * A text in `locale`, as {@link findText} finds it. A list in MeoCord's English is joined with commas, as it reads;
+ * in an app's catalog, in the words of the locale that has it.
  */
 export function renderText(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): string {
-  const own = canFind(translator) ? translator[FIND_MESSAGE](locale, text.key) : undefined
-  const english = own ? undefined : lookup(MEOCORD_MESSAGES, text.key)
-  if (!own && english === undefined) return text.fallback ?? text.key
-  const found: FoundMessage = own ?? { message: english!, locale: 'en-US' as Locale }
+  const found = findText(translator, locale, text.key)
+  if (!found) return text.fallback ?? text.key
   const params = text.params ?? {}
   return pluralForm(found, params.count).replace(/\{(\w+)}/g, (whole, name: string) => {
     if (!Object.hasOwn(params, name)) return whole
     const value = params[name]
     if (typeof value !== 'object') return String(value)
-    if ('list' in value) return own ? listIn(found.locale, value.style, value.list) : value.list.join(value.joiner ?? ', ')
+    if ('list' in value) return found.own ? listIn(found.locale, value.style, value.list) : value.list.join(value.joiner ?? ', ')
     return renderText(translator, locale, value)
   })
 }
