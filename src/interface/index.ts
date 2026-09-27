@@ -399,10 +399,18 @@ export type MessagePrefix = string | readonly string[]
  *
  * @example
  * ```ts
+ * @Controller()
+ * class DiceController {
+ *   @MessageHandler('roll {sides:int}')
+ *   async roll(message: Message, { sides }: { sides: number }) {
+ *     await message.reply(String(1 + Math.floor(Math.random() * sides)))
+ *   }
+ * }
+ *
  * @MeoCord({
- *   controllers: [],
+ *   controllers: [DiceController],
  *   clientOptions: { intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] },
- *   // A command starts after `!` or a mention of the bot; a usage reply stays 30 seconds
+ *   // !roll 20, or @Bot roll 20; a usage reply stays 30 seconds
  *   messages: { prefix: '!', mention: true, deleteUsageRepliesAfter: 30 },
  * })
  * class App {}
