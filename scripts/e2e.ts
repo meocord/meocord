@@ -266,9 +266,13 @@ async function themeChecks(bot: Bot, helper: DiscordApi): Promise<void> {
 async function helperChecks(bot: Bot): Promise<void> {
   if (!helperToken || !channelId) {
     const name = 'a message, a reaction and the theme showcase from the helper bot'
-    // Optional on a contributor's machine; in CI a skip would pass the run with these checks never run
     if (process.env.CI === 'true') {
-      record('FAIL', name, 'helper bot not configured: set MEOCORD_E2E_HELPER_BOT_TOKEN and MEOCORD_E2E_CHANNEL_ID in the e2e environment')
+      // Skipped, as on a contributor's machine, but with a warning on the run, so a job that passes says what it left unrun
+      const warning =
+        'helper bot not configured: set MEOCORD_E2E_HELPER_BOT_TOKEN and MEOCORD_E2E_CHANNEL_ID in the e2e environment; ' +
+        'message, reaction and theme checks skipped'
+      console.log(`::warning title=Real Discord::${warning}`)
+      record('skip', name, warning)
     } else {
       record('skip', name, 'set MEOCORD_E2E_CHANNEL_ID and MEOCORD_E2E_HELPER_BOT_TOKEN to run them')
     }
@@ -282,10 +286,14 @@ async function helperChecks(bot: Bot): Promise<void> {
       message = await helper.sendMessage(channelId, 'MeoCord e2e: a message and reaction check, deleted when it ends.')
       await bot.waitFor('message event for the helper bot’s message', marker => marker.event === 'message-event' && marker.id === message!.id)
     })
-    await check("@ReactionHandler receives the helper bot's reaction", async () => {
+    await check("@ReactionHandler with bots: true receives the helper bot's reaction, and one without ignores it", async () => {
       expect(message, 'There is no message to react to.')
       await helper.react(channelId, message.id, '✅')
       await bot.waitFor('reaction on the helper bot’s message', marker => marker.event === 'reaction' && marker.message === message!.id)
+      // The handler without bots: true would have run with the other, had the reaction reached it
+      await sleep(2_000)
+      const reached = bot.markers.some(marker => marker.event === 'reaction-people-only' && marker.message === message!.id)
+      expect(!reached, 'A handler without bots: true ran for the helper bot’s reaction.')
     })
   } finally {
     if (message) {

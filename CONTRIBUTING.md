@@ -104,7 +104,8 @@ It checks, in order:
 - the bot logs in, and `onReady` runs in dependency order, told the process is primary;
 - `ShardContext.call` reaches the process;
 - exactly the smoke command is registered in the test server, and `clearOther` leaves no global command;
-- with a helper bot, `@On('messageCreate')` receives its message and `@ReactionHandler` its reaction.
+- with a helper bot, `@On('messageCreate')` receives its message, and `@ReactionHandler` with
+  `bots: true` its reaction, while one without `bots: true` ignores it.
   `@MessageHandler` ignores messages from bots, so that one is marked for a person to check;
 - with a helper bot, the theme on real ids: a listener's reply, read back from Discord, carries the
   app's theme, the listener class's `@UseTheme`, the test server's and the helper bot's from `themeFor`,
@@ -237,8 +238,8 @@ share the `discord-e2e` concurrency group, so only one logs in as the test bot a
 running check is never cancelled for another. It is not a required check, so an outage at Discord blocks
 no merge. Pull requests from forks get no secrets: for them a separate job explains the skip. Without
 the environment's secrets, the job passes with the skip message. With the test bot's but without the
-helper bot's, the helper bot's checks fail there, where a contributor's run skips them, so the job never
-passes with them left unrun.
+helper bot's, the job skips the helper bot's checks, as a contributor's run does, and adds a warning to the
+run saying which secrets to set, so a passing job never hides that they did not run.
 
 ## Changesets and releases
 
