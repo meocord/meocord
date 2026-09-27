@@ -375,10 +375,11 @@ describe('classes that share a name', () => {
     }
     return Shop
   }
-  const plainShop = () => {
+  // Each under its own command, since two handlers of one command would be refused for that
+  const plainShop = (command = 'sell') => {
     @Controller()
     class Shop {
-      @Command('sell', CommandType.SLASH)
+      @Command(command, CommandType.SLASH)
       async sell(_interaction: ChatInputCommandInteraction) {}
     }
     return Shop
@@ -403,7 +404,7 @@ describe('classes that share a name', () => {
   })
 
   it('start when neither has a cooldown or a @Once handler', () => {
-    expect(() => MeoCordTestingModule.create({ controllers: [plainShop(), plainShop()] }).compile()).not.toThrow()
+    expect(() => MeoCordTestingModule.create({ controllers: [plainShop(), plainShop('refund')] }).compile()).not.toThrow()
   })
 })
 

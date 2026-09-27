@@ -46,6 +46,7 @@ import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
+import { assertDistinctCommands } from '@src/core/command-conflicts.js'
 import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
@@ -983,6 +984,8 @@ export class TestingModuleBuilder {
     const messages = messagesOf(this.options.app)
     // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
     buildMessageRoutes(this.options.controllers ?? [], messages)
+    // As the app does when it is created, so a test sees the refusal the bot would give
+    assertDistinctCommands(this.options.controllers ?? [])
     if (this.options.app) bindAppPresenter(container, this.options.app)
     const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
     assertObservers("the testing module's observers", observers)

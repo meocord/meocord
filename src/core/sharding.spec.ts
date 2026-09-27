@@ -6,6 +6,7 @@ import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as ShardManagerModule from '@src/core/shard-manager.js'
 import type * as ShardContextModule from '@src/core/shard-context.js'
 import { type MeoCordConfig, type OnReady, type ReadyInfo } from '@src/interface/index.js'
+import { CommandType } from '@src/enum/index.js'
 
 const { logged, config, platformChecked } = vi.hoisted(() => ({
   logged: { info: [] as string[], error: [] as string[] },
@@ -100,6 +101,38 @@ describe('sharding', () => {
     Reflect.deleteProperty(process, 'send')
     vi.unstubAllEnvs()
     vi.restoreAllMocks()
+  })
+
+  // One call in MeoCordFactory.create covers every way a bot runs; each is tested, so moving the call below one fails
+  describe('two handlers of one command', () => {
+    const duplicated = (loaded: Loaded) => {
+      @loaded.Controller()
+      class StatsController {
+        @loaded.Command('stats', CommandType.SLASH)
+        async stats() {}
+      }
+      @loaded.Controller()
+      class AdminController {
+        @loaded.Command('stats', CommandType.SLASH)
+        async adminStats() {}
+      }
+      return appClass(loaded, { controllers: [StatsController, AdminController] })
+    }
+
+    it.each([
+      ['as a bot', () => {}, { discordToken: 'token' }],
+      ['under meocord register', () => vi.stubEnv('MEOCORD_REGISTER_ONLY', '1'), { discordToken: 'token' }],
+      ['as the shard manager', () => {}, { discordToken: 'token', sharding: { mode: 'process' } }],
+      ['as a spawned shard', () => vi.stubEnv('SHARDING_MANAGER', 'true'), { discordToken: 'token', sharding: { mode: 'process' } }],
+    ] as const)('stop the bot %s, before anything registers or runs', async (_how, setUp, current) => {
+      const loaded = await load()
+      setUp()
+      config.current = current as MeoCordConfig
+
+      expect(() => loaded.MeoCordFactory.create(duplicated(loaded))).toThrow(
+        'StatsController.stats and AdminController.adminStats both handle the slash command "stats"',
+      )
+    })
   })
 
   describe('entry modes', () => {

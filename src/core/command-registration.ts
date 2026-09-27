@@ -44,7 +44,7 @@ type Builder = NonNullable<CommandMetadata['builder']>
 const DEFAULT_APPLICATION_COMMAND_TYPE = ApplicationCommandType.ChatInput
 
 /** The body a builder registers, which is what Discord sees; throws when the builder is incomplete. */
-function serialise(builder: Builder): CollectedCommand['body'] {
+export function serialise(builder: Builder): CollectedCommand['body'] {
   return typeof (builder as { toJSON?: () => unknown }).toJSON === 'function'
     ? ((builder as { toJSON: () => unknown }).toJSON() as CollectedCommand['body'])
     : (builder as CollectedCommand['body'])
@@ -54,7 +54,7 @@ function serialise(builder: Builder): CollectedCommand['body'] {
  * The identity Discord gives a command. The numeric type leads, so the halves never read apart
  * wrongly; an absent type is the chat input one Discord infers, so untyped slash builders collide.
  */
-function registrationKey(body: CollectedCommand['body'], fallbackName: string): string {
+export function registrationKey(body: CollectedCommand['body'], fallbackName: string): string {
   const type = typeof body.type === 'number' ? body.type : DEFAULT_APPLICATION_COMMAND_TYPE
   return `${type}:${typeof body.name === 'string' ? body.name : fallbackName}`
 }
@@ -71,7 +71,7 @@ export function collectCommands(
 ): CollectedCommand[] | undefined {
   // Keyed by type and name: Discord treats that pair as one command, so a user and a message context
   // menu may share a name, and a command split across methods sends its builder once.
-  const byKey = new Map<string, { builder: Builder; command: CollectedCommand }>()
+  const byKey = new Map<string, { builderClass: unknown; command: CollectedCommand }>()
   const broken: string[] = []
   const unlocalizable: string[] = []
 
@@ -79,7 +79,7 @@ export function collectCommands(
     const commandMap = getCommandMap(controllerClass.prototype) ?? {}
 
     for (const commandName in commandMap) {
-      for (const { builder, type, guilds } of commandMap[commandName]) {
+      for (const { builder, builderClass, type, guilds } of commandMap[commandName]) {
         if (!(type in CommandType) || !builder) continue
 
         let body: CollectedCommand['body']
@@ -96,8 +96,9 @@ export function collectCommands(
         if (existing === undefined) {
           const name = typeof body.name === 'string' ? body.name : commandName
           unlocalizable.push(...localizationProblems(name, body))
-          byKey.set(key, { builder, command: { name, body, ...(guilds && { guilds }) } })
-        } else if (existing.builder !== builder) {
+          byKey.set(key, { builderClass: builderClass ?? builder, command: { name, body, ...(guilds && { guilds }) } })
+        } else if (existing.builderClass !== (builderClass ?? builder)) {
+          // Refused when the app is created; kept for a caller that collects commands on its own, never thrown
           logger.warn(
             `Command "${existing.command.name}" is built more than once for the same application command type; ` +
               `only the first builder is registered. Two builders of one type cannot both own a name, so declare ` +

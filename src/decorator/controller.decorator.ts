@@ -575,6 +575,7 @@ export function Command<
     commands[commandName].push({
       methodName: propertyKey,
       builder: builderInstance,
+      ...(typeof builderOrType === 'function' && { builderClass: builderOrType as abstract new (...args: any[]) => unknown }),
       type: commandType,
       regex,
       dynamicParams,
