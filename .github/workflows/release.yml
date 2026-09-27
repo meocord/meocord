@@ -124,9 +124,12 @@ jobs:
           echo "One or more Node versions failed: ${{ needs.test.result }}"
           exit 1
 
-      # Skipped on a push, where the release checks run them instead
+      # Skipped only on a push or a manual re-run, where the release checks run them instead
       - name: Report the slow CLI scenarios
-        if: needs.slow-scenarios.result != 'success' && needs.slow-scenarios.result != 'skipped'
+        if: >-
+          needs.slow-scenarios.result != 'success' &&
+          !(needs.slow-scenarios.result == 'skipped' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
         run: |
           echo "The slow CLI scenarios failed: ${{ needs.slow-scenarios.result }}"
           exit 1
