@@ -151,7 +151,7 @@ structured enough for the generator. On hover the whole comment fits a screen, a
   `Decorators`, `Responses`, `Utilities`, `Testing`, `Configuration`, `CLI`, `Types`.
 - **`@category`:** an optional subgroup: for `Decorators`, `App`, `Controllers`, `Handlers`, `Pipeline stages` or
   `Params`; for `Responses`, `Errors` or `Presenters`; for `Utilities`, `Localisation` or `Cooldown stores`; for
-  `Configuration`, `Config file` or `App options`; for `Testing`, `Module`, `Mocks` or `Inspection`.
+  `Configuration`, `Config file`, `App options` or `ESLint`; for `Testing`, `Module`, `Mocks` or `Inspection`.
 - **`@see`:** up to four related symbols, `{@link Symbol}`, or guide pages by their `https://meocord.dev/docs/4.1/…`
   URL: the line of the package's own version, so a reader lands on pages for the version they installed. The check
   fails a link to another line, and `bun run check:jsdoc-examples --fix` moves every link to the package's line, as
