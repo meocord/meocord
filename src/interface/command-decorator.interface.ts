@@ -84,10 +84,10 @@ export interface CommandBuilderBase<T extends BuildableCommandType = BuildableCo
 export type CommandBuilderConstructor<T extends BuildableCommandType> = new () => CommandBuilderBase<T>
 
 /**
- * What `@Command` records about a handler method: its route, its type and its builder.
+ * What `@Command` records about a handler method: its route, its type and its builder. Exported, but not public
+ * API: no public type or function takes or returns it.
  *
- * @group Types
- * @see {@link Command}
+ * @internal
  */
 export interface CommandMetadata<T extends string = string> {
   /** The handler method's name. */
@@ -110,10 +110,10 @@ export interface CommandMetadata<T extends string = string> {
 }
 
 /**
- * What `@Autocomplete` records about a handler method: the command and option it completes.
+ * What `@Autocomplete` records about a handler method: the command and option it completes. Exported, but not
+ * public API: no public type or function takes or returns it.
  *
- * @group Types
- * @see {@link Autocomplete}
+ * @internal
  */
 export interface AutocompleteMetadata {
   /** The command path the handler serves, e.g. `settings` or `settings notify email`. */
