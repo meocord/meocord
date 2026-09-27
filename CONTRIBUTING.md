@@ -8,6 +8,7 @@ Thanks for taking the time. Issues, questions, and pull requests are all welcome
 - [Making a change](#making-a-change)
 - [AI-assisted contributions](#ai-assisted-contributions)
 - [What the checks do](#what-the-checks-do)
+- [Writing JSDoc](#writing-jsdoc)
 - [Checking against real Discord](#checking-against-real-discord)
 - [Changesets and releases](#changesets-and-releases)
 - [Reporting bugs](#reporting-bugs)
@@ -48,7 +49,8 @@ bun run test
 3. Write a test first where there is behaviour to pin down.
 4. If the change reaches the published package, run `bun run changeset` and commit the file it writes.
 5. Run `bun run lint` and `bun run test` before pushing.
-6. If you touched anything under `src/bin/`, also run `bun run build && bun run verify:generated`.
+6. If you touched anything under `src/bin/`, also run `bun run build && bun run verify:generated`. If you
+   changed a public symbol's JSDoc, run `bun run build && bun run check:jsdoc-examples`.
 7. If you added or removed a dependency, run `bun run notices` and commit the result. CI fails when it is out of date.
 8. Push and open a pull request against `main`.
 
@@ -91,6 +93,93 @@ whether that text lints, compiles, tests or builds; shipped bugs have hidden in 
 **The Windows job** installs the packed tarball globally and drives the CLI through the `.cmd` shim npm
 writes from the interpreter line. Nothing on a POSIX runner exercises that path, and generation is what
 walks and writes file paths, so it is also run where the separator and case rules differ.
+
+## Writing JSDoc
+
+A public symbol's JSDoc is read in two places: on hover in an editor, and as the symbol's page in the API
+reference, which the docs site generates from the published `.d.ts`. So it is short enough for a hover and
+structured enough for the generator. On hover the whole comment fits a screen, about 30 lines.
+
+````ts
+/**
+ * Runs guards before a handler, or before every handler of a controller.
+ *
+ * Use it to decide whether a call may run at all: who may use a command, where, or on whose message. To limit
+ * how often a handler runs, use {@link Cooldown}; to check its input, {@link Validate}.
+ *
+ * @remarks
+ * The handler runs only when every guard allows the call. …
+ *
+ * @param entries - Guard classes, or `{ provide, params? }` to give one use of a guard its params.
+ * @throws Error when an entry is neither a guard class nor `{ provide, params? }`, as the decorator applies.
+ *
+ * @example
+ * ```ts
+ * @Command('trade', CommandType.SLASH)
+ * @UseGuard(StaffGuard, { provide: ChannelGuard, params: { channelIds: ['123456789012345678'] } })
+ * async trade(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Trade opened.')
+ * }
+ * ```
+ *
+ * @pipeline guards after the global guards, a controller's before a method's
+ * @group Decorators
+ * @category Pipeline stages
+ * @see {@link Guard}
+ */
+````
+
+- **Summary:** the first paragraph, one sentence on one line. A function or decorator starts with a verb, a type
+  with a noun phrase.
+- **When to use:** the paragraphs after it, at most three sentences: what it is for, and what to use instead,
+  linked.
+- **`@remarks`:** how it works and its gotchas, when there are any. Anything longer belongs in the guide, linked
+  with `@see`.
+- **Options** are documented on the options type's own properties, one sentence each, with `@defaultValue` for a
+  default, not in `@param`. The reference builds its options table from them.
+- **`@param`** says what each positional parameter is; **`@returns`** is there only when the type does not say it;
+  **`@throws`** says when it refuses something, and what to do about it.
+- **`@example`:** one, in a fenced `ts` block, at most 12 lines of real code. Every decorator, function and class
+  has one; a type may skip it. See below for how it is compiled.
+- **`@pipeline <stage> [clause]`:** where a symbol that runs in the pipeline runs. The stage is one of, in the
+  order a call runs: `observers`, `filters`, `defer`, `parse`, `guards`, `cooldown-check`, `fetch`,
+  `interceptors`, `validation`, `pipes`, `cooldowns`, `lock`, `handler`. A symbol that runs in two places takes
+  one tag per place.
+- **`@group`:** the section of the API reference, and its URL. Every public symbol has one of `Controllers`,
+  `Decorators`, `Responses`, `Utilities`, `Testing`, `Configuration`, `CLI`, `Types`.
+- **`@category`:** an optional subgroup: for `Decorators`, `App`, `Controllers`, `Handlers`, `Pipeline stages` or
+  `Params`; for `Testing`, `Module`, `Mocks` or `Inspection`.
+- **`@see`:** up to four related symbols, `{@link Symbol}`, or guide pages by their `https://meocord.dev/docs/latest/…`
+  URL.
+- **`@deprecated`** links its replacement; **`@internal`** marks an export that is not public API.
+- Leave out what is derived: signatures and types, the entry point, the version a symbol first appeared in, and
+  anchors.
+
+Write as for any comment here: the code as it is now, with no history.
+
+### Examples compile
+
+`bun run check:jsdoc-examples`, after `bun run build`, compiles the example of every public symbol that has a
+`@group` against `dist`, and CI runs it. So an example:
+
+- **has no imports.** A name exported by one of meocord's entry points or by discord.js is imported for it; a name
+  both export is an error, not a guess.
+- **may be class members.** A snippet of decorated methods, with a constructor for what it injects, is compiled
+  inside a `@Controller()` class.
+- **may use a fixture**, declared in `scripts/jsdoc-examples/fixtures.ts`: the guards `StaffGuard` and
+  `ChannelGuard` (with `params: { channelIds }`), `TimingInterceptor`, `CooldownFilter` (for `CooldownError`),
+  `TrimPipe`, and `ProfileService` (`render(userId)` gives an `EmbedBuilder`). An example uses one as a dependency,
+  applying it or injecting it, and never extends it; each means what the guide's example of the same name does. A
+  new fixture goes in that file with its first use.
+- **may import a library it shows,** such as `import { z } from 'zod'`, in its first lines. The library is a dev
+  dependency of the repository.
+- declares anything else it uses.
+
+`--coverage` also lists the public symbols that do not follow this yet: a missing `@group`, summary or example.
+
+In an editor, a decorator example shows a stray `@Command —` inside its code on hover: TypeScript's JSDoc parser
+takes a line starting with `@` for a tag, even in a code fence. The API reference and the checker read the fence
+correctly, so write decorators as they are.
 
 ## Checking against real Discord
 

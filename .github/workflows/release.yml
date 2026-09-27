@@ -259,6 +259,10 @@ jobs:
       - name: Build package
         run: bun run build
 
+      # Every JSDoc example that follows the standard in CONTRIBUTING.md, compiled against the build
+      - name: Compile the JSDoc examples
+        run: bun run check:jsdoc-examples
+
       # Installs an application from the packed build and runs its own lint, typecheck,
       # tests, coverage and builds. Rendering a template says nothing about whether the
       # code it produces passes any of them.
