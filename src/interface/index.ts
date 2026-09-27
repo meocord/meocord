@@ -388,6 +388,7 @@ export interface ControllerOptions {
  * One prefix or several that start a message command, such as `'!'` or `['!', '?']`; `''` stands for none.
  *
  * @group Configuration
+ * @category App options
  * @see {@link MessageCommandOptions}
  */
 export type MessagePrefix = string | readonly string[]
@@ -466,6 +467,7 @@ export interface MessageCommandOptions {
  * ```
  *
  * @group Configuration
+ * @category App options
  * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
  */
 export interface MessageParamType<T = unknown> {
