@@ -20,6 +20,7 @@ If you know NestJS, the shape will feel familiar.
 ## Features
 
 - **Controllers for every interaction** — [slash commands](https://meocord.dev/docs/4.1/slash-commands) and their subcommands, autocomplete, [buttons, selects and modals](https://meocord.dev/docs/4.1/components) routed by customId, context menus, message commands and reactions, each a decorated method.
+- **Message commands** — [commands typed in chat](https://meocord.dev/docs/4.1/message-commands), from a pattern such as `ban {target:member} {reason...?}`: typed params, flags and lists, a usage reply when a message does not fit, and built-in help.
 - **A request pipeline** — [guards](https://meocord.dev/docs/4.1/guards) decide whether a handler runs, interceptors wrap it, validation and pipes check its input, [cooldowns](https://meocord.dev/docs/4.1/cooldowns) limit how often it runs, and exception filters decide what the user is told.
 - **Dependency injection** — services, providers and lifecycle hooks, wired into controllers with no manual instantiation.
 - **Answers that fit the interaction** — `respond(interaction)` replies, edits or follows up from whatever state the interaction is in, styled by a presenter and a [theme](https://meocord.dev/docs/4.1/theming).
