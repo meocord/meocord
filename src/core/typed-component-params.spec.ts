@@ -62,6 +62,8 @@ describe('typed customId params', () => {
       values: { count: 7 },
     })
     expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/seven' })).toBeUndefined()
+    // A route without a typed param reads as it always has, with no values
+    expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/reset' })).not.toHaveProperty('values')
 
     await module.invoke(Panel, 'count', press(counter.build({ count: 3 })))
     expect(received).toEqual([['count', 3]])

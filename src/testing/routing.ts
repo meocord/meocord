@@ -66,10 +66,11 @@ export interface ResolvedRoute {
    */
   params: Record<string, string>
   /**
-   * The params as a component's handler receives them: each typed param as its value, such as a number for
-   * `{count:int}`, and the others as their text. A message's are its `params`.
+   * The params as the handler receives them, for a component route with a typed param: each typed param as its
+   * value, such as a number for `{count:int}`, and the others as their text. Absent for any other route, whose
+   * handler receives `params`.
    */
-  values: Record<string, string | number | boolean>
+  values?: Record<string, string | number | boolean>
 }
 
 /**
@@ -146,7 +147,7 @@ export function resolveRoute(
     const matched = matchMessageRoute(buildMessageRoutes(controllersOf(app), messages), input.content, starts)
     if (!matched) return undefined
     const { route, params } = matched
-    return { controller: route.controllerClass, method: route.method, handler: route.controllerClass.prototype[route.method], params, values: params }
+    return { controller: route.controllerClass, method: route.method, handler: route.controllerClass.prototype[route.method], params }
   }
 
   if (!isCustomIdRouted(input.type)) {
@@ -157,7 +158,8 @@ export function resolveRoute(
   if (!matched) return undefined
   const { route, params, text } = matched
   const method = route.meta.methodName
-  return { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params: text, values: params }
+  const typed = Object.keys(route.types).length > 0
+  return { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params: text, ...(typed && { values: params }) }
 }
 
 /**
