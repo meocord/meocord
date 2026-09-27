@@ -19,10 +19,12 @@ import {
 import { CommandType } from '@src/enum/index.js'
 
 /**
- * The command types that are registered with Discord, and so need a builder.
+ * The command types registered with Discord, which take a builder: slash, context menu and entry point commands.
  *
- * Components are addressed by a customId the application makes up, so they have
- * nothing to register; these three are published through `application.commands.set`.
+ * Components have nothing to register: they are addressed by a customId the app makes up.
+ *
+ * @group Types
+ * @see {@link CommandBuilder}
  */
 export type BuildableCommandType = CommandType.SLASH | CommandType.CONTEXT_MENU | CommandType.PRIMARY_ENTRY_POINT
 
@@ -38,11 +40,14 @@ export type PrimaryEntryPointCommandData = RESTPostAPIPrimaryEntryPointApplicati
 }
 
 /**
- * The payload `build()` returns for a command type.
+ * What a builder's `build()` returns for its command type.
  *
- * - `SLASH`: a `SlashCommandBuilder`, including the narrowed forms chaining options or subcommands
- *   produces (`SlashCommandOptionsOnlyBuilder`, `SlashCommandSubcommandsOnlyBuilder`).
- * - `PRIMARY_ENTRY_POINT`: the raw REST body, since `@discordjs/builders` has no builder for it.
+ * A `SlashCommandBuilder` for `SLASH`, in any of the narrowed forms chaining options or subcommands produces; a
+ * `ContextMenuCommandBuilder` for `CONTEXT_MENU`; and the raw REST body for `PRIMARY_ENTRY_POINT`, which
+ * discord.js has no builder for.
+ *
+ * @group Types
+ * @see {@link CommandBuilderBase}
  */
 export type CommandBuildResult<T extends BuildableCommandType> = T extends CommandType.SLASH
   ? SlashCommandBuilder | SlashCommandOptionsOnlyBuilder | SlashCommandSubcommandsOnlyBuilder
@@ -53,7 +58,12 @@ export type CommandBuildResult<T extends BuildableCommandType> = T extends Comma
       : never
 
 /**
- * Base interface for a command builder.
+ * What a command builder implements: `build`, which describes the command to register.
+ *
+ * Implement it on a class marked with {@link CommandBuilder}.
+ *
+ * @group Types
+ * @see {@link CommandBuilder}
  */
 export interface CommandBuilderBase<T extends BuildableCommandType = BuildableCommandType> {
   /**
@@ -65,10 +75,19 @@ export interface CommandBuilderBase<T extends BuildableCommandType = BuildableCo
   build: (commandName: string) => CommandBuildResult<T>
 }
 
+/**
+ * A command builder class, as `@Command` takes it.
+ *
+ * @group Types
+ * @see {@link Command}
+ */
 export type CommandBuilderConstructor<T extends BuildableCommandType> = new () => CommandBuilderBase<T>
 
 /**
- * Command metadata describing a registered command method.
+ * What `@Command` records about a handler method: its route, its type and its builder.
+ *
+ * @group Types
+ * @see {@link Command}
  */
 export interface CommandMetadata<T extends string = string> {
   methodName: string
@@ -85,7 +104,12 @@ export interface CommandMetadata<T extends string = string> {
   guilds?: (string | undefined)[]
 }
 
-/** Metadata describing one `@Autocomplete` handler. */
+/**
+ * What `@Autocomplete` records about a handler method: the command and option it completes.
+ *
+ * @group Types
+ * @see {@link Autocomplete}
+ */
 export interface AutocompleteMetadata {
   /** The command path the handler serves, e.g. `settings` or `settings notify email`. */
   commandPath: string
@@ -108,6 +132,12 @@ interface ComponentInteractionMap {
   [CommandType.PRIMARY_ENTRY_POINT]: PrimaryEntryPointCommandInteraction
 }
 
+/**
+ * The interaction a `@Command` handler receives, from its builder or its `CommandType`.
+ *
+ * @group Types
+ * @see {@link Command}
+ */
 export type CommandInteractionType<
   CBC extends BuildableCommandType,
   T extends CommandBuilderConstructor<CBC> | CommandType,

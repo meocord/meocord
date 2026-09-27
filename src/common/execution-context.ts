@@ -12,30 +12,41 @@ import { respond, type ResponseState } from '@src/common/response/response-state
 import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.interface.js'
 import { useTheme } from '@src/core/theme-scope.js'
 
-/** What an {@link ExecutionContext} is running a handler for. */
+/**
+ * What an {@link ExecutionContext} is running a handler for: an interaction, an autocomplete, a message, a
+ * reaction or a gateway event.
+ *
+ * @group Types
+ * @see {@link ExecutionContext}
+ */
 export type ExecutionContextType = 'interaction' | 'autocomplete' | 'message' | 'reaction' | 'event'
 
 /**
- * Describes one handler call: which controller and method run, with which arguments, and the metadata
- * declared on them.
+ * Describes one handler call: which controller and method run, with which arguments, and the metadata on them.
  *
- * A guard receives it by constructor injection, an interceptor as the first argument of `intercept`,
- * and an exception filter as the second argument of `catch`. Each call gets its own context, so a
- * guard that injects it is resolved per call; a shared controller, service, interceptor or filter
- * cannot inject it.
+ * Use it in a guard, an interceptor, a filter, a pipe or an observer to read the call: its interaction or
+ * message, the handler's params, what the handler is decorated with, and its answer through `response`.
+ *
+ * @remarks
+ * A guard injects it through its constructor; an interceptor, a filter, a pipe and an observer receive it as
+ * an argument. Each call gets its own, so a controller or a service, shared by every call, cannot inject it.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Guard()
- * export class RolesGuard implements GuardInterface {
+ * export class GuildOnlyGuard implements GuardInterface {
  *   constructor(private readonly context: ExecutionContext) {}
  *
- *   canActivate(interaction: ChatInputCommandInteraction): boolean {
- *     const roles = this.context.get(Roles) ?? []
- *     return roles.length === 0 || (interaction.inCachedGuild() && roles.some(r => interaction.member.roles.cache.has(r)))
+ *   canActivate(): boolean {
+ *     return this.context.getInteraction()?.inGuild() ?? true
  *   }
  * }
  * ```
+ *
+ * @group Utilities
+ * @see {@link createMetadata}
+ * @see {@link StageParams}
+ * @see {@link https://meocord.dev/docs/latest/guards | Guards}
  */
 export abstract class ExecutionContext {
   /**

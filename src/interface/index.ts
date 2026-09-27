@@ -25,25 +25,19 @@ import { type ExecutionContext } from '@src/common/execution-context.js'
 import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.interface.js'
 
 /**
- * A guard, run by `@UseGuard` before a handler to decide whether it may run.
+ * What a guard implements: `canActivate`, which decides whether the handler runs.
  *
- * Class-level and global guards also run before `@Autocomplete` handlers, where they receive an
- * `AutocompleteInteraction` and `ExecutionContext.getType()` is `'autocomplete'`. A guard must not
- * reply there: returning `false` denies, and the menu is closed with an empty list.
+ * Implement it on a class marked with {@link Guard}, and apply the class with {@link UseGuard}.
  *
- * Before an `@On` or `@Once` handler, a guard receives the event's arguments, such as a `GuildMember`
- * for `guildMemberAdd`, and `ExecutionContext.getType()` is `'event'`. Global guards run there too;
- * `@Guard({ types })` limits a guard to the context types it is written for.
+ * @remarks
+ * Before an `@Autocomplete` handler, a class-level or global guard receives an `AutocompleteInteraction` and
+ * must not answer it: returning `false` closes the menu with an empty list. Before an `@On` handler, it receives
+ * the event's arguments, such as a `GuildMember` for `guildMemberAdd`. `@Guard({ types })` limits a guard to the
+ * calls it is written for.
  *
- * @example
- * ```ts
- * @Guard()
- * export class OwnerOnlyGuard implements GuardInterface {
- *   canActivate(interaction: ButtonInteraction, { ownerId }: { ownerId: string }): boolean {
- *     return interaction.user.id === ownerId
- *   }
- * }
- * ```
+ * @group Types
+ * @see {@link Guard}
+ * @see {@link UseGuard}
  */
 export interface GuardInterface {
   /**
@@ -152,7 +146,10 @@ export interface OnShutdown {
 }
 
 /**
- * Runs the rest of the pipeline from inside an interceptor: the next interceptor, then the handler.
+ * Runs the rest of a call from inside an interceptor: the next interceptor, then the handler.
+ *
+ * @group Types
+ * @see {@link InterceptorInterface}
  */
 export interface CallHandler {
   /**
@@ -165,33 +162,18 @@ export interface CallHandler {
 }
 
 /**
- * An interceptor, run by `@UseInterceptor` around a handler after its guards allow the call.
+ * What an interceptor implements: `intercept`, which runs around the handler.
  *
- * It receives the call's `ExecutionContext` as an argument and continues with `next.handle()`, called
- * at most once, since each call runs the handler again. It can act before and after the handler, skip
- * the handler by not calling `next.handle()`, or catch and replace the error the handler throws. One
- * instance is shared across calls, so keep per-call state in local variables, and read
- * `{ provide, params }` through `context.getParams()`.
+ * Implement it on a class marked with {@link Interceptor}, and apply the class with {@link UseInterceptor}.
  *
- * Global interceptors also run around `@On` and `@Once` event handlers; `@Interceptor({ types })`
- * limits an interceptor to the context types it is written for.
+ * @remarks
+ * It continues with `next.handle()`, at most once, since each call runs the handler again; not calling it skips
+ * the handler. One instance is shared by every call, so per-call state lives in local variables, and a use's
+ * params come from `context.getParams()`.
  *
- * @example
- * ```ts
- * @Interceptor()
- * export class TimingInterceptor implements InterceptorInterface {
- *   private readonly logger = new Logger(TimingInterceptor.name)
- *
- *   async intercept(context: ExecutionContext, next: CallHandler): Promise<unknown> {
- *     const started = performance.now()
- *     try {
- *       return await next.handle()
- *     } finally {
- *       this.logger.log(`${context.getHandlerName()} took ${Math.round(performance.now() - started)} ms`)
- *     }
- *   }
- * }
- * ```
+ * @group Types
+ * @see {@link Interceptor}
+ * @see {@link CallHandler}
  */
 export interface InterceptorInterface {
   /**
@@ -284,23 +266,19 @@ export interface ResponsePresenter {
 }
 
 /**
- * An exception filter, applied with `@UseFilter` or `@MeoCord({ filters })`, that handles the errors its
- * `@Catch` names: from the handler, its interceptors and guards, or dispatch itself.
+ * What an exception filter implements: `catch`, which answers an error its `@Catch` names.
  *
- * The filter closest to the handler wins: method filters, then the controller's, then global ones;
- * within one level, the first whose `@Catch` matches. When none matches, the built-in fallback logs
- * the error and tells the user something went wrong. One instance is shared across calls.
+ * Implement it on a class marked with {@link Catch}, and apply the class with {@link UseFilter} or
+ * `@MeoCord({ filters })`.
  *
- * @example
- * ```ts
- * @Catch(RateLimitedError)
- * export class RateLimitedFilter implements ExceptionFilter<RateLimitedError> {
- *   async catch(error: RateLimitedError, context: ExecutionContext) {
- *     // Private, and right wherever the answer stands: a reply, the deferred reply edited, or a follow-up
- *     await context.response?.error(error, { message: `Slow down: try again in ${error.retryAfter}s.` })
- *   }
- * }
- * ```
+ * @remarks
+ * It receives errors from the handler, its stages, or dispatch itself. The filter closest to the handler wins:
+ * the method's, then the controller's, then the global ones. When none matches, the built-in fallback logs the
+ * error and answers the user. One instance is shared by every call.
+ *
+ * @group Types
+ * @see {@link Catch}
+ * @see {@link UseFilter}
  */
 export interface ExceptionFilter<E = unknown> {
   /**
@@ -315,24 +293,17 @@ export interface ExceptionFilter<E = unknown> {
 }
 
 /**
- * A pipe, run by `@Validate(schema, { pipes })` or `@UsePipe` on one value of a handler's input after
- * validation, to turn it into what the handler works with: an id into an account, say. One instance is
- * shared across calls.
+ * What a pipe implements: `transform`, which turns one input value into what the handler receives.
+ *
+ * Implement it on a class marked with {@link Pipe}, and apply the class with {@link UsePipe} or
+ * `@Validate(schema, { pipes })`: to turn an id into an account, say. One instance is shared by every call.
  *
  * @typeParam In - The value it receives.
  * @typeParam Out - The value the handler receives in its place.
  *
- * @example
- * ```ts
- * @Pipe()
- * export class AccountPipe implements PipeInterface<string, Account> {
- *   constructor(private readonly accounts: AccountService) {}
- *
- *   async transform(uid: string): Promise<Account> {
- *     return this.accounts.find(uid)
- *   }
- * }
- * ```
+ * @group Types
+ * @see {@link Pipe}
+ * @see {@link UsePipe}
  */
 export interface PipeInterface<In = any, Out = any> {
   /**
@@ -373,12 +344,18 @@ export interface ReactionHandlerSettings {
   bots?: boolean
 }
 
-/** How `@Controller` treats a class. */
+/**
+ * How `@Controller` treats a class: whether the handlers it declares take the stages of the classes it extends.
+ *
+ * @group Types
+ * @see {@link Controller}
+ */
 export interface ControllerOptions {
   /**
    * Whether the class-level guards, interceptors, filters and cooldowns of the classes this one
    * extends also apply to the handlers it declares itself. `false` limits those handlers to this
    * class's own class and method stages; handlers it inherits keep their base's stages either way.
+   *
    * @defaultValue `true`
    */
   inheritStages?: boolean
@@ -898,12 +875,10 @@ export interface CommandRegistrationConfig {
 }
 
 /**
- * Options for `@CommandBuilder`.
+ * Where a command `@CommandBuilder` describes is registered, in place of the configured scope.
  *
- * @example
- * ```ts
- * @CommandBuilder(CommandType.SLASH, { guilds: [process.env.STAFF_GUILD_ID!] })
- * ```
+ * @group Types
+ * @see {@link CommandBuilder}
  */
 export interface CommandBuilderOptions {
   /**

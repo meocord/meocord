@@ -1,18 +1,23 @@
 import { MetadataKey } from '@src/enum/index.js'
 
 /**
- * Composes multiple class or method decorators into a single decorator.
+ * Composes several class or method decorators into one.
+ *
+ * Use it to give a set of stages a name of your own, such as a guard and a cooldown every staff command takes,
+ * so each controller or handler applies it with one decorator.
  *
  * @example
- * ```typescript
- * export const Protected = () => applyDecorators(
- *   UseGuard(DefaultGuard, GlobalRateLimiterGuard),
- * )
+ * ```ts
+ * export const StaffOnly = () => applyDecorators(UseGuard(StaffGuard), Cooldown({ seconds: 5 }))
  *
  * @Controller()
- * @Protected()
- * export class PingController {}
+ * @StaffOnly()
+ * export class ModerationController {}
  * ```
+ *
+ * @group Utilities
+ * @see {@link createMetadata}
+ * @see {@link https://meocord.dev/docs/latest/custom-decorators | Custom decorators}
  */
 export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator)[]): ClassDecorator & MethodDecorator {
   return function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor): any {
@@ -38,29 +43,30 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Attaches a value to a class or method under a key of your choosing. A guard, interceptor or filter
- * reads it with `ExecutionContext.get(key)`, the method's value first, then the controller's.
+ * Attaches a value to a controller or a handler under a string key of your choosing.
  *
- * Prefer {@link createMetadata}, whose decorator is typed and whose key cannot collide with another.
+ * Prefer {@link createMetadata}, whose decorator is typed and whose key cannot collide with another. A stage
+ * reads the value with `ExecutionContext.get(key)`, the method's first, then the controller's.
  *
- * @param metadataKey - The key to store the value under. MeoCord's own keys, such as `'guards'` and
- *   `'commandType'`, are refused: a value there would replace what the framework stores, such as the
- *   guards a handler runs.
+ * @param metadataKey - The key to store the value under.
  * @param metadataValue - The value to store.
  * @returns A decorator for a class or a method.
- * @throws When `metadataKey` is one MeoCord reserves.
+ * @throws Error when `metadataKey` is one MeoCord reserves, such as `'guards'`: a value there would replace
+ *   what the framework stores.
  *
  * @example
- * ```typescript
+ * ```ts
  * export const Roles = (...roles: string[]) => SetMetadata('roles', roles)
  *
- * @Command('admin', CommandType.SLASH)
+ * @Command('ban', CommandType.SLASH)
  * @Roles('admin', 'moderator')
- * async adminCommand(interaction: ChatInputCommandInteraction) {}
- *
- * // In a guard that injects ExecutionContext:
- * const roles = this.context.get<string[]>('roles') ?? []
+ * async ban(interaction: ChatInputCommandInteraction) {
+ *   await respond(interaction).send('Banned.')
+ * }
  * ```
+ *
+ * @group Utilities
+ * @see {@link createMetadata}
  */
 export function SetMetadata<V = any>(metadataKey: string, metadataValue: V): ClassDecorator & MethodDecorator {
   if (RESERVED_KEYS.has(metadataKey)) {
