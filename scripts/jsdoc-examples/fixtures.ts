@@ -1,12 +1,19 @@
 /**
  * The stand-ins a JSDoc `@example` may name without declaring, as a dependency: a stage it applies or a service it
- * injects, never one it extends. Each means what the guide's example of the same name does. `check:jsdoc-examples` compiles this file against the built package with the examples.
+ * injects, never one it extends. Each means what the guide's example of the same name does. `check:jsdoc-examples`
+ * compiles this file against the built package with the examples.
  */
 
 import { type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js'
 import { CooldownError, type ExecutionContext, Logger } from 'meocord/common'
 import { Catch, Guard, Interceptor, Pipe, Service } from 'meocord/decorator'
-import { type CallHandler, type ExceptionFilter, type GuardInterface, type InterceptorInterface, type PipeInterface } from 'meocord/interface'
+import {
+  type CallHandler,
+  type ExceptionFilter,
+  type GuardInterface,
+  type InterceptorInterface,
+  type PipeInterface,
+} from 'meocord/interface'
 
 /** Lets a call through when its member has a staff role. */
 @Guard()

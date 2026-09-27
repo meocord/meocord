@@ -165,7 +165,8 @@ Write as for any comment here: the code as it is now, with no history.
 - **has no imports.** A name exported by one of meocord's entry points or by discord.js is imported for it; a name
   both export is an error, not a guess.
 - **may be class members.** A snippet of decorated methods, with a constructor for what it injects, is compiled
-  inside a `@Controller()` class.
+  inside a `@Controller()` class; module code before the first member, such as a decorator it defines, stays
+  outside it.
 - **may use a fixture**, declared in `scripts/jsdoc-examples/fixtures.ts`: the guards `StaffGuard` and
   `ChannelGuard` (with `params: { channelIds }`), `TimingInterceptor`, `CooldownFilter` (for `CooldownError`),
   `TrimPipe`, and `ProfileService` (`render(userId)` gives an `EmbedBuilder`). An example uses one as a dependency,
@@ -175,7 +176,8 @@ Write as for any comment here: the code as it is now, with no history.
   dependency of the repository.
 - declares anything else it uses.
 
-`--coverage` also lists the public symbols that do not follow this yet: a missing `@group`, summary or example.
+`--coverage` also lists the public symbols that do not follow this yet: a missing `@group`, summary or example. A
+symbol marked `@internal` is left out of both, as the reference leaves it out.
 
 In an editor, a decorator example shows a stray `@Command —` inside its code on hover: TypeScript's JSDoc parser
 takes a line starting with `@` for a tag, even in a code fence. The API reference and the checker read the fence
