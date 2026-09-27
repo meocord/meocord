@@ -61,11 +61,15 @@ export interface ResolvedRoute {
    */
   handler: (...args: any[]) => unknown
   /**
-   * What the pattern's params captured. A component's typed params are their values, such as a number for
-   * `{count:int}`; a message's typed params are left as their words, which dispatch and `invoke` resolve
-   * against the message's guild.
+   * The text the pattern's params captured. A message's typed params are left as their words: dispatch and
+   * `invoke` resolve them against the message's guild.
    */
-  params: Record<string, string | number | boolean>
+  params: Record<string, string>
+  /**
+   * The params as a component's handler receives them: each typed param as its value, such as a number for
+   * `{count:int}`, and the others as their text. A message's are its `params`.
+   */
+  values: Record<string, string | number | boolean>
 }
 
 /**
@@ -142,7 +146,7 @@ export function resolveRoute(
     const matched = matchMessageRoute(buildMessageRoutes(controllersOf(app), messages), input.content, starts)
     if (!matched) return undefined
     const { route, params } = matched
-    return { controller: route.controllerClass, method: route.method, handler: route.controllerClass.prototype[route.method], params }
+    return { controller: route.controllerClass, method: route.method, handler: route.controllerClass.prototype[route.method], params, values: params }
   }
 
   if (!isCustomIdRouted(input.type)) {
@@ -151,9 +155,9 @@ export function resolveRoute(
   const routes = buildComponentRoutes(controllersOf(app))
   const matched = matchComponentRoute(routes, type => type === input.type, input.customId)
   if (!matched) return undefined
-  const { route, params } = matched
+  const { route, params, text } = matched
   const method = route.meta.methodName
-  return { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params }
+  return { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params: text, values: params }
 }
 
 /**

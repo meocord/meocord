@@ -109,7 +109,8 @@ export function route<const T extends string>(pattern: T): Route<T> {
       if (text === '') throw new TypeError(`route('${pattern}').build() got an empty {${name}}, which no customId segment can hold.`)
       // A typed segment must read back as the value it was built from, or the route could never match it
       if (types[name] && parseSegment(types[name], text) === undefined) {
-        throw new TypeError(`route('${pattern}').build() got ${JSON.stringify(value)} for ${placeholder}, which is not a value of its type.`)
+        const shown = typeof value === 'string' ? JSON.stringify(value) : String(value)
+        throw new TypeError(`route('${pattern}').build() got ${shown} for ${placeholder}, which is not a value of its type.`)
       }
       return encodeSegment(text)
     })

@@ -32,6 +32,7 @@ describe('resolveRoute', () => {
       method: 'specific',
       handler: SpecificController.prototype.specific,
       params: { ownerId: '111', uid: '800000001' },
+      values: { ownerId: '111', uid: '800000001' },
     })
   })
 
@@ -41,6 +42,7 @@ describe('resolveRoute', () => {
       method: 'broad',
       handler: BroadController.prototype.broad,
       params: { uuid: 'abc-def', uid: '800000001' },
+      values: { uuid: 'abc-def', uid: '800000001' },
     })
   })
 
@@ -158,6 +160,7 @@ describe('resolveRoute for messages', () => {
       method: 'roll',
       handler: DiceController.prototype.roll,
       params: { sides: '6', note: 'for luck' },
+      values: { sides: '6', note: 'for luck' },
     })
     expect(resolveRoute(DiceApp, { content: '!ROLL 20' })?.method).toBe('rollTwenty')
     expect(resolveRoute(DiceApp, { content: 'hello' })?.method).toBe('hello')

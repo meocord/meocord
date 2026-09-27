@@ -73,11 +73,11 @@ export function matchComponentRoute(
   routes: readonly ComponentRoute[],
   acceptsType: (type: CommandType) => boolean,
   customId: string,
-): { route: ComponentRoute; params: Record<string, RouteParamValue> } | undefined {
+): { route: ComponentRoute; params: Record<string, RouteParamValue>; text: Record<string, string> } | undefined {
   for (const route of routes) {
     if (!acceptsType(route.meta.type)) continue
-    const params = readCustomId(route.pattern, route.meta.regex!, customId)
-    if (params) return { route, params }
+    const read = readCustomIdSegments(route.pattern, route.meta.regex!, customId)
+    if (read) return { route, params: read.values, text: read.text }
   }
   return undefined
 }
@@ -96,15 +96,25 @@ function typesOf(pattern: string): Record<string, string> {
  * `undefined` when the customId does not match, or a segment is not a value of its param's type.
  */
 export function readCustomId(pattern: string, regex: RegExp, customId: string): Record<string, RouteParamValue> | undefined {
+  return readCustomIdSegments(pattern, regex, customId)?.values
+}
+
+/** {@link readCustomId}'s values, with each param's text as the customId gave it. */
+function readCustomIdSegments(
+  pattern: string,
+  regex: RegExp,
+  customId: string,
+): { values: Record<string, RouteParamValue>; text: Record<string, string> } | undefined {
   const match = regex.exec(customId)
   if (!match) return undefined
-  const params: Record<string, RouteParamValue> = decodeRouteParams(match.groups)
+  const text = decodeRouteParams(match.groups)
+  const values: Record<string, RouteParamValue> = { ...text }
   for (const [name, type] of Object.entries(typesOf(pattern))) {
-    const value = parseSegment(type, params[name] as string) as RouteParamValue | undefined
+    const value = parseSegment(type, text[name]) as RouteParamValue | undefined
     if (value === undefined) return undefined
-    params[name] = value
+    values[name] = value
   }
-  return params
+  return { values, text }
 }
 
 /** Pattern pairs that can match one customId, compared only within a component type, as dispatch does. */

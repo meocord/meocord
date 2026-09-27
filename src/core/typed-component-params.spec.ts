@@ -2,7 +2,8 @@ import { ButtonInteraction } from 'discord.js'
 import { route } from '@src/common/route.js'
 import { Command, Controller, MeoCord } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { createMockInteraction, MeoCordTestingModule, resolveRoute } from '@src/testing/index.js'
+import { createMockInteraction, findRouteConflicts, MeoCordTestingModule, resolveRoute } from '@src/testing/index.js'
+import { buildComponentRoutes } from '@src/core/component-routes.js'
 
 const received: unknown[] = []
 const counter = route('counter/{count:int}')
@@ -55,7 +56,11 @@ describe('typed customId params', () => {
   })
 
   it('reads a customId alike in resolveRoute and invoke', async () => {
-    expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/7' })).toMatchObject({ method: 'count', params: { count: 7 } })
+    expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/7' })).toMatchObject({
+      method: 'count',
+      params: { count: '7' },
+      values: { count: 7 },
+    })
     expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/seven' })).toBeUndefined()
 
     await module.invoke(Panel, 'count', press(counter.build({ count: 3 })))
@@ -67,6 +72,8 @@ describe('typed customId params', () => {
     expect(counter.build({ count: 12 })).toBe('counter/12')
     expect(route('toggle/{on:bool}').build({ on: false })).toBe('toggle/false')
     expect(() => counter.build({ count: 1.5 })).toThrow(`route('counter/{count:int}').build() got 1.5 for {count:int}, which is not a value of its type.`)
+    expect(() => route('scale/{by:number}').build({ by: Number.NaN })).toThrow('got NaN for {by:number}')
+    expect(() => route('pick/{w:yes|no}').build({ w: 'maybe' as never })).toThrow('got "maybe" for {w:yes|no}')
   })
 
   it('refuses a type a customId cannot hold where the pattern is declared', () => {
@@ -82,5 +89,66 @@ describe('typed customId params', () => {
     expect(declare('wait/{for:duration}')).toThrow('{for:duration} names no type a customId can hold.')
     expect(declare('paint/{shade:colour}')).toThrow('{shade:colour} names no type a customId can hold.')
     expect(declare('paint/{shade:}')).toThrow('{shade:} names no type a customId can hold.')
+    expect(declare('pick/{w:|}')).toThrow('{w:|} lists an empty word to choose from')
+    expect(declare('pick/{w:a|}')).toThrow('{w:a|} lists an empty word to choose from')
+  })
+})
+
+describe('typed customId params beside other routes of one shape', () => {
+  it('keeps routes whose typed segments take different values, and runs the typed one first, in either order', async () => {
+    const ran: unknown[] = []
+    @Controller()
+    class Typed {
+      @Command('item/{n:int}', CommandType.BUTTON) async item(_i: ButtonInteraction, { n }: { n: number }) { ran.push(['int', n]) }
+      @Command('sort/{o:asc|desc}', CommandType.BUTTON) async sort(_i: ButtonInteraction, { o }: { o: string }) { ran.push(['order', o]) }
+      @Command('page/{n:int}', CommandType.BUTTON) async page(_i: ButtonInteraction, { n }: { n: number }) { ran.push(['page', n]) }
+      @Command('t/{id}/{n:int}', CommandType.BUTTON) async t(_i: ButtonInteraction, { n }: { n: number }) { ran.push(['t', n]) }
+    }
+    @Controller()
+    class Loose {
+      @Command('item/{f:bool}', CommandType.BUTTON) async flag(_i: ButtonInteraction, { f }: { f: boolean }) { ran.push(['bool', f]) }
+      @Command('sort/{p:int}', CommandType.BUTTON) async by(_i: ButtonInteraction, { p }: { p: number }) { ran.push(['by', p]) }
+      @Command('page/{name}', CommandType.BUTTON) async named(_i: ButtonInteraction, { name }: { name: string }) { ran.push(['named', name]) }
+      @Command('t/{id}/{name}', CommandType.BUTTON) async tn(_i: ButtonInteraction, { name }: { name: string }) { ran.push(['tn', name]) }
+    }
+    for (const controllers of [[Typed, Loose], [Loose, Typed]]) {
+      expect(() => buildComponentRoutes(controllers)).not.toThrow()
+      ran.length = 0
+      const module = MeoCordTestingModule.create({ controllers }).compile()
+      for (const id of ['item/3', 'item/true', 'sort/asc', 'sort/2', 'page/5', 'page/last', 't/a/9', 't/a/z']) await module.dispatch(press(id))
+      expect(ran).toEqual([['int', 3], ['bool', true], ['order', 'asc'], ['by', 2], ['page', 5], ['named', 'last'], ['t', 9], ['tn', 'z']])
+    }
+  })
+
+  it('keeps a typed spelling beside a text spelling of one handler, so its typed segments still arrive as values', async () => {
+    const got: unknown[] = []
+    @Controller()
+    class Card {
+      @Command('card/{id:int}', CommandType.BUTTON)
+      @Command('card/{id}', CommandType.BUTTON)
+      async open(_i: ButtonInteraction, { id }: { id: number | string }) {
+        got.push(id)
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Card] }).compile()
+    await module.dispatch(press('card/5'))
+    await module.dispatch(press('card/abc'))
+    expect(got).toEqual([5, 'abc'])
+  })
+
+  it('reports only patterns whose typed segments can take one value', () => {
+    @Controller()
+    class Paths {
+      @Command('p/last/x', CommandType.BUTTON) last() {}
+      @Command('p/{n:int}/x', CommandType.BUTTON) numbered() {}
+      @Command('q/{f:bool}', CommandType.BUTTON) flag() {}
+      @Command('q/{n:number}', CommandType.BUTTON) amount() {}
+      @Command('r/{w:on|off}', CommandType.BUTTON) toggle() {}
+      @Command('r/{f:bool}', CommandType.BUTTON) bool() {}
+    }
+    @MeoCord({ controllers: [Paths], clientOptions: { intents: [] } })
+    class PathsApp {}
+    // 'on' and 'off' read as booleans, so those two can both take r/on
+    expect(findRouteConflicts(PathsApp).map(({ patterns }) => patterns)).toEqual([['r/{w:on|off}', 'r/{f:bool}']])
   })
 })
