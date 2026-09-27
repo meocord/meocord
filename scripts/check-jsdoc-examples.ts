@@ -132,6 +132,27 @@ function fencedCode(text: string): string {
   return (match ? match[1] : text).trimEnd()
 }
 
+/** How many sentences a summary holds, reading code spans, links and abbreviations such as "e.g." as words. */
+function sentenceCount(text: string): number {
+  const plain = text
+    .replace(/`[^`]*`/g, 'code')
+    .replace(/\{@link [^}]*\}/g, 'link')
+    .replace(/\b(e\.g|i\.e|etc|vs)\./g, 'abbreviation')
+  return plain.split(/(?<=[.!?])\s+(?=[A-Z`@'"(])/).filter(sentence => sentence.trim() !== '').length
+}
+
+/** An interface's own properties and methods with no comment of their own, which the reference would show blank. */
+function undocumentedMembers(checker: ts.TypeChecker, symbol: ts.Symbol): string[] {
+  if (!(symbol.flags & ts.SymbolFlags.Interface)) return []
+  const own = new Set<ts.Node>(symbol.declarations)
+  return checker
+    .getPropertiesOfType(checker.getDeclaredTypeOfSymbol(symbol))
+    .filter(member => member.declarations?.some(declaration => own.has(declaration.parent)))
+    .filter(member => !member.getJsDocTags(checker).some(tag => tag.name === 'internal'))
+    .filter(member => ts.displayPartsToString(member.getDocumentationComment(checker)).trim() === '')
+    .map(member => member.name)
+}
+
 /** The names a module exports, from a file in the program. */
 function exportedNames(program: ts.Program, file: string): Set<string> {
   const checker = program.getTypeChecker()
@@ -213,6 +234,7 @@ function main(): void {
   if (!discordTypes) throw new Error('discord.js could not be resolved. Run bun install first.')
   const base = ts.createProgram([...entries.values(), discordTypes, fixturesFile], compilerOptions)
   const symbols = publicSymbols(base, entries)
+  const checker = base.getTypeChecker()
   const problems: string[] = []
 
   // Where each importable name comes from; a name with two sources is refused rather than guessed
@@ -230,6 +252,21 @@ function main(): void {
   for (const item of symbols.values()) {
     if (!item.group) continue
     if (!GROUPS.includes(item.group)) problems.push(`${item.name}: @group ${item.group} is not one of ${GROUPS.join(', ')}.`)
+    // A symbol with a @group follows the whole standard: the reference renders it from these
+    const sentences = sentenceCount(item.summary)
+    if (sentences === 0) problems.push(`${item.name}: it has no summary; the comment's first paragraph is its summary.`)
+    if (sentences > 1) {
+      problems.push(
+        `${item.name}: its summary, the first paragraph, is ${sentences} sentences; end it after the first, and start the ` +
+          `next paragraph, when to use it, after a blank line.`,
+      )
+    }
+    if (!item.isType && item.examples.length === 0) problems.push(`${item.name}: it has no @example; only a type may skip one.`)
+    const blank = undocumentedMembers(checker, item.symbol)
+    if (blank.length > 0) {
+      const [verb, own] = blank.length > 1 ? ['have no comments', 'their'] : ['has no comment', 'its']
+      problems.push(`${item.name}: ${blank.join(', ')} ${verb} of ${own} own.`)
+    }
     for (const stage of item.stages) {
       if (!STAGES.includes(stage)) problems.push(`${item.name}: @pipeline ${stage} is not one of ${STAGES.join(', ')}.`)
     }

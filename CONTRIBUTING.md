@@ -130,13 +130,15 @@ structured enough for the generator. On hover the whole comment fits a screen, a
 ````
 
 - **Summary:** the first paragraph, one sentence on one line. A function or decorator starts with a verb, a type
-  with a noun phrase.
+  with a noun phrase. The reference shows the first paragraph as the summary, so a second sentence starts the next
+  paragraph.
 - **When to use:** the paragraphs after it, at most three sentences: what it is for, and what to use instead,
   linked.
 - **`@remarks`:** how it works and its gotchas, when there are any. Anything longer belongs in the guide, linked
   with `@see`.
 - **Options** are documented on the options type's own properties, one sentence each, with `@defaultValue` for a
-  default, not in `@param`. The reference builds its options table from them.
+  default, not in `@param`. The reference builds its options table from them, so every property and method of a
+  documented interface has a comment of its own.
 - **`@param`** says what each positional parameter is; **`@returns`** is there only when the type does not say it;
   **`@throws`** says when it refuses something, and what to do about it.
 - **`@example`:** one, in a fenced `ts` block, at most 12 lines of real code. Every decorator, function and class
@@ -177,6 +179,8 @@ Write as for any comment here: the code as it is now, with no history.
   dependency of the repository.
 - declares anything else it uses.
 
+A symbol with a `@group` follows all of this: the check also fails when its summary is more than one sentence or
+missing, when it is not a type and has no example, or when an interface's own property or method has no comment.
 `--coverage` also lists the public symbols that do not follow this yet: a missing `@group`, summary or example. A
 symbol marked `@internal` is left out of both, as the reference leaves it out.
 
