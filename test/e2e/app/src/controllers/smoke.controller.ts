@@ -25,8 +25,14 @@ export class SmokeController {
     await message.reply('pong')
   }
 
-  @ReactionHandler('✅')
+  // The helper bot reacts, and a bot's reaction reaches only a handler that takes bots
+  @ReactionHandler('✅', { bots: true })
   reacted(reaction: MessageReaction, { user, action }: ReactionHandlerOptions) {
     report('reaction', { message: reaction.message.id, user: user.id, action })
+  }
+
+  @ReactionHandler('✅')
+  reactedByPerson(reaction: MessageReaction) {
+    report('reaction-people-only', { message: reaction.message.id })
   }
 }
