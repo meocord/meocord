@@ -251,11 +251,11 @@ describe('TestingModule.invoke', () => {
       expect(got).toEqual([5, 'last'])
     })
 
-    it('accepts a customId a handler shares with a sibling subclass, as neither runs over the other', async () => {
+    it('rejects, as the bot refuses to start, a module whose handlers match the same customIds', async () => {
       abstract class BaseCard {
         @Command('base/{id}', CommandType.BUTTON)
-        async open(_interaction: ButtonInteraction, { id }: { id: string }) {
-          log.push(`${this.constructor.name}:${id}`)
+        async open(_interaction: ButtonInteraction) {
+          log.push('open')
         }
       }
       @Controller()
@@ -264,9 +264,10 @@ describe('TestingModule.invoke', () => {
       class RightCard extends BaseCard {}
       const module = MeoCordTestingModule.create({ controllers: [LeftCard, RightCard] }).compile()
 
-      await module.invoke(LeftCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'base/1' }))
-      await module.invoke(RightCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'base/2' }))
-      expect(log).toEqual(['LeftCard:1', 'RightCard:2'])
+      await expect(module.invoke(LeftCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'base/1' }))).rejects.toThrow(
+        '"base/{id}" in LeftCard.open and "base/{id}" in RightCard.open match the same button customIds, so only one of them could ever run.',
+      )
+      expect(log).toEqual([])
     })
 
     it('rejects a command name the handler is not registered for', async () => {

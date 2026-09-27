@@ -79,13 +79,14 @@ describe('the layers a handler\'s theme is built from', () => {
     }
   }
 
-  @MeoCord({ controllers: [Shop, Sealed], clientOptions: { intents: [] }, theme: { colors: { info: '#0000AA', success: '#0000BB' } } })
+  @MeoCord({ controllers: [Shop], clientOptions: { intents: [] }, theme: { colors: { info: '#0000AA', success: '#0000BB' } } })
   class App {}
 
-  const compile = () => MeoCordTestingModule.create({ app: App, controllers: [Shop, Sealed] }).compile()
+  // Shop and Sealed both inherit base/inherited, so the bot would take only one of them
+  const compile = (controller: typeof Shop | typeof Sealed) => MeoCordTestingModule.create({ app: App, controllers: [controller] }).compile()
 
   it('merges the app\'s theme, then each class from the base down, then the method, over the defaults', async () => {
-    const module = compile()
+    const module = compile(Shop)
 
     await module.invoke(Shop, 'own', press('shop/own'))
     await module.invoke(Shop, 'plain', press('shop/plain'))
@@ -100,7 +101,7 @@ describe('the layers a handler\'s theme is built from', () => {
   })
 
   it('stops at a class with inheritStages: false, as guards do, and keeps the app\'s theme beneath it', async () => {
-    await compile().invoke(Sealed, 'own', press('sealed/own'))
+    await compile(Sealed).invoke(Sealed, 'own', press('sealed/own'))
 
     expect(seen).toEqual([['#000004', '#0000BB', '#0000AA']])
   })

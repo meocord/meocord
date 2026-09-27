@@ -7,8 +7,7 @@ import {
   StringSelectMenuInteraction,
   UserSelectMenuInteraction,
 } from 'discord.js'
-import { getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
-import { type CommandType } from '@src/enum/index.js'
+import { getCommandMap } from '@src/decorator/controller.decorator.js'
 import { type ComponentRoute, matchComponentRoute, type RouteParamValue } from '@src/core/component-routes.js'
 import {
   hasCustomId,
@@ -101,19 +100,14 @@ export function componentRouteFor(
 
   const { customId } = interaction
   const handler = `${controller.name}.${methodName}`
-  const accepts = (type: CommandType) => matchesCommandType(type, interaction)
-  const target = matchComponentRoute(routes, accepts, customId)
-  // A handler of the same shape as the target is one the bot refuses beside it, so neither runs over the other
-  const mine = target && own.find(route => route === target.route || sameShape(route, target.route))
-  if (mine) return { params: mine === target.route ? target.params : matchComponentRoute([mine], accepts, customId)!.params }
+  const target = matchComponentRoute(routes, type => matchesCommandType(type, interaction), customId)
+  if (target && own.includes(target.route)) return { params: target.params }
   if (target) {
     const other = `${target.route.controllerClass.name}.${target.route.meta.methodName}`
     return { mismatch: `customId '${customId}' does not reach ${handler}: dispatch runs ${other}.` }
   }
   return { mismatch: `customId '${customId}' does not match ${handler}'s route ${own.map(({ pattern }) => `'${pattern}'`).join(' or ')}.` }
 }
-
-const sameShape = (a: ComponentRoute, b: ComponentRoute): boolean => a.meta.type === b.meta.type && patternShape(a.pattern) === patternShape(b.pattern)
 
 /**
  * Why a command could not reach a handler by its name, for a test calling the handler directly.
