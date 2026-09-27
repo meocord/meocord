@@ -21,6 +21,7 @@ import {
 } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
+import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
@@ -29,6 +30,8 @@ const COMMAND_METADATA_KEY = Symbol('commands')
 const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
 const REACTION_HANDLER_METADATA_KEY = Symbol('reaction_handlers')
 const AUTOCOMPLETE_METADATA_KEY = Symbol('autocomplete_handlers')
+
+const logger = new Logger('Command')
 
 /**
  * The class's own handler list, started from a copy of the inherited one, so a subclass's
@@ -442,6 +445,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
  *   `CommandType` for a handler that registers nothing: a component, or a subcommand its command's builder
  *   describes.
+ * @throws Error when the builder throws, naming the builder and the command, and on a subcommand path the handler,
+ *   since the builder of the path's command describes it.
  *
  * @example
  * ```ts
@@ -507,16 +512,39 @@ export function Command<
 
     // Determine command type and builder
     if (typeof builderOrType === 'function') {
+      const where = `${target.constructor.name}.${propertyKey}`
+      // A subcommand is part of its command's builder, which belongs on the command's own name
+      const subcommandPath =
+        Reflect.getMetadata(MetadataKey.CommandType, builderOrType) === CommandType.SLASH && commandName.includes(' ')
+      const command = commandName.split(' ')[0]
+      const declareInstead =
+        `Declare the handler with @Command('${commandName}', CommandType.SLASH), and give the builder to ` +
+        `@Command('${command}').`
       const builderObj = new builderOrType() as CommandBuilderBase
       try {
         builderInstance = builderObj.build(commandName)
       } catch (error) {
-        // discord.js builders validate as they are set, and their errors name neither the command nor the field.
         const detail = error instanceof Error ? error.message.split('\n')[0] : String(error)
+        if (subcommandPath) {
+          throw new Error(
+            `${where} declares the builder ${builderOrType.name} on "${commandName}", which is a subcommand path: the ` +
+              `builder of its command, "${command}", describes it, and building it from the path failed (${detail}). ` +
+              declareInstead,
+            { cause: error },
+          )
+        }
+        // discord.js builders validate as they are set, and their errors name neither the command nor the field.
         throw new Error(
           `${builderOrType.name} could not build "${commandName}": ${detail}. Check its names, descriptions and ` +
             `localizations, which Discord limits to 32 and 100 characters.`,
           { cause: error },
+        )
+      }
+      // A builder that names its command itself still works on the path, registered once with its command
+      if (subcommandPath) {
+        logger.warn(
+          `${where} declares the builder ${builderOrType.name} on "${commandName}", which is a subcommand path; the ` +
+            `builder of its command, "${command}", describes it. ${declareInstead}`,
         )
       }
       guilds = Reflect.getMetadata(BUILDER_GUILDS, builderOrType)
