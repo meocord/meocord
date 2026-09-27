@@ -43,18 +43,27 @@ export function getResponse(interaction: Interaction): ResponseReport {
 }
 
 /**
- * Creates the error discord.js throws for a failed Discord API call, with the given code, for a mock to
- * reject with. Common codes: 10062 (unknown interaction: the three seconds passed), 40060 (already
- * acknowledged), 50001 (missing access), 50027 (invalid webhook token: fifteen minutes passed).
+ * Creates the error discord.js throws for a failed Discord API call, for a mock to reject with.
+ *
+ * Use it to test what a handler or `respond()` does when Discord refuses a call. Common codes: 10062, the three
+ * seconds to answer passed; 40060, already acknowledged; 50001, missing access; 50027, the fifteen-minute token
+ * expired.
  *
  * @param code - The Discord JSON error code.
- * @param message - The error message. Defaults to one naming the code.
- * @returns A `DiscordAPIError`.
+ * @param message - The error's message; one naming the code by default.
  *
  * @example
  * ```ts
- * interaction.editReply.mockRejectedValueOnce(createDiscordError(50027))
+ * import { expect } from 'vitest'
+ *
+ * const interaction = createMockInteraction(ButtonInteraction, { customId: 'refresh' })
+ * interaction.deferUpdate.mockRejectedValueOnce(createDiscordError(10062))
+ * await expect(interaction.deferUpdate()).rejects.toMatchObject({ code: 10062 })
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link getResponse}
  */
 export function createDiscordError(code: number, message = `Discord API error ${code}`): DiscordAPIError {
   return new DiscordAPIError({ code, message }, code, 400, 'POST', 'https://discord.com/api/v10/interactions', {})

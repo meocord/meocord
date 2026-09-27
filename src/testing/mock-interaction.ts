@@ -64,10 +64,18 @@ import { createDiscordError } from './response.js'
 // ---------------------------------------------------------------------------
 
 /**
- * A mock of `T`: every method a mock function, every nested object mocked in turn, five levels deep.
+ * A mock of `T`: every method a mock function, and every nested object mocked in turn, five levels deep.
  *
- * Assignable wherever `T` is expected, since the mock is built on `T`'s real prototype. Properties
- * `T` declares `readonly` cannot be assigned afterwards; pass them to the factory as {@link MockProps}.
+ * It is what the mock factories return. It is assignable wherever `T` is expected, since the mock is built on `T`'s
+ * real prototype, and each method takes `mockResolvedValue` and the rest of {@link MockInstance}.
+ *
+ * @remarks
+ * Properties `T` declares `readonly` cannot be assigned on the mock. Pass them to the factory as {@link MockProps}.
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockInteraction}
+ * @see {@link createMock}
  */
 export type DeepMocked<T, Depth extends number[] = []> = Depth['length'] extends 5
   ? T
@@ -80,20 +88,23 @@ export type DeepMocked<T, Depth extends number[] = []> = Depth['length'] extends
     } & T
 
 /**
- * Property values a mock factory applies at construction.
+ * Property values a mock factory sets as it builds the mock.
  *
- * Use it for anything the discord.js class declares `readonly`, such as
- * `ModalSubmitInteraction#customId` or `MessageComponentInteraction#message`, which the returned
- * mock does not let you assign afterwards.
+ * Use it for anything the discord.js class declares `readonly`, such as `ModalSubmitInteraction#customId` or
+ * `MessageComponentInteraction#message`, which the returned mock does not let you assign.
  *
+ * @remarks
  * `authorizingIntegrationOwners` also takes the plain map Discord sends, such as
- * `{ [ApplicationIntegrationType.UserInstall]: userId }`, and becomes the object discord.js builds
- * from it.
+ * `{ [ApplicationIntegrationType.UserInstall]: userId }`, and becomes the object discord.js builds from it.
  *
  * @example
  * ```ts
  * const modal = createMockInteraction(ModalSubmitInteraction, { customId: 'feedback' })
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockInteraction}
  */
 export type MockProps<T> = {
   // Methods stay loosely typed: every literal carries `Object.prototype.valueOf`, which clashes with
@@ -401,17 +412,17 @@ const MOCK_BOT_ID = '1300000000000000000'
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a mock instance of a discord.js class, keeping its prototype so `instanceof` holds.
+ * Creates a mock instance of a discord.js class, such as an interaction, keeping its prototype so `instanceof` holds.
  *
- * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a
- * `channelId` and a `user` with an `id`, each a snowflake no other mock in the run has, unless given.
- * Its `createdTimestamp` and `createdAt` are the time an `id` the test gives encodes, as discord.js reads
- * them; with the generated `id`, the time the mock was made; and a `createdTimestamp` the test gives wins.
- * `inGuild()`, `inCachedGuild()` and `inRawGuild()` answer from the mock's own `guildId` and `guild`,
- * so a mock created without a `guildId` is a DM, with `guildId`, `guild` and `member` `null`. An interaction's `locale` is `'en-US'`, and its `guildLocale` is `'en-US'` with
- * a `guildId` and `null` without, unless given. Replies behave like a real
- * interaction: `reply()` or `deferReply()` twice throws, and `followUp()`, `editReply()` and
- * `deleteReply()` throw before a reply. Every method is a mock function you can override; one that
+ * Use it for the interaction a test hands to `invoke` or `dispatch`. For a user, a message, a guild, a channel or a
+ * client, the dedicated factories fill in what discord.js would; for a type with no class, use {@link createMock}.
+ *
+ * @remarks
+ * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a `channelId` and a
+ * `user` with an `id`, each a snowflake no other mock in the run has, unless given; its `createdTimestamp` is the time
+ * its `id` encodes. Without a `guildId` it is a DM, with `guild` and `member` `null`. Its `locale` is `'en-US'`, as is
+ * its `guildLocale` in a guild. Replies behave as on a real interaction: `reply()` or `deferReply()` twice rejects, and
+ * `followUp()`, `editReply()` and `deleteReply()` reject before a reply. Every method is a mock function; one that
  * returns a promise in discord.js resolves, such as `send()` to a mock message.
  *
  * @param Class - The discord.js class to mock.
@@ -419,12 +430,20 @@ const MOCK_BOT_ID = '1300000000000000000'
  *
  * @example
  * ```ts
- * const interaction = createMockInteraction(ButtonInteraction)
- * interaction.isButton()                       // true
- * await interaction.reply({ content: 'hi' })
- * interaction.replied                          // true
- * await interaction.reply({ content: 'again' }) // throws: already replied
+ * import { expect } from 'vitest'
+ *
+ * const interaction = createMockInteraction(ButtonInteraction, { customId: 'ticket/42/close' })
+ * expect(interaction.isButton()).toBe(true)
+ * await interaction.reply({ content: 'Closed.' })
+ * expect(interaction.replied).toBe(true)
+ * await expect(interaction.reply({ content: 'Again.' })).rejects.toThrow()
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link MockProps}
+ * @see {@link createChatInputOptions}
+ * @see {@link https://meocord.dev/docs/latest/mocks | Mocks}
  */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
@@ -666,19 +685,30 @@ function stubCallable(): Mock {
 /**
  * Creates a mock of any type, with no class needed, for service doubles and interfaces.
  *
- * Every property is a mock function created on first access, and the result is assignable to `T`.
- * Values passed as `props` are used as given rather than wrapped in mock functions.
+ * Use it for a provider a testing module injects in place of the real one, or for a discord.js type the other
+ * factories do not build. For a discord.js class, {@link createMockInteraction} keeps its prototype.
+ *
+ * @remarks
+ * Every property is a mock function created on first access, and the result is assignable to `T`. Values passed as
+ * `props` are used as given rather than wrapped in mock functions.
  *
  * @example
  * ```ts
- * const notifications = createMock<NotificationService>()
- * notifications.notify.mockResolvedValue('sent')
+ * import { expect } from 'vitest'
  *
- * const module = MeoCordTestingModule.create({
- *   controllers: [AlertController],
- *   providers: [{ provide: NotificationService, useValue: notifications }],
- * }).compile()
+ * interface Mailer {
+ *   send(to: string, text: string): Promise<boolean>
+ * }
+ * const mailer = createMock<Mailer>()
+ * mailer.send.mockResolvedValue(true)
+ *
+ * await mailer.send('ada', 'Welcome!')
+ * expect(mailer.send).toHaveBeenCalledWith('ada', 'Welcome!')
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link TestingModuleBuilder}
  */
 export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T> {
   const target: Record<string, unknown> = {}
@@ -717,15 +747,54 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
 // Convenience wrappers for common discord.js classes
 // ---------------------------------------------------------------------------
 
-/** Creates a mock {@link User}: a person, not a bot, with an id of its own. All methods are auto-stubbed as a mock fn. */
+/**
+ * Creates a mock {@link User}: a person, not a bot, with an id of its own.
+ *
+ * Use it for the member a command acts on, such as a user option's value, or a message's author.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const target = createMockUser()
+ * const interaction = createMockInteraction(ChatInputCommandInteraction, {
+ *   commandName: 'profile',
+ *   options: createChatInputOptions({ target }),
+ * })
+ * expect(interaction.options.getUser('target')).toBe(target)
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockInteraction}
+ */
 export const createMockUser = (): DeepMocked<User> => createMockInteraction(User, { id: nextSnowflake(), bot: false })
 
 /**
- * Creates a mock {@link Client}, with `users`, `channels`, `guilds` and `application.commands` ready to
- * stub. Their methods resolve as discord.js's do: `users.send()` to a mock message, `users.fetch(id)`
- * to a mock user, `channels.fetch(id)` to a mock text channel, and a list fetch to an empty collection.
- * `users.cache` and `channels.cache` are real, empty collections. Every mock client is logged in as the
- * same bot, so `createMockClient().user.id` is the id a message mentions to address it.
+ * Creates a mock {@link Client}, with `users`, `channels`, `guilds` and `application.commands` ready to stub.
+ *
+ * Use it when code under test reaches the client, such as to DM a user or fetch a channel, or to address messages to
+ * the bot. A mock message or interaction built without one gets a client of its own.
+ *
+ * @remarks
+ * Its managers' methods resolve as discord.js's do: `users.send()` to a mock message, `users.fetch(id)` to a mock
+ * user, `channels.fetch(id)` to a mock text channel, and a list fetch to an empty collection. `users.cache` and
+ * `channels.cache` are real, empty collections. Every mock client is logged in as the same bot, so `user.id` is the id
+ * a message mentions to address it.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const client = createMockClient()
+ * const botId = client.user!.id
+ * const message = createMockMessage({ content: `<@${botId}> help`, client })
+ * expect(message.mentions.users.has(botId)).toBe(true)
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockMessage}
  */
 export function createMockClient(): DeepMocked<Client> {
   const instance = Object.create(Client.prototype) as Record<string, unknown>
@@ -745,7 +814,12 @@ export function createMockClient(): DeepMocked<Client> {
   return stubDeep(instance) as DeepMocked<Client>
 }
 
-/** What {@link createMockGuild} puts in the guild's caches, as the gateway would have filled them. */
+/**
+ * What {@link createMockGuild} puts in the guild's caches, as the gateway would have filled them.
+ *
+ * @group Testing
+ * @category Mocks
+ */
 export interface MockGuildOverrides {
   /** The guild's id. */
   id?: string
@@ -766,16 +840,27 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
 }
 
 /**
- * Creates a mock {@link Guild}, with the `members`, `channels`, `roles` and `bans` managers ready
- * to stub. A manager's `fetch(id)`, `create()` and `edit()` resolve to a mock of its item, and a list
- * fetch to an empty collection. Members, roles and channels given are put in their managers' caches,
- * where dispatch looks first when resolving a message's typed params.
+ * Creates a mock {@link Guild}, with the `members`, `channels`, `roles` and `bans` managers ready to stub.
+ *
+ * Use it for the server a message or an interaction came from, with the members, roles and channels a handler looks
+ * up in it.
+ *
+ * @remarks
+ * A manager's `fetch(id)`, `create()` and `edit()` resolve to a mock of its item, and a list fetch to an empty
+ * collection. Members, roles and channels given are put in their managers' caches, where dispatch looks first when it
+ * resolves a message's typed params.
  *
  * @example
  * ```ts
- * const target = createMock<GuildMember>({ id: '111' })
- * const message = createMockMessage({ content: '!ban 111 spam', guild: createMockGuild({ members: [target] }) })
+ * const target = createMock<GuildMember>({ id: '111111111111111111' })
+ * const guild = createMockGuild({ members: [target] })
+ * const message = createMockMessage({ content: '!ban 111111111111111111 spam', guild })
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link MockGuildOverrides}
+ * @see {@link createMockMessage}
  */
 export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<Guild> {
   const instance = Object.create(Guild.prototype) as Record<string, unknown>
@@ -791,10 +876,28 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
 }
 
 /**
- * Creates a mock channel of the given class, such as `TextChannel`, `ThreadChannel` or `DMChannel`,
- * with the managers that class has ready to stub: `messages`, `threads` on text, announcement, forum
- * and media channels, and `members` on threads. A subclass gets the managers of the class it extends.
+ * Creates a mock channel of the given class, such as `TextChannel`, `ThreadChannel` or `DMChannel`.
+ *
+ * Use it for a channel a handler reads or posts to, such as one it fetches messages from or opens a thread in.
+ *
+ * @remarks
+ * The managers the class has are ready to stub: `messages`, `threads` on text, announcement, forum and media channels,
+ * and `members` on threads. A subclass gets the managers of the class it extends.
+ *
  * @param Class - The discord.js channel class to mock.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const thread = createMockChannel(ThreadChannel)
+ * await thread.members.add('111111111111111111')
+ * expect(thread.members.add).toHaveBeenCalledWith('111111111111111111')
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockGuild}
  */
 export function createMockChannel<T extends BaseChannel>(Class: InteractionClass<T>): DeepMocked<T> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
@@ -833,8 +936,11 @@ function createMockGuildForMessage(): object {
 }
 
 /**
- * What {@link createMockMessage} builds a message with. Components and embeds may be API JSON,
- * builders or discord.js instances.
+ * What {@link createMockMessage} builds a message with. Components and embeds may be API JSON, builders or discord.js
+ * instances.
+ *
+ * @group Testing
+ * @category Mocks
  */
 export interface MockMessageOverrides {
   /** The message's id. */
@@ -933,42 +1039,36 @@ function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
 /**
  * Creates a mock {@link Message} that tracks whether it has been deleted.
  *
- * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is
- * deleted; `edit()` and `reply()` resolve to a new mock message. Nested members such as
- * `msg.author.send` and `msg.guild.members.fetch` are ready to use, and every method is a mock
- * function you can override per test.
+ * Use it for the message a message command reads, or the message a button sits on. Its author is a person, so
+ * `@MessageHandler` does not skip it.
  *
- * Without overrides the message is empty: no flags, components, embeds or attachments. Components
- * and embeds given as API JSON or builders keep that JSON behind `toJSON()`, which is what
- * `respond()` and `@Defer` read, such as when `@Defer` locks the controls of the message a button
- * sits on; discord.js instances are kept as they are.
+ * @remarks
+ * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted, and `edit()`
+ * and `reply()` resolve to a new mock message. Without overrides the message is empty. Components and embeds given as
+ * API JSON or builders keep that JSON behind `toJSON()`, which `respond()` and `@Defer` read. What the content
+ * mentions is cached as the gateway delivers it: `<@id>` a user, and a member in a guild; `<@&id>` a role; `<#id>` a
+ * channel. A bare id is not cached, as a bot has to fetch it. Its `createdTimestamp` is the time its `id` encodes.
  *
- * What the content mentions is cached as the gateway delivers it: `<@id>` a user in the client's
- * `users.cache` and, in a guild, a member in `guild.members.cache`; `<@&id>` a role; `<#id>` a
- * channel. Each is in `mentions` too. A bare id is not cached, as a bot has to fetch it.
- *
- * Its `createdTimestamp` and `createdAt` are the time an `id` the test gives encodes, as discord.js reads
- * them; with the generated `id`, the time the mock was made; and a `createdTimestamp` the test sets wins.
- *
- * @param overrides - The message's id, content, components, embeds and flags; its guild, or `null`
- *   for a DM; the client it arrived on, a new mock client otherwise; and more users for that client's cache.
- * @returns The mock message.
+ * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *
  * @example
  * ```ts
- * const message = createMockMessage({
- *   components: [
- *     new ActionRowBuilder<ButtonBuilder>().addComponents(
- *       new ButtonBuilder().setCustomId('card/refresh').setLabel('Refresh').setStyle(ButtonStyle.Primary),
- *     ),
- *   ],
- *   embeds: [{ title: 'Card' }],
- * })
- * const interaction = createMockInteraction(ButtonInteraction, { customId: 'card/refresh', message })
+ * import { expect } from 'vitest'
  *
- * await message.delete()
- * message.deleted // true
+ * const close = new ButtonBuilder().setCustomId('ticket/42/close').setLabel('Close').setStyle(ButtonStyle.Danger)
+ * const message = createMockMessage({
+ *   content: 'Ticket #42',
+ *   components: [new ActionRowBuilder<ButtonBuilder>().addComponents(close)],
+ * })
+ * const click = createMockInteraction(ButtonInteraction, { customId: 'ticket/42/close', message })
+ * await click.message.delete()
+ * expect(message.deleted).toBe(true)
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link MockMessageOverrides}
+ * @see {@link createMockGuild}
  */
 export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMocked<Message> & { deleted: boolean } {
   const instance = Object.create(Message.prototype) as Record<string, unknown>
@@ -1066,8 +1166,18 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
 // createChatInputOptions — typed options resolver for ChatInputCommandInteraction
 // ---------------------------------------------------------------------------
 
+/**
+ * The options of a mock slash command, as {@link createChatInputOptions} takes them: each value by its option's name.
+ *
+ * A value is a string, a number or a boolean, or a user, member, role, channel or attachment for an entity option.
+ *
+ * @group Testing
+ * @category Mocks
+ */
 export interface ChatInputOptions {
+  /** The subcommand group the command was used through. */
   subcommandGroup?: string | null
+  /** The subcommand the command was used through. */
   subcommand?: string | null
   /** The option the user is currently typing, for autocomplete interactions. */
   focused?: string | null
@@ -1136,24 +1246,33 @@ function buildOptionData(
 }
 
 /**
- * Builds a typed options resolver from a plain record, found by name like the real
- * `CommandInteractionOptionResolver`. Every method is a mock function, and methods not listed
- * (such as `getAttachment`) are stubbed automatically.
+ * Builds a slash command's options from a plain record, found by name as the real options resolver finds them.
  *
- * @typeParam Cached - Defaults to `any` to match `createMockInteraction(ChatInputCommandInteraction)`;
- *   pass it explicitly when the interaction under test is cache-pinned.
+ * Use it for the `options` of a mock `ChatInputCommandInteraction`, including an autocomplete's `focused` option. The
+ * options are nested under the subcommand and group as Discord sends them, so the handler's params build as in the bot.
+ *
+ * @remarks
+ * Every method is a mock function, and methods not listed, such as `getAttachment`, are stubbed automatically. An
+ * entity option carries its id in `value` and the object itself, as the gateway sends it.
+ *
+ * @typeParam Cached - `any` by default, to match `createMockInteraction(ChatInputCommandInteraction)`; pass it when the
+ *   interaction under test is cache-pinned.
  *
  * @example
  * ```ts
- * const interaction = createMockInteraction(ChatInputCommandInteraction)
- * interaction.options = createChatInputOptions({
- *   subcommandGroup: 'daily',
- *   subcommand: 'notes',
- *   uid: 12345678,
+ * import { expect } from 'vitest'
+ *
+ * const interaction = createMockInteraction(ChatInputCommandInteraction, {
+ *   commandName: 'settings',
+ *   options: createChatInputOptions({ subcommandGroup: 'notify', subcommand: 'email', address: 'ada@example.com' }),
  * })
- * interaction.options.getSubcommand()  // 'notes'
- * interaction.options.getNumber('uid') // 12345678
+ * expect(interaction.options.getSubcommand()).toBe('email')
+ * expect(interaction.options.getString('address')).toBe('ada@example.com')
  * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link ChatInputOptions}
  */
 export function createChatInputOptions<Cached extends CacheType = any>(
   opts: ChatInputOptions = {},
