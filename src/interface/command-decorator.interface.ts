@@ -95,6 +95,8 @@ export interface CommandMetadata<T extends string = string> {
   methodName: string
   /** What the command's builder built, which is registered with Discord; `undefined` for a handler with a `CommandType`. */
   builder: ReturnType<CommandBuilderBase['build']> | undefined
+  /** The builder class that built it, which tells one builder serving a command and its subcommands from two. */
+  builderClass?: abstract new (...args: any[]) => unknown
   /** The kind of interaction the handler takes. */
   type: CommandType
   /** The pattern a component's customId is matched with; `undefined` for a command, matched by its name. */
