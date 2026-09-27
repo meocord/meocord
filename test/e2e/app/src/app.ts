@@ -1,6 +1,7 @@
 import { GatewayIntentBits, Partials } from 'discord.js'
 import { MeoCord } from 'meocord/decorator'
 import { SmokeController } from '@src/controllers/smoke.controller'
+import { CardController } from '@src/controllers/card.controller'
 import { ResponderController } from '@src/controllers/responder.controller'
 import { ThemeResponderController } from '@src/controllers/theme-responder.controller'
 import { ThemeShowcaseController } from '@src/controllers/theme-showcase.controller'
@@ -14,7 +15,7 @@ const themedUserId = process.env.MEOCORD_E2E_THEMED_USER_ID
 
 @MeoCord({
   // The responders serve the manual checklist; the automated checks register only the smoke command
-  controllers: manual ? [SmokeController, ThemeShowcaseController, ResponderController, ThemeResponderController] : [SmokeController, ThemeShowcaseController],
+  controllers: manual ? [SmokeController, ThemeShowcaseController, ResponderController, CardController, ThemeResponderController] : [SmokeController, ThemeShowcaseController],
   services: [ProbeService],
   clientOptions: {
     intents: [

@@ -58,6 +58,7 @@ import {
   SnowflakeUtil,
 } from 'discord.js'
 import { createDiscordError } from './response.js'
+import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 
 // ---------------------------------------------------------------------------
 // DeepMocked<T>
@@ -530,13 +531,24 @@ export function createMockInteraction<T extends object>(
         return createMockMessage()
       }),
     )
+    // The interaction's own message as Discord holds it: the message a component is on, or the original response.
+    // An edit replaces it in the shape Discord stores, with ids and resolved media, stamped with when it was edited,
+    // and fetchReply() reads that back, so code comparing the two sees what it would against Discord.
+    let held: HeldMessage | undefined
+    const current = (): HeldMessage => (held ??= heldFrom(instance.message))
     stubs.set(
       'editReply',
-      createMockFn(async () => {
+      createMockFn(async (options?: unknown) => {
         if (!instance.deferred && !instance.replied) throw notYetReplied('editReply')
         instance.replied = true
-        return createMockMessage()
+        held = edited(current(), options)
+        // The response has the message as Discord answers the edit, before its uploaded files have loaded again
+        return messageFrom({ ...held, components: held.returned ?? held.components })
       }),
+    )
+    stubs.set(
+      'fetchReply',
+      createMockFn(async () => messageFrom(current())),
     )
     stubs.set(
       'deleteReply',
@@ -958,6 +970,8 @@ export interface MockMessageOverrides {
   client?: Client
   /** Users in the client's `users.cache`, by their id, beside those the content mentions. */
   users?: readonly User[]
+  /** When it was last edited, in milliseconds since the epoch; `null`, the default, for a message never edited. */
+  editedTimestamp?: number | null
 }
 
 /** The ids each kind of mention in `content` names, in order and once each. */
@@ -1021,6 +1035,75 @@ function mentionsOf(content: string | undefined, client: unknown, guild: unknown
   const instance = Object.create(MessageMentions.prototype) as object
   for (const [key, value] of Object.entries({ ...mentioned, everyone: false })) Object.defineProperty(instance, key, { value, writable: true })
   return stubDeep(instance)
+}
+
+/** A message as a mock interaction's reply methods hold it, in the shape Discord stores it. */
+interface HeldMessage {
+  id: string
+  /** The components as the last edit's response had them; read back, they are `components`. */
+  returned?: unknown[]
+  /** Whether an edit has had Discord process the files uploaded with the message again, which only the first does. */
+  reprocessed?: boolean
+  content?: string
+  components: unknown[]
+  embeds: unknown[]
+  flags?: MessageFlagsResolvable
+  editedTimestamp: number | null
+}
+
+/** A value as its API JSON: a builder or discord.js structure through `toJSON()`, anything else as it is. */
+const jsonOf = (value: unknown): unknown =>
+  value && typeof (value as { toJSON?: unknown }).toJSON === 'function' ? (value as { toJSON: () => unknown }).toJSON() : value
+
+/** The message a reply method starts from: the one a component is on, as it was, or an empty original response. */
+function heldFrom(message: unknown): HeldMessage {
+  // Read only what the message really has: a mock's unset fields are stubs
+  const from = (message ?? {}) as Partial<Record<keyof Message, unknown>>
+  return {
+    id: typeof from.id === 'string' ? from.id : nextSnowflake(),
+    content: typeof from.content === 'string' ? from.content : undefined,
+    components: Array.isArray(from.components) ? from.components.map(jsonOf) : [],
+    embeds: Array.isArray(from.embeds) ? from.embeds.map(jsonOf) : [],
+    flags: from.flags instanceof MessageFlagsBitField ? from.flags : undefined,
+    editedTimestamp: typeof from.editedTimestamp === 'number' ? from.editedTimestamp : null,
+  }
+}
+
+/** A held message after an edit: what the edit sets replaced in Discord's shape, and a later edit stamp. */
+function edited(held: HeldMessage, options: unknown): HeldMessage {
+  const edit = (typeof options === 'string' ? { content: options } : (options ?? {})) as {
+    content?: string
+    components?: unknown[]
+    embeds?: unknown[]
+    flags?: MessageFlagsResolvable
+  }
+  return {
+    ...held,
+    ...(edit.content !== undefined && { content: edit.content }),
+    // The first edit that keeps a file uploaded with the message has Discord process it again: the response has it
+    // loading, and it has loaded by the time the message is read back. Later edits find it processed.
+    ...(edit.components !== undefined && {
+      components: asDiscordStores(edit.components.map(jsonOf)),
+      returned: asDiscordStores(edit.components.map(jsonOf), { loading: !held.reprocessed }),
+      reprocessed: true,
+    }),
+    ...(edit.embeds !== undefined && { embeds: embedsAsDiscordStores(edit.embeds.map(jsonOf)) }),
+    ...(edit.flags !== undefined && { flags: edit.flags }),
+    // Later than the last edit, even within one millisecond or under fake timers
+    editedTimestamp: Math.max(Date.now(), (held.editedTimestamp ?? 0) + 1),
+  }
+}
+
+/** A mock message showing a held message. */
+function messageFrom(held: HeldMessage): DeepMocked<Message> & { deleted: boolean } {
+  return createMockMessage({
+    id: held.id,
+    ...(held.content !== undefined && { content: held.content }),
+    components: held.components as APIMessageTopLevelComponent[],
+    embeds: held.embeds as APIEmbed[],
+    ...(held.flags !== undefined && { flags: held.flags }),
+    editedTimestamp: held.editedTimestamp,
+  })
 }
 
 /**
@@ -1109,6 +1192,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   instance.components = (overrides.components ?? []).map(asHeld)
   instance.embeds = (overrides.embeds ?? []).map(asHeld)
   instance.attachments = new Collection()
+  instance.editedTimestamp = overrides.editedTimestamp ?? null
   const generatedId = overrides.id === undefined ? nextSnowflake() : undefined
   instance.id = overrides.id ?? generatedId
   defineCreatedTime(instance, generatedId)

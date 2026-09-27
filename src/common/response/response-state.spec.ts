@@ -1083,10 +1083,10 @@ describe("respond() under @Defer's timer and locks", () => {
   describe('the lock registry', () => {
     it('forgets a message at once when something else changed it', async () => {
       const interaction = button(Object.assign(messageWith({ components: [row('refresh')] }), { id: 'changed-outside' }))
-      interaction.editReply.mockResolvedValue(createMockMessage() as never)
       await respond(interaction).lock()
       const held = lockedMessageCount()
-      interaction.fetchReply.mockResolvedValue(Object.assign(messageWith({ components: [row('someone-else')] })) as never)
+      // Edited after the lock, as Discord stamps an edit something else makes
+      interaction.fetchReply.mockResolvedValue(Object.assign(messageWith({ components: [row('someone-else')] }), { editedTimestamp: Date.now() + 60_000 }) as never)
 
       await responseOf(interaction).release()
 

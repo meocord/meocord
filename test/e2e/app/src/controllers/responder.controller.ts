@@ -1,4 +1,11 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, type ButtonInteraction, type ChatInputCommandInteraction } from 'discord.js'
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  MessageFlags,
+} from 'discord.js'
 import { getInstallContext, respond } from 'meocord/common'
 import { Command, Controller, Defer, UseGuard } from 'meocord/decorator'
 import { CommandType } from 'meocord/enum'
@@ -16,7 +23,11 @@ function panel(ownerId: string) {
       button('e2e/auto-fast', 'Auto, fast'),
       button('e2e/auto-slow', 'Auto, 3s'),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(button('e2e/slow/a', 'Slow A, 5s'), button('e2e/slow/b', 'Slow B, 5s')),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      button('e2e/slow/a', 'Slow A, 5s'),
+      button('e2e/slow/b', 'Slow B, 5s'),
+      button('e2e/follow-up', 'Follow-up only, 2s'),
+    ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       button(`e2e/owner/${ownerId}`, 'Owner only', ButtonStyle.Primary),
       button('e2e/fail', 'Fail', ButtonStyle.Danger),
@@ -74,6 +85,14 @@ export class ResponderController {
   async slow(_interaction: ButtonInteraction, { which }: { which: string }) {
     report('slow', { which })
     await sleep(5_000)
+  }
+
+  // Answers only with a follow-up, so the panel it locked has to be put back as it was
+  @Command('e2e/follow-up', CommandType.BUTTON)
+  @Defer()
+  async followUpOnly(interaction: ButtonInteraction) {
+    await sleep(2_000)
+    await respond(interaction).followUp({ content: `Follow-up only: sent ${stamp()} UTC.`, flags: MessageFlags.Ephemeral })
   }
 
   @Command('e2e/owner/{ownerId}', CommandType.BUTTON)
