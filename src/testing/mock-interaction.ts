@@ -936,8 +936,9 @@ function createMockGuildForMessage(): object {
 }
 
 /**
- * What {@link createMockMessage} builds a message with. Components and embeds may be API JSON, builders or discord.js
- * instances.
+ * What {@link createMockMessage} builds a message with.
+ *
+ * Components and embeds may be API JSON, builders or discord.js instances.
  *
  * @group Testing
  * @category Mocks
