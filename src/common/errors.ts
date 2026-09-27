@@ -91,6 +91,7 @@ export class UserError extends Error {
  * ```
  *
  * @group Responses
+ * @category Errors
  * @see {@link Catch}
  * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
  */
@@ -182,6 +183,7 @@ export interface MessageUsageIssue {
  * ```
  *
  * @group Responses
+ * @category Errors
  * @see {@link MessageHandler}
  * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
  */
