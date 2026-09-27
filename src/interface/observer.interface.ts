@@ -7,7 +7,9 @@ import { type ExecutionContext } from '@src/common/execution-context.js'
  *   from a cache for instance, counts too.
  * - `'denied'`: a guard returned `false` or threw `GuardDeniedError`.
  * - `'cooldown'`: a `@Cooldown` refused it with `CooldownError`.
- * - `'invalid'`: `@Validate` refused its input with `ValidationError`.
+ * - `'invalid'`: the user's input doesn't fit: `@Validate` refused it with `ValidationError`, or a message
+ *   named a command it doesn't fit, a `MessageUsageError`: a word of the wrong type, a param left out, a flag the
+ *   command lacks, a command sent where it doesn't work, or a parent's words alone.
  * - `'refused'`: a `UserError` told the user what to fix, such as too few coins: their mistake, not a
  *   fault of the bot.
  * - `'error'`: anything else was thrown, by the handler, a pipe, an interceptor or a guard.

@@ -358,4 +358,66 @@ describe('observers at runtime', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(told).toHaveLength(1)
   })
+
+  it("report a message command's usage error as the user's invalid input, not a fault of the bot", async () => {
+    const loaded = await load()
+    const told: string[] = []
+
+    @loaded.Observer()
+    class AuditObserver {
+      onSettled(context: import('@src/common/index.js').ExecutionContext, { outcome, error }: DispatchResult) {
+        told.push(`${context.getHandlerName() ?? '-'}:${outcome}:${(error as Error | undefined)?.name ?? ''}`)
+      }
+    }
+    @loaded.Controller()
+    class ToolsController {
+      @loaded.MessageHandler('roll {sides:int}')
+      async roll() {}
+
+      @loaded.MessageHandler('purge {count:int} {--bots}')
+      async purge() {}
+
+      @loaded.MessageHandler('ban {who}', { scope: 'guild' })
+      async ban() {}
+
+      @loaded.MessageHandler('config set {key} {value}')
+      async set() {}
+
+      @loaded.MessageHandler('config get {key}')
+      async get() {}
+    }
+
+    const clients: Client[] = []
+    vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
+      clients.push(this)
+      return Promise.resolve('token')
+    })
+    vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
+    @loaded.MeoCord({
+      controllers: [ToolsController],
+      observers: [AuditObserver],
+      messages: { prefix: '!', deleteUsageRepliesAfter: 0 },
+      clientOptions: { intents: [] },
+    })
+    class App {}
+    await loaded.MeoCordFactory.create(App).start()
+    const [dispatch] = clients[0].listeners('messageCreate') as ((message: unknown) => Promise<void>)[]
+    const message = (content: string, guild?: null) =>
+      Object.assign(loaded.createMockMessage({ content, ...(guild === null && { guild: null }) }), { author: { id: 'ada', bot: false } })
+
+    // A word of the wrong type, a param left out, a flag the command lacks, a server command in a DM, and a parent
+    for (const sent of [message('!roll abc'), message('!roll'), message('!purge 5 --nope'), message('!ban ana', null), message('!config')]) {
+      await dispatch(sent)
+    }
+
+    await vi.waitFor(() => expect(told).toHaveLength(5))
+    expect(told).toEqual([
+      'roll:invalid:MessageUsageError',
+      'roll:invalid:MessageUsageError',
+      'purge:invalid:MessageUsageError',
+      'ban:invalid:MessageUsageError',
+      '-:invalid:MessageUsageError',
+    ])
+  })
 })
+
