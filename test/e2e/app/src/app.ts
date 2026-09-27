@@ -5,6 +5,7 @@ import { CardController } from '@src/controllers/card.controller'
 import { ResponderController } from '@src/controllers/responder.controller'
 import { ThemeResponderController } from '@src/controllers/theme-responder.controller'
 import { ThemeShowcaseController } from '@src/controllers/theme-showcase.controller'
+import { ActorObserver } from '@src/observers/actor.observer'
 import { ProbeService } from '@src/services/probe.service'
 import { APP_THEME, GUILD_THEME, USER_THEME } from '@src/theme-showcase'
 
@@ -17,6 +18,8 @@ const themedUserId = process.env.MEOCORD_E2E_THEMED_USER_ID
   // The responders serve the manual checklist; the automated checks register only the smoke command
   controllers: manual ? [SmokeController, ThemeShowcaseController, ResponderController, CardController, ThemeResponderController] : [SmokeController, ThemeShowcaseController],
   services: [ProbeService],
+  // Who made each call of the manual checklist, for scripts/e2e.ts to check against the expected clicker
+  observers: manual ? [ActorObserver] : [],
   clientOptions: {
     intents: [
       GatewayIntentBits.Guilds,

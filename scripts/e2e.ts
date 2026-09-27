@@ -14,6 +14,7 @@ import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { isDeepStrictEqual } from 'util'
+import { actorLine } from './lib/actor.js'
 import { DiscordApi, type RegisteredCommand, type StoredMessage } from './lib/discord-api.js'
 import { DEFAULT_THEME } from '../src/core/theme-defaults.js'
 import {
@@ -33,6 +34,8 @@ const botToken = process.env.MEOCORD_E2E_BOT_TOKEN?.trim() ?? ''
 const guildId = process.env.MEOCORD_E2E_GUILD_ID?.trim() ?? ''
 const channelId = process.env.MEOCORD_E2E_CHANNEL_ID?.trim() ?? ''
 const helperToken = process.env.MEOCORD_E2E_HELPER_BOT_TOKEN?.trim() ?? ''
+// The Discord user working through the manual checklist, whose calls are told apart from anyone else's
+const clickerId = process.env.MEOCORD_E2E_CLICKER_ID?.trim() ?? ''
 const manual = process.argv.includes('--manual')
 
 const overlayDir = path.join(repoRoot, 'test', 'e2e', 'app')
@@ -75,7 +78,7 @@ class Bot {
   private readonly child: ChildProcess
   private output = ''
 
-  constructor(env: NodeJS.ProcessEnv, echo = false) {
+  constructor(env: NodeJS.ProcessEnv, echo = false, onMarker?: (marker: Marker) => void) {
     this.child = spawn('node', [installedCli, 'start', '--prod'], { cwd: appDir, env: botEnv(env), stdio: ['ignore', 'pipe', 'pipe'] })
     let pending = ''
     const read = (chunk: string) => {
@@ -85,8 +88,10 @@ class Bot {
       pending = lines.pop() ?? ''
       for (const line of lines.map(text => text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, ''))) {
         const marker = /^E2E (\{.*\})$/.exec(line.trim())
-        if (marker) this.markers.push(JSON.parse(marker[1]) as Marker)
+        const reported = marker ? (JSON.parse(marker[1]) as Marker) : undefined
+        if (reported) this.markers.push(reported)
         if (echo) console.log(redact(line))
+        if (reported) onMarker?.(reported)
       }
     }
     this.child.stdout!.setEncoding('utf8').on('data', read)
@@ -420,8 +425,16 @@ async function manualRun(): Promise<void> {
   const install = `https://discord.com/oauth2/authorize?client_id=${applicationId}`
   console.log(`Add the bot to a server:  ${install}&scope=bot+applications.commands&permissions=117760&integration_type=0`)
   console.log(`Install it to an account: ${install}&scope=applications.commands&integration_type=1`)
+  console.log(
+    clickerId
+      ? 'Each call is checked against MEOCORD_E2E_CLICKER_ID; one from anyone else is flagged.'
+      : 'MEOCORD_E2E_CLICKER_ID is not set: each call shows who made it, unchecked.',
+  )
   console.log('Work through "Checking against real Discord" in CONTRIBUTING.md, then press Ctrl+C.\n')
-  const bot = new Bot({ MEOCORD_E2E_MODE: 'manual' }, true)
+  const bot = new Bot({ MEOCORD_E2E_MODE: 'manual' }, true, marker => {
+    const line = actorLine(marker, clickerId)
+    if (line) console.log(line)
+  })
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => bot.stop(signal))
   const code = await bot.exit
   if (code !== 0) process.exitCode = code ?? 1
