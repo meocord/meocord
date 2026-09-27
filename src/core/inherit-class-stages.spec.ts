@@ -228,7 +228,9 @@ describe('@Controller({ inheritStages: false })', () => {
     }
   }
 
-  const module = MeoCordTestingModule.create({ controllers: [Standalone, BelowStandalone] }).compile()
+  // Both inherit base/{id}, so the bot would take only one of them: each gets its own module
+  const module = MeoCordTestingModule.create({ controllers: [Standalone] }).compile()
+  const below = MeoCordTestingModule.create({ controllers: [BelowStandalone] }).compile()
 
   it("gives the subclass's own handlers only its own class and method stages", async () => {
     await module.invoke(Standalone, 'own', click('standalone/1'))
@@ -245,7 +247,7 @@ describe('@Controller({ inheritStages: false })', () => {
   })
 
   it('stops a further subclass at the class that opted out', async () => {
-    await module.invoke(BelowStandalone, 'deeper', click('below/1'))
+    await below.invoke(BelowStandalone, 'deeper', click('below/1'))
     expect(ran).toEqual(['OwnGuard', 'deeper'])
   })
 })

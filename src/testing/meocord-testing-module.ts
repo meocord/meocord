@@ -481,9 +481,9 @@ export class TestingModule {
 
   private builtComponentRoutes?: ComponentRoute[]
 
-  /** The module's component routes, ranked as dispatch ranks them, with any the bot would refuse as duplicates. */
+  /** The module's component routes, ranked as dispatch ranks them; throws, as the bot would, for two of one shape. */
   private componentRoutes(): ComponentRoute[] {
-    return (this.builtComponentRoutes ??= buildComponentRoutes(this.controllers, { keepDuplicates: true }))
+    return (this.builtComponentRoutes ??= buildComponentRoutes(this.controllers))
   }
 
   private dispatcher?: Dispatcher
