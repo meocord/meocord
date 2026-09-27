@@ -894,12 +894,13 @@ describe('a command named by its leading words alone', () => {
 
   @Controller()
   class Config {
-    @MessageHandler('config set {key} {value...}')
+    @MessageHandler('config set {key} {value...}', { aliases: ['config put'] })
     set() {
       ran.push('set')
     }
 
     @MessageHandler('config get {key}', { aliases: ['cfg get'] })
+    @MessageHandler('config show {key}')
     get() {
       ran.push('get')
     }
@@ -921,12 +922,12 @@ describe('a command named by its leading words alone', () => {
     ran.length = 0
   })
 
-  it('answers with the usage of every subcommand the caller could reach, leaving out guarded ones', async () => {
+  it('answers with the usage of every handler the caller could reach, once each, leaving out guarded ones', async () => {
     const client = await startApp({ controllers: [Config], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
 
     const message = await send(client, '!config')
 
-    expect(replyText(message)).toBe('Usage: !config get <key>\n!config set <key> <value…>')
+    expect(replyText(message)).toBe('Usage:\n!config get <key>\n!config set <key> <value…>')
     expect(ran).toEqual([])
   })
 
@@ -935,7 +936,7 @@ describe('a command named by its leading words alone', () => {
 
     const message = await send(client, '!config nope x')
 
-    expect(replyText(message)).toBe('Usage: !config get <key>\n!config set <key> <value…>')
+    expect(replyText(message)).toBe('Usage:\n!config get <key>\n!config set <key> <value…>')
   })
 
   it("lists an alias's subcommands as typed, and a deeper parent's only", async () => {
@@ -953,8 +954,8 @@ describe('a command named by its leading words alone', () => {
     const client = await startApp({ controllers: [Config, Admin], messages: { prefix: '!', deleteUsageRepliesAfter: 0 } })
 
     expect(replyText(await send(client, '!cfg'))).toBe('Usage: !cfg get <key>')
-    expect(replyText(await send(client, '!admin'))).toBe('Usage: !admin role add <name>\n!admin user ban <target>\n!admin user kick <target>')
-    expect(replyText(await send(client, '!admin user'))).toBe('Usage: !admin user ban <target>\n!admin user kick <target>')
+    expect(replyText(await send(client, '!admin'))).toBe('Usage:\n!admin role add <name>\n!admin user ban <target>\n!admin user kick <target>')
+    expect(replyText(await send(client, '!admin user'))).toBe('Usage:\n!admin user ban <target>\n!admin user kick <target>')
   })
 
   it('leaves a route that matches to run, as before', async () => {
@@ -1042,10 +1043,10 @@ describe('a command named by its leading words alone', () => {
       return message
     }
 
-    expect(replyText(await send(client, '!team'))).toBe('Usage: !team leave <name>\n!team list <page>')
+    expect(replyText(await send(client, '!team'))).toBe('Usage:\n!team leave <name>\n!team list <page>')
     expect(replyText(await send(client, `<@${BOT_ID}> team`))).toBe(`Usage: <@${BOT_ID}> team join <name>`)
     expect(replyText(await send(client, '!TEAM'))).toBe('Usage: !team leave <name>')
-    expect(replyText(await dm('!team'))).toBe('Usage: !team join <name>\n!team list <page>')
+    expect(replyText(await dm('!team'))).toBe('Usage:\n!team join <name>\n!team list <page>')
   })
 
   it("goes to the app's filters, with every usage line", async () => {
