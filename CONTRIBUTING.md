@@ -262,6 +262,7 @@ replaced.
 | `MEOCORD_E2E_GUILD_ID`         | yes      | The test server's id                                      |
 | `MEOCORD_E2E_CHANNEL_ID`       | no       | A text channel in the test server, for the helper bot     |
 | `MEOCORD_E2E_HELPER_BOT_TOKEN` | no       | The helper bot's token; with the channel, runs its checks |
+| `MEOCORD_E2E_CLICKER_ID`       | no       | Your user id, which `--manual` checks each call against   |
 
 ### The manual checklist
 
@@ -271,6 +272,11 @@ globally, the only scope a user install reaches everywhere, prints the install l
 Ctrl+C, showing the bot's output. Install the application to your account through the second link too.
 It first clears the test server's own commands, so each command appears there once; the next automated
 run removes the global commands and registers the server's again.
+
+Global commands reach anyone with the application, so the output says who made each call: after the bot's
+own lines, a line such as `e2e/fail (error) by the expected clicker`. Set `MEOCORD_E2E_CLICKER_ID` to your
+user id and a call from anyone else reads `by ANOTHER user`; without it, each call shows the user's id.
+Only your own calls count as the checklist's, apart from the stranger's click below.
 
 You need a second Discord account for the stranger's click, a server the bot is not in, and a group DM.
 `/e2e-panel` answers with where it was used and whether the bot is there, then a panel of buttons. Run
@@ -297,8 +303,9 @@ it in each of the four contexts, and work through the steps in each:
    message, and the panel comes back as it was: its buttons usable, the loading view gone. The handler
    answers only with a follow-up, so nothing but `@Defer` puts the panel back.
 7. **A stranger's click**: from the second account, click **Owner only**. Only they see "Only the user
-   who opened this panel can use this button.", and the panel does not change, not even briefly. When
-   you click it, the lock appears and the text says "Owner only: handled for its owner".
+   who opened this panel can use this button.", the panel does not change, not even briefly, and the
+   output flags the click as another user's. When you click it, the lock appears and the text says
+   "Owner only: handled for its owner".
 8. **The error, public**: click **Fail**. You see a private "Oops!" message with "An error occurred
    while executing the command.", and the panel comes back as it was.
 9. **The error, appended**: run `/e2e-panel private:True` and click **Fail** on that private panel. The
