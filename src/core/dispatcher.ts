@@ -188,8 +188,10 @@ export class Dispatcher {
       const route = matchMessageRoute(this.messageRoutes, text, starts)?.route ?? matchMessageCommand(this.messageRoutes, text, starts)?.route
       if (!route || taken.has(route)) continue
       taken.add(route)
+      // The placeholder mention reads as the bot's, not as an id no one has
+      const shown = text.replace(`<@${bot}> `, '@bot ')
       this.logger.warn(
-        `messages.help is on, but ${route.controllerClass.name}.${route.method} (${JSON.stringify(route.pattern)}) takes "${text}", ` +
+        `messages.help is on, but ${route.controllerClass.name}.${route.method} (${JSON.stringify(route.pattern)}) takes "${shown}", ` +
           `which runs it instead, so the built-in help never answers. Turn help off, or give the handler another word.`,
       )
     }
