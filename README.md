@@ -3005,6 +3005,8 @@ expect(response.sent).toBe(true)
 expect(response.calls.map(call => call.method)).toEqual(['deferUpdate', 'editReply'])
 ```
 
+A call Discord refused stays in `calls`, in the order it was made, with the error it rejected with as `error`, and does not count towards `sent`. A reply refused with 10062 reports `sent: false`, and an edit that fell back to the channel after an expired token lists the refused `editReply` before the `message.edit` that went through.
+
 `createDiscordError(code)` builds the `DiscordAPIError` discord.js throws, for a mock to reject with: 10062 (the three seconds passed), 40060 (already acknowledged), 50001 (missing access), 50027 (the fifteen-minute token expired). Mock interactions take `context` and `authorizingIntegrationOwners`, to test each place a user-installed app can be used:
 
 ```typescript

@@ -11,10 +11,10 @@ export interface ResponseReport {
   /** Where the answer stands: `'unanswered'`, `'deferred'` or `'replied'`. */
   state: ResponsePhase
 
-  /** Whether anything the user can see was sent: a reply, an update, an edit or a follow-up. */
+  /** Whether anything the user can see was sent: a reply, an update, an edit or a follow-up that Discord accepted. */
   sent: boolean
 
-  /** Every Discord call made through `respond()`, in order, with the payload it sent. */
+  /** Every Discord call made through `respond()`, in order, with the payload it sent, and the `error` of one Discord refused. */
   calls: readonly ResponseCall[]
 }
 
@@ -56,7 +56,7 @@ export function getResponse(interaction: Interaction): ResponseReport {
   const state = existingResponse(interaction)
   if (state) {
     const calls = [...state.history]
-    return { state: state.state, sent: calls.some(call => VISIBLE.has(call.method)), calls }
+    return { state: state.state, sent: calls.some(call => VISIBLE.has(call.method) && !('error' in call)), calls }
   }
   const answered = interaction.isRepliable() ? interaction.replied : false
   const deferred = interaction.isRepliable() ? interaction.deferred : false
