@@ -3,7 +3,7 @@ import { Container, type ServiceIdentifier } from 'inversify'
 import { COOLDOWN_POLICY, DEFAULT_COOLDOWN_STORE_TIMEOUT_MS } from '@src/core/cooldown-runner.js'
 import {
   BaseInteraction,
-  type Client,
+  Client,
   type ClientEvents,
   type Interaction,
   Message,
@@ -13,6 +13,7 @@ import {
   type User,
 } from 'discord.js'
 import { MetadataKey, ReactionHandlerAction } from '@src/enum/index.js'
+import { CooldownStore } from '@src/common/cooldown-store.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { missingTranslatorError, Translator } from '@src/common/translator.js'
 import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
@@ -87,8 +88,9 @@ export interface TestingModuleOptions {
 
   /**
    * The `@MeoCord` app class, whose global guards, interceptors and filters run with each handler's own, and whose
-   * translator, presenter, message options, theme and observers the module uses. Its controllers and services are not
-   * registered: list them in `controllers` and `providers`.
+   * translator, presenter, message options, theme and observers the module uses. Its controllers, services and
+   * providers are not registered: list the ones a test needs, or build the whole app with
+   * {@link MeoCordTestingModule.fromApp}.
    */
   app?: new (...args: any[]) => unknown
 
@@ -97,6 +99,29 @@ export interface TestingModuleOptions {
    * module waits for them before a call resolves, so a test sees what they were told.
    */
   observers?: (new (...args: any[]) => DispatchObserver)[]
+}
+
+/**
+ * What a test changes of the app {@link MeoCordTestingModule.fromApp} builds.
+ *
+ * @group Testing
+ * @category Module
+ * @see {@link MeoCordTestingModule.fromApp}
+ */
+export interface FromAppOptions {
+  /** Providers that replace the app's own by token, or add what it lacks, such as the Discord `Client`. */
+  providers?: Provider[]
+  /** Controllers built beside the app's, such as one only a test uses. */
+  controllers?: (new (...args: any[]) => any)[]
+  /** `@Observer` classes told about each call, after the app's own. */
+  observers?: (new (...args: any[]) => DispatchObserver)[]
+}
+
+/** What `fromApp` takes from the app beyond what `app` gives: its providers, services and cooldown store. */
+interface AppWiring {
+  providers: Provider[]
+  services: (new (...args: any[]) => unknown)[]
+  cooldownStore?: new (...args: any[]) => CooldownStore
 }
 
 /**
@@ -244,6 +269,8 @@ export class TestingModule {
     private readonly constructed: ReadonlySet<unknown> = new Set(),
     /** The `app`'s `warnUnanswered`, which dispatch follows as the bot does. */
     private readonly appWarnUnanswered?: boolean,
+    /** The app's listed services, made at `init()` as the bot makes them before it logs in. */
+    private readonly services: readonly (new (...args: any[]) => unknown)[] = [],
   ) {}
 
   private resolving?: Promise<void>
@@ -282,7 +309,9 @@ export class TestingModule {
    * ```
    */
   async init(options: TestingModuleInitOptions = {}): Promise<this> {
-    this.resolving ??= resolveProviders(this.container, this.providers, this.order)
+    this.resolving ??= resolveProviders(this.container, this.providers, this.order).then(() => {
+      for (const service of this.services) this.container.get(service)
+    })
     await this.resolving
     if (options.ready) {
       const { client = createMockClient() as unknown as Client<true>, primary = true } = options.ready === true ? {} : options.ready
@@ -689,7 +718,10 @@ export class TestingModuleBuilder {
   /** The resolvers `overrideThemeFor` gives, in place of the app's `@MeoCord({ themeFor })`. */
   private themeForOverride?: { resolvers: ThemeResolvers | undefined }
 
-  constructor(private readonly options: TestingModuleOptions) {}
+  constructor(
+    private readonly options: TestingModuleOptions,
+    private readonly wiring?: AppWiring,
+  ) {}
 
   /**
    * Replaces a provider with a test double.
@@ -851,15 +883,33 @@ export class TestingModuleBuilder {
       }),
     )
 
-    // Checked as the app checks its own, then merged with the overrides, which win
-    const providers = providerMap(this.options.providers ?? [], "the testing module's providers")
+    // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them
+    // by token, then the overrides, which win
+    const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
+    for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
     for (const [token, override] of this.overrides) providers.set(token, override)
-    assertTypedParameters(
-      reachableClasses(
-        [...(this.options.controllers ?? []), ...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
-        providers,
-      ),
-    )
+    const services = this.wiring?.services ?? []
+    const store = this.wiring?.cooldownStore
+    const roots = [
+      ...(this.options.controllers ?? []),
+      ...services,
+      ...(store ? [store] : []),
+      ...(this.options.app ? appObservers(this.options.app) : []),
+      ...(this.options.observers ?? []),
+    ]
+    const reachable = reachableClasses(roots, providers)
+    assertTypedParameters(reachable)
+    // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
+    const needClient = reachable.filter(cls => injectedTokens(cls).includes(Client))
+    if (needClient.length > 0 && !providers.has(Client)) {
+      container.bind(Client).toDynamicValue(() => {
+        throw new Error(
+          `${needClient.map(cls => cls.name).join(', ')} ${needClient.length === 1 ? 'injects' : 'inject'} the Discord Client, ` +
+            'which a testing module does not make: give one in its providers, such as ' +
+            '{ provide: Client, useValue: createMockClient() }.',
+        )
+      })
+    }
 
     // Bind guard overrides — prevents inversify from auto-wiring guard dependencies
     for (const [guardClass, stub] of this.guardOverrides) {
@@ -911,17 +961,23 @@ export class TestingModuleBuilder {
       // Stamp container on controller class so @UseGuard works in tests too
       Reflect.defineMetadata(MetadataKey.Container, container, ctrl)
     }
+    for (const service of services) bindClass(service)
+    // The app's own store, resolved like a service, unless the test provides the CooldownStore itself
+    if (store && !providers.has(CooldownStore)) {
+      bindClass(store)
+      container.bind(CooldownStore).toService(store)
+    }
 
     // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
     // controllers, and what they inject; factories resolve in the same order
-    const order = resolutionOrder(container, providers, [...providers.keys(), ...(this.options.controllers ?? [])])
+    const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(this.options.controllers ?? [])])
     appClasses.push(
       ...order.filter((token): token is new (...args: any[]) => unknown => {
         const provider = providers.get(token)
         return isAppClassToken(token) && (!provider || (isClassProvider(provider) && provider.useClass === token))
       }),
     )
-    assertProvided(container, providers, appClasses, "the testing module's providers")
+    assertProvided(container, providers, [...appClasses, ...(store ? [store] : [])], "the testing module's providers")
     for (const cls of appClasses) Reflect.defineMetadata(MetadataKey.Container, container, cls)
     prepareHandlerStages(container, appClasses)
     const messages = messagesOf(this.options.app)
@@ -934,6 +990,7 @@ export class TestingModuleBuilder {
     // The order the app runs lifecycle hooks in: providers, then controllers, then observers, each after what it injects
     const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
       ...providers.keys(),
+      ...services,
       ...(this.options.controllers ?? []),
       ...observers,
     ]).map(token => ({ token, name: tokenName(token), dependencies: tokenDependencies(container, providers, token) }))
@@ -958,6 +1015,7 @@ export class TestingModuleBuilder {
       lifecycle,
       constructed,
       warnUnanswered,
+      services,
     )
   }
 }
@@ -1000,6 +1058,78 @@ export class MeoCordTestingModule {
    */
   static create(options: TestingModuleOptions): TestingModuleBuilder {
     return new TestingModuleBuilder(options)
+  }
+
+  /**
+   * Starts building a testing module from a whole `@MeoCord` app, wired as the bot wires it.
+   *
+   * Use it to test the app as it runs: every controller, service, provider and the cooldown store come from its
+   * `@MeoCord({...})`, with its stages, translator, presenter, message options, theme and observers, as
+   * {@link TestingModuleOptions.app} gives them. A test replaces what it must, by token, before anything is made.
+   *
+   * @remarks
+   * A factory runs only when what it provides is first resolved, by `get()` or `init()`, so a factory the test
+   * replaces never runs. The app's listed services are made at `init()`, as the bot makes them before it logs in.
+   * The module makes no Discord `Client`: a class that injects one needs it in `providers`.
+   *
+   * @param app - The class `@MeoCord` decorates.
+   * @param options - Providers that replace the app's by token, extra controllers, and observers.
+   * @returns The builder, whose `override*` methods still apply, for `compile()`.
+   * @throws TypeError when `app` is not a `@MeoCord` class.
+   *
+   * @example
+   * ```ts
+   * import { expect } from 'vitest'
+   *
+   * const DATABASE = createToken<{ query(sql: string): Promise<unknown[]> }>('Database')
+   * @Service()
+   * class Notes {
+   *   constructor(@Inject(DATABASE) private readonly db: { query(sql: string): Promise<unknown[]> }) {}
+   *   list() {
+   *     return this.db.query('select * from notes')
+   *   }
+   * }
+   * @Controller()
+   * class NotesController {
+   *   constructor(private readonly notes: Notes) {}
+   *   @Command('notes', CommandType.SLASH)
+   *   async show(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send(`${(await this.notes.list()).length} notes`)
+   *   }
+   * }
+   * @MeoCord({
+   *   controllers: [NotesController],
+   *   providers: [{ provide: DATABASE, useFactory: async () => ({ query: async () => [] }) }],
+   *   clientOptions: { intents: [] },
+   * })
+   * class App {}
+   *
+   * // The app's own wiring, with an in-memory database in place of the real one
+   * const module = await MeoCordTestingModule.fromApp(App, {
+   *   providers: [{ provide: DATABASE, useValue: { query: async () => [{ id: 1 }] } }],
+   * })
+   *   .compile()
+   *   .init()
+   * const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'notes' })
+   * await module.dispatch(interaction)
+   * expect(getResponse(interaction).calls[0].payload).toMatchObject({ content: '1 notes' })
+   * ```
+   */
+  static fromApp(app: new (...args: any[]) => unknown, options: FromAppOptions = {}): TestingModuleBuilder {
+    const appOptions = Reflect.getMetadata(MetadataKey.AppOptions, app) as
+      | {
+          controllers: (new (...args: any[]) => any)[]
+          services?: (new (...args: any[]) => unknown)[]
+          providers?: Provider[]
+          cooldownStore?: new (...args: any[]) => CooldownStore
+        }
+      | undefined
+    if (!appOptions) throw new TypeError(`${app?.name ?? String(app)} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.`)
+    const controllers = [...new Set([...appOptions.controllers, ...(options.controllers ?? [])])]
+    return new TestingModuleBuilder(
+      { app, controllers, providers: options.providers, observers: options.observers },
+      { providers: appOptions.providers ?? [], services: appOptions.services ?? [], cooldownStore: appOptions.cooldownStore },
+    )
   }
 }
 
