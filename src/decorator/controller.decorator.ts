@@ -455,8 +455,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * @category Handlers
  * @see {@link CommandBuilder}
  * @see {@link route}
- * @see {@link https://meocord.dev/docs/latest/command-types | Command types}
- * @see {@link https://meocord.dev/docs/latest/component-routing | Component routing}
+ * @see {@link https://meocord.dev/docs/latest/slash-commands | Slash commands}
+ * @see {@link https://meocord.dev/docs/latest/components | Buttons, selects and modals}
  */
 export function Command<
   CBC extends BuildableCommandType,
