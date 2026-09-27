@@ -109,6 +109,8 @@ function publicSymbols(program: ts.Program, entries: Map<string, string>): Map<t
         continue
       }
       const { summary, tags } = parsedDoc(symbol)
+      // Exported for the types' sake, but not public API: the reference leaves it out
+      if (tags.some(tag => tag.name === 'internal')) continue
       symbols.set(symbol, {
         name: exported.name,
         entries: [entry],
@@ -136,6 +138,22 @@ function exportedNames(program: ts.Program, file: string): Set<string> {
   const source = program.getSourceFile(file)
   const moduleSymbol = source && checker.getSymbolAtLocation(source)
   return new Set(moduleSymbol ? checker.getExportsOfModule(moduleSymbol).map(symbol => symbol.name) : [])
+}
+
+/**
+ * A snippet as module code, or as class members after any module code before them, such as a decorator
+ * defined and then used: `members` is `undefined` when the whole snippet is module code.
+ */
+function splitMembers(code: string): { outside: string; members?: string } {
+  if (parsesAsModule(code)) return { outside: code }
+  const lines = code.split('\n')
+  for (let index = 0; index < lines.length; index++) {
+    if (!/^(@|constructor\(|async |private |public |protected |readonly |static |[A-Za-z_$][\w$]*\()/.test(lines[index])) continue
+    const outside = lines.slice(0, index).join('\n')
+    const members = lines.slice(index).join('\n')
+    if (parsesAsModule(outside) && parsesAsModule(`class Example {\n${members}\n}`)) return { outside, members }
+  }
+  return { outside: '', members: code }
 }
 
 /** Whether a snippet parses as a module, rather than as class members. */
@@ -208,7 +226,7 @@ function main(): void {
     add(name, './fixtures')
   }
 
-  const files = new Map<string, { owner: string; code: string; offset: number }>()
+  const files = new Map<string, { label: string; code: string; lineOf: (number | undefined)[] }>()
   for (const item of symbols.values()) {
     if (!item.group) continue
     if (!GROUPS.includes(item.group)) problems.push(`${item.name}: @group ${item.group} is not one of ${GROUPS.join(', ')}.`)
@@ -220,12 +238,14 @@ function main(): void {
       const lines = snippet.split('\n')
       const start = Math.max(0, lines.findIndex(line => !/^import .+ from '[^']+'$/.test(line) && line.trim() !== ''))
       const ownImports = lines.slice(0, start).filter(line => line.trim() !== '')
-      const example = lines.slice(start).join('\n')
-      const wrapped = !parsesAsModule(example)
-      const body = wrapped ? `@Controller()\nexport class Example {\n${example}\n}\n` : `${example}\n`
-      const imports: string[] = [...ownImports]
-      // The names those imports bind, which are not looked up again
+      const exampleLines = lines.slice(start)
+      const { outside, members } = splitMembers(exampleLines.join('\n'))
+      const wrapped = members !== undefined
+      const outsideCount = !wrapped ? exampleLines.length : outside === '' ? 0 : outside.split('\n').length
+      const body = wrapped ? `${outside}\n@Controller()\nexport class Example {\n${members}\n}\n` : `${exampleLines.join('\n')}\n`
+      // The names the snippet's own imports bind, which are not looked up again
       const imported = new Set(ownImports.flatMap(line => /^import (.+) from/.exec(line)![1].match(/[A-Za-z_$][\w$]*/g) ?? []))
+      const autoImports: string[] = []
       for (const name of [...freeNames(body)].sort()) {
         if (imported.has(name)) continue
         const from = sources.get(name)
@@ -235,15 +255,28 @@ function main(): void {
           continue
         }
         const [module] = from
-        imports.push(`import { ${name} } from '${module === './fixtures' ? '../scripts/jsdoc-examples/fixtures.js' : module}'`)
+        autoImports.push(`import { ${name} } from '${module === './fixtures' ? '../scripts/jsdoc-examples/fixtures.js' : module}'`)
       }
-      const code = `${imports.join('\n')}\n${body}export {}\n`
-      files.set(path.join(examplesDir, `${item.name}.${index}.ts`), {
-        owner: item.name,
-        code,
-        // Lines before the snippet's code, less the snippet's own import lines: the imports, and the wrapper's two
-        offset: imports.length + (wrapped ? 2 : 0) - start,
-      })
+      // The compiled file, with the snippet's line number for each of its lines
+      const code: string[] = []
+      const lineOf: (number | undefined)[] = []
+      const add = (text: string, snippetLine?: number) => {
+        code.push(text)
+        lineOf.push(snippetLine)
+      }
+      lines.slice(0, start).forEach((line, i) => line.trim() !== '' && add(line, i + 1))
+      for (const line of autoImports) add(line)
+      exampleLines.slice(0, outsideCount).forEach((line, i) => add(line, start + i + 1))
+      if (wrapped) {
+        add('@Controller()')
+        add('export class Example {')
+        exampleLines.slice(outsideCount).forEach((line, i) => add(line, start + outsideCount + i + 1))
+        add('}')
+      }
+      add('export {}')
+      // Keyed by a counter: on a case-insensitive disk, UseTheme and useTheme would be one file
+      const label = `${item.name}: its example${item.examples.length > 1 ? ` ${index + 1}` : ''}`
+      files.set(path.join(examplesDir, `${files.size}.ts`), { label, code: `${code.join('\n')}\n`, lineOf })
     })
   }
 
@@ -259,10 +292,12 @@ function main(): void {
     const example = file ? files.get(file) : undefined
     const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
     if (example && diagnostic.start !== undefined) {
-      const line = diagnostic.file!.getLineAndCharacterOfPosition(diagnostic.start).line + 1 - example.offset
-      problems.push(`${example.owner}: its example, line ${line}: ${message}`)
+      const line = example.lineOf[diagnostic.file!.getLineAndCharacterOfPosition(diagnostic.start).line]
+      problems.push(`${example.label}${line === undefined ? '' : `, line ${line}`}: ${message}`)
+    } else if (!file) {
+      problems.push(`The examples' compiler options: ${message}`)
     } else if (file === fixturesFile || example) {
-      problems.push(`${path.relative(repoRoot, file!)}: ${message}`)
+      problems.push(`${path.relative(repoRoot, file)}: ${message}`)
     }
   }
 
