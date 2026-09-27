@@ -779,7 +779,7 @@ async count(interaction: ButtonInteraction, { count }: { count: number }) {
 | `bool`                     | `boolean`         | `true`, `false`, `on` |
 | words, such as `asc\|desc` | `'asc' \| 'desc'` | `asc`, as written     |
 
-- A segment that is not a value of its type does not match, so the next route is tried, and a customId no route takes is [not found](#when-nothing-matches). Beside a text param in the same place, a typed one is tried first, whatever order they are declared in: `page/{n:int}` takes `page/5`, and `page/{name}` takes `page/last`.
+- A segment that is not a value of its type does not match, so the next route is tried, and a customId no route takes is [not found](#when-nothing-matches). Beside a text param in the same place, a typed one is tried first, and of two types the narrower, whatever order they are declared in: words to choose from, then `bool`, `int` and `number`. `page/{n:int}` takes `page/5`, `page/{x:number}` takes `page/2.5`, and `page/{name}` takes `page/last`.
 - Patterns whose typed segments cannot take one value, such as `item/{n:int}` and `item/{f:bool}`, are different routes. Two whose segments can, such as `r/{w:on|off}` and `r/{f:bool}`, match the same customIds and stop the bot, as two text patterns would.
 - `route(pattern).build()` takes a value of each typed param's type, and throws for one that would not read back, such as `1.5` for an `int`.
 - The handler's typed params are checked against the pattern, for a route and for a plain string pattern: `{ count: string }` for `{count:int}` fails to compile. Untyped params stay unchecked, since `@Validate` and pipes change them.
