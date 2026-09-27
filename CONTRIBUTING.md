@@ -165,7 +165,9 @@ Write as for any comment here: the code as it is now, with no history.
 ### Examples compile
 
 `bun run check:jsdoc-examples`, after `bun run build`, compiles the example of every public symbol that has a
-`@group` against `dist`, and CI runs it. So an example:
+`@group` against `dist`, and CI runs it. It compiles the README's `typescript` blocks the same way, so the landing
+page's example works as a reader copies it; a README block imports what it uses, each import on one line. So an
+example:
 
 - **has no imports.** A name exported by one of meocord's entry points or by discord.js is imported for it; a name
   both export is an error, not a guess.
