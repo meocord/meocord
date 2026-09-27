@@ -108,23 +108,30 @@ export type LocaleCatalog<C> = {
   readonly [K in keyof C]?: C[K] extends string ? string : IsPlural<C[K]> extends true ? PluralMessage : LocaleCatalog<C[K]>
 }
 
-/** A translation of one of MeoCord's texts: any wording, with no `{param}` the English text lacks. */
-type OwnParamsOnly<S, E> = [Exclude<Placeholders<S>, Placeholders<E>>] extends [never]
-  ? string
-  : `MeoCord's text takes no {${Exclude<Placeholders<S>, Placeholders<E>> & string}}`
+/**
+ * What is wrong with a catalog's `meocord` group, one message per mistake: a key MeoCord has no text for, or a
+ * `{param}` MeoCord's English text lacks, shown beside that English so the params it takes can be read.
+ */
+type MeoCordIssues<T, M, Path extends string = 'meocord.'> = {
+  [K in keyof T & string]: K extends keyof M
+    ? M[K] extends string
+      ? T[K] extends string
+        ? `${Path}${K} takes no {${Exclude<Placeholders<T[K]>, Placeholders<M[K]>> & string}}: MeoCord's English is "${M[K]}"`
+        : `${Path}${K} is a text, not a group`
+      : MeoCordIssues<T[K], M[K], `${Path}${K}.`>
+    : `${Path}${K} is not one of MeoCord's texts`
+}[keyof T & string]
 
-/** A catalog's `meocord` group: any of MeoCord's texts, each key one MeoCord has. */
-type MeoCordGroup<T, M> = {
-  readonly [K in keyof T]: K extends keyof M ? (M[K] extends string ? OwnParamsOnly<T[K], M[K]> : MeoCordGroup<T[K], M[K]>) : never
-}
+/** The issues of a catalog's `meocord` group, each a message naming the text and what is wrong. */
+export type CatalogIssues<C> = C extends { readonly meocord: infer G } ? MeoCordIssues<G, MeoCordMessages> : never
 
-/** A catalog whose `meocord` group, if it has one, translates only texts MeoCord has. */
-type MeoCordChecked<T> = { readonly [K in keyof T]: K extends 'meocord' ? MeoCordGroup<T[K], MeoCordMessages> : unknown }
+/** Refuses a `meocord` group with a mistake, naming each one, where a mismatched text would otherwise read as `never`. */
+type MeoCordReport<Issues> = [Issues] extends [never] ? unknown : Readonly<Record<Issues & string, never>>
 
 /** A locale's catalog with nothing the default lacks: each key is `never` where the default has none. */
 type WithinDefault<T, C> = {
   readonly [K in keyof T]: K extends 'meocord'
-    ? MeoCordGroup<T[K], MeoCordMessages>
+    ? unknown
     : K extends keyof C
     ? C[K] extends string
       ? string
@@ -166,7 +173,7 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
  * @group Utilities
  * @category Localisation
  */
-export function defineCatalog<const T extends CatalogShape>(catalog: T & MeoCordChecked<T>): T {
+export function defineCatalog<const T extends CatalogShape>(catalog: T & MeoCordReport<CatalogIssues<T>>): T {
   return catalog
 }
 
@@ -256,8 +263,8 @@ export abstract class Translator<C = CatalogShape> {
 /** Where a translator made by `createTranslator` keeps its catalogs, for `expectCompleteCatalog` to read. */
 export const CATALOGS = Symbol('catalogs')
 
-/** How MeoCord's own texts read a translator made by `createTranslator`: the message a locale is served for a key. */
-export const FIND_MESSAGE = Symbol('findMessage')
+/** How MeoCord's own texts read a translator made by `createTranslator`: the catalogs that serve a locale, in order. */
+export const LOCALE_CHAIN = Symbol('localeChain')
 
 /** A message a translator serves, and the locale whose catalog has it. */
 export interface FoundMessage {
@@ -274,7 +281,7 @@ export function missingTranslatorError(cls: { name: string }): Error {
 
 const DISCORD_LOCALES: ReadonlySet<string> = new Set(Object.values(Locale))
 
-const languageOf = (locale: string): string => locale.split('-')[0]
+export const languageOf = (locale: string): string => locale.split('-')[0]
 
 /** A message by its dotted key, or undefined when the catalog lacks it or the key names a group. */
 export function lookup(catalog: CatalogShape | undefined, key: string): string | PluralMessage | undefined {
@@ -317,7 +324,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   }
 
   /** The catalogs that serve a locale, most specific first, ending with the default. */
-  private chain(requested: string | undefined): Locale[] {
+  [LOCALE_CHAIN](requested: string | undefined): Locale[] {
     const chain: Locale[] = []
     const add = (locale: Locale) => {
       if (!chain.includes(locale)) chain.push(locale)
@@ -333,18 +340,12 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     return chain
   }
 
-  [FIND_MESSAGE](requested: string | undefined, key: string): FoundMessage | undefined {
-    for (const locale of this.chain(requested)) {
-      const message = lookup(this.catalogs[locale], key)
-      if (message !== undefined) return { message, locale }
-    }
-    return undefined
-  }
-
   private translate(requested: string | undefined, key: string, params: Record<string, unknown> = {}): string {
-    const found = this[FIND_MESSAGE](requested, key)
-    if (!found) return key
-    return interpolate(pluralForm(found, params.count), params)
+    for (const locale of this[LOCALE_CHAIN](requested)) {
+      const message = lookup(this.catalogs[locale], key)
+      if (message !== undefined) return interpolate(pluralForm({ message, locale }, params.count), params)
+    }
+    return key
   }
 
   private translateTo(locale: string | undefined): Translate<C> {
@@ -415,10 +416,9 @@ export function createTranslator<
   options: {
     default: Default
     locales: Locales &
-      DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> } & {
-        readonly [L in Default]: MeoCordChecked<Locales[L]>
-      }
-  } & LiteralCatalog<Locales[Default]>,
+      DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> }
+  } & LiteralCatalog<Locales[Default]> &
+    MeoCordReport<{ [L in keyof Locales]: CatalogIssues<Locales[L]> }[keyof Locales]>,
 ): Translator<Locales[Default]> {
   const { default: defaultLocale, locales } = options
   for (const locale of Object.keys(locales)) {

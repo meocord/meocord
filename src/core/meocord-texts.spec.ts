@@ -3,7 +3,7 @@ import { ButtonInteraction, ChatInputCommandInteraction, Client, type APIEmbed, 
 import { Command, Controller, Cooldown, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
-import { createTranslator, defineCatalog } from '@src/common/index.js'
+import { createTranslator, defineCatalog, type Translator } from '@src/common/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type MessageParamType } from '@src/interface/index.js'
 import { createMockGuild, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
@@ -69,7 +69,7 @@ class Commands {
 }
 
 /** Starts an app with this translator, logged in without a network; without one, `color` has a plain label. */
-async function startApp(i18n: typeof t | undefined): Promise<Client> {
+async function startApp(i18n: Translator<any> | undefined): Promise<Client> {
   const messages = { prefix: '!', help: true, deleteUsageRepliesAfter: 0, types: { color: i18n ? color : { parse: color.parse, label: 'hex colour' } } }
   const clients: Client[] = []
   vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client) {
@@ -143,6 +143,32 @@ describe("MeoCord's own texts", () => {
     expect((await repliesTo(client, ['!help tag'], null))[0]).toBe(
       'Usage: !tag <names…> [--loud]\nTags things.\nnames: text, one or more · --loud (optional): on when given\nAlso: !label, !mark, !t',
     )
+  })
+
+  it('answers help with a partial catalog: the translated lines and joins, the rest in English', async () => {
+    const partial = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': enUS, id: { meocord: { help: { params: '{params}', aliases: 'Juga: {aliases}' } } } },
+    })
+    const client = await startApp(partial)
+
+    expect((await repliesTo(client, ['!help tag'], serverIn('id')))[0]).toBe(
+      'Usage: !tag <names…> [--loud]\nTags things.\nnames: text, one or more, --loud (optional): on when given\nJuga: !label, !mark, !t',
+    )
+  })
+
+  it("answers an English server in MeoCord's English when the default locale is another language", async () => {
+    const idDefault = defineCatalog({
+      types: { color: 'warna hex' },
+      meocord: { usage: { heading: 'Cara pakai: {usage}', notValid: '{label}: "{word}" bukan {type} yang sah' }, types: { int: 'bilangan bulat' } },
+    })
+    const idFirst = createTranslator({ default: 'id', locales: { id: idDefault, 'en-US': {} } })
+    const client = await startApp(idFirst)
+    const indonesian = 'Cara pakai: !roll <sides>\nsides: "lots" bukan bilangan bulat yang sah'
+
+    expect(await repliesTo(client, ['!roll lots'], serverIn('en-US'))).toEqual(['Usage: !roll <sides>\nsides: "lots" is not a valid whole number'])
+    expect(await repliesTo(client, ['!roll lots'], serverIn('en-GB'))).toEqual(['Usage: !roll <sides>\nsides: "lots" is not a valid whole number'])
+    expect([...(await repliesTo(client, ['!roll lots'], serverIn('id'))), ...(await repliesTo(client, ['!roll lots'], null))]).toEqual([indonesian, indonesian])
   })
 
   it('answers in English without i18n, whatever the server speaks', async () => {

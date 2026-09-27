@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
 import { createTranslator, defineCatalog, translateError, type Translator } from '@src/common/index.js'
+import { type CatalogIssues } from '@src/common/translator.js'
 
 const enUS = defineCatalog({
   ban: { description: 'Ban a member', done: 'Banned {user} for {days} days.' },
@@ -119,18 +120,31 @@ describe("MeoCord's own texts", () => {
   })
 
   it('rejects a key MeoCord lacks, in the default catalog and in another locale', () => {
-    // @ts-expect-error `headng` is not one of MeoCord's texts
+    // @ts-expect-error Property '"meocord.usage.headng is not one of MeoCord's texts"' is missing
     defineCatalog({ meocord: { usage: { headng: 'Usage: {usage}' } } })
-    // @ts-expect-error `headng` is not one of MeoCord's texts
+    // @ts-expect-error the same, named for the locale's group
     createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { meocord: { usage: { headng: 'Cara pakai: {usage}' } } } } })
   })
 
   it('rejects a {param} the English text lacks, and takes one that leaves a param out', () => {
-    // @ts-expect-error `{command}` is not a param of meocord.usage.heading
+    // @ts-expect-error Property '"meocord.usage.heading takes no {command}: MeoCord's English is "Usage: {usage}""' is missing
     defineCatalog({ meocord: { usage: { heading: 'Usage: {command}' } } })
-    // @ts-expect-error `{name}` is not a param of meocord.usage.missing
+    // @ts-expect-error the same, for meocord.usage.missing in the id locale
     createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { meocord: { usage: { missing: '{name} belum diisi' } } } } })
     createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { meocord: { usage: { notValid: '"{word}" tidak sah' } } } } })
+  })
+
+  it('names the text, what is wrong, and the English with the params it takes, in the error', () => {
+    type Issues<T> = CatalogIssues<{ meocord: T }>
+    expectTypeOf<Issues<{ usage: { heading: 'Usage: {command}' } }>>().toEqualTypeOf<`meocord.usage.heading takes no {command}: MeoCord's English is "Usage: {usage}"`>()
+    expectTypeOf<Issues<{ usage: { notValid: '{label} {wrd} {kind}' } }>>().toEqualTypeOf<
+      | `meocord.usage.notValid takes no {wrd}: MeoCord's English is "{label}: "{word}" is not a valid {type}"`
+      | `meocord.usage.notValid takes no {kind}: MeoCord's English is "{label}: "{word}" is not a valid {type}"`
+    >()
+    expectTypeOf<Issues<{ usage: { headng: 'x' }; helpp: { list: 'y' } }>>().toEqualTypeOf<
+      `meocord.usage.headng is not one of MeoCord's texts` | `meocord.helpp is not one of MeoCord's texts`
+    >()
+    expectTypeOf<Issues<{ usage: { heading: 'Cara pakai: {usage}' }; types: { int: string } }>>().toEqualTypeOf<never>()
   })
 
   it('gives the translator their keys when the default catalog has them', () => {

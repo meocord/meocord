@@ -81,4 +81,32 @@ describe('translateError', () => {
       'Command not found!',
     ])
   })
+
+  describe('with a default locale that is not English', () => {
+    const idFirst = createTranslator({
+      default: 'id',
+      locales: {
+        id: { ping: 'Pong!', meocord: { usage: { heading: 'Cara pakai: {usage}' }, fallback: { notFound: 'Perintah tidak ditemukan!' } } },
+        'en-GB': { meocord: { fallback: { notFound: 'No such command, sorry!' } } },
+      },
+    })
+    const notFound = new CommandNotFoundError()
+    const usage = new MessageUsageError('!ping', [])
+
+    it("answers an English caller in MeoCord's English, before the default's language", () => {
+      expect(translateError(usage, idFirst, 'en-US')).toBe('Usage: !ping')
+      expect(translateError(usage, idFirst, 'en-GB')).toBe('Usage: !ping')
+    })
+
+    it("lets the app's own English catalog word a text over MeoCord's, for every English caller as its messages are", () => {
+      expect(translateError(notFound, idFirst, 'en-GB')).toBe('No such command, sorry!')
+      expect(translateError(notFound, idFirst, 'en-US')).toBe('No such command, sorry!')
+    })
+
+    it('answers any other language, and a DM, in the default', () => {
+      expect(translateError(notFound, idFirst, 'id')).toBe('Perintah tidak ditemukan!')
+      expect(translateError(usage, idFirst, 'ja')).toBe('Cara pakai: !ping')
+      expect(translateError(usage, idFirst, createMockMessage({ guild: null }))).toBe('Cara pakai: !ping')
+    })
+  })
 })
