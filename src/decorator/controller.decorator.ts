@@ -319,9 +319,16 @@ export function createRegexFromPattern(pattern: string): {
   // more exactly than one leaving it to a parameter. Fewer parameters breaks a tie
   // between equal-length patterns, so the ranking is total and never falls back to
   // declaration order.
-  const specificity = routeSpecificity({ literals: literalLength, params: params.length, typed: Object.keys(types).length })
+  const specificity = routeSpecificity({
+    literals: literalLength,
+    params: params.length,
+    typed: Object.values(types).reduce((sum, type) => sum + narrowness(type), 0),
+  })
   return { regex, params, types, specificity }
 }
+
+/** How few values a segment type takes, so a narrower type ranks first: words to choose from, then bool, int, number. */
+const narrowness = (type: string): number => (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : 1)
 
 /** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
 function segmentTypeProblem(param: string, type: string): string {

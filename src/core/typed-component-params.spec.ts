@@ -154,3 +154,23 @@ describe('typed customId params beside other routes of one shape', () => {
     expect(findRouteConflicts(PathsApp).map(({ patterns }) => patterns)).toEqual([['r/{w:on|off}', 'r/{f:bool}']])
   })
 })
+
+describe('typed customId params of one shape', () => {
+  it('runs the narrower type first, whatever order they are declared in', async () => {
+    const ran: unknown[] = []
+    @Controller()
+    class Wide {
+      @Command('n/{x:number}', CommandType.BUTTON) async wide(_i: ButtonInteraction, { x }: { x: number }) { ran.push(['number', x]) }
+    }
+    @Controller()
+    class Narrow {
+      @Command('n/{x:int}', CommandType.BUTTON) async narrow(_i: ButtonInteraction, { x }: { x: number }) { ran.push(['int', x]) }
+    }
+    for (const controllers of [[Wide, Narrow], [Narrow, Wide]]) {
+      ran.length = 0
+      const module = MeoCordTestingModule.create({ controllers }).compile()
+      for (const id of ['n/5', 'n/2.5']) await module.dispatch(press(id))
+      expect(ran).toEqual([['int', 5], ['number', 2.5]])
+    }
+  })
+})
