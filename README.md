@@ -992,7 +992,7 @@ A message that names a command, after a prefix or mention, but does not fit its 
 
 ```
 !pay @ana lots       ->  Usage: !pay <to> <amount> [note…]
-                         amount: "lots" is not a whole number
+                         amount: "lots" is not a valid whole number
 !pay @ana            ->  Usage: !pay <to> <amount> [note…]
                          amount is missing
 ```
@@ -1381,7 +1381,7 @@ MeoCord answers a message in plain text: a command's [usage](#usage-errors), a g
 
 ```text
 ⚠️ Usage: !roll <sides>
-sides: "lots" is not a whole number
+sides: "lots" is not a valid whole number
 ```
 
 ### Migrating from `Theme`

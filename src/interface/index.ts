@@ -435,7 +435,7 @@ export interface MessageCommandOptions {
  * @example
  * ```ts
  * const color: MessageParamType<number> = {
- *   label: 'a hex colour',
+ *   label: 'hex colour',
  *   parse: word => (/^#[0-9a-f]{6}$/i.test(word) ? parseInt(word.slice(1), 16) : undefined),
  * }
  * // @MeoCord({ messages: { types: { color } } }), and in a .d.ts of the app:
@@ -449,7 +449,7 @@ export interface MessageCommandOptions {
  * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
  */
 export interface MessageParamType<T = unknown> {
-  /** What the usage calls a value of this type, such as `color`. Defaults to the type's key. */
+  /** A noun such as `hex colour`, read in "is not a valid hex colour". Defaults to the type's key. */
   label?: string
   /**
    * The value a word stands for, or `undefined` when it stands for none. It runs before the handler's guards,

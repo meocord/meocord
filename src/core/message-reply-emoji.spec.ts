@@ -107,7 +107,7 @@ describe('messages.replyEmoji', () => {
     const client = await startApp({ deleteUsageRepliesAfter: 0 }, { emojis: { warning: '🚧' } })
 
     expect(await repliesTo(client, REFUSED)).toEqual([
-      'Usage: !roll <sides>\nsides: "lots" is not a whole number',
+      'Usage: !roll <sides>\nsides: "lots" is not a valid whole number',
       'Moderators only.',
       'amount: must be at least 1',
       'Link your account first.',
@@ -120,7 +120,7 @@ describe('messages.replyEmoji', () => {
     const warning = DEFAULT_THEME.emojis.warning
 
     expect(await repliesTo(client, REFUSED)).toEqual([
-      `${warning} Usage: !roll <sides>\nsides: "lots" is not a whole number`,
+      `${warning} Usage: !roll <sides>\nsides: "lots" is not a valid whole number`,
       `${warning} Moderators only.`,
       `${warning} amount: must be at least 1`,
       `${warning} Link your account first.`,
@@ -144,7 +144,7 @@ describe('messages.replyEmoji', () => {
 
     expect(await repliesTo(client, ['!link', '!roll lots', 'spam'], { guild: castle })).toEqual([
       '🏰 Link your account first.',
-      '🏰 Usage: !roll <sides>\nsides: "lots" is not a whole number',
+      '🏰 Usage: !roll <sides>\nsides: "lots" is not a valid whole number',
       '🏰 Slow down.',
     ])
     expect(await repliesTo(client, ['!link', 'spam'], { guild: castle, author: 'vip' })).toEqual(['👑 Link your account first.', '👑 Slow down.'])
