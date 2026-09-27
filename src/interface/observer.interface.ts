@@ -53,7 +53,7 @@ export interface DispatchResult {
 }
 
 /**
- * Observes every call MeoCord dispatches, once it has settled, for metrics and audit logs.
+ * Observes every call MeoCord dispatches, as it starts and once it has settled, for metrics and audit logs.
  *
  * Implement it on a class marked with {@link Observer}. It hears about commands, components, modals,
  * autocomplete, message, reaction and event handlers, and interactions no handler matches and nothing else
@@ -62,8 +62,9 @@ export interface DispatchResult {
  *
  * @remarks
  * An observer cannot change a call: the call waits for neither method, one that throws is logged, and the
- * other observers still run. It cannot inject `ExecutionContext`, which both methods receive; its `onReady`
- * and `onShutdown` hooks run with the services'.
+ * other observers still run. One instance is resolved from the container, so it injects services, and its
+ * `onReady` and `onShutdown` hooks run with theirs; it cannot inject `ExecutionContext`, which both methods
+ * receive. `@Observer({ types })` limits it to some kinds of call.
  *
  * @group Types
  * @see {@link Observer}

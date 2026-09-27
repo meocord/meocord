@@ -31,9 +31,9 @@ import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.inter
  *
  * @remarks
  * Before an `@Autocomplete` handler, a class-level or global guard receives an `AutocompleteInteraction` and
- * must not answer it: returning `false` closes the menu with an empty list. Before an `@On` handler, it receives
- * the event's arguments, such as a `GuildMember` for `guildMemberAdd`. `@Guard({ types })` limits a guard to the
- * calls it is written for.
+ * must not answer it: returning `false` closes the menu with an empty list. Before an `@On` or `@Once` handler,
+ * it receives the event's arguments, such as a `GuildMember` for `guildMemberAdd`. `@Guard({ types })` limits a
+ * guard to the calls it is written for.
  *
  * @group Types
  * @see {@link Guard}
@@ -168,8 +168,9 @@ export interface CallHandler {
  *
  * @remarks
  * It continues with `next.handle()`, at most once, since each call runs the handler again; not calling it skips
- * the handler. One instance is shared by every call, so per-call state lives in local variables, and a use's
- * params come from `context.getParams()`.
+ * the handler, and catching what it throws can replace the handler's error. One instance is shared by every
+ * call, so per-call state lives in local variables, and a use's params come from `context.getParams()`. A
+ * global interceptor also runs around `@On` and `@Once` handlers.
  *
  * @group Types
  * @see {@link Interceptor}

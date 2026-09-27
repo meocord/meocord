@@ -63,6 +63,7 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
  * async ban(interaction: ChatInputCommandInteraction) {
  *   await respond(interaction).send('Banned.')
  * }
+ * // In a guard that injects ExecutionContext: this.context.get<string[]>('roles')
  * ```
  *
  * @group Utilities

@@ -79,11 +79,16 @@ export declare const PIPED_BRAND: unique symbol
  * ```ts
  * import { z } from 'zod'
  *
- * @Command('say/{text}', CommandType.BUTTON)
+ * @Pipe()
+ * class LengthPipe implements PipeInterface<string, number> {
+ *   transform = (value: string): number => value.length
+ * }
+ *
+ * @Command('count/{text}', CommandType.BUTTON)
  * @Validate(z.object({ text: z.string() }))
- * @UsePipe('text', TrimPipe)
- * async say(interaction: ButtonInteraction, { text }: { text: Piped<string> }) {
- *   await respond(interaction).send(text)
+ * @UsePipe('text', LengthPipe)
+ * async count(interaction: ButtonInteraction, { text }: { text: Piped<number> }) {
+ *   await respond(interaction).send(`${text} characters.`)
  * }
  * ```
  *

@@ -33,12 +33,15 @@ export type ExecutionContextType = 'interaction' | 'autocomplete' | 'message' | 
  *
  * @example
  * ```ts
+ * export const UnderMaintenance = createMetadata<boolean>('maintenance')
+ *
  * @Guard()
- * export class GuildOnlyGuard implements GuardInterface {
+ * export class MaintenanceGuard implements GuardInterface {
  *   constructor(private readonly context: ExecutionContext) {}
  *
  *   canActivate(): boolean {
- *     return this.context.getInteraction()?.inGuild() ?? true
+ *     if (!this.context.get(UnderMaintenance)) return true
+ *     throw new GuardDeniedError(`${this.context.getHandlerName()} is closed for now.`)
  *   }
  * }
  * ```
