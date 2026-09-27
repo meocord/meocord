@@ -37,17 +37,18 @@ import {
   matchComponentRoute,
   type RouteParamValue,
 } from '@src/core/component-routes.js'
-import { handleUnroutedError, type HandlerOutcome, observeUnclaimed, type RunOptions, runHandler } from '@src/core/handler-pipeline.js'
+import { handleUnroutedError, type HandlerOutcome, handlerStages, observeUnclaimed, type RunOptions, runHandler } from '@src/core/handler-pipeline.js'
 import { closeAutocomplete, type Fallback } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
 import {
   buildMessageRoutes,
   matchMessageCommand,
+  matchMessageSubcommands,
   matchMessageRoute,
   type MessageRoute,
   messageStartsFor,
 } from '@src/core/message-routes.js'
-import { messageCommandHooks } from '@src/core/message-params.js'
+import { messageCommandHooks, subcommandUsageError } from '@src/core/message-params.js'
 import { CommandNotFoundError } from '@src/common/errors.js'
 import { existingResponse } from '@src/common/response/response-state.js'
 
@@ -117,6 +118,9 @@ interface Call {
   fallback: Fallback
   record?: DispatchRecorder
 }
+
+/** Whether a message route's controller and method have no guards, as the pipeline collects them, inherited ones included. */
+const isUnguarded = (route: MessageRoute): boolean => handlerStages(route.controllerClass.prototype as object, route.method).guards.length === 0
 
 /**
  * Routes interactions, messages and reactions to the handlers that take them, as the bot does, and runs
@@ -422,8 +426,9 @@ export class Dispatcher {
   /**
    * Runs the most specific patterned handler the message matches, then every listener. Its typed params
    * are resolved before its guards, and a message that names a command but does not fit its pattern gets
-   * the command's usage, through that handler's filters. A failure to read the prefixes goes to the global
-   * filters, then the fallback; the listeners still run.
+   * the command's usage, through that handler's filters. One that names only a command's leading words gets
+   * its unguarded subcommands' usage, and a failure to read the prefixes, through the global filters, then
+   * the fallback; the listeners still run.
    */
   async message(message: Message, record?: DispatchRecorder): Promise<void> {
     if (message.author.bot || !message.content?.trim()) return
@@ -438,6 +443,10 @@ export class Dispatcher {
           const named = matchMessageCommand(this.messageRoutes, message.content, starts)
           if (named) target = { ...named, params: {} }
         }
+        // A parent with no handler of its own lists its subcommands; one a guard protects is left out, since
+        // the listing runs no guards and must not name what a caller may be refused
+        const listing = target ? undefined : matchMessageSubcommands(this.messageRoutes, message.content, starts, isUnguarded)
+        if (listing) throw subcommandUsageError(listing)
       }
     } catch (error) {
       await handleUnroutedError(this.container, [message], error, this.runOptions(call))

@@ -740,6 +740,54 @@ export function matchMessageCommand(
 }
 
 /**
+ * The subcommands a message names the parent of, when no pattern matches it and it names no command: the routes
+ * whose command words begin with the most of the message's words, short of all of them, as `!config` or
+ * `!config nope` does for `config set …` and `config get …`. Only routes `listable` accepts, that the message
+ * started as they start and whose scope fits, count, so a parent whose subcommands are all left out names none.
+ * A message with no prefix or mention names none, as chat is never taken for a command.
+ */
+export function matchMessageSubcommands(
+  routes: readonly MessageRoute[],
+  content: string,
+  starts: MessageStarts,
+  listable: (route: MessageRoute) => boolean,
+): { route: MessageRoute; start: string }[] | undefined {
+  let index = indexes.get(routes)
+  if (!index) indexes.set(routes, (index = compileIndex(routes)))
+  let first = 0
+  while (first < content.length && isSpace(content, first)) first++
+  if (first === content.length || !mayStart(index, starts, content[first])) return undefined
+  const text = content.trim()
+
+  let depth = 0
+  let found: { route: MessageRoute; start: string }[] = []
+  for (const group of index.groups) {
+    if (group.prefix === false && !(group.mentionOnly && starts.inGuild !== false)) continue
+    const rest = restFor(group, text, starts)
+    if (!rest || rest.length === text.length) continue
+    const firstWord = firstWordKey(rest, group.caseSensitive)
+    if (firstWord === undefined || !group.commands.has(firstWord)) continue
+    const words = splitWords(rest)
+    const start = text.slice(0, text.length - rest.length)
+    for (const rank of group.commands.get(firstWord)!) {
+      const route = routes[rank]
+      if (!fitsScope(route.scope, starts.inGuild) || !listable(route)) continue
+      const command = commandWordsOf(route.tokens)
+      let shared = 0
+      while (shared < command.length && words[shared] && wordKey(words[shared].value, group.caseSensitive) === wordKey(command[shared], group.caseSensitive)) shared++
+      // A route whose every command word the message gives is a command it names, not a parent of
+      if (shared === command.length || shared < depth) continue
+      if (shared > depth) {
+        depth = shared
+        found = []
+      }
+      found.push({ route, start })
+    }
+  }
+  return found.length > 0 ? found : undefined
+}
+
+/**
  * What a test calling a handler with a message alone passes as its params, as dispatch would build
  * them: `undefined` for a listener, which takes none; `{}` for a message without content; otherwise
  * what the handler's pattern captures, with the route and the start the message used. A message that

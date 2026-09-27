@@ -338,6 +338,15 @@ export function messageCommandHooks(
 }
 
 /**
+ * The usage error that answers a message naming only a command's leading words: the usage of each subcommand
+ * it could reach, one line each, sorted so neither declaration order nor file layout decides the order.
+ */
+export function subcommandUsageError(listing: readonly { route: MessageRoute; start: string }[]): MessageUsageError {
+  const lines = [...new Set(listing.map(({ route, start }) => usageOf(route, start)))].sort()
+  return new MessageUsageError(lines.join('\n'), [])
+}
+
+/**
  * Reads a message's flags into params: a flag without a type as `true` or `false`, a typed one's value as a
  * word to resolve. The issues are the flags the command does not have, and a typed flag missing or given no
  * value. Given twice, a flag takes its last value.
