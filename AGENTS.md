@@ -53,19 +53,20 @@ The pre-commit hook runs `bun run lint`. Do not bypass it for code changes.
 
 ## 3. Repository map
 
-| Path                          | Contents                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| `src/core/`                   | `MeoCordFactory`, `MeoCordApp` (lifecycle, dispatch), `component-routes` |
-| `src/decorator/`              | `@MeoCord`, `@Controller`, `@Command`, `@Autocomplete`, `@Guard`, ...    |
-| `src/common/`                 | `Logger`, `applyDecorators`, `SetMetadata`, `Theme`                      |
-| `src/interface/`, `src/enum/` | Public types and enums                                                   |
-| `src/testing/`                | `meocord/testing`: testing module, mocks, `resolveRoute`                 |
-| `src/build/`                  | Rsbuild config and native-addon packing for `bundleDependencies`         |
-| `src/bin/`                    | The CLI, generators, `app-template/` and `builder-template/`             |
-| `src/util/`                   | Internal helpers: config loading, routing keys, runtime detection, ...   |
-| `scripts/`                    | `verify-generated.ts`, `third-party-notices.ts`                          |
-| `docs/MIGRATING.md`           | Upgrade guide; linked by GitHub URL, not shipped in the package          |
-| `.changeset/`                 | Pending release notes and changesets config                              |
+| Path                          | Contents                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `src/core/`                   | `MeoCordFactory`, `MeoCordApp` (lifecycle, dispatch), `component-routes`                   |
+| `src/decorator/`              | `@MeoCord`, `@Controller`, `@Command`, `@Autocomplete`, `@Guard`, ...                      |
+| `src/common/`                 | `Logger`, `applyDecorators`, `SetMetadata`, `Theme`                                        |
+| `src/interface/`, `src/enum/` | Public types and enums                                                                     |
+| `src/testing/`                | `meocord/testing`: testing module, mocks, `resolveRoute`                                   |
+| `src/build/`                  | Rsbuild config and native-addon packing for `bundleDependencies`                           |
+| `src/bin/`                    | The CLI, generators, `app-template/` and `builder-template/`                               |
+| `src/util/`                   | Internal helpers: config loading, routing keys, runtime detection, ...                     |
+| `scripts/`                    | `verify-generated.ts`, `third-party-notices.ts`                                            |
+| `README.md`                   | Landing page on GitHub and npm: intro, install, one example, links to meocord.dev          |
+| `docs/MIGRATING.md`           | Pointer to the upgrade guide on meocord.dev; its headings keep old changelog links landing |
+| `.changeset/`                 | Pending release notes and changesets config                                                |
 
 ## 4. Architecture essentials
 
@@ -136,8 +137,9 @@ what an application experiences, generate an app from the built package and run 
   bump by what a consumer installs: `major` breaks a working bot, `minor` adds capability, `patch`
   fixes or corrects what ships (JSDoc compiles into `.d.ts`, so a wrong `@example` is a patch).
   Docs, CI and test-only changes take none. Commit prefixes do not decide releases.
-- Write release notes for the person upgrading: what changed and what they do about it, linking
-  `docs/MIGRATING.md` for breaking changes.
+- Write release notes for the person upgrading: what changed and what they do about it, linking the
+  upgrade guide at `https://meocord.dev/docs/<line>/migrating#<anchor>` for breaking changes, and other
+  documentation at `https://meocord.dev/docs/<line>/<page>`, never a README anchor.
 - Merging to `main` publishes nothing. The workflow opens a `chore: release` pull request; **merging
   that pull request publishes to npm**.
 
@@ -216,7 +218,11 @@ Coordination happens between sessions and stays there.
 ## 10. Documentation
 
 - Every Markdown file is formatted by prettier (`bun run lint` does it).
-- User-facing changes update the README and, for breaking changes, `docs/MIGRATING.md`.
-- `docs/MIGRATING.md` is not in the npm package; link it by its GitHub URL, and keep headings stable
-  — changelog entries link to its anchors.
-- Code examples in the README and JSDoc must compile against the current API.
+- The guides, the upgrade guide and the API reference live on meocord.dev, in the meocord/docs
+  repository. A user-facing change updates them there, in a meocord/docs pull request, and the JSDoc
+  here, which the API reference is generated from.
+- The README is the landing page. It holds no guide content, and its example compiles
+  (`check:jsdoc-examples` checks it).
+- `docs/MIGRATING.md` and the README's "Moved sections" keep headings that published changelogs link
+  to. Never rename or remove one; each points at the same section on meocord.dev.
+- Code examples in JSDoc must compile against the current API.
