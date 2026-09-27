@@ -112,7 +112,7 @@ export class UserError extends Error {
  * @group Responses
  * @category Errors
  * @see {@link Catch}
- * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
+ * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
  */
 export class CommandNotFoundError extends Error {
   constructor(message = 'No handler matched the interaction.') {
@@ -217,7 +217,7 @@ export interface MessageUsageIssue {
  * @group Responses
  * @category Errors
  * @see {@link MessageHandler}
- * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
 export class MessageUsageError extends Error {
   /** Whether the command works only in a server and the message was sent elsewhere. */

@@ -17,7 +17,7 @@ import { MetadataKey } from '@src/enum/index.js'
  *
  * @group Utilities
  * @see {@link createMetadata}
- * @see {@link https://meocord.dev/docs/latest/custom-decorators | Custom decorators}
+ * @see {@link https://meocord.dev/docs/4.1/custom-decorators | Custom decorators}
  */
 export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator)[]): ClassDecorator & MethodDecorator {
   return function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor): any {

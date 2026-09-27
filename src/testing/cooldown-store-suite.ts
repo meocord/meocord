@@ -56,7 +56,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  * @group Testing
  * @category Inspection
  * @see {@link CooldownStore}
- * @see {@link https://meocord.dev/docs/latest/recipes/cooldown-stores | Cooldown stores}
+ * @see {@link https://meocord.dev/docs/4.1/recipes/cooldown-stores | Cooldown stores}
  */
 export function testCooldownStore(
   name: string,

@@ -95,7 +95,7 @@ export interface PatternedMessageHandlerDecorator<T, R, Pattern extends string> 
  * @group Decorators
  * @category Handlers
  * @see {@link ReactionHandler}
- * @see {@link https://meocord.dev/docs/latest/messages-and-reactions | Messages and reactions}
+ * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
 export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boolean>>, R extends void | Promise<void>>(): (
   target: object,
@@ -135,7 +135,7 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
  * @group Decorators
  * @category Handlers
  * @see {@link ParamsOf}
- * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
 export function MessageHandler<
   T extends OmitPartialGroupDMChannel<Message<boolean>>,
@@ -195,12 +195,18 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * @group Decorators
  * @category Handlers
  * @see {@link ReactionHandlerOptions}
- * @see {@link https://meocord.dev/docs/latest/messages-and-reactions | Messages and reactions}
+ * @see {@link https://meocord.dev/docs/4.1/reactions | Reactions}
  */
 export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>>(
   emoji?: string,
   settings?: ReactionHandlerSettings,
 ): ReactionHandlerDecorator<T, R>
+/**
+ * Runs the method it decorates for every reaction added to or removed from a message, with the settings given, such
+ * as `bots: true` to take bots' reactions too.
+ *
+ * @param settings - Whether bots' reactions reach it too; see {@link ReactionHandlerSettings}.
+ */
 export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>>(
   settings: ReactionHandlerSettings,
 ): ReactionHandlerDecorator<T, R>

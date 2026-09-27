@@ -45,7 +45,7 @@ function at(catalog: CatalogShape, key: string): unknown {
  * @group Testing
  * @category Inspection
  * @see {@link createTranslator}
- * @see {@link https://meocord.dev/docs/latest/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.1/localisation | Localisation}
  */
 export function expectCompleteCatalog(translator: Translator<any>): void {
   const catalogs = (translator as unknown as { [CATALOGS]?: Partial<Record<string, CatalogShape>> })[CATALOGS]

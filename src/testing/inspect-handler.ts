@@ -74,19 +74,33 @@ export interface HandlerInspection {
   /**
    * Reads a metadata value as `ExecutionContext.get` does: the method's value, else the controller's.
    *
-   * @param metadata - A decorator made by `createMetadata`, or a `SetMetadata` key.
+   * @param metadata - A decorator made by `createMetadata`.
    * @returns The value, or `undefined` when neither declares one.
    */
   get<T>(metadata: MetadataDecorator<T>): T | undefined
+  /**
+   * Reads the value stored under a `SetMetadata` key as `ExecutionContext.get` does: the method's value, else the
+   * controller's.
+   *
+   * @param key - The key `SetMetadata` stored the value under.
+   * @returns The value, or `undefined` when neither declares one.
+   */
   get<T = unknown>(key: string | symbol): T | undefined
 
   /**
    * Reads every declared value as `ExecutionContext.getAll` does, method first, then controller.
    *
-   * @param metadata - A decorator made by `createMetadata`, or a `SetMetadata` key.
+   * @param metadata - A decorator made by `createMetadata`.
    * @returns The declared values; empty when none is declared.
    */
   getAll<T>(metadata: MetadataDecorator<T>): T[]
+  /**
+   * Reads every value stored under a `SetMetadata` key as `ExecutionContext.getAll` does, method first, then
+   * controller.
+   *
+   * @param key - The key `SetMetadata` stored the values under.
+   * @returns The declared values; empty when none is declared.
+   */
   getAll<T = unknown>(key: string | symbol): T[]
 }
 
@@ -152,7 +166,7 @@ export interface InspectHandlerOptions {
  * @group Testing
  * @category Inspection
  * @see {@link createExecutionContext}
- * @see {@link https://meocord.dev/docs/latest/testing-recipes#guards | Testing guards}
+ * @see {@link https://meocord.dev/docs/4.1/testing-recipes#guards | Testing guards}
  */
 export function inspectHandler<C extends new (...args: any[]) => unknown>(
   controller: C,

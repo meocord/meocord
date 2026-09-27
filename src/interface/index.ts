@@ -483,7 +483,7 @@ export interface MessageCommandOptions {
  *
  * @group Configuration
  * @category App options
- * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
 export interface MessageParamType<T = unknown> {
   /** A noun such as `hex colour`, read in "is not a valid hex colour". Defaults to the type's key. */

@@ -441,7 +441,7 @@ const MOCK_BOT_ID = '1300000000000000000'
  * @category Mocks
  * @see {@link MockProps}
  * @see {@link createChatInputOptions}
- * @see {@link https://meocord.dev/docs/latest/mocks | Mocks}
+ * @see {@link https://meocord.dev/docs/4.1/mocks | Mocks}
  */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
