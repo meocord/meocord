@@ -167,26 +167,31 @@ export class Dispatcher {
   }
 
   /**
-   * Warns when `messages.help` is on but never answers: a handler of the app's takes its word, which always runs
-   * instead, or the app has no prefix and takes no mention, so no message can ask for it.
+   * Warns when `messages.help` is on but never answers: a handler of the app's that the help message itself
+   * reaches, which always runs instead, or no start at all, when the app has no prefix and takes no mention.
    */
   private warnUnreachableHelp(): void {
     const words = helpWords(this.messageOptions.help)
     if (words.length === 0) return
-    for (const route of this.messageRoutes) {
-      const [only] = route.tokens
-      const word = route.tokens.length === 1 && only && 'literal' in only ? words.find(candidate => candidate.toLowerCase() === only.literal.toLowerCase()) : undefined
-      if (word !== undefined) {
-        this.logger.warn(
-          `messages.help is on, but ${route.controllerClass.name}.${route.method} handles "${word}", which runs instead, ` +
-            `so the built-in help never answers it. Turn help off, or give the handler another word.`,
-        )
-      }
-    }
     const { prefix, mention } = this.messageOptions
-    const prefixes = typeof prefix === 'function' ? ['function'] : prefix === undefined ? [] : [prefix].flat()
-    if (!mention && prefixes.every(candidate => candidate === '')) {
+    // The help message as it would be sent, alone and asking about a command: after each of the app's own
+    // prefixes, and after a mention of the bot
+    const bot = '0'
+    const prefixes = typeof prefix === 'function' || prefix === undefined ? [] : [prefix].flat().filter(candidate => candidate !== '')
+    const starts: MessageStarts = { prefixes: mention === 'only' ? [] : prefixes, mention: mention ? bot : undefined, bot }
+    const texts = [...starts.prefixes, ...(mention ? [`<@${bot}> `] : [])].flatMap(start => words.flatMap(word => [start + word, `${start}${word} topic`]))
+    if (texts.length === 0 && typeof prefix !== 'function') {
       this.logger.warn('messages.help is on, but the app has no prefix and takes no mention, so no message can ask for help.')
+    }
+    const taken = new Set<MessageRoute>()
+    for (const text of texts) {
+      const route = matchMessageRoute(this.messageRoutes, text, starts)?.route ?? matchMessageCommand(this.messageRoutes, text, starts)?.route
+      if (!route || taken.has(route)) continue
+      taken.add(route)
+      this.logger.warn(
+        `messages.help is on, but ${route.controllerClass.name}.${route.method} (${JSON.stringify(route.pattern)}) takes "${text}", ` +
+          `which runs it instead, so the built-in help never answers. Turn help off, or give the handler another word.`,
+      )
     }
   }
 

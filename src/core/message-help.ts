@@ -80,7 +80,7 @@ function paramsOf(route: MessageRoute, types: Record<string, MessageParamType> |
   const flags = route.flags.map(
     (flag): MessageHelpParam => ({
       name: `--${flag.flag}`,
-      label: flag.type === undefined ? helpText('switchFlag') : paramTypeLabel(flag.type, types),
+      label: flag.type === undefined ? helpText('flagOn') : paramTypeLabel(flag.type, types),
       optional: flag.type === undefined || flag.optional,
     }),
   )
@@ -107,9 +107,13 @@ function entryOf(
   types: Record<string, MessageParamType> | undefined,
 ): MessageHelpEntry {
   const primary = [...handlerRoutes].sort(primaryFirst)[0]
+  // Its aliases and its other spellings, each by the words that name it
+  const own = commandWordsOf(primary.tokens).join(' ')
   const aliases = all
-    .filter(route => route.controllerClass === primary.controllerClass && route.method === primary.method && route.aliasOf !== undefined)
-    .map(route => displayStart(route, start, starts) + commandWordsOf(route.tokens).join(' '))
+    .filter(route => route.controllerClass === primary.controllerClass && route.method === primary.method && route !== primary)
+    .map(route => ({ route, words: commandWordsOf(route.tokens).join(' ') }))
+    .filter(({ words }) => words !== '' && words !== own)
+    .map(({ route, words }) => displayStart(route, start, starts) + words)
   return {
     usage: usageOf(primary, displayStart(primary, start, starts)),
     command: commandWordsOf(primary.tokens).join(' '),
@@ -160,6 +164,11 @@ export function computeMessageHelp(
 
   const children = byHandler(routes.filter(route => named(route, false) && fits(route) && isListable(route)))
   if (children.length > 0) return { kind: 'parent', subcommands: entries(children), invocation }
+  // A query typed as an example, such as `roll 20`, names the command its leading words do
+  if (asked.length > 1) {
+    const shorter = computeMessageHelp(routes, { start, query: asked.slice(0, -1).join(' '), starts, invocation }, types)
+    if (shorter.kind === 'command') return shorter
+  }
   return { kind: 'unknown', query, invocation }
 }
 
@@ -178,7 +187,7 @@ export const HELP_TEXT = {
   describedCommand: '{usage} — {description}',
   usageHeading: 'Usage:',
   usageLine: 'Usage: {usage}',
-  requiredParam: '{name}: {label}',
+  param: '{name}: {label}',
   optionalParam: '{name} (optional): {label}',
   paramSeparator: ' · ',
   aliases: 'Also: {aliases}',
@@ -189,7 +198,7 @@ export const HELP_TEXT = {
   emptyHere: 'There are no commands you can use here.',
   emptyServerOnly: 'These commands work in servers only.',
   listOf: '{label}, one or more',
-  switchFlag: 'on when given',
+  flagOn: 'on when given',
 } as const
 
 /** One of {@link HELP_TEXT}'s texts, with its `{name}` values filled in. */
@@ -221,7 +230,7 @@ export function renderMessageHelp(help: MessageHelp): string {
 
 /** One command's help: its usage, what it does, its params, its aliases, and where it works. */
 function commandBlock(entry: MessageHelpEntry): string {
-  const params = entry.params.map(({ name, label, optional }) => helpText(optional ? 'optionalParam' : 'requiredParam', { name, label }))
+  const params = entry.params.map(({ name, label, optional }) => helpText(optional ? 'optionalParam' : 'param', { name, label }))
   const scope = entry.scope === 'guild' ? helpText('serverOnly') : entry.scope === 'dm' ? helpText('dmOnly') : undefined
   return [
     helpText('usageLine', { usage: entry.usage }),
