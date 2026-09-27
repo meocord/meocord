@@ -10,7 +10,7 @@
     "format": "prettier --write \"**/*.md\" \"src/bin/app-template/**/*.template\"",
     "format:check": "prettier --check \"**/*.md\" \"src/bin/app-template/**/*.template\"",
     "lint": "bun run format && eslint --fix . && tsc --noEmit && tsc --noEmit --project tsconfig.test.json && tsc --noEmit --project tsconfig.eslint.json && tsc --project src/interface/theme-augmented/tsconfig.json && tsc --project src/interface/theme-augmented/tsconfig.reserved.json",
-    "build": "rm -rf ./dist && rollup -c && bun scripts/write-build-stamp.ts",
+    "build": "rm -rf ./dist && rollup -c && bun scripts/write-cli-manifest.ts && bun scripts/write-build-stamp.ts",
     "prepare": "husky",
     "test": "vitest run",
     "verify:generated": "bun scripts/verify-generated.ts",

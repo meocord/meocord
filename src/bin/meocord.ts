@@ -117,6 +117,14 @@ export class MeoCordCLI {
    * Configures and runs the MeoCord CLI.
    */
   async run() {
+    this.program().showHelpAfterError().parse(process.argv)
+  }
+
+  /**
+   * The CLI's commands, options and arguments, configured but not parsed: what `run` parses, and what the build
+   * describes in `dist/cli.json`, so the two cannot differ.
+   */
+  program(): Command {
     let program = new Command()
 
     program
@@ -254,7 +262,7 @@ copies or substantial portions of the Software.
 
     configureCommandHelp(program)
 
-    program.showHelpAfterError().parse(process.argv)
+    return program
   }
 
   async createApp(
