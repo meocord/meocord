@@ -402,7 +402,7 @@ export type MessagePrefix = string | readonly string[]
  * @MeoCord({
  *   controllers: [],
  *   clientOptions: { intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] },
- *   // !roll 20, or @Bot roll 20; a usage reply stays 30 seconds
+ *   // A command starts after `!` or a mention of the bot; a usage reply stays 30 seconds
  *   messages: { prefix: '!', mention: true, deleteUsageRepliesAfter: 30 },
  * })
  * class App {}
