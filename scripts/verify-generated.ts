@@ -29,7 +29,9 @@ const stepEnv = cleanEnv()
  */
 function run(label: string, command: string, args: string[], cwd: string, { quiet = false, silent = false } = {}): void {
   const started = performance.now()
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: stepEnv })
+  // A deprecation notice from a dependency on a newer Node says nothing about the app; warnings from tools still count
+  const env = silent ? { ...stepEnv, NODE_OPTIONS: [stepEnv.NODE_OPTIONS, '--no-deprecation'].filter(Boolean).join(' ') } : stepEnv
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env })
   const seconds = ((performance.now() - started) / 1000).toFixed(1)
   const where = `${[command, ...args].join(' ')}, in ${path.relative(workDir, cwd) || '.'}`
 

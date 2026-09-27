@@ -50,8 +50,10 @@ const typescriptConfig = {
       'import-x/resolver': {
         typescript: {
           alwaysTryTypes: true,
-          // The one the others extend, for its paths: several would make the resolver warn on every lint
-          project: './tsconfig.json',
+          // Each file resolves through the tsconfig that includes it, so a spec sees an alias only the tests
+          // declare; several projects are the intended setup, which the resolver otherwise warns about on every lint
+          project: ['./tsconfig.json', './tsconfig.test.json', './tsconfig.eslint.json'],
+          noWarnOnMultipleProjects: true,
         },
       },
     }),
