@@ -9,8 +9,9 @@ import {
 } from '@src/common/cooldown-store.js'
 
 /**
- * Runs a Lua script on the server, as a client's `EVAL` does: the script, the keys it touches, and its
- * arguments. Resolves to the script's reply.
+ * Runs a Lua script on the server, as a client's `EVAL` does.
+ *
+ * It receives the script, the keys it touches and its arguments, and resolves to the script's reply.
  *
  * @group Types
  */
@@ -124,13 +125,17 @@ function shaOf(script: string): string {
 const DEFAULT_PREFIX = 'meocord:cooldown:'
 
 /**
- * A `CooldownStore` on Redis, or on any server that speaks its protocol and runs its Lua scripts:
- * Valkey, KeyDB, Dragonfly, and Upstash, which runs `EVAL`. Garnet runs Lua only in part; check it with
- * `testCooldownStore` before relying on it. Counts outlive a restart and are shared by every process and
- * shard that uses the same server, so `'user'` and `'global'` cooldowns stay exact across them.
+ * A `CooldownStore` on Redis, or on any server that speaks its protocol and runs its Lua scripts.
  *
- * MeoCord does not depend on a Redis client: give {@link RedisCooldownStore.using} a function that runs
- * a script with the client you have, and pass what it returns to `@MeoCord({ cooldownStore })`.
+ * Use it for counts that outlive a restart and are shared by every process and shard on one server, so `'user'` and
+ * `'global'` cooldowns stay exact across them. For process shards on one host, {@link ShardedCooldownStore} needs no
+ * database.
+ *
+ * @remarks
+ * It runs on Valkey, KeyDB, Dragonfly, and Upstash, which runs `EVAL`; Garnet runs Lua only in part, so check it with
+ * `testCooldownStore` before relying on it. MeoCord does not depend on a Redis client: give
+ * {@link RedisCooldownStore.using} a function that runs a script with the client you have, and pass what it returns to
+ * `@MeoCord({ cooldownStore })`.
  *
  * @example
  * ```ts

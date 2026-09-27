@@ -16,6 +16,7 @@ export interface CooldownLimit {
  * @group Types
  */
 export interface CooldownVerdict {
+  /** Whether the call may run. */
   allowed: boolean
   /** `0` when allowed; otherwise how long until the oldest call in the window leaves it. */
   retryAfterMs: number
@@ -27,7 +28,9 @@ export interface CooldownVerdict {
  * @group Types
  */
 export interface CooldownEntry {
+  /** The key the store counts the call under. */
   key: string
+  /** How many calls that key allows, and in how long a window. */
   limit: CooldownLimit
 }
 
@@ -42,12 +45,14 @@ export interface CooldownBatchVerdict extends CooldownVerdict {
 }
 
 /**
- * Where `@Cooldown` counts calls. The default keeps them in memory, in this process; bind another with
- * `@MeoCord({ cooldownStore })` so shards or several processes share one count: `ShardedCooldownStore`,
- * `RedisCooldownStore`, or one of your own.
+ * Where `@Cooldown` counts calls.
  *
- * `consume` must check and record a call as one step: two calls at the limit must not both pass. Check a
- * store of your own with `testCooldownStore` from `meocord/testing`.
+ * The default keeps them in memory, in this process. Bind another with `@MeoCord({ cooldownStore })` so shards or
+ * several processes share one count: `ShardedCooldownStore`, `RedisCooldownStore`, or one of your own.
+ *
+ * @remarks
+ * `consume` must check and record a call as one step: two calls at the limit must not both pass. Check a store of your
+ * own with `testCooldownStore` from `meocord/testing`.
  *
  * @example
  * ```ts
@@ -58,9 +63,7 @@ export interface CooldownBatchVerdict extends CooldownVerdict {
  *
  * @Service()
  * export class DatabaseCooldownStore extends CooldownStore {
- *   constructor(private readonly queries: CooldownQueries) {
- *     super()
- *   }
+ *   constructor(private readonly queries: CooldownQueries) { super() }
  *
  *   consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
  *     return this.queries.consume(key, limit.uses, limit.windowMs)
@@ -172,11 +175,11 @@ function verdictOf(entry: CallTimes, { uses, windowMs }: CooldownLimit, now: num
 }
 
 /**
- * Counts cooldown calls in this process's memory: the store `@Cooldown` uses unless `@MeoCord({ cooldownStore })`
- * names another.
+ * Counts cooldown calls in this process's memory: the store `@Cooldown` uses unless another is bound.
  *
- * It suits a bot in one process. Its counts start again on a restart, and with process sharding each shard counts
- * on its own; for those, use {@link ShardedCooldownStore} or {@link RedisCooldownStore}.
+ * It suits a bot in one process; bind another with `@MeoCord({ cooldownStore })`. Its counts start again on a restart,
+ * and with process sharding each shard counts on its own; for those, use {@link ShardedCooldownStore} or
+ * {@link RedisCooldownStore}.
  *
  * @remarks
  * The window slides, and stacked cooldowns are counted together: a call is recorded against every key only if all

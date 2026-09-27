@@ -172,13 +172,16 @@ export function themeForInteraction(interaction: object): ResolvedTheme | Promis
 }
 
 /**
- * The theme of the running call: MeoCord's defaults, then the app's theme, then each `@UseTheme` from the
- * controller's base class down to the handler. Outside a call, the theme of the app the process runs, or
- * MeoCord's defaults before an app has started; it never throws.
+ * The theme of the running call, with every role present.
  *
- * It reads the call through `AsyncLocalStorage`, so a service or presenter the handler calls reads the same
- * theme, and so does work the call starts that outlives it, such as a timer's follow-up. The theme is frozen:
- * it is shared by every call it applies to.
+ * Read it wherever a call runs: in a handler, in a service or presenter it calls, and in work it starts, such as a
+ * timer's follow-up. Outside a call, it is the theme of the app the process runs, or MeoCord's defaults before an app
+ * has started; it never throws.
+ *
+ * @remarks
+ * The theme is MeoCord's defaults, then the app's theme, then each `@UseTheme` from the controller's base class down
+ * to the handler. It reads the call through `AsyncLocalStorage`, and it is frozen: it is shared by every call it
+ * applies to.
  *
  * @returns The resolved theme, with every role present.
  *
@@ -198,10 +201,11 @@ export function useTheme(): ResolvedTheme {
 }
 
 /**
- * Makes a function run in the theme of the call that binds it, wherever it is called from later. A listener a handler
- * registers, such as a collector's `collect` callback or a `client.on(...)` handler, runs when its emitter emits, in
- * the emitter's context rather than the handler's, so without it a `useTheme()` inside reads the theme outside any
- * call. Timers and promises the handler starts keep its theme without it.
+ * Makes a function run in the theme of the call that binds it, wherever it is called from later.
+ *
+ * Wrap a listener a handler registers in it, such as a collector's `collect` callback or a `client.on(...)` handler.
+ * Such a listener runs in its emitter's context, so without it a `useTheme()` inside reads the theme outside any call.
+ * Timers and promises the handler starts keep its theme without it.
  *
  * @param fn - The function to run in the call's theme; `this` and its arguments are passed through.
  * @returns A function that runs `fn` in the theme `useTheme()` returns where `bindTheme` is called.

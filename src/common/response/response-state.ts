@@ -136,6 +136,9 @@ export interface ResponseSendOptions {
  * @group Responses
  */
 export interface ResponseCall {
+  /**
+   * The Discord method it used; `message.edit` edits the message itself, once the interaction's token has expired.
+   */
   method:
     | 'deferReply'
     | 'deferUpdate'
@@ -146,6 +149,7 @@ export interface ResponseCall {
     | 'deleteReply'
     | 'showModal'
     | 'message.edit'
+  /** What was sent, as that method received it; none for a deferral or a deletion. */
   payload?: unknown
 }
 
@@ -254,8 +258,9 @@ function toJson(value: unknown): Record<string, unknown> {
 }
 
 /**
- * How one interaction is answered: the single place its replies, edits and follow-ups go through, so
- * each call picks the right Discord method for where the answer stands. Get it with `respond()`.
+ * How one interaction is answered: the single place its replies, edits and follow-ups go through.
+ *
+ * Get it with `respond()`. Each call picks the right Discord method for where the answer stands.
  *
  * @group Responses
  */
@@ -897,13 +902,15 @@ export function responseOf(interaction: RepliableInteraction): InteractionRespon
 }
 
 /**
- * The response state of an interaction: one per interaction, created on first use, through which its
- * replies, edits, follow-ups and errors go.
+ * The response state of an interaction, through which its replies, edits, follow-ups and errors go.
  *
- * Each call picks the Discord method from where the answer stands, re-read from the interaction, so
- * answers made directly with discord.js or by a collector still count. Answers use the interaction's
- * own methods, which work wherever the interaction happened, including user-installed apps in
- * servers and direct messages the bot is not in.
+ * Use it for every answer a handler, a guard, an interceptor, a filter or a collector's callback gives an interaction.
+ * There is one per interaction, created on first use.
+ *
+ * @remarks
+ * Each call picks the Discord method from where the answer stands, re-read from the interaction, so answers made
+ * directly with discord.js or by a collector still count. Answers use the interaction's own methods, which work
+ * wherever the interaction happened, including user-installed apps in servers and direct messages the bot is not in.
  *
  * @param interaction - A command, component or modal submission.
  * @returns The interaction's response state.
