@@ -13,6 +13,7 @@ import {
   hasCustomId,
   isCustomIdRouted,
   matchesCommandType,
+  matchesHandler,
   resolveCommandPaths,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
@@ -124,7 +125,14 @@ export function routeMismatch(controller: { name: string; prototype: object }, m
   if (typeof interaction.commandName !== 'string' || named.length === 0) return undefined
   // A chat command reaches the handler of its full path, or of its bare name, as dispatch tries them
   const keys = interaction.isChatInputCommand() ? resolveCommandPaths(interaction) : [interaction.commandName]
-  if (named.some(({ route }) => keys.includes(route))) return undefined
+  const byName = named.filter(({ route }) => keys.includes(route))
+  // A user and a message context menu may share a name; dispatch sends each only to its own kind's handler
+  if (byName.some(({ meta }) => !interaction.isContextMenuCommand() || matchesHandler(meta, interaction))) return undefined
+  if (byName.length > 0) {
+    const [sent, handled] = interaction.isUserContextMenuCommand() ? ['user', 'message'] : ['message', 'user']
+    const name = interaction.commandName
+    return `A ${sent} context menu command '${name}' does not match ${handler}, which handles the ${handled} context menu command '${name}'.`
+  }
   return describe('command', keys[0], named)
 }
 
