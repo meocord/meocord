@@ -69,20 +69,30 @@ export class UserError extends Error {
 }
 
 /**
- * The error dispatch reports when an interaction matches no handler, such as a button whose customId
- * fits no `@Command` pattern. Global filters receive it, with no handler in their `ExecutionContext`;
- * without one, the built-in fallback answers "Command not found!".
+ * The error raised for an interaction no handler matches, such as a button whose customId fits no pattern.
+ *
+ * Catch it in a global filter to answer an expired or unknown control in your own words. Without one, the
+ * built-in fallback answers "Command not found!" and logs a warning naming the customId or command.
+ *
+ * @remarks
+ * Only global filters see it, since no handler ran, so its `ExecutionContext` has no handler. A button, select
+ * menu or modal no route takes is left to another listener, such as a collector, for 1.5 seconds before it is
+ * raised; a command no handler takes is raised at once.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Catch(CommandNotFoundError)
- * export class NotFoundFilter implements ExceptionFilter<CommandNotFoundError> {
+ * export class ExpiredControlFilter implements ExceptionFilter<CommandNotFoundError> {
  *   async catch(_error: CommandNotFoundError, context: ExecutionContext) {
  *     const interaction = context.getInteraction()
- *     if (interaction?.isRepliable()) await interaction.reply({ content: 'That button has expired.', flags: MessageFlags.Ephemeral })
+ *     if (interaction?.isRepliable()) await respond(interaction).send({ content: 'That button has expired.', flags: MessageFlags.Ephemeral })
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @see {@link Catch}
+ * @see {@link https://meocord.dev/docs/latest/exception-filters | Exception filters}
  */
 export class CommandNotFoundError extends Error {
   constructor(message = 'No handler matched the interaction.') {
@@ -135,7 +145,12 @@ export class ValidationError extends Error {
   }
 }
 
-/** One thing wrong with a message's command: a param whose word is not a value of its type, or a missing one. */
+/**
+ * One thing wrong with a message command's input: a word that is not a value of its param's type, or a param missing.
+ *
+ * @group Types
+ * @see {@link MessageUsageError}
+ */
 export interface MessageUsageIssue {
   /** The param it is about, if it is about one. */
   param?: string
@@ -144,21 +159,31 @@ export interface MessageUsageIssue {
 }
 
 /**
- * Thrown when a message names a command, by its prefix and command words, but its params do not fit the
- * command's pattern: a word that is not a value of its param's type, a param missing, or a command sent
- * where it does not work, such as a server-only one in a DM. The handler does not run. The user is answered with a reply
- * showing {@link MessageUsageError.usage} and the issues, deleted after
- * `@MeoCord({ messages: { deleteUsageRepliesAfter } })` seconds; an exception filter can answer otherwise.
+ * The error raised when a message names a command but does not fit its pattern, which the user is told.
+ *
+ * Catch it in a filter to answer a misuse in the app's own words or language. Without one, the built-in fallback
+ * replies with the command's usage and the issues, and deletes the reply after
+ * `@MeoCord({ messages: { deleteUsageRepliesAfter } })` seconds.
+ *
+ * @remarks
+ * The handler does not run. It carries the command's `usage`, such as `!ban <target> [reason…]`, and the
+ * `issues`, one per param: a word that is not a value of its type, a param missing, a flag the command does
+ * not have. `serverOnly` and `dmOnly` say the command was sent where it does not work. `quiet` marks a message
+ * with no prefix or mention, which may be ordinary chat, so the fallback does not answer it.
  *
  * @example
  * ```ts
  * @Catch(MessageUsageError)
  * export class UsageFilter implements ExceptionFilter<MessageUsageError> {
  *   async catch(error: MessageUsageError, context: ExecutionContext) {
- *     await context.getMessage()?.reply(`Try \`${error.usage}\``)
+ *     if (!error.quiet) await context.getMessage()?.reply(`Try \`${error.usage}\``)
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @see {@link MessageHandler}
+ * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
  */
 export class MessageUsageError extends Error {
   /** Whether the command works only in a server and the message was sent elsewhere. */

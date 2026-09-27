@@ -50,7 +50,15 @@ export type MessageAt<C, K extends string> = K extends `${infer Head}.${infer Re
 
 type Placeholders<S> = S extends `${string}{${infer Name}}${infer Rest}` ? Name | Placeholders<Rest> : never
 
-/** The params a message takes: one per `{name}`, and `count` for a plural. */
+/**
+ * The params a catalog message takes: one per `{name}` placeholder, and `count` for a plural message.
+ *
+ * A translator's `t(key, params)` is checked against it, so a placeholder left out or misspelt fails to compile.
+ * Use it to type params you build before translating.
+ *
+ * @group Types
+ * @see {@link createTranslator}
+ */
 export type MessageParams<M> = M extends string
   ? Record<Placeholders<M>, string | number>
   : IsPlural<M> extends true

@@ -345,7 +345,12 @@ export interface PipeInterface<In = any, Out = any> {
   transform(value: In, context: ExecutionContext): Out | Promise<Out>
 }
 
-/** The second argument a `@ReactionHandler` method receives. */
+/**
+ * The second argument a `@ReactionHandler` method receives: who reacted, and whether they added or removed it.
+ *
+ * @group Types
+ * @see {@link ReactionHandler}
+ */
 export interface ReactionHandlerOptions {
   /** The user who added or removed the reaction. */
   user: User | PartialUser
@@ -353,7 +358,12 @@ export interface ReactionHandlerOptions {
   action: ReactionHandlerAction
 }
 
-/** What a `@ReactionHandler` sets for itself. */
+/**
+ * The settings a `@ReactionHandler` takes for itself.
+ *
+ * @group Types
+ * @see {@link ReactionHandler}
+ */
 export interface ReactionHandlerSettings {
   /**
    * Also runs for reactions from bots, the bot's own included, which are skipped by default as
@@ -374,7 +384,12 @@ export interface ControllerOptions {
   inheritStages?: boolean
 }
 
-/** One prefix or several, such as `'!'` or `['!', '?']`. `''` stands for no prefix. */
+/**
+ * One prefix or several that start a message command, such as `'!'` or `['!', '?']`; `''` stands for none.
+ *
+ * @group Configuration
+ * @see {@link MessageCommandOptions}
+ */
 export type MessagePrefix = string | readonly string[]
 
 /**
@@ -427,20 +442,31 @@ export interface MessageCommandOptions {
 }
 
 /**
- * A param type an app adds for its patterns: turns the word a message gives into a value, or into
- * `undefined` when the word is not one, which the user is told with the command's usage.
+ * A param type an app adds for its message patterns, such as `{accent:color}`: it reads a word as a value.
+ *
+ * Add one for a value the built-in types do not cover, such as a colour, an item from your catalogue or an
+ * order ID. Register it in `@MeoCord({ messages: { types } })` by the name patterns use, and declare what it
+ * gives in {@link MessageParamTypes}, so handlers using it are typed.
+ *
+ * @remarks
+ * `parse` returns `undefined` for a word that is not one, which the user is told with the command's usage,
+ * built from `label`. It runs before the handler's guards, so it should not call Discord; for something that
+ * needs a request, return an {@link EntityRef}, resolved once the guards let the call through.
  *
  * @example
  * ```ts
  * const color: MessageParamType<number> = {
- *   label: 'color',
- *   parse: word => (/^#?[0-9a-f]{6}$/i.test(word) ? parseInt(word.replace('#', ''), 16) : undefined),
+ *   label: 'a hex colour',
+ *   parse: word => (/^#[0-9a-f]{6}$/i.test(word) ? parseInt(word.slice(1), 16) : undefined),
  * }
  * // @MeoCord({ messages: { types: { color } } }), and in a .d.ts of the app:
  * declare module 'meocord/interface' {
  *   interface MessageParamTypes { color: number }
  * }
  * ```
+ *
+ * @group Configuration
+ * @see {@link https://meocord.dev/docs/latest/message-commands | Message commands}
  */
 export interface MessageParamType<T = unknown> {
   /** What the usage calls a value of this type, such as `color`. Defaults to the type's key. */
@@ -455,9 +481,14 @@ export interface MessageParamType<T = unknown> {
 }
 
 /**
- * What each param type in a message pattern gives the handler, by the name a pattern uses for it:
- * `{amount:int}` gives a `number`, `{target:member}` a `GuildMember`. An app adds its own types here by
- * declaration merging, beside registering them in `@MeoCord({ messages: { types } })`.
+ * What each param type in a message pattern gives the handler, by the name a pattern uses for it.
+ *
+ * Read it to see what `{amount:int}` or `{target:member}` gives, and augment it with the types your app adds in
+ * `@MeoCord({ messages: { types } })`, so their handlers are typed.
+ *
+ * @group Types
+ * @see {@link MessageParamType}
+ * @see {@link ParamsOf}
  */
 export interface MessageParamTypes {
   /** A word, or "quoted words". The type of a param that names none. */
@@ -481,19 +512,29 @@ export interface MessageParamTypes {
 }
 
 /**
- * A member, user, role or channel a message names, as a guard sees it: before the guards let the call
- * through, nothing is fetched from Discord, so a caller they refuse costs no request. The handler receives
- * the entity itself.
+ * A member, user, role or channel a message command names, as its guards see it: not fetched yet.
+ *
+ * Read `cached` for what discord.js already has, and call `resolve()` only once a cheaper check has passed, so a
+ * caller you refuse costs no request. The handler receives the entity itself, fetched after the guards.
+ *
+ * @remarks
+ * `resolve()` makes one request per ID however many messages and guards ask at the same time, and the fetch
+ * after the guards shares it. It gives `undefined` when there is no such entity.
  *
  * @example
  * ```ts
- * async canActivate(message: Message, { target }: ParamRefsOf<'ban {target:member} {reason...?}'>) {
- *   // Cheap checks first; fetch only when the author may ban at all
- *   if (!message.member?.permissions.has('BanMembers')) return false
- *   const member = target.cached ?? (await target.resolve())
- *   return !member || member.roles.highest.position < message.member.roles.highest.position
+ * @Guard()
+ * export class OutranksTargetGuard implements GuardInterface {
+ *   async canActivate(message: Message, { target }: ParamRefsOf<'ban {target:member}'>) {
+ *     if (!message.member?.permissions.has('BanMembers')) return false
+ *     const member = target.cached ?? (await target.resolve())
+ *     return !member || member.roles.highest.position < message.member.roles.highest.position
+ *   }
  * }
  * ```
+ *
+ * @group Types
+ * @see {@link ParamRefsOf}
  */
 export interface EntityRef<T> {
   /** The ID the message gave, by mention or as a bare ID. */
@@ -570,13 +611,13 @@ type PatternSpecs<P extends string> = ParamSpec<PatternWords<P>[number]>
 /**
  * The params a message pattern gives its handler, read from the pattern itself.
  *
- * @example
- * ```ts
- * type Ban = ParamsOf<'ban {target:member} {duration:duration?} {reason...?}'>
- * // { target: GuildMember } & { duration?: number; reason?: string }
- * type Purge = ParamsOf<'purge {count:int} {--bots} {--from:user?}'>
- * // { count: number; bots: boolean } & { from?: User }
- * ```
+ * Use it to type a handler's params, or anything that receives them, from the pattern alone:
+ * `ParamsOf<'ban {target:member} {days:int?}'>` is `{ target: GuildMember } & { days?: number }`. A handler's
+ * declared params are checked against it anyway; for what guards see, use {@link ParamRefsOf}.
+ *
+ * @group Types
+ * @see {@link MessageHandler}
+ * @see {@link MessageParamTypes}
  */
 export type ParamsOf<P extends string> = {
   [S in PatternSpecs<P> as S['optional'] extends true ? never : S['name']]: S['value']
@@ -585,15 +626,13 @@ export type ParamsOf<P extends string> = {
 }
 
 /**
- * The params of a message pattern as they stand before anything is fetched from Discord, which is how its
- * guards see them: those {@link ParamsOf} gives, with each member, user, role and channel as an
- * {@link EntityRef}. Nothing is fetched until the guards let the call through.
+ * The params of a message pattern as its guards see them: each member, user, role and channel as an `EntityRef`.
  *
- * @example
- * ```ts
- * type Ban = ParamRefsOf<'ban {target:member} {days:int?}'>
- * // { target: EntityRef<GuildMember> } & { days?: number }
- * ```
+ * Use it to type a guard's params for a message command: `ParamRefsOf<'ban {target:member}'>` is
+ * `{ target: EntityRef<GuildMember> }`. Scalars and choices are their values, as in {@link ParamsOf}.
+ *
+ * @group Types
+ * @see {@link EntityRef}
  */
 export type ParamRefsOf<P extends string> = {
   [S in PatternSpecs<P> as S['optional'] extends true ? never : S['name']]: S['guard']
@@ -602,10 +641,14 @@ export type ParamRefsOf<P extends string> = {
 }
 
 /**
- * The params a handler of pattern `P` is called with, for checking the params it declares, `Declared`: a
- * name the pattern does not have comes as a value saying so, a typed param as its value, and an optional
- * one with `undefined`, so a declaration that cannot take them fails to compile, naming the param. A handler that takes any params,
- * such as `Record<string, string>`, is not checked.
+ * The params a message handler declares, `Declared`, as `@MessageHandler` checks them against its pattern `P`.
+ *
+ * You do not use it directly: it is why a handler whose params name a param the pattern lacks, or give a typed
+ * param a type its value does not fit, fails to compile, with the param named. Params such as
+ * `Record<string, string>`, which take anything, are not checked.
+ *
+ * @group Types
+ * @see {@link ParamsOf}
  */
 export type CheckedParams<P extends string, Declared> = string extends keyof Declared
   ? Declared
@@ -623,7 +666,12 @@ export type CheckedParams<P extends string, Declared> = string extends keyof Dec
         : { readonly 'not a param of the pattern': K }
     }
 
-/** Where a message command works: in servers only, in direct messages only, or in both. */
+/**
+ * Where a message command works: `'guild'` in servers only, `'dm'` in direct messages only, or `'any'`.
+ *
+ * @group Types
+ * @see {@link MessageHandlerOptions}
+ */
 export type MessageScope = 'guild' | 'dm' | 'any'
 
 /** What a patterned `@MessageHandler` sets for itself, over the app's `messages` options. */
