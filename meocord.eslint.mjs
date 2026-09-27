@@ -50,7 +50,8 @@ export const typescriptConfig = {
       'import-x/resolver': {
         typescript: {
           alwaysTryTypes: true,
-          project: ['./tsconfig.json', './tsconfig.test.json', './tsconfig.eslint.json'],
+          // The one the others extend, for its paths: several would make the resolver warn on every lint
+          project: './tsconfig.json',
         },
       },
     }),

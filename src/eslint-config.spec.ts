@@ -33,11 +33,30 @@ describe('import-x/no-cycle', () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-no-cycle-')))
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
 
-  // A project of its own, with the three tsconfigs the config's type-aware parser reads
-  const tsconfig = { compilerOptions: { strict: true, module: 'ESNext', moduleResolution: 'Bundler' }, include: ['src/**/*.ts'] }
-  for (const name of ['tsconfig.json', 'tsconfig.test.json', 'tsconfig.eslint.json']) {
-    fs.writeFileSync(path.join(root, name), JSON.stringify(tsconfig))
+  // A project of its own, with the three tsconfigs the config's type-aware parser reads, shaped as a generated
+  // app's: specs only in tsconfig.test.json, and the `@src/*` alias in the one both extend
+  const compilerOptions = { strict: true, module: 'ESNext', moduleResolution: 'Bundler', paths: { '@src/*': ['./src/*'] } }
+  const tsconfigs = {
+    'tsconfig.json': { compilerOptions, include: ['src/**/*.ts'], exclude: ['src/**/*.spec.ts'] },
+    'tsconfig.test.json': { extends: './tsconfig.json', include: ['src/**/*.ts'], exclude: [] },
+    'tsconfig.eslint.json': { extends: './tsconfig.json', include: ['src/**/*.ts'] },
   }
+  for (const [name, tsconfig] of Object.entries(tsconfigs)) fs.writeFileSync(path.join(root, name), JSON.stringify(tsconfig))
+  // import-x tells an alias from a package by the package.json above what it resolves to
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'no-cycle', type: 'module' }))
+  // The resolver warns once per process, when first asked, so it is watched from before any lint; not with a
+  // spy, which the suite's settings restore after each test
+  const warnings: unknown[] = []
+  const consoleWarn = console.warn
+  beforeAll(() => {
+    console.warn = (...args: unknown[]) => {
+      warnings.push(...args)
+      consoleWarn(...args)
+    }
+  })
+  afterAll(() => {
+    console.warn = consoleWarn
+  })
   const files: Record<string, string> = {
     // Two classes that import each other, as two services injecting one another would
     'notes.ts': "import { Store } from './store'\n\nexport class Notes {\n  constructor(readonly store: Store) {}\n}\n",
@@ -45,6 +64,9 @@ describe('import-x/no-cycle', () => {
     // A cycle through a type-only import loses nothing at runtime
     'user.ts': "import type { Team } from './team'\n\nexport interface User {\n  team: Team\n}\n",
     'team.ts': "import type { User } from './user'\n\nexport interface Team {\n  members: User[]\n}\n",
+    // A cycle through a spec, which only tsconfig.test.json includes, by the alias
+    'ledger.spec.ts': "import { Book } from '@src/book'\n\nexport class Ledger {\n  constructor(readonly book: Book) {}\n}\n",
+    'book.ts': "import { Ledger } from '@src/ledger.spec'\n\nexport class Book {\n  constructor(readonly ledger: Ledger) {}\n}\n",
   }
   fs.mkdirSync(path.join(root, 'src'))
   for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(root, 'src', name), text)
@@ -58,7 +80,9 @@ describe('import-x/no-cycle', () => {
         { files: ['**/*.ts'], languageOptions: { parserOptions: { tsconfigRootDir: root } } },
       ],
     })
-    const [result] = await eslint.lintFiles([path.join(root, 'src', file)])
+    // The resolver reads the config's tsconfigs from the working directory, as an app's lint runs from its root
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root)
+    const [result] = await eslint.lintFiles([path.join(root, 'src', file)]).finally(() => cwd.mockRestore())
     return result.messages
       .filter(message => message.ruleId === 'import-x/no-cycle')
       .map(message => [message.severity, message.message])
@@ -99,5 +123,14 @@ describe('import-x/no-cycle', () => {
 
   it('ignores a cycle made only of type imports', async () => {
     expect(await lintCycles('user.ts')).toEqual([])
+  })
+
+  it("resolves the alias from a spec, which only tsconfig.test.json includes, through tsconfig.json's paths", async () => {
+    expect(await lintCycles('ledger.spec.ts')).toEqual([[1, 'Dependency cycle detected']])
+  })
+
+  // The first thing a new application's `bun run lint` would print
+  it('lints without the resolver warning about several projects', () => {
+    expect(warnings.filter(text => String(text).includes('Multiple projects found'))).toEqual([])
   })
 })

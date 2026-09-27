@@ -23,19 +23,21 @@ const installedCli = installedCliOf(appDir)
 
 const stepEnv = cleanEnv()
 
-/** Runs a command, printing one line on success and the command's full output on failure. */
-function run(label: string, command: string, args: string[], cwd: string, { quiet = false } = {}): void {
+/**
+ * Runs a command, printing one line on success and the command's full output on failure. `silent` fails it
+ * for printing anything at all, as a warning a tool prints outside its own count would otherwise pass.
+ */
+function run(label: string, command: string, args: string[], cwd: string, { quiet = false, silent = false } = {}): void {
   const started = performance.now()
   const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: stepEnv })
   const seconds = ((performance.now() - started) / 1000).toFixed(1)
+  const where = `${[command, ...args].join(' ')}, in ${path.relative(workDir, cwd) || '.'}`
 
   if (result.status !== 0) {
     const output = outputOf(result)
-    throw new Error(
-      `${label} failed (${[command, ...args].join(' ')}, in ${path.relative(workDir, cwd) || '.'}):\n\n` +
-        (output || String(result.error ?? `exit code ${result.status}`)),
-    )
+    throw new Error(`${label} failed (${where}):\n\n` + (output || String(result.error ?? `exit code ${result.status}`)))
   }
+  if (silent && outputOf(result)) throw new Error(`${label} printed output where a clean run prints none (${where}):\n\n${outputOf(result)}`)
 
   if (!quiet) console.log(`  ok  ${label} (${seconds}s)`)
 }
@@ -220,9 +222,10 @@ function runAppScripts(): void {
   inApp('build --prod', 'build:prod')
   if (!existsSync(path.join(appDir, 'dist', 'main.js'))) throw new Error('build --prod wrote no dist/main.js')
 
-  // Without --fix, since generated code has to pass lint as written, and with no warnings allowed.
-  // Last, so it also proves the lint config skips the coverage report and build output written above.
-  inApp('eslint, without --fix', 'eslint', '--max-warnings=0')
+  // Without --fix, since generated code has to pass lint as written, and with no warnings allowed, from a rule
+  // or printed by a plugin: a new user's first `bun run lint` shows either. Last, so it also proves the lint
+  // config skips the coverage report and build output written above.
+  run('eslint, without --fix', process.execPath, ['run', 'eslint', '--max-warnings=0'], appDir, { silent: true })
 }
 
 /**
