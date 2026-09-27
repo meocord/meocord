@@ -142,7 +142,7 @@ function exportedClasses(dir: string, suffix: string): { name: string; from: str
 /**
  * Lists every controller and observer in the application, as its developer would after generating them,
  * with a spec that its routes are apart and that it builds; and imports an image and a Markdown file, as
- * the README shows. The application's own checks then cover all of it.
+ * the docs show. The application's own checks then cover all of it.
  */
 function registerComponents(): void {
   const controllers = exportedClasses('controllers', '.controller.ts')

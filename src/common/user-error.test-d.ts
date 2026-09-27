@@ -3,7 +3,7 @@ import { createTranslator, defineCatalog, Theme, type Translator, UserError } fr
 import { Service } from '@src/decorator/index.js'
 import { type PresentedError, type ResponseContext, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
 
-/** Runs under `vitest --typecheck`: the README's and the JSDoc's `UserError` examples compile. */
+/** Runs under `vitest --typecheck`: the docs' and the JSDoc's `UserError` examples compile. */
 
 const en = defineCatalog({ shop: { poor: 'You need {missing} more coins.' } })
 void createTranslator({ default: 'en-US', locales: { 'en-US': en } })
@@ -16,7 +16,7 @@ describe('UserError', () => {
     }
   })
 
-  it("compiles the README's presenter", () => {
+  it("compiles the docs' presenter", () => {
     @Service()
     class AppPresenter implements ResponsePresenter {
       constructor(private readonly t: Translator<typeof en>) {}

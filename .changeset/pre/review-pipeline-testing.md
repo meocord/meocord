@@ -13,4 +13,4 @@ Testing mocks behave more like discord.js, and a few messages and types say more
 - The `ExceptionFilter` and `@Catch` examples answer through `context.response?.error()`, which suits a deferred interaction too.
 - The README gives the key a cooldown is counted under, with an example.
 
-Tests that relied on the old mock defaults may need a change; see [Smaller changes](https://github.com/meocord/meocord/blob/main/docs/MIGRATING.md#smaller-changes).
+Tests that relied on the old mock defaults may need a change; see [Smaller changes](https://meocord.dev/docs/4.1/migrating#smaller-changes).
