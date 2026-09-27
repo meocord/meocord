@@ -376,9 +376,9 @@ type RouteCheckedType =
 type ContextMenuInteraction = UserContextMenuCommandInteraction | MessageContextMenuCommandInteraction
 
 /**
- * The handler a command's interaction type allows. A context menu handler's interaction is checked as a method's
- * parameter is, so it may declare the one kind its builder registers, which startup checks against the builder;
- * every other handler takes exactly its interaction type.
+ * The handler a command's interaction type allows. A context menu handler whose builder's kind the compiler cannot
+ * tell is checked as a method's parameter is, so it may declare one kind, which startup checks against the builder;
+ * every other handler, a context menu one whose builder's `setType()` names its kind included, takes exactly its type.
  */
 type Handles<I, Args extends unknown[], R> = [I] extends [ContextMenuInteraction]
   ? [ContextMenuInteraction] extends [I]
@@ -438,8 +438,9 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * A subcommand's path is its parts separated by a space, as Discord shows it: `settings notify email`. In a
  * customId pattern, `{name}` captures one `/`-separated segment into the handler's params; with a route, the
  * keys the handler's params require are checked against it when the code compiles. Two component handlers of
- * one type whose patterns match the same ids stop the bot at startup. A context menu handler may declare the kind of
- * interaction its builder registers, which the bot checks as it starts.
+ * one type whose patterns match the same ids stop the bot at startup. A context menu handler receives the kind its
+ * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
+ * kind, the bot checks it as it starts.
  *
  * @param name - The command's name or subcommand path, or a component's customId pattern or route.
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
