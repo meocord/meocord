@@ -1,7 +1,7 @@
 import { type ExecutionContext } from '@src/common/execution-context.js'
 
 /**
- * How a dispatched call ended:
+ * How a dispatched call ended, as a {@link DispatchObserver} is told.
  *
  * - `'ran'`: it settled without an error. An interceptor that answers without calling `next.handle()`,
  *   from a cache for instance, counts too.
@@ -13,10 +13,18 @@ import { type ExecutionContext } from '@src/common/execution-context.js'
  * - `'error'`: anything else was thrown, by the handler, a pipe, an interceptor or a guard.
  * - `'not-found'`: an interaction no handler matches and nothing else answers, such as a button whose
  *   customId no pattern routes, or an autocomplete no `@Autocomplete` claims.
+ *
+ * @group Types
+ * @see {@link DispatchResult}
  */
 export type DispatchOutcome = 'ran' | 'denied' | 'cooldown' | 'invalid' | 'refused' | 'error' | 'not-found'
 
-/** What a {@link DispatchObserver} is told about a call once it has settled. */
+/**
+ * What a {@link DispatchObserver} is told about a call once it has settled.
+ *
+ * @group Types
+ * @see {@link DispatchObserver}
+ */
 export interface DispatchResult {
   /** How the call ended. */
   outcome: DispatchOutcome
@@ -45,28 +53,21 @@ export interface DispatchResult {
 }
 
 /**
- * Observes every call MeoCord dispatches: commands, components, modals, autocomplete, message, reaction
- * and event handlers, and interactions no handler matches and nothing else, such as a collector, answers.
- * A message no handler matches is not a call and is not reported. Declare it with `@Observer()`, optionally limited to some `types`, and list it in
- * `@MeoCord({ observers })`.
+ * Observes every call MeoCord dispatches, once it has settled, for metrics and audit logs.
  *
- * An observer cannot change a call: `onStart` sees it begin and `onSettled` sees it end, and the call
- * waits for neither. A slow one never delays a handler, and one that throws is logged, and the other
- * observers still run. One instance is resolved from the container, so it injects services, and its
- * `onReady` and `onShutdown` hooks run with theirs; it cannot inject `ExecutionContext`, which is passed
- * in instead.
+ * Implement it on a class marked with {@link Observer}. It hears about commands, components, modals,
+ * autocomplete, message, reaction and event handlers, and interactions no handler matches and nothing else
+ * answers; a message no handler matches is not a call. For work inside a call, such as a span around a query,
+ * use an interceptor.
  *
- * @example
- * ```ts
- * @Observer()
- * export class MetricsObserver implements DispatchObserver {
- *   constructor(private readonly metrics: MetricsService) {}
+ * @remarks
+ * An observer cannot change a call: the call waits for neither method, one that throws is logged, and the
+ * other observers still run. It cannot inject `ExecutionContext`, which both methods receive; its `onReady`
+ * and `onShutdown` hooks run with the services'.
  *
- *   onSettled(context: ExecutionContext, { outcome, durationMs }: DispatchResult) {
- *     this.metrics.record(context.getType(), context.getHandlerName() ?? 'unrouted', outcome, durationMs)
- *   }
- * }
- * ```
+ * @group Types
+ * @see {@link Observer}
+ * @see {@link DispatchResult}
  */
 export interface DispatchObserver {
   /**

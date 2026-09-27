@@ -1,12 +1,13 @@
 import { type StandardSchemaV1Issue } from '@src/interface/standard-schema.interface.js'
 
 /**
- * Thrown by a guard to deny a call and tell the user why. Returning `false` from `canActivate` denies
- * silently; throwing this denies with its message, which the built-in fallback shows only to the user
- * who made the call. A filter can catch it to answer differently.
+ * Thrown by a guard to deny a call and tell the user why.
+ *
+ * Use it where returning `false`, which denies silently, would leave the user guessing. The built-in fallback
+ * shows the message only to the user who made the call, and a filter can catch it to answer otherwise.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Guard()
  * export class OwnerGuard implements GuardInterface {
  *   canActivate(interaction: ButtonInteraction, { ownerId }: { ownerId: string }): boolean {
@@ -15,6 +16,11 @@ import { type StandardSchemaV1Issue } from '@src/interface/standard-schema.inter
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @category Errors
+ * @see {@link Guard}
+ * @see {@link UserError}
  */
 export class GuardDeniedError extends Error {
   /** @param message - What the user is told. */
@@ -91,7 +97,12 @@ export class CommandNotFoundError extends Error {
   }
 }
 
-/** One problem `@Validate` found in a handler's input. */
+/**
+ * One problem `@Validate` found in a handler's input.
+ *
+ * @group Types
+ * @see {@link ValidationError}
+ */
 export interface ValidationIssue {
   /** What is wrong, as the schema library wrote it. */
   message: string
@@ -104,8 +115,10 @@ const describePath = (path: readonly PropertyKey[]): string =>
   path.map(segment => (typeof segment === 'symbol' ? (segment.description ?? '') : String(segment))).join('.')
 
 /**
- * Thrown when a handler's input fails its `@Validate` schema, so the handler does not run. The user is
- * answered privately with {@link ValidationError.issues}; an exception filter can phrase them otherwise.
+ * Thrown when a handler's input fails its `@Validate` schema, so the handler does not run.
+ *
+ * The built-in fallback answers the user privately with each issue. Catch it in a filter to phrase the issues
+ * your own way, or in the user's language.
  *
  * @example
  * ```ts
@@ -113,9 +126,15 @@ const describePath = (path: readonly PropertyKey[]): string =>
  * export class ValidationFilter implements ExceptionFilter<ValidationError> {
  *   async catch(error: ValidationError, context: ExecutionContext) {
  *     const lines = error.issues.map(issue => `${issue.path.map(String).join('.') || 'input'}: ${issue.message}`)
+ *     await context.response?.error(error, { message: lines.join('\n') })
  *   }
  * }
  * ```
+ *
+ * @group Responses
+ * @category Errors
+ * @see {@link Validate}
+ * @see {@link ValidationIssue}
  */
 export class ValidationError extends Error {
   /** @param issues - Every problem found, in the order the schema reported them. */
