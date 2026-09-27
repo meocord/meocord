@@ -74,8 +74,6 @@ end
 return {1, 0, -1}
 `
 
-const SCRIPT_SHA = createHash('sha1').update(SCRIPT).digest('hex')
-
 /**
  * The same check as SCRIPT, writing nothing: calls newer than the window are counted in place rather than
  * trimmed, and a key at its limit reports the wait until its oldest call in the window leaves it.
@@ -104,7 +102,14 @@ end
 return {1, 0, -1}
 `
 
-const PEEK_SCRIPT_SHA = createHash('sha1').update(PEEK_SCRIPT).digest('hex')
+const shas = new Map<string, string>()
+
+/** A script's SHA1, as EVALSHA names it: worked out on first use, so an app without Redis never hashes anything. */
+function shaOf(script: string): string {
+  let sha = shas.get(script)
+  if (sha === undefined) shas.set(script, (sha = createHash('sha1').update(script).digest('hex')))
+  return sha
+}
 
 const DEFAULT_PREFIX = 'meocord:cooldown:'
 
@@ -202,7 +207,7 @@ export class RedisCooldownStore extends CooldownStore {
     if (entries.length === 0) return { allowed: true, retryAfterMs: 0 }
     const args = [randomUUID(), ...limitsOf(entries)]
     try {
-      return verdictOf(await this.run(SCRIPT, SCRIPT_SHA, this.keysOf(entries), args), entries.length)
+      return verdictOf(await this.run(SCRIPT, this.keysOf(entries), args), entries.length)
     } catch (error) {
       if (entries.length === 1 || !messageOf(error).includes('CROSSSLOT')) throw error
       return super.consumeMany(entries)
@@ -220,7 +225,7 @@ export class RedisCooldownStore extends CooldownStore {
   async peekMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
     if (entries.length === 0) return { allowed: true, retryAfterMs: 0 }
     try {
-      return verdictOf(await this.run(PEEK_SCRIPT, PEEK_SCRIPT_SHA, this.keysOf(entries), limitsOf(entries)), entries.length)
+      return verdictOf(await this.run(PEEK_SCRIPT, this.keysOf(entries), limitsOf(entries)), entries.length)
     } catch (error) {
       if (entries.length === 1 || !messageOf(error).includes('CROSSSLOT')) throw error
       const verdicts = await Promise.all(entries.map(entry => this.peekMany([entry])))
@@ -232,11 +237,11 @@ export class RedisCooldownStore extends CooldownStore {
     return entries.map(({ key }) => `${this.prefix}${this.options.hashTag === 'handler' ? handlerTagged(key) : key}`)
   }
 
-  private async run(script: string, sha: string, keys: string[], args: string[]): Promise<unknown> {
+  private async run(script: string, keys: string[], args: string[]): Promise<unknown> {
     const { evalsha } = this.options
     if (!evalsha) return this.evaluate(script, keys, args)
     try {
-      return await evalsha(sha, keys, args)
+      return await evalsha(shaOf(script), keys, args)
     } catch (error) {
       // The server has not seen the script since it started, or its scripts were flushed: EVAL loads it.
       if (!messageOf(error).includes('NOSCRIPT')) throw error
