@@ -51,9 +51,14 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
 }
 
 /**
- * Declares the MeoCord application class: its controllers, services, client options and activities.
+ * Declares the application class: its controllers, services, client options and what applies to every handler.
  *
- * The options are stored as metadata; `MeoCordFactory.create()` builds the application from them.
+ * Put it on one class, the one `main.ts` passes to `MeoCordFactory.create()`. What the process needs before this
+ * class is read, the token, build and sharding, belongs in `meocord.config.ts` instead.
+ *
+ * @remarks
+ * The options are stored as metadata and read when the application is created. Stages listed here, guards,
+ * interceptors and filters, apply to every dispatched handler, outside the controller's and the method's own.
  *
  * @param options.controllers - Controllers to register.
  * @param options.clientOptions - Options for the discord.js `Client`.
@@ -81,10 +86,8 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
  *   asks for one.
  * @param options.presenter - The `ResponsePresenter` that styles loading and error views, resolved once
  *   from the container. Without one, MeoCord's own styling is used.
- * @param options.messages - How `@MessageHandler` patterns match: the `prefix` a message starts with,
- *   a list of them or a function of the message returning them; `mention` to accept a mention of the
- *   bot as well; `caseSensitive` for the prefix and literal words; `types` of the app's own for
- *   `{name:type}` params; and `deleteUsageRepliesAfter`, the seconds a usage reply stays (10, or 0 to keep).
+ * @param options.messages - How message commands start and match across the app: the `prefix`, a mention of the
+ *   bot, `mention: 'only'`, the app's own param `types` and how usage replies look; see {@link MessageCommandOptions}.
  * @param options.observers - `@Observer` classes told about every dispatched call once it has settled,
  *   with its outcome and duration, in the order listed. The call never waits for them.
  * @param options.warnUnanswered - Warns, once per handler, when a handler finishes without answering
@@ -103,21 +106,24 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined): void
  * @param options.themeForTimeoutMs - How long a call waits for a resolver, in milliseconds; 1,000 unless set.
  *
  * @example
- * ```typescript
- * @MeoCord({
- *   controllers: [PingSlashController],
- *   clientOptions: {
- *     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
- *   },
- *   activities: [{ name: 'with slash commands', type: ActivityType.Playing }],
- *   guards: [BlocklistGuard],
- *   interceptors: [TimingInterceptor],
- *   filters: [ReportingFilter],
- *   providers: [{ provide: DATABASE, useFactory: () => new Pool({ connectionString: process.env.DATABASE_URL }) }],
- *   messages: { prefix: '!', mention: true },
- * })
+ * ```ts
+ * @Controller()
+ * class PingController {
+ *   @Command('ping', CommandType.SLASH)
+ *   async ping(interaction: ChatInputCommandInteraction) {
+ *     await respond(interaction).send('Pong!')
+ *   }
+ * }
+ *
+ * @MeoCord({ controllers: [PingController], clientOptions: { intents: [GatewayIntentBits.Guilds] } })
  * class App {}
  * ```
+ *
+ * @group Decorators
+ * @category App
+ * @see {@link MeoCordFactory}
+ * @see {@link MeoCordConfig}
+ * @see {@link https://meocord.dev/docs/4.1/configuration | Configuration}
  */
 export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(options: {
   controllers: ServiceIdentifier[]

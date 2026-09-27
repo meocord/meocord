@@ -86,6 +86,25 @@ function warnPerShardCooldowns(controllers: readonly (new (...args: any[]) => un
   )
 }
 
+/**
+ * Creates the application from the class `@MeoCord` decorates, ready to start.
+ *
+ * Call it once, in `main.ts`, and `start()` what it returns. Tests build a module with `MeoCordTestingModule`
+ * instead, which reads the same decorators without a client or a config file.
+ *
+ * @example
+ * ```ts
+ * @MeoCord({ controllers: [], clientOptions: { intents: [GatewayIntentBits.Guilds] } })
+ * class App {}
+ *
+ * const app = MeoCordFactory.create(App)
+ * await app.start()
+ * ```
+ *
+ * @group Controllers
+ * @see {@link MeoCordApplication}
+ * @see {@link MeoCord}
+ */
 export class MeoCordFactory {
   private static logger = new Logger()
 
@@ -103,6 +122,16 @@ export class MeoCordFactory {
     return { ...config, sharding: { ...config.sharding, mode: 'internal' } }
   }
 
+  /**
+   * Creates the application for an app class, reading `dist/meocord.config.mjs` for its token and config.
+   *
+   * With process sharding it returns the manager that runs one process per shard; otherwise the bot itself.
+   *
+   * @param target - The class `@MeoCord` decorates.
+   * @returns The application, which `start()` logs in.
+   * @throws Error when the class has no `@MeoCord`, when the built config is missing, or when a provider cannot
+   *   be bound, such as one for a token MeoCord binds itself.
+   */
   static create(target: ServiceIdentifier): MeoCordApplication {
     const options = Reflect.getMetadata(MetadataKey.AppOptions, target)
 

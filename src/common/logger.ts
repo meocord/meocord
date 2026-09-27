@@ -10,6 +10,31 @@ import { LOG_LEVEL_ENV, LOG_LEVEL_RANK, logThreshold, takeRejectedLogLevel } fro
 dayjs.extend(utc)
 dayjs.extend(timezone)
 
+/**
+ * Prints timestamped lines to the console, each named with the app and a context, at a level the config can hide.
+ *
+ * Use it in controllers and services instead of `console`, so the bot's lines share one format and
+ * `meocord.config.ts`'s `logLevel`, or `MEOCORD_LOG_LEVEL` for one run, decides which print.
+ *
+ * @remarks
+ * An object argument is printed in full, however deep. A line prints when its level is at or above the threshold:
+ * `debug`, then `log` (with `info` and `verbose`), `warn`, `error`.
+ *
+ * @example
+ * ```ts
+ * @Service()
+ * export class ReminderService {
+ *   private readonly logger = new Logger(ReminderService.name)
+ *
+ *   remind(userId: string) {
+ *     this.logger.log(`Reminding ${userId}`)
+ *   }
+ * }
+ * ```
+ *
+ * @group Utilities
+ * @see {@link MeoCordConfig}
+ */
 export class Logger {
   private readonly colorMap: Record<string, (msg: string) => string> = {
     LOG: chalk.green,
@@ -19,6 +44,7 @@ export class Logger {
     DEBUG: chalk.magenta,
   }
 
+  /** @param context - What the lines are about, shown on each, such as a class's name. */
   constructor(private context?: string) {}
 
   /**
@@ -36,26 +62,32 @@ export class Logger {
     return LOG_LEVEL_RANK[level] >= threshold
   }
 
+  /** Prints a line at the `log` level. */
   log(...args: any[]): void {
     if (Logger.shows('log')) this.logWithContext('log', args)
   }
 
+  /** Prints a line at the `log` level, as `log` does. */
   info(...args: any[]): void {
     if (Logger.shows('log')) this.logWithContext('log', args)
   }
 
+  /** Prints a warning, shown unless the level is `error` or `silent`. */
   warn(...args: any[]): void {
     if (Logger.shows('warn')) this.logWithContext('warn', args)
   }
 
+  /** Prints an error, shown unless the level is `silent`. */
   error(...args: any[]): void {
     if (Logger.shows('error')) this.logWithContext('error', args)
   }
 
+  /** Prints a line at the `debug` level, shown only when the level is `debug`. */
   debug(...args: any[]): void {
     if (Logger.shows('debug')) this.logWithContext('debug', args)
   }
 
+  /** Prints a line at the `log` level, as `log` does. */
   verbose(...args: any[]): void {
     if (Logger.shows('log')) this.logWithContext('log', args)
   }

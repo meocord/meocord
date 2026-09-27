@@ -1,8 +1,7 @@
 /**
- * Centralised metadata keys used across the framework's `Reflect` calls.
+ * The reflect-metadata keys MeoCord reads and writes, its own and the ones Inversify and TypeScript set.
  *
- * Keeping them here prevents typos, documents the Inversify 8 key rename,
- * and makes key changes a single-file edit.
+ * @internal
  */
 export const enum MetadataKey {
   /**

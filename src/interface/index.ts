@@ -13,13 +13,31 @@ import {
   type PartialUser,
   User,
 } from 'discord.js'
-import { type RsbuildConfig } from '@rsbuild/core'
+import { type RsbuildConfig as RsbuildCoreConfig } from '@rsbuild/core'
 
 /**
- * Rsbuild's configuration type, as the `rsbuild` hook receives it. Import it from here to type a
- * helper for that hook without depending on `@rsbuild/core`.
+ * Rsbuild's configuration, as `meocord.config.ts`'s `rsbuild` hook receives and returns it.
+ *
+ * Import it from here to type a helper for that hook without depending on `@rsbuild/core` yourself.
+ *
+ * @example
+ * ```ts
+ * const markdownAsText = (config: RsbuildConfig) => {
+ *   config.tools ??= {}
+ *   config.tools.rspack = (_rspack, { addRules }) => {
+ *     addRules([{ test: /\.md$/i, type: 'asset/source' }])
+ *   }
+ *   return config
+ * }
+ *
+ * export default { discordToken: process.env.DISCORD_TOKEN!, rsbuild: markdownAsText } satisfies MeoCordConfig
+ * ```
+ *
+ * @group Configuration
+ * @category Config file
+ * @see {@link MeoCordConfig}
  */
-export type { RsbuildConfig }
+export type RsbuildConfig = RsbuildCoreConfig
 import { ReactionHandlerAction } from '@src/enum/controller.enum.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
 import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.interface.js'
@@ -51,14 +69,22 @@ export interface GuardInterface {
 }
 
 /**
- * The application `MeoCordFactory.create` returns: a bot in one process, or, with process sharding,
- * the manager that runs one process per shard.
+ * The application {@link MeoCordFactory.create} returns: a bot in one process, or the manager of a process per shard.
+ *
+ * `main.ts` starts it and nothing else needs it: which of the two it is follows from `meocord.config.ts`'s
+ * `sharding`, and both start and register commands the same way.
  *
  * @example
- * ```typescript
- * const app = MeoCordFactory.create(App)
+ * ```ts
+ * @MeoCord({ controllers: [], clientOptions: { intents: [GatewayIntentBits.Guilds] } })
+ * class App {}
+ *
+ * const app: MeoCordApplication = MeoCordFactory.create(App)
  * await app.start()
  * ```
+ *
+ * @group Controllers
+ * @see {@link MeoCordFactory}
  */
 export interface MeoCordApplication {
   /**
@@ -78,7 +104,12 @@ export interface MeoCordApplication {
   registerCommands(): Promise<void>
 }
 
-/** The second argument `onReady` receives. */
+/**
+ * What `onReady` learns about its process, beside the client: whether it should do one-off work.
+ *
+ * @group Types
+ * @see {@link OnReady}
+ */
 export interface ReadyInfo {
   /**
    * Whether this process should do one-off work, such as starting a scheduler that must run once.
@@ -89,23 +120,38 @@ export interface ReadyInfo {
 }
 
 /**
- * A controller, service or provided value that does work once the bot is online, such as starting
- * timers or warming a cache.
+ * A controller, service or provided value that does work once the bot is online, such as starting timers.
  *
- * Called on every controller and service the app binds, including services no handler has used
- * yet, and on every value `@MeoCord({ providers })` provides, after the client is ready. Hooks run one at a time in dependency order, so a service's hook
- * runs after the hooks of the services it injects. Command registration runs alongside and never
- * delays them. A hook that throws is logged and the next one still runs.
+ * Implement it for work that needs the ready client: a scheduler, a warmed cache, the bot's activity. For work in
+ * response to Discord, use `@On` with a client event instead; to clean up, implement {@link OnShutdown}.
+ *
+ * @remarks
+ * Called on every controller and service the app binds, including services no handler has used yet, and on every
+ * value `@MeoCord({ providers })` provides, after the client is ready. Hooks run one at a time in dependency
+ * order, so a service's hook runs after the hooks of the services it injects. Command registration runs alongside
+ * and never delays them. A hook that throws is logged and the next one still runs.
  *
  * @example
  * ```ts
  * @Service()
- * export class ReminderScheduler implements OnReady {
- *   async onReady(client: Client<true>, { primary }: ReadyInfo) {
- *     if (primary) this.start()
+ * export class ServerCountReporter implements OnReady, OnShutdown {
+ *   private readonly logger = new Logger(ServerCountReporter.name)
+ *   private timer?: NodeJS.Timeout
+ *
+ *   onReady(client: Client<true>, { primary }: ReadyInfo) {
+ *     // One process reports, however many shards run
+ *     if (primary) this.timer = setInterval(() => this.logger.log(`${client.guilds.cache.size} servers`), 60_000)
+ *   }
+ *
+ *   onShutdown() {
+ *     clearInterval(this.timer)
  *   }
  * }
  * ```
+ *
+ * @group Types
+ * @see {@link OnShutdown}
+ * @see {@link https://meocord.dev/docs/4.1/lifecycle-hooks | Lifecycle hooks}
  */
 export interface OnReady {
   /**
@@ -118,9 +164,11 @@ export interface OnReady {
 }
 
 /**
- * A controller, service or provided value that cleans up before the bot stops, such as stopping
- * timers, flushing writes or closing a connection.
+ * A controller, service or provided value that cleans up before the bot stops, such as closing a connection.
  *
+ * Implement it to stop what {@link OnReady} started: timers, open connections, writes still buffered.
+ *
+ * @remarks
  * Called on SIGINT or SIGTERM, before the client is destroyed, and only if `onReady` hooks ran. Hooks
  * run one at a time in reverse dependency order, so a service stops before the services it injects.
  * The whole sequence is limited by `shutdownTimeout` in `meocord.config.ts`; the process then exits
@@ -133,12 +181,24 @@ export interface OnReady {
  * @example
  * ```ts
  * @Service()
- * export class ReminderScheduler implements OnShutdown {
- *   async onShutdown() {
- *     this.stop()
+ * export class ServerCountReporter implements OnReady, OnShutdown {
+ *   private readonly logger = new Logger(ServerCountReporter.name)
+ *   private timer?: NodeJS.Timeout
+ *
+ *   onReady(client: Client<true>, { primary }: ReadyInfo) {
+ *     // One process reports, however many shards run
+ *     if (primary) this.timer = setInterval(() => this.logger.log(`${client.guilds.cache.size} servers`), 60_000)
+ *   }
+ *
+ *   onShutdown() {
+ *     clearInterval(this.timer)
  *   }
  * }
  * ```
+ *
+ * @group Types
+ * @see {@link OnReady}
+ * @see {@link https://meocord.dev/docs/4.1/lifecycle-hooks | Lifecycle hooks}
  */
 export interface OnShutdown {
   /** Runs before the client is destroyed. */
@@ -744,18 +804,26 @@ export interface MessageHandlerOptions {
 }
 
 /**
- * The configuration `meocord.config.ts` exports.
+ * The configuration `meocord.config.ts` exports: the bot's token, how it is built, and how it registers and shards.
+ *
+ * It holds what the CLI and the process need before the app class is read. What the app itself does, its
+ * controllers, intents and message options, belongs in `@MeoCord` instead. A new app's config file imports
+ * `dotenv/config` first, so `process.env` holds `.env`'s values.
  *
  * @example
  * ```ts
- * import 'dotenv/config'
- * import { type MeoCordConfig } from 'meocord/interface'
- *
  * export default {
  *   appName: 'My Bot',
+ *   // Read from .env, since this file is committed
  *   discordToken: process.env.DISCORD_TOKEN!,
+ *   commands: { developmentGuild: process.env.DEV_GUILD_ID || undefined },
  * } satisfies MeoCordConfig
  * ```
+ *
+ * @group Configuration
+ * @category Config file
+ * @see {@link MeoCord}
+ * @see {@link https://meocord.dev/docs/4.1/configuration | Configuration}
  */
 export interface MeoCordConfig {
   /** Shown as a prefix on every log line. Omitted when unset. */
@@ -854,17 +922,29 @@ export interface MeoCordConfig {
 }
 
 /**
- * How the bot shards its gateway connection.
+ * How the bot splits its gateway connection into shards, set as `meocord.config.ts`'s `sharding`.
  *
- * By default every shard runs in one process, in one client: one container, one set of services, and
- * `onReady` once. `mode: 'process'` runs each shard in a process of its own instead, for a bot that
- * needs more than one CPU core; `meocord start`, `node dist/main.js` and bun then start a manager that
- * spawns the shards, registers the commands once, and restarts a shard that exits.
+ * Discord requires sharding from about 2,500 servers. Keep the default mode, every shard in one process, until
+ * the bot needs more than one CPU core.
+ *
+ * @remarks
+ * By default every shard runs in one process, in one client: one container, one set of services, and `onReady`
+ * once. `mode: 'process'` runs each shard in a process of its own instead; `meocord start`, `node dist/main.js`
+ * and bun then start a manager that spawns the shards, registers the commands once, and restarts a shard that
+ * exits.
  *
  * @example
  * ```ts
- * sharding: { shards: 'auto' },
+ * export default {
+ *   discordToken: process.env.DISCORD_TOKEN!,
+ *   sharding: { shards: 'auto', mode: 'process' },
+ * } satisfies MeoCordConfig
  * ```
+ *
+ * @group Configuration
+ * @category Config file
+ * @see {@link ShardContext}
+ * @see {@link https://meocord.dev/docs/4.1/sharding | Sharding}
  */
 export interface ShardingConfig {
   /**
@@ -889,18 +969,26 @@ export interface ShardingConfig {
 }
 
 /**
- * Where and whether MeoCord registers the application's commands with Discord.
+ * Where and whether MeoCord registers the application's commands with Discord, set as `meocord.config.ts`'s `commands`.
  *
- * Registration replaces the commands in each scope it sends to with exactly the ones the bot
- * declares. Global commands can take a while to show up in clients; guild commands appear at once,
- * which is what a development guild is for.
+ * Global commands can take a while to show up in clients; guild commands appear at once, which is what a
+ * development guild is for. Set `register: false` to register only with `meocord register`, from CI for instance.
+ *
+ * @remarks
+ * Registration replaces the commands in each scope it sends to with exactly the ones the bot declares.
  *
  * @example
  * ```ts
- * commands: {
- *   developmentGuild: process.env.DEV_GUILD_ID || undefined,
- * }
+ * export default {
+ *   discordToken: process.env.DISCORD_TOKEN!,
+ *   // Every command goes to this guild under `meocord start --dev`, and globally in production
+ *   commands: { developmentGuild: process.env.DEV_GUILD_ID || undefined },
+ * } satisfies MeoCordConfig
  * ```
+ *
+ * @group Configuration
+ * @category Config file
+ * @see {@link https://meocord.dev/docs/4.1/command-registration | Command registration}
  */
 export interface CommandRegistrationConfig {
   /**

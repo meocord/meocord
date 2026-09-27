@@ -16,7 +16,14 @@ import { usageOf } from '@src/core/message-params.js'
 
 type HandlerClass = new (...args: any[]) => unknown
 
-/** What a {@link HandlerEntry} handles. */
+/**
+ * The kind of handler a {@link HandlerEntry} describes, such as `'command'` or `'message'`.
+ *
+ * Pass one to {@link HandlerRegistry.list} to list only that kind; the entries it returns are narrowed to it.
+ *
+ * @group Types
+ * @see {@link HandlerFilter}
+ */
 export type HandlerKind = 'command' | 'component' | 'modal' | 'autocomplete' | 'message' | 'reaction' | 'event'
 
 interface HandlerEntryBase {
@@ -25,18 +32,26 @@ interface HandlerEntryBase {
   /** The name of the handler method. */
   method: string
   /**
-   * Reads a metadata value for the handler: the method's value, else the controller's, as
+   * Reads a metadata decorator's value for the handler: the method's value, else the controller's, as
    * `ExecutionContext.get` does.
    */
   get<T>(metadata: MetadataDecorator<T>): T | undefined
+  /** Reads the value stored under a metadata key for the handler, the method's before the controller's. */
   get<T = unknown>(key: string | symbol): T | undefined
-  /** Reads every declared value for the handler, method first, then controller. */
+  /** Reads every value a metadata decorator declared for the handler, the method's first, then the controller's. */
   getAll<T>(metadata: MetadataDecorator<T>): T[]
+  /** Reads every value stored under a metadata key for the handler, the method's first, then the controller's. */
   getAll<T = unknown>(key: string | symbol): T[]
 }
 
-/** A slash command, subcommand, context menu command or entry point command. */
+/**
+ * A registered slash command, subcommand, context menu command or entry point command, as the registry lists it.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface CommandHandlerEntry extends HandlerEntryBase {
+  /** Marks a command, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'command'
   /** The `CommandType` the handler is declared with. */
   commandType: CommandType
@@ -48,8 +63,14 @@ export interface CommandHandlerEntry extends HandlerEntryBase {
   description?: string
 }
 
-/** A button or select menu handler. */
+/**
+ * A registered button or select menu handler, as the registry lists it.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface ComponentHandlerEntry extends HandlerEntryBase {
+  /** Marks a component handler, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'component'
   /** The `CommandType` the handler is declared with. */
   commandType: CommandType
@@ -57,23 +78,45 @@ export interface ComponentHandlerEntry extends HandlerEntryBase {
   name: string
 }
 
-/** A modal submit handler. */
+/**
+ * A registered modal submit handler, as the registry lists it.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface ModalHandlerEntry extends HandlerEntryBase {
+  /** Marks a modal handler, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'modal'
+  /** Always `CommandType.MODAL_SUBMIT`. */
   commandType: CommandType.MODAL_SUBMIT
   /** The customId pattern. */
   name: string
 }
 
-/** An `@Autocomplete` handler. */
+/**
+ * A registered `@Autocomplete` handler, as the registry lists it.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface AutocompleteHandlerEntry extends HandlerEntryBase {
+  /** Marks an autocomplete handler, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'autocomplete'
   /** The command path, followed by the option name when the handler completes one option only. */
   name: string
 }
 
-/** A `@MessageHandler`. */
+/**
+ * A registered `@MessageHandler`, a message command or a listener for every message, as the registry lists it.
+ *
+ * A message command is listed once, with its aliases, description, scope and usage, which is what a help
+ * command needs.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface MessageHandlerEntry extends HandlerEntryBase {
+  /** Marks a message handler, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'message'
   /** The pattern, or `undefined` for a handler that takes every message. */
   name: string | undefined
@@ -97,15 +140,27 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
   matches(words: string): boolean
 }
 
-/** A `@ReactionHandler`. */
+/**
+ * A registered `@ReactionHandler`, as the registry lists it.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface ReactionHandlerEntry extends HandlerEntryBase {
+  /** Marks a reaction handler, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'reaction'
   /** The emoji, or `undefined` for a handler that takes every reaction. */
   name: string | undefined
 }
 
-/** An `@On` or `@Once` handler. */
+/**
+ * A registered `@On` or `@Once` handler, as the registry lists it.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface EventHandlerEntry extends HandlerEntryBase {
+  /** Marks an event handler, so `kind` narrows a {@link HandlerEntry} to this type. */
   kind: 'event'
   /** The client event. */
   name: keyof ClientEvents
@@ -113,7 +168,14 @@ export interface EventHandlerEntry extends HandlerEntryBase {
   once: boolean
 }
 
-/** One registered handler, narrowed by its `kind`. */
+/**
+ * One registered handler, as {@link HandlerRegistry.list} gives it, narrowed by its `kind`.
+ *
+ * Every entry names its controller and method, and reads the metadata declared on it with `get` and `getAll`.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export type HandlerEntry =
   | CommandHandlerEntry
   | ComponentHandlerEntry
@@ -123,7 +185,12 @@ export type HandlerEntry =
   | ReactionHandlerEntry
   | EventHandlerEntry
 
-/** Narrows {@link HandlerRegistry.list}. */
+/**
+ * What {@link HandlerRegistry.list} lists: handlers of one kind, of one controller, or both.
+ *
+ * @group Types
+ * @see {@link HandlerRegistry}
+ */
 export interface HandlerFilter<K extends HandlerKind = HandlerKind> {
   /** Only handlers of this kind. */
   kind?: K
@@ -189,34 +256,35 @@ function messageCommand(
 }
 
 /**
- * Every handler the app registered, with the metadata declared on it: for a `/help` command, an admin
- * page or generated docs.
+ * Lists every handler the app registered, with the metadata declared on it.
  *
- * Inject it into a service or controller. It lists commands (one entry per subcommand path),
- * components, modals, autocomplete, message, reaction and event handlers, on every controller and
- * service the app binds. A message command is listed once, with its aliases, description and usage.
+ * Inject it to build what reads the app's own handlers: a help command, an admin page or generated docs. To act
+ * on a handler's metadata while it runs, read it from {@link ExecutionContext} instead.
+ *
+ * @remarks
+ * It lists commands, one entry per subcommand path, and components, modals, autocomplete, message, reaction and
+ * event handlers, on every controller and service the app binds. A message command is listed once, with its
+ * aliases, description, scope and usage.
  *
  * @example
- * ```typescript
+ * ```ts
  * @Service()
  * export class HelpService {
  *   constructor(private readonly handlers: HandlerRegistry) {}
  *
- *   commands() {
- *     return this.handlers
- *       .list({ kind: 'command' })
- *       .map(h => ({ path: h.name, description: h.description, category: h.get(Category) ?? 'Other' }))
- *   }
- *
  *   // `!help` lists the message commands; `!help ban` shows one
  *   messageHelp(command?: string) {
- *     const commands = this.handlers.list({ kind: 'message' }).filter(h => h.command)
- *     const one = command ? commands.find(h => h.matches(command)) : undefined
+ *     const commands = this.handlers.list({ kind: 'message' }).filter(entry => entry.command)
+ *     const one = command ? commands.find(entry => entry.matches(command)) : undefined
  *     if (one) return [one.usage('!'), one.description].filter(Boolean).join('\n')
- *     return commands.map(h => `${h.usage('!')}: ${h.description ?? ''}`).join('\n')
+ *     return commands.map(entry => `${entry.usage('!')}: ${entry.description ?? ''}`).join('\n')
  *   }
  * }
  * ```
+ *
+ * @group Controllers
+ * @see {@link HandlerEntry}
+ * @see {@link https://meocord.dev/docs/4.1/handler-discovery | Handler discovery}
  */
 export class HandlerRegistry {
   private entries?: HandlerEntry[]
