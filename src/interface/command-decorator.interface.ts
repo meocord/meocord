@@ -90,10 +90,15 @@ export type CommandBuilderConstructor<T extends BuildableCommandType> = new () =
  * @see {@link Command}
  */
 export interface CommandMetadata<T extends string = string> {
+  /** The handler method's name. */
   methodName: string
+  /** What the command's builder built, which is registered with Discord; `undefined` for a handler with a `CommandType`. */
   builder: ReturnType<CommandBuilderBase['build']> | undefined
+  /** The kind of interaction the handler takes. */
   type: CommandType
+  /** The pattern a component's customId is matched with; `undefined` for a command, matched by its name. */
   regex?: RegExp
+  /** The params a component's customId pattern captures, in the order they appear. */
   dynamicParams?: T[]
   /**
    * How specific this pattern is; the highest wins when several routes match one customId, so
@@ -115,6 +120,7 @@ export interface AutocompleteMetadata {
   commandPath: string
   /** The option it completes, or `undefined` to complete every option of that command. */
   optionName?: string
+  /** The handler method's name. */
   methodName: string
 }
 

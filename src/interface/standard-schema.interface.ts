@@ -81,7 +81,9 @@ export declare const PIPED_BRAND: unique symbol
  *
  * @Pipe()
  * class LengthPipe implements PipeInterface<string, number> {
- *   transform = (value: string): number => value.length
+ *   transform(value: string): number {
+ *     return value.length
+ *   }
  * }
  *
  * @Command('count/{text}', CommandType.BUTTON)
