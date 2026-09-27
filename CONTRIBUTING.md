@@ -28,19 +28,19 @@ bun install
 bun run test
 ```
 
-| Command                    | What it does                                                                                   |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `bun run test`             | Runs the suite, including the `*.test-d.ts` type-level assertions                              |
-| `bun run test:watch`       | Same, in watch mode                                                                            |
-| `bun run test:coverage`    | Runs the suite with istanbul coverage and enforces the thresholds                              |
-| `bun run test:mutation`    | Mutation-tests the core modules with Stryker, by hand and not in CI; name modules to run a few |
-| `bun run lint`             | Formats, fixes lint, then typechecks the source, test, and eslint projects                     |
-| `bun run build`            | Clears `dist/` and builds ESM, CJS, and type declarations through rollup                       |
-| `bun run verify:generated` | Generates an app from the packed build and runs its own checks — see below                     |
-| `bun run cli:scenarios`    | Runs the packed CLI through what must work and what must fail clearly — see below              |
-| `bun run test:e2e`         | Runs a smoke app against real Discord with a test application — see below                      |
-| `bun run changeset`        | Records a release note for your change — see below                                             |
-| `bun run notices`          | Regenerates THIRD_PARTY_NOTICES.md after a dependency is added or removed                      |
+| Command                    | What it does                                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| `bun run test`             | Runs the suite, including the `*.test-d.ts` type-level assertions                                 |
+| `bun run test:watch`       | Same, in watch mode                                                                               |
+| `bun run test:coverage`    | Runs the suite with istanbul coverage and enforces the thresholds                                 |
+| `bun run test:mutation`    | Mutation-tests the core modules with Stryker, by hand and not in CI; name modules to run a few    |
+| `bun run lint`             | Formats, fixes lint, then typechecks the source, test, and eslint projects                        |
+| `bun run build`            | Clears `dist/`, builds ESM, CJS, and type declarations through rollup, and writes `dist/cli.json` |
+| `bun run verify:generated` | Generates an app from the packed build and runs its own checks — see below                        |
+| `bun run cli:scenarios`    | Runs the packed CLI through what must work and what must fail clearly — see below                 |
+| `bun run test:e2e`         | Runs a smoke app against real Discord with a test application — see below                         |
+| `bun run changeset`        | Records a release note for your change — see below                                                |
+| `bun run notices`          | Regenerates THIRD_PARTY_NOTICES.md after a dependency is added or removed                         |
 
 ## Making a change
 
