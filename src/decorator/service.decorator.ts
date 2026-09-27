@@ -25,7 +25,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
  * @group Decorators
  * @category App
  * @see {@link Inject}
- * @see {@link https://meocord.dev/docs/latest/services | Services}
+ * @see {@link https://meocord.dev/docs/4.1/services | Services}
  */
 export function Service<T>() {
   return function (target: new (...args: any[]) => T) {

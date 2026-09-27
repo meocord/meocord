@@ -4,9 +4,10 @@
  * snippet of class members is compiled inside a controller. Run after `bun run build`.
  *
  * `--coverage` also lists the public symbols still missing a `@group`, a summary or, unless a type, an example.
+ * `--fix` first moves every link to the documentation onto the package's own line, as a new minor version needs.
  */
 
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import ts from 'typescript'
@@ -175,6 +176,47 @@ function undocumentedMembers(checker: ts.TypeChecker, symbol: ts.Symbol): string
     })
 }
 
+/** The documentation line the package's links name: its major and minor version, such as `4.1` for 4.1.0-beta.6. */
+function docsLine(): string {
+  const { version } = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string }
+  return version.split('.').slice(0, 2).join('.')
+}
+
+/** The source files the package's JSDoc is written in. */
+function sourceFiles(dir = path.join(repoRoot, 'src')): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const file = path.join(dir, entry.name)
+    if (entry.isDirectory()) return sourceFiles(file)
+    return /\.ts$/.test(entry.name) && !/\.(spec|test-d)\.ts$/.test(entry.name) ? [file] : []
+  })
+}
+
+const DOCS_LINK = /https:\/\/meocord\.dev\/docs\/([^/\s|}]+)\//g
+
+/**
+ * The links to another line of the documentation than the package's, which would send a reader to pages for another
+ * version; `fix` rewrites them to the package's line instead.
+ */
+function staleDocsLinks(line: string, fix: boolean): string[] {
+  const stale: string[] = []
+  for (const file of sourceFiles()) {
+    const text = readFileSync(file, 'utf8')
+    if (fix) {
+      const fixed = text.replace(DOCS_LINK, (link, linked: string) => (linked === line ? link : `https://meocord.dev/docs/${line}/`))
+      if (fixed !== text) writeFileSync(file, fixed)
+      continue
+    }
+    text.split('\n').forEach((content, index) => {
+      for (const [, linked] of content.matchAll(DOCS_LINK)) {
+        if (linked !== line) {
+          stale.push(`${path.relative(repoRoot, file)}:${index + 1}: links docs/${linked}; link docs/${line}, the package's line, or run with --fix.`)
+        }
+      }
+    })
+  }
+  return stale
+}
+
 /** The names a module exports, from a file in the program. */
 function exportedNames(program: ts.Program, file: string): Set<string> {
   const checker = program.getTypeChecker()
@@ -249,6 +291,8 @@ function freeNames(code: string): Set<string> {
 }
 
 function main(): void {
+  const line = docsLine()
+  if (process.argv.includes('--fix')) staleDocsLinks(line, true)
   const entries = entryPoints()
   // The declarations an example's `import … from 'discord.js'` resolves to
   const discordTypes = ts.resolveModuleName('discord.js', path.join(examplesDir, 'x.ts'), compilerOptions, ts.sys).resolvedModule
@@ -257,7 +301,7 @@ function main(): void {
   const base = ts.createProgram([...entries.values(), discordTypes, fixturesFile], compilerOptions)
   const symbols = publicSymbols(base, entries)
   const checker = base.getTypeChecker()
-  const problems: string[] = []
+  const problems: string[] = [...staleDocsLinks(line, false)]
 
   // Where each importable name comes from; a name with two sources is refused rather than guessed
   const sources = new Map<string, Set<string>>()

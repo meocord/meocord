@@ -34,7 +34,7 @@ import { defineStageTypes } from '@src/core/stage-scope.js'
  * @pipeline observers around the whole call, answered or not
  * @group Decorators
  * @category Pipeline stages
- * @see {@link https://meocord.dev/docs/latest/observers | Observers}
+ * @see {@link https://meocord.dev/docs/4.1/observers | Observers}
  */
 export function Observer(
   options: {

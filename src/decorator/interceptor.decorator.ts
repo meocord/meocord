@@ -35,7 +35,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseInterceptor}
- * @see {@link https://meocord.dev/docs/latest/interceptors | Interceptors}
+ * @see {@link https://meocord.dev/docs/4.1/interceptors | Interceptors}
  */
 export function Interceptor(
   options: {
@@ -83,7 +83,7 @@ export function Interceptor(
  * @group Decorators
  * @category Pipeline stages
  * @see {@link Interceptor}
- * @see {@link https://meocord.dev/docs/latest/interceptors | Interceptors}
+ * @see {@link https://meocord.dev/docs/4.1/interceptors | Interceptors}
  */
 export function UseInterceptor<const T extends readonly unknown[]>(
   ...interceptors: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => InterceptorInterface> }

@@ -62,7 +62,7 @@ export interface CooldownByDecorator<P> {
  * @see {@link CooldownOptions}
  * @see {@link CooldownError}
  * @see {@link CooldownStore}
- * @see {@link https://meocord.dev/docs/latest/cooldowns | Cooldowns}
+ * @see {@link https://meocord.dev/docs/4.1/cooldowns | Cooldowns}
  */
 export function Cooldown(options: CooldownOptions & { by?: undefined }): ClassDecorator & MethodDecorator
 /**
