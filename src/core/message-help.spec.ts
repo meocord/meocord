@@ -229,6 +229,9 @@ describe('the built-in help', () => {
     expect(await warned(shadowing('help {command}'))).toContain('Topic.topic ("help {command}") takes "!help"')
     expect(await warned(shadowing('guide {topic...?}', { aliases: ['help'] }))).toContain('takes "!help"')
     expect(await warned(shadowing('help {topic?}', { prefix: '?' }))).not.toContain('takes')
+    logged.warn.length = 0
+    await startApp({ controllers: [shadowing('help {topic?}')], messages: { mention: 'only', help: true } })
+    expect(logged.warn.flat().join(' ')).toContain('takes "@bot help"')
   })
 
   it('warns at startup when no message can ask for help', async () => {
