@@ -33,6 +33,7 @@ import {
   type ExceptionFilter,
   type GuardInterface,
   type InterceptorInterface,
+  type MessageCommandOptions,
 } from '@src/interface/index.js'
 import { createMockInteraction, createMockMessage } from '@src/testing/index.js'
 
@@ -56,7 +57,7 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 
 /** Starts an app built by the factory, with a client that logs in without a network. */
 async function startApp(
-  options: { controllers?: any[]; services?: any[]; guards?: any[]; interceptors?: any[] },
+  options: { controllers?: any[]; services?: any[]; guards?: any[]; interceptors?: any[]; messages?: MessageCommandOptions },
   clientOptions: ClientOptions = { intents: [] },
 ): Promise<Client> {
   const clients: Client[] = []
@@ -70,6 +71,7 @@ async function startApp(
     services: options.services,
     guards: options.guards,
     interceptors: options.interceptors,
+    messages: options.messages,
     clientOptions,
   })
   class App {}
@@ -604,6 +606,40 @@ describe('gateway event handlers', () => {
       const warnings = logged.warn.map(args => String(args[0])).join('\n')
       expect(warnings).toContain("MessageContent intent is not in clientOptions.intents, so Discord will not send what @MessageHandler('ping') in Chat.ping")
       expect(warnings).toContain("Partials.Message is not in clientOptions.partials, so @ReactionHandler('👍') in Chat.like")
+    })
+
+    it('asks no MessageContent for commands only a mention of the bot or a direct message reaches', async () => {
+      @Controller()
+      class Mentioned {
+        @MessageHandler('ping')
+        ping(_message: Message) {}
+      }
+      @Controller()
+      class Mixed {
+        // A mention alone starts it, whatever the app's prefix
+        @MessageHandler('status', { mention: 'only' })
+        status(_message: Message) {}
+        // Direct messages carry their text, whatever starts them
+        @MessageHandler('inbox', { scope: 'dm' })
+        inbox(_message: Message) {}
+        @MessageHandler('roll {sides}')
+        roll(_message: Message) {}
+        @MessageHandler()
+        everything(_message: Message) {}
+      }
+      const contentWarnings = () => logged.warn.map(args => String(args[0])).filter(text => text.includes('MessageContent'))
+      const intents = { intents: [GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages] }
+
+      await startApp({ controllers: [Mentioned], messages: { mention: 'only' } }, intents)
+      expect(contentWarnings()).toEqual([])
+
+      await startApp({ controllers: [Mixed], messages: { prefix: '!' } }, intents)
+      const [warning] = contentWarnings()
+      // Still asked for a prefixed command and a listener, and the warning says what arrives without it
+      expect(warning).toContain("@MessageHandler('roll {sides}') in Mixed.roll, @MessageHandler() in Mixed.everything")
+      expect(warning).not.toContain('Mixed.status')
+      expect(warning).not.toContain('Mixed.inbox')
+      expect(warning).toContain("only messages that mention the bot and direct messages carry their text; messages: { mention: 'only' } needs none.")
     })
 
     it('says nothing when the client options cover every handler', async () => {

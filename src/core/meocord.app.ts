@@ -26,7 +26,7 @@ import { stageClass, stageTypes } from '@src/core/stage-scope.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import {
   eventRequirements,
-  MESSAGE_HANDLER_REQUIREMENTS,
+  messageHandlerRequirements,
   missingRequirementWarnings,
   REACTION_HANDLER_REQUIREMENTS,
   type RequiringHandler,
@@ -425,9 +425,12 @@ export class MeoCordApp implements MeoCordApplication {
           requirements: eventRequirements(event),
         })
       }
-      for (const { pattern, method } of getMessageHandlers(prototype)) {
-        const decorator = pattern === undefined ? '@MessageHandler()' : `@MessageHandler('${pattern}')`
-        handlers.push({ label: `${decorator} in ${lifecycleClass.name}.${method}`, requirements: MESSAGE_HANDLER_REQUIREMENTS })
+      for (const handler of getMessageHandlers(prototype)) {
+        const decorator = handler.pattern === undefined ? '@MessageHandler()' : `@MessageHandler('${handler.pattern}')`
+        handlers.push({
+          label: `${decorator} in ${lifecycleClass.name}.${handler.method}`,
+          requirements: messageHandlerRequirements(handler, this.messageOptions ?? {}),
+        })
       }
       for (const { emoji, method } of getReactionHandlers(prototype)) {
         const decorator = emoji === undefined ? '@ReactionHandler()' : `@ReactionHandler('${emoji}')`

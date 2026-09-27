@@ -285,6 +285,18 @@ describe('TestingModule.invoke with a message', () => {
     expect(received).toEqual([{ sides: '20', note: 'for luck' }])
   })
 
+  it("matches only a mention of the bot under mention: 'only', as dispatch does", async () => {
+    @MeoCord({ controllers: [DiceController], clientOptions: { intents: [] }, messages: { mention: 'only' } })
+    class App {}
+    const module = MeoCordTestingModule.create({ controllers: [DiceController], app: App }).compile()
+    const mention = createMockMessage({ content: 'roll 6' })
+    mention.content = `<@${mention.client.user.id}> roll 6`
+
+    await module.invoke(DiceController, 'roll', mention)
+    expect(received).toEqual([{ sides: '6' }])
+    await expect(module.invoke(DiceController, 'roll', createMockMessage({ content: 'roll 6' }))).rejects.toThrow("does not match DiceController.roll's pattern")
+  })
+
   it("strips the app's prefix first, awaiting a prefix function", async () => {
     @MeoCord({ controllers: [DiceController], clientOptions: { intents: [] }, messages: { prefix: async () => ['!', '?'] } })
     class App {}

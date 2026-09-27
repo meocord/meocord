@@ -299,6 +299,40 @@ describe('message commands', () => {
     expect(calls).toEqual([['ping'], ['ping']])
   })
 
+  it("starts every command with a mention alone under mention: 'only', never the message as it is", async () => {
+    const client = await startApp({ controllers: [DiceController], messages: { mention: 'only' } })
+
+    await send(client, `<@${BOT_ID}> ping`)
+    await send(client, 'ping')
+    await send(client, '!ping')
+    await send(client, `<@!${BOT_ID}> roll 6`)
+    expect(calls).toEqual([['ping'], ['roll', { sides: 6, note: undefined }]])
+  })
+
+  it("starts a handler with mention: 'only' by a mention alone, beside the app's prefix and whatever its mention", async () => {
+    @Controller()
+    class Split {
+      @MessageHandler('status', { mention: 'only' })
+      async status() {
+        calls.push(['status'])
+      }
+
+      @MessageHandler('ping')
+      async ping() {
+        calls.push(['ping'])
+      }
+    }
+    const client = await startApp({ controllers: [Split], messages: { prefix: '!' } })
+
+    await send(client, `<@${BOT_ID}> status`)
+    await send(client, '!status')
+    await send(client, 'status')
+    await send(client, '!ping')
+    // The app accepts no mention, so the prefixed handler takes none
+    await send(client, `<@${BOT_ID}> ping`)
+    expect(calls).toEqual([['status'], ['ping']])
+  })
+
   it('validates message params and shows them to every stage through getHandlerParams', async () => {
     @Controller()
     class Recorded {
@@ -380,8 +414,10 @@ describe('message command startup errors', () => {
 
     expect(declare({ prefix: 1 })).toThrow('@MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function')
     expect(declare({ prefix: ['!', 2] })).toThrow('@MeoCord({ messages: { prefix } })')
-    expect(declare({ mention: 'yes' })).toThrow('@MeoCord({ messages: { mention } }) takes true or false.')
+    expect(declare({ mention: 'yes' })).toThrow("@MeoCord({ messages: { mention } }) takes true, false or 'only'.")
+    expect(declare({ mention: 'only', prefix: '!' })).toThrow("has mention: 'only', which starts every command with a mention, and a prefix")
     expect(declare({ prefix: ['!', '?'], mention: true, caseSensitive: false })).not.toThrow()
+    expect(declare({ mention: 'only' })).not.toThrow()
   })
 
   it('still refuses @Validate on a listener, which has no params', () => {

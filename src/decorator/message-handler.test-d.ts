@@ -111,6 +111,33 @@ describe('@MessageHandler params', () => {
   })
 })
 
+describe("mention: 'only'", () => {
+  it("is taken by the app and a handler, and no other string is", () => {
+    @MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { mention: 'only' } })
+    class MentionOnly {}
+    void MentionOnly
+
+    // @ts-expect-error mention is true, false or 'only'
+    @MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { mention: 'always' } })
+    class Wrong {}
+    void Wrong
+
+    class Status {
+      @MessageHandler('status', { mention: 'only' })
+      async status() {
+        return undefined
+      }
+
+      // @ts-expect-error a handler's mention is 'only'; the app's option covers the rest
+      @MessageHandler('ping', { mention: true })
+      async ping() {
+        return undefined
+      }
+    }
+    void Status
+  })
+})
+
 describe('@MeoCord({ messages })', () => {
   it('takes prefixes as a string, a list, or a function of the message', () => {
     @MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { prefix: '!', mention: true, caseSensitive: false } })

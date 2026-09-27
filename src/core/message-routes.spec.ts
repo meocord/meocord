@@ -384,6 +384,9 @@ describe('message route ranking', () => {
     expect(build('ban {target:member}', { scope: 'dm' })).toThrow(/scope is 'dm', but \{target:member\} is found only in a server/)
     expect(build('whois {target:user}', { scope: 'dm' })).not.toThrow()
     expect(build('whois {--in:channel?}', { scope: 'dm' })).toThrow(/scope is 'dm', but \{--in:channel\} is found only in a server/)
+    expect(build('status', { mention: true })).toThrow(/mention is 'only', not true/)
+    expect(build('status', { mention: 'only', prefix: '?' })).toThrow(/Only\.handle: mention: 'only' starts the command with a mention alone/)
+    expect(build('status', { mention: 'only' })).not.toThrow()
   })
 
   it('keeps handlers of one pattern in scopes that do not overlap, and picks by where the message was sent', () => {

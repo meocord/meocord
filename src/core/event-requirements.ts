@@ -103,6 +103,25 @@ export const MESSAGE_HANDLER_REQUIREMENTS: EventRequirements = {
   intents: [MESSAGES, [GatewayIntentBits.MessageContent]],
 }
 
+/**
+ * A `@MessageHandler` only messages that mention the bot, or direct messages, can reach: Discord sends their text
+ * without MessageContent.
+ */
+export const MENTION_OR_DM_HANDLER_REQUIREMENTS: EventRequirements = { intents: [MESSAGES] }
+
+/**
+ * What a `@MessageHandler` needs: MessageContent, unless it has a pattern that only a mention of the bot starts,
+ * or works in direct messages only.
+ */
+export function messageHandlerRequirements(
+  handler: { pattern?: string; options: { mention?: unknown; prefix?: unknown; scope?: unknown } },
+  app: { mention?: unknown },
+): EventRequirements {
+  if (handler.pattern === undefined) return MESSAGE_HANDLER_REQUIREMENTS
+  const mentionOnly = handler.options.mention === 'only' || (app.mention === 'only' && handler.options.prefix === undefined)
+  return mentionOnly || handler.options.scope === 'dm' ? MENTION_OR_DM_HANDLER_REQUIREMENTS : MESSAGE_HANDLER_REQUIREMENTS
+}
+
 /** A `@ReactionHandler` needs the reaction intents, and the partials for messages sent before the bot started. */
 export const REACTION_HANDLER_REQUIREMENTS: EventRequirements = { intents: [REACTIONS], partials: REACTION_PARTIALS }
 
@@ -156,6 +175,10 @@ export function missingRequirementWarnings(options: ClientOptions, handlers: rea
         `handle${labels.length === 1 ? 's' : ''}.` +
         (privileged.length > 0
           ? ` ${privileged.join(' and ')} is privileged: also enable it for the app in the Discord developer portal.`
+          : '') +
+        (bits.includes(GatewayIntentBits.MessageContent)
+          ? " Without it, only messages that mention the bot and direct messages carry their text; messages: { mention: 'only' } " +
+            'needs none.'
           : ''),
     )
   }
