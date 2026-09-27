@@ -104,7 +104,8 @@ export type DeepReadonly<T> = T extends readonly unknown[]
 /**
  * Part of a theme, as a scope sets it: any role, of MeoCord's or the app's, and nothing unknown.
  *
- * @group Types
+ * @group Configuration
+ * @category App options
  */
 export type ThemeOverride = DeepPartial<MeoCordTheme>
 
@@ -164,7 +165,8 @@ type ReservedTaken = {
  * {@link ReservedThemeRole}), it is instead a type naming each one, so the root theme fails to compile with the
  * roles to rename.
  *
- * @group Types
+ * @group Configuration
+ * @category App options
  */
 export type RootTheme = [ReservedTaken] extends [never]
   ? UncheckedRootTheme
@@ -194,7 +196,8 @@ export interface UserThemeTarget {
  * user's over the server's. Each result is cached, so a resolver runs once per server or user until the cache
  * expires; `ThemeCache` clears it sooner.
  *
- * @group Types
+ * @group Configuration
+ * @category App options
  */
 export interface ThemeResolvers {
   /** The theme for calls from a server; not asked for a call from a DM. */

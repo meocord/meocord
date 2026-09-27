@@ -94,7 +94,8 @@ function scopeId(per: CooldownScope, first: unknown): string {
  * `@MeoCord({ cooldownStoreFailure })`: `'deny'`, the default, refuses it with `CooldownStoreError`, and
  * `'allow'` runs it uncounted.
  *
- * @group Types
+ * @group Configuration
+ * @category App options
  */
 export type CooldownStoreFailure = 'deny' | 'allow'
 
