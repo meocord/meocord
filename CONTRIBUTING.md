@@ -293,19 +293,33 @@ it in each of the four contexts, and work through the steps in each:
 5. **Concurrent clicks**: click **Slow A, 5s**, then **Slow B, 5s** within a couple of seconds. Each is
    disabled with ⏳ once clicked while the other buttons stay usable, and each comes back when its own
    five seconds end, A first. The loading view stays until both have ended.
-6. **A stranger's click**: from the second account, click **Owner only**. Only they see "Only the user
+6. **Follow-up only, 2s**: the lock as in step 2, then two seconds later a private "Follow-up only: sent"
+   message, and the panel comes back as it was: its buttons usable, the loading view gone. The handler
+   answers only with a follow-up, so nothing but `@Defer` puts the panel back.
+7. **A stranger's click**: from the second account, click **Owner only**. Only they see "Only the user
    who opened this panel can use this button.", and the panel does not change, not even briefly. When
    you click it, the lock appears and the text says "Owner only: handled for its owner".
-7. **The error, public**: click **Fail**. You see a private "Oops!" message with "An error occurred
+8. **The error, public**: click **Fail**. You see a private "Oops!" message with "An error occurred
    while executing the command.", and the panel comes back as it was.
-8. **The error, appended**: run `/e2e-panel private:True` and click **Fail** on that private panel. The
+9. **The error, appended**: run `/e2e-panel private:True` and click **Fail** on that private panel. The
    error is added to the private panel itself rather than sent as a separate message.
-9. **The error, edit in place**: run `/e2e-private-fail`. Its private "thinking…" reply turns into the
-   error message after a second.
-10. **Optional, the 15-minute expiry**: click **Answer after 15 min** and wait 15½ minutes. Where the bot
+10. **The error, edit in place**: run `/e2e-private-fail`. Its private "thinking…" reply turns into the
+    error message after a second.
+11. **Optional, the 15-minute expiry**: click **Answer after 15 min** and wait 15½ minutes. Where the bot
     is present, the panel then says "Answered after the token expired" and its buttons come back, sent
     through the channel since the interaction's token has expired. Where it is not, the panel stays
     locked and the bot's output logs why.
+
+For a private Components V2 card, run `/e2e-card`: a card only you see, with an uploaded image, a select
+whose default is **Dark**, and three buttons. Wait for each step to settle before the next. The first step
+comes right after the card is sent, when the lock's edit has Discord process the image again:
+
+1. **Select, follow-up only**: pick **Light**. The card locks, a private "Select, follow-up only: picked
+   light" message follows, and the card comes back as it was: its image, its buttons usable, and the select
+   showing **Dark** again rather than the pick.
+2. **Follow-up only**: the lock, a private "Card, follow-up only: sent" message, and the card back as it was.
+3. **Slow, 3s**: the lock for three seconds, then the card back as it was, with no message.
+4. **Fail**: the lock, a private "Oops!" message, and the card back as it was.
 
 For message handlers, send `e2e ping` in the test server: the bot answers "pong".
 

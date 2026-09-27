@@ -34,7 +34,6 @@ import {
   lockComponents,
   type LockOptions,
   sameEmbed,
-  sameJson,
   V2_COMPONENT_LIMIT,
   withoutRenderedViews,
 } from '@src/common/response/components.js'
@@ -202,14 +201,25 @@ function forMode(body: Body, v2: boolean): Body {
 
 interface Snapshot { components: Record<string, unknown>[]; embeds: APIEmbed[] }
 
+/**
+ * Whether a message was edited after MeoCord's own edit at `ours`: only a later stamp says so. A message with no
+ * stamp, or an edit of ours Discord returned without one, cannot tell, and counts as not edited since.
+ */
+function editedSince(stamp: number | null | undefined, ours: number | undefined): boolean {
+  return typeof stamp === 'number' && ours !== undefined && stamp > ours
+}
+
 /** A message `@Defer` locked, shared by the calls holding it, so concurrent clicks each put back their own control. */
 interface MessageLock {
   /** The message with no call holding it: before the first lock, then as the last settled call left it. */
   original: Snapshot
   /** The calls holding it, with the control each disabled. */
   holders: Map<InteractionResponse, LockOptions>
-  /** The components MeoCord last wrote to it, to tell whether something else changed it since. */
-  written?: unknown[]
+  /**
+   * When MeoCord last edited it, as Discord stamped the edit: a later stamp means something else edited it since.
+   * Discord rewrites the components it returns, with ids and resolved media, so comparing them tells nothing.
+   */
+  editedAt?: number
   forget?: ReturnType<typeof setTimeout>
 }
 
@@ -612,8 +622,7 @@ export class InteractionResponse implements ResponseState {
     this.settled = true
     try {
       const current = await this.interaction.fetchReply()
-      const components = current?.components?.map(component => component.toJSON())
-      if (components && !sameJson(components, entry.written)) {
+      if (editedSince(current?.editedTimestamp, entry.editedAt)) {
         this.leave({ changedOutside: true })
         return
       }
@@ -790,9 +799,9 @@ export class InteractionResponse implements ResponseState {
       this.lastMessage = await this.call('message.edit', sent, () => message.edit(sent as never))
     }
     this.phase = 'replied'
-    // What is on the locked message now, for a restore to tell whether something else changed it since
+    // When MeoCord last edited the locked message, for a restore to tell whether something else edited it since
     if (this.lockEntry && !answersWithOwnMessage(this.interaction)) {
-      this.lockEntry.written = this.lastMessage?.components?.map(component => component.toJSON()) ?? (sent.components as unknown[])
+      this.lockEntry.editedAt = this.lastMessage?.editedTimestamp ?? undefined
     }
     return this.lastMessage
   }

@@ -26,3 +26,12 @@ export class PrivateFailCommandBuilder {
       .setDescription('MeoCord e2e: defers privately, then fails')
   }
 }
+
+@CommandBuilder(CommandType.SLASH)
+export class CardCommandBuilder {
+  build(commandName: string) {
+    return everywhere(new SlashCommandBuilder())
+      .setName(commandName)
+      .setDescription('MeoCord e2e: a private Components V2 card with an image, a select and buttons')
+  }
+}

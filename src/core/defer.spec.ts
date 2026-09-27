@@ -6,6 +6,8 @@ import {
   AutocompleteInteraction,
   ButtonInteraction,
   ChatInputCommandInteraction,
+  StringSelectMenuInteraction,
+  UserSelectMenuInteraction,
   ComponentType,
   EmbedType,
   InteractionContextType,
@@ -142,6 +144,18 @@ class CardController {
   @Defer()
   async limited(interaction: ButtonInteraction) {
     await handlerBody(interaction)
+  }
+
+  @Command('pick/{action}', CommandType.SELECT_MENU)
+  @Defer()
+  async pick(interaction: StringSelectMenuInteraction) {
+    await handlerBody(interaction as never)
+  }
+
+  @Command('who/{action}', CommandType.USER_SELECT_MENU)
+  @Defer()
+  async who(interaction: UserSelectMenuInteraction) {
+    await handlerBody(interaction as never)
   }
 
   @Command('form', CommandType.MODAL_SUBMIT)
@@ -363,8 +377,9 @@ describe('@Defer', () => {
   it('does not restore over an edit something else made after the lock', async () => {
     const emit = await startApp()
     const interaction = click('card/refresh')
+    // Edited after the lock, as Discord stamps an edit something else makes
     interaction.fetchReply.mockResolvedValue(
-      createMockMessage({ components: [{ type: ComponentType.ActionRow, components: [] }] }) as never,
+      createMockMessage({ components: [{ type: ComponentType.ActionRow, components: [] }], editedTimestamp: Date.now() + 60_000 }) as never,
     )
 
     await emit(interaction)
@@ -815,5 +830,133 @@ describe('@Defer', () => {
       }
       return Messages
     }).toThrow('@Defer is for interaction handlers, but Messages.hi is a message handler')
+  })
+})
+
+describe('@Defer puts back a message the handler answers without editing', () => {
+  const option = (value: string, extra: Json = {}) => ({ label: value.toUpperCase(), value, emoji: { name: '⭐' }, ...extra })
+  // A card as Discord holds it: its components numbered, a select with one default option, a user select with a default user
+  const card = () =>
+    createMockMessage({
+      id: 'card-message',
+      editedTimestamp: 1_700_000_000_000,
+      components: [
+        {
+          type: ComponentType.ActionRow,
+          id: 1,
+          components: [{ type: ComponentType.Button, id: 2, style: 1, custom_id: 'card/refresh', label: 'Refresh', emoji: { name: '🔄' } }],
+        },
+        {
+          type: ComponentType.ActionRow,
+          id: 3,
+          components: [
+            {
+              type: ComponentType.StringSelect,
+              id: 4,
+              custom_id: 'pick/theme',
+              options: [option('light'), option('dark', { default: true }), option('auto')],
+            },
+          ],
+        },
+        {
+          type: ComponentType.ActionRow,
+          id: 5,
+          components: [{ type: ComponentType.UserSelect, id: 6, custom_id: 'who/owner', default_values: [{ id: '42', type: 'user' }] }],
+        },
+      ] as unknown as APIMessageTopLevelComponent[],
+    })
+  const followUpOnly = async (interaction: unknown) => void (await respond(interaction as ButtonInteraction).followUp({ content: 'Saved.', flags: Ephemeral }))
+
+  /** What the message shows after the call, read back as Discord returns it. */
+  const shown = async (interaction: { fetchReply: () => Promise<unknown> }) =>
+    ((await interaction.fetchReply()) as Message).components.map(component => component.toJSON() as unknown as Json)
+  const disabledIn = (components: Json[]) => JSON.stringify(components).split('"disabled":true').length - 1
+  const stripIds = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(stripIds)
+      : value && typeof value === 'object'
+        ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'id').map(([key, entry]) => [key, stripIds(entry)]))
+        : value
+
+  it.each([
+    ['a button', () => createMockInteraction(ButtonInteraction, { customId: 'card/refresh', message: card() })],
+    ['a string select, with the user\'s pick', () => createMockInteraction(StringSelectMenuInteraction, { customId: 'pick/theme', values: ['auto'], message: card() })],
+    ['a user select', () => createMockInteraction(UserSelectMenuInteraction, { customId: 'who/owner', values: ['7'], message: card() })],
+  ])('after %s whose handler answers only with a follow-up', async (_what, make) => {
+    const emit = await startApp()
+    handlerBody = followUpOnly
+    const interaction = make()
+
+    await emit(interaction)
+
+    expect(calls(interaction)).toEqual(['deferUpdate', 'editReply', 'followUp', 'editReply'])
+    // Back as it was before the lock: nothing disabled, the select's options and defaults as the message had them
+    const after = await shown(interaction as never)
+    expect(disabledIn(after)).toBe(0)
+    expect(stripIds(after)).toEqual(stripIds(card().components.map(component => component.toJSON())))
+  })
+
+  it('after a handler that returns without answering, and one that throws', async () => {
+    const emit = await startApp()
+    for (const body of [async () => {}, async () => void Promise.reject(new Error('x')).catch(() => undefined), async () => { throw new Error('broke') }]) {
+      handlerBody = body
+      const interaction = createMockInteraction(StringSelectMenuInteraction, { customId: 'pick/theme', values: ['light'], message: card() })
+
+      await emit(interaction)
+
+      expect(disabledIn(await shown(interaction as never))).toBe(0)
+    }
+  })
+
+  // Clicked soon after it was sent, a message with an uploaded file: the lock's edit has Discord process the file
+  // again, so the edit's response has it loading, and it has loaded by the restore, with no edit to the message
+  it('on a private Components V2 card with an uploaded image, clicked soon after it was sent', async () => {
+    const emit = await startApp()
+    handlerBody = followUpOnly
+    const image = {
+      url: 'https://cdn.discordapp.com/attachments/1/2/card.webp?ex=1&is=2&hm=3',
+      proxy_url: 'https://media.discordapp.net/attachments/1/2/card.webp?ex=1&is=2&hm=3',
+      attachment_id: '1300000000000000001',
+      id: '1300000000000000002',
+      content_type: 'image/webp',
+      width: 1,
+      height: 1,
+      flags: 0,
+      loading_state: 2,
+    }
+    const message = createMockMessage({
+      id: 'private-card',
+      flags: Ephemeral | IsComponentsV2,
+      editedTimestamp: null,
+      components: [
+        {
+          type: ComponentType.Container,
+          id: 1,
+          components: [
+            { type: ComponentType.TextDisplay, id: 2, content: '### Card' },
+            { type: ComponentType.MediaGallery, id: 3, items: [{ media: image }] },
+            {
+              type: ComponentType.ActionRow,
+              id: 4,
+              components: [{ type: ComponentType.StringSelect, id: 5, custom_id: 'pick/theme', options: [option('light'), option('dark', { default: true })] }],
+            },
+          ],
+        },
+      ] as unknown as APIMessageTopLevelComponent[],
+    })
+    const interaction = createMockInteraction(StringSelectMenuInteraction, { customId: 'pick/theme', values: ['light'], message })
+
+    await emit(interaction)
+
+    expect(calls(interaction)).toEqual(['deferUpdate', 'editReply', 'followUp', 'editReply'])
+    const after = await shown(interaction as never)
+    expect(disabledIn(after)).toBe(0)
+    // The image kept, and the select with the message's own default rather than the pick
+    const container = after[0].components as Json[]
+    expect(((container[1].items as Json[])[0].media as Json).url).toBe(image.url)
+    expect(((container[2].components as Json[])[0].options as Json[]).map(({ value, default: isDefault }) => [value, isDefault])).toEqual([
+      ['light', undefined],
+      ['dark', true],
+    ])
   })
 })
