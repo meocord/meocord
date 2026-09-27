@@ -34,6 +34,7 @@ export type Injected<I extends readonly unknown[]> = { -readonly [K in keyof I]:
  *
  * @example
  * ```ts
+ * @Service()
  * class Settings { readonly databaseUrl = process.env.DATABASE_URL! }
  * class Database { constructor(readonly url: string) {} }
  * export const DATABASE = createToken<Database>('Database')

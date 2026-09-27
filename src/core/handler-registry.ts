@@ -21,7 +21,7 @@ type HandlerClass = new (...args: any[]) => unknown
  *
  * Pass one to {@link HandlerRegistry.list} to list only that kind; the entries it returns are narrowed to it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerFilter}
  */
 export type HandlerKind = 'command' | 'component' | 'modal' | 'autocomplete' | 'message' | 'reaction' | 'event'
@@ -47,7 +47,7 @@ interface HandlerEntryBase {
 /**
  * A registered slash command, subcommand, context menu command or entry point command, as the registry lists it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface CommandHandlerEntry extends HandlerEntryBase {
@@ -66,7 +66,7 @@ export interface CommandHandlerEntry extends HandlerEntryBase {
 /**
  * A registered button or select menu handler, as the registry lists it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface ComponentHandlerEntry extends HandlerEntryBase {
@@ -81,7 +81,7 @@ export interface ComponentHandlerEntry extends HandlerEntryBase {
 /**
  * A registered modal submit handler, as the registry lists it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface ModalHandlerEntry extends HandlerEntryBase {
@@ -96,7 +96,7 @@ export interface ModalHandlerEntry extends HandlerEntryBase {
 /**
  * A registered `@Autocomplete` handler, as the registry lists it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface AutocompleteHandlerEntry extends HandlerEntryBase {
@@ -112,7 +112,7 @@ export interface AutocompleteHandlerEntry extends HandlerEntryBase {
  * A message command is listed once, with its aliases, description, scope and usage, which is what a help
  * command needs.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface MessageHandlerEntry extends HandlerEntryBase {
@@ -143,7 +143,7 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
 /**
  * A registered `@ReactionHandler`, as the registry lists it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface ReactionHandlerEntry extends HandlerEntryBase {
@@ -156,7 +156,7 @@ export interface ReactionHandlerEntry extends HandlerEntryBase {
 /**
  * A registered `@On` or `@Once` handler, as the registry lists it.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface EventHandlerEntry extends HandlerEntryBase {
@@ -173,7 +173,7 @@ export interface EventHandlerEntry extends HandlerEntryBase {
  *
  * Every entry names its controller and method, and reads the metadata declared on it with `get` and `getAll`.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export type HandlerEntry =
@@ -188,7 +188,7 @@ export type HandlerEntry =
 /**
  * What {@link HandlerRegistry.list} lists: handlers of one kind, of one controller, or both.
  *
- * @group Types
+ * @group Controllers
  * @see {@link HandlerRegistry}
  */
 export interface HandlerFilter<K extends HandlerKind = HandlerKind> {
