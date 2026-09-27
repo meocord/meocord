@@ -419,11 +419,9 @@ const MOCK_BOT_ID = '1300000000000000000'
  *
  * @remarks
  * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a `channelId` and a
- * `user` with an `id`, each a snowflake no other mock in the run has, unless given; its `createdTimestamp` is the time
- * its `id` encodes. Without a `guildId` it is a DM, with `guild` and `member` `null`. Its `locale` is `'en-US'`, as is
- * its `guildLocale` in a guild. Replies behave as on a real interaction: `reply()` or `deferReply()` twice rejects, and
- * `followUp()`, `editReply()` and `deleteReply()` reject before a reply. Every method is a mock function; one that
- * returns a promise in discord.js resolves, such as `send()` to a mock message.
+ * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM. Replies follow
+ * Discord's order, so a second `reply()` rejects, and {@link getResponse} reports what `respond()` sent. Every method
+ * is a mock function, and one that returns a promise in discord.js resolves.
  *
  * @param Class - The discord.js class to mock.
  * @param props - Values for properties the class declares `readonly`; see {@link MockProps}.
@@ -1045,10 +1043,8 @@ function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
  *
  * @remarks
  * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted, and `edit()`
- * and `reply()` resolve to a new mock message. Without overrides the message is empty. Components and embeds given as
- * API JSON or builders keep that JSON behind `toJSON()`, which `respond()` and `@Defer` read. What the content
- * mentions is cached as the gateway delivers it: `<@id>` a user, and a member in a guild; `<@&id>` a role; `<#id>` a
- * channel. A bare id is not cached, as a bot has to fetch it. Its `createdTimestamp` is the time its `id` encodes.
+ * and `reply()` resolve to a new mock message. Without overrides the message is empty. The users, roles and channels
+ * the content mentions are cached as the gateway delivers them.
  *
  * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *

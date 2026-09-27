@@ -77,9 +77,11 @@ export function getResponse(interaction: Interaction): ResponseReport {
  * ```ts
  * import { expect } from 'vitest'
  *
- * const interaction = createMockInteraction(ButtonInteraction, { customId: 'refresh' })
- * interaction.deferUpdate.mockRejectedValueOnce(createDiscordError(10062))
- * await expect(interaction.deferUpdate()).rejects.toMatchObject({ code: 10062 })
+ * const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
+ * interaction.reply.mockRejectedValueOnce(createDiscordError(10062))
+ *
+ * // respond() passes Discord's refusal on to the handler, and a filter or the fallback answers it
+ * await expect(respond(interaction).send('Pong!')).rejects.toMatchObject({ code: 10062 })
  * ```
  *
  * @group Testing
