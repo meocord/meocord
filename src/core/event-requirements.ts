@@ -177,8 +177,9 @@ export function missingRequirementWarnings(options: ClientOptions, handlers: rea
           ? ` ${privileged.join(' and ')} is privileged: also enable it for the app in the Discord developer portal.`
           : '') +
         (bits.includes(GatewayIntentBits.MessageContent)
-          ? " Without it, only messages that mention the bot and direct messages carry their text; messages: { mention: 'only' } " +
-            'needs none.'
+          ? ' Without it, only messages that mention the bot and direct messages carry their text' +
+            // A command can be started by a mention alone; a listener takes every message, so it cannot
+            (labels.some(label => label.startsWith("@MessageHandler('")) ? "; messages: { mention: 'only' } needs none." : '.')
           : ''),
     )
   }
