@@ -32,7 +32,7 @@ export default defineConfig({
     // mock created in vi.mock factories. Spies are restored manually per-test
     // instead, and each test file runs in an isolated worker so spies don't leak.
     restoreMocks: false,
-    include: ['src/**/*.spec.ts', 'tools/**/*.spec.ts'],
+    include: ['src/**/*.spec.ts', 'tools/**/*.spec.ts', 'scripts/**/*.spec.ts'],
     // Type-level behaviour is erased before a runtime test can observe it, so
     // the assertions in *.test-d.ts run through tsc instead. Negative cases use
     // `@ts-expect-error`, which fails once the rejected form starts compiling —

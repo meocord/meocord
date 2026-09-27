@@ -9,6 +9,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { AppGeneratorHelper } from '../../src/bin/helper/app-generator.helper.js'
+import { assertFreshBuild } from './build-stamp.js'
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -61,6 +62,8 @@ export function mustRun(label: string, command: string, args: string[], cwd: str
  * link to the repository: only what `files` ships, resolved through `exports`.
  */
 export function pack(into: string): string {
+  // A dist built before the source changed would pass for the current code, and fail later on what it lacks
+  assertFreshBuild(repoRoot)
   mustRun('pack the framework', 'npm', ['pack', '--ignore-scripts', '--silent', '--pack-destination', into], repoRoot)
   const tarball = readdirSync(into).find(name => name.endsWith('.tgz'))
   if (!tarball) throw new Error(`npm pack wrote no tarball into ${into}`)
