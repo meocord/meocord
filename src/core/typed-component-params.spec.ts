@@ -156,6 +156,28 @@ describe('typed customId params beside other routes of one shape', () => {
 })
 
 describe('typed customId params of one shape', () => {
+  it('keeps words beside bool and warns, with a shared value going to the words; the same words in another order stop the bot', async () => {
+    const ran: unknown[] = []
+    @Controller()
+    class Toggle {
+      @Command('r/{f:bool}', CommandType.BUTTON) async bool(_i: ButtonInteraction, { f }: { f: boolean }) { ran.push(['bool', f]) }
+      @Command('r/{w:on|off}', CommandType.BUTTON) async words(_i: ButtonInteraction, { w }: { w: string }) { ran.push(['words', w]) }
+    }
+    @MeoCord({ controllers: [Toggle], clientOptions: { intents: [] } })
+    class ToggleApp {}
+    expect(findRouteConflicts(ToggleApp).map(({ patterns }) => patterns)).toEqual([['r/{w:on|off}', 'r/{f:bool}']])
+    const module = MeoCordTestingModule.create({ controllers: [Toggle] }).compile()
+    for (const id of ['r/on', 'r/yes']) await module.dispatch(press(id))
+    expect(ran).toEqual([['words', 'on'], ['bool', true]])
+
+    @Controller()
+    class Twice {
+      @Command('s/{w:on|off}', CommandType.BUTTON) first() {}
+      @Command('s/{v:off|on}', CommandType.BUTTON) second() {}
+    }
+    expect(() => buildComponentRoutes([Twice])).toThrow(/"s\/\{w:on\|off\}" in Twice\.first and "s\/\{v:off\|on\}" in Twice\.second match the same/)
+  })
+
   it('runs the narrower type first, whatever order they are declared in', async () => {
     const ran: unknown[] = []
     @Controller()
