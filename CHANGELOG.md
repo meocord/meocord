@@ -1,5 +1,36 @@
 # meocord
 
+## 4.1.0-beta.7
+
+### Minor Changes
+
+- [#257](https://github.com/meocord/meocord/pull/257) [`afa139d`](https://github.com/meocord/meocord/commit/afa139debcc8e4accfe3f5c2a8997dbe9d0fb4d3) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `MeoCordTestingModule.fromApp(App, options?)` builds a testing module from a whole `@MeoCord` app, wired as the bot wires it: its controllers, services, providers and cooldown store, with its stages, translator, presenter, message options, theme and observers. A test no longer lists the app's controllers and providers again. `options.providers` replaces the app's by token, before anything is made, so a database factory the test replaces never runs; `options.controllers` and `options.observers` add a test's own; the `override*()` methods still apply. The app's services are made at `init()`, as the bot makes them before it logs in.
+
+  A class that injects the Discord `Client` in a testing module that was given none is now refused with what to do, `{ provide: Client, useValue: createMockClient() }`, where it read `No bindings found for service: "Client"`.
+
+- [#258](https://github.com/meocord/meocord/pull/258) [`f9189b9`](https://github.com/meocord/meocord/commit/f9189b9b1008a9fee97ede546466b302afe71e92) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A context menu handler is typed with the kind its builder's `setType()` names. With `.setType(ApplicationCommandType.User)`, `@Command('Report user', ReportUserBuilder)` gives the handler a `UserContextMenuCommandInteraction`, and a handler declaring `MessageContextMenuCommandInteraction` no longer compiles. It is caught however the interaction is imported, an `import { type … }` included, where the check as the bot starts needed it imported as a value. Such a handler was broken anyway: dispatch sends a builder's command only to a handler of its kind, so its first click already failed. Declare the kind the builder's `setType()` names.
+
+  Nothing new is needed: MeoCord adds the kind to discord.js's `ContextMenuCommandBuilder.setType` for the compiler alone, and nothing changes at runtime. A builder whose kind the compiler can't tell, one that never calls `setType()` or picks the kind at runtime, gives either kind as before, and is still checked as the bot starts.
+
+### Patch Changes
+
+- [#260](https://github.com/meocord/meocord/pull/260) [`18334ec`](https://github.com/meocord/meocord/commit/18334ecb55c1301586606e4c8d7a9a6ddf4173a1) Thanks [@l7aromeo](https://github.com/l7aromeo)! - The package includes `dist/cli.json`, which describes the `meocord` CLI: every command and subcommand, with its aliases, arguments, options, defaults, choices and descriptions, in the order `meocord --help` lists them. The build writes it from the program the CLI runs, so it always matches the installed version, and a tool can read it as data, without running the CLI. `schemaVersion` changes only when a change to the shape would break a reader.
+
+- [#261](https://github.com/meocord/meocord/pull/261) [`701890b`](https://github.com/meocord/meocord/commit/701890b82e7edad7fa020cc4764f4fd7c5fdfb51) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A message `@Defer` locked is put back when its handler answers only with a follow-up, returns without answering, or throws. On a message with an uploaded file, such as an image in a Components V2 card, a click soon after the message was sent could leave it locked instead: its buttons and selects disabled under the loading view, for good. The lock's edit has Discord process the uploaded file again, and MeoCord, seeing the message change from what its edit returned, took it for someone else's edit and left it alone. It now keeps the time Discord stamps on its own edit, and leaves a message as it is only when it shows a later edit. The file stays attached, and a select that was clicked comes back with its options and defaults as the message had them, not the user's pick.
+
+  `meocord/testing`: a mock interaction's `editReply()` and `fetchReply()` now keep its message as Discord does. Components get their ids, media resolves, a file uploaded with the message comes back loading from the first edit that keeps it, and each edit is stamped with its time. `createMockMessage` takes `editedTimestamp`.
+
+- [#259](https://github.com/meocord/meocord/pull/259) [`01f11d4`](https://github.com/meocord/meocord/commit/01f11d4a0b024ce5a1fd5b83acea5476ae58ca56) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A bot whose commands only one handler or one builder could ever take stops when it is created, as `meocord start`, `meocord register`, a shard manager and a testing module build it, naming both:
+
+  - two handlers of one slash command name or subcommand path, or of one context menu name and kind, where only the first ever ran: `StatsController.stats and AdminController.adminStats both handle the slash command "stats", so only StatsController.stats would ever run.`;
+  - two builder classes that build one application command, where only the first was registered, with a warning: `StatsBuilder on StatsController.stats and CopiedStatsBuilder on StatsController.statistics both build the slash command "stats"…`.
+
+  One builder on a command and its own subcommand paths is still one command, and a user and a message context menu may still share a name. See [Upgrading to 4.1](https://meocord.dev/docs/4.1/migrating#two-handlers-of-one-command-stop-the-bot).
+
+- [#254](https://github.com/meocord/meocord/pull/254) [`2b02b0e`](https://github.com/meocord/meocord/commit/2b02b0ea9e8ad9f8e594ae14e32ba76400ee3275) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A slash command builder given on a subcommand path, such as `@Command('settings notify email', SettingsCommandBuilder)`, is named for what it is. A builder that builds its name from the path fails as before, now with a message naming the handler: `SettingsSlashController.notifyEmail declares the builder SettingsCommandBuilder on "settings notify email", which is a subcommand path: the builder of its command, "settings", describes it`, with what to declare instead, where it said "Invalid string format" and advised checking name lengths. A builder that names its command itself keeps working, and is warned about once as the bot starts, with the same advice: declare the handler with `@Command('settings notify email', CommandType.SLASH)`, and give the builder to `@Command('settings')`.
+
+- [#255](https://github.com/meocord/meocord/pull/255) [`2852892`](https://github.com/meocord/meocord/commit/2852892922694fb883c8244b9469781e152468c1) Thanks [@l7aromeo](https://github.com/l7aromeo)! - An observer is told a message command's usage error as `'invalid'`, the user's input that doesn't fit, as it is told a `ValidationError`. It was told `'error'`, so metrics counted a user's typo as a fault of the bot. This covers a word of the wrong type, a param left out, a flag the command lacks, a command sent where it doesn't work, and a parent's words alone, answered with its subcommands. A dashboard that counts `'error'` sees these under `'invalid'` from this release.
+
 ## 4.1.0-beta.6
 
 ### Minor Changes
