@@ -166,7 +166,7 @@ export interface InspectHandlerOptions {
  * @group Testing
  * @category Inspection
  * @see {@link createExecutionContext}
- * @see {@link https://meocord.dev/docs/4.1/testing-recipes#guards | Testing guards}
+ * @see {@link https://meocord.dev/docs/4.1/testing-recipes | Testing recipes}
  */
 export function inspectHandler<C extends new (...args: any[]) => unknown>(
   controller: C,
