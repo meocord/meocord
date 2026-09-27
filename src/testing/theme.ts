@@ -41,7 +41,7 @@ function mockTheme(overrides: unknown, where: string): ResolvedTheme {
  * @group Testing
  * @category Mocks
  * @see {@link withTheme}
- * @see {@link https://meocord.dev/docs/latest/theming | Theming}
+ * @see {@link https://meocord.dev/docs/4.1/theming | Theming}
  */
 export function createMockTheme(...[overrides]: MockThemeArgs): DeepReadonly<MeoCordTheme> {
   return mockTheme(overrides, 'createMockTheme')
