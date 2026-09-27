@@ -338,11 +338,29 @@ export function messageCommandHooks(
 }
 
 /**
+ * Orders two routes of one handler by which names it best: its own pattern before an alias, then the more
+ * specific, then the one that sorts first, so declaration order never decides.
+ */
+function primaryFirst(a: MessageRoute, b: MessageRoute): number {
+  if ((a.aliasOf === undefined) !== (b.aliasOf === undefined)) return a.aliasOf === undefined ? -1 : 1
+  if (a.specificity !== b.specificity) return b.specificity - a.specificity
+  return a.pattern < b.pattern ? -1 : a.pattern > b.pattern ? 1 : 0
+}
+
+/**
  * The usage error that answers a message naming only a command's leading words: the usage of each subcommand
- * it could reach, one line each, sorted so neither declaration order nor file layout decides the order.
+ * it could reach, one line per handler, sorted so neither declaration order nor file layout decides the order.
+ * A handler reached under an alias or a second spelling as well is listed once, by its primary pattern.
  */
 export function subcommandUsageError(listing: readonly { route: MessageRoute; start: string }[]): MessageUsageError {
-  const lines = [...new Set(listing.map(({ route, start }) => usageOf(route, start)))].sort()
+  const byHandler = new Map<unknown, Map<string, { route: MessageRoute; start: string }>>()
+  for (const entry of listing) {
+    const methods = byHandler.get(entry.route.controllerClass) ?? new Map<string, { route: MessageRoute; start: string }>()
+    byHandler.set(entry.route.controllerClass, methods)
+    const kept = methods.get(entry.route.method)
+    if (!kept || primaryFirst(entry.route, kept.route) < 0) methods.set(entry.route.method, entry)
+  }
+  const lines = [...byHandler.values()].flatMap(methods => [...methods.values()].map(({ route, start }) => usageOf(route, start))).sort()
   return new MessageUsageError(lines.join('\n'), [])
 }
 

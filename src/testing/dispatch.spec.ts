@@ -213,7 +213,7 @@ describe('TestingModule.dispatch', () => {
 
     expect(result.error).toBeInstanceOf(MessageUsageError)
     expect(result.handlers).toEqual([])
-    expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Usage: !settings get <key>\n!settings set <key> <value>' }))
+    expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Usage:\n!settings get <key>\n!settings set <key> <value>' }))
     expect(resolveRoute(SettingsApp, { content: '!settings' })).toBeUndefined()
     await expect(module.invoke(Settings, 'get', createMockMessage({ content: '!settings' }))).rejects.toThrow("does not match Settings.get's pattern")
   })

@@ -228,7 +228,8 @@ export class MessageUsageError extends Error {
   readonly quiet: boolean
 
   /**
-   * @param usage - The command as the user should type it, such as `!ban <target> [reason…]`.
+   * @param usage - The command as the user should type it, such as `!ban <target> [reason…]`, or one line per
+   *   subcommand for a message that names only their parent.
    * @param issues - Each thing wrong, in the order of the command's params.
    */
   constructor(
@@ -239,7 +240,8 @@ export class MessageUsageError extends Error {
     super(
       serverOnly || dmOnly
         ? issues.map(issue => issue.message).join('\n')
-        : [`Usage: ${usage}`, ...issues.map(issue => issue.message)].join('\n'),
+        : // A usage of several lines, such as a parent's subcommands, starts below its heading, so each reads alike
+          [usage.includes('\n') ? `Usage:\n${usage}` : `Usage: ${usage}`, ...issues.map(issue => issue.message)].join('\n'),
     )
     this.name = 'MessageUsageError'
     this.serverOnly = serverOnly
