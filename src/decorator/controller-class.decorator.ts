@@ -33,7 +33,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
  * @category Controllers
  * @see {@link Command}
  * @see {@link ControllerOptions}
- * @see {@link https://meocord.dev/docs/latest/how-a-handler-runs | How a call runs}
+ * @see {@link https://meocord.dev/docs/latest/how-a-call-runs | How a call runs}
  */
 export function Controller(options: ControllerOptions = {}) {
   return function (target: abstract new (...args: any[]) => unknown) {
