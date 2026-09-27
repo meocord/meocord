@@ -988,7 +988,7 @@ export interface ShardingConfig {
  *
  * @group Configuration
  * @category Config file
- * @see {@link https://meocord.dev/docs/4.1/command-registration | Command registration}
+ * @see {@link https://meocord.dev/docs/4.1/slash-commands | Slash commands}
  */
 export interface CommandRegistrationConfig {
   /**
