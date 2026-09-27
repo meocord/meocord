@@ -180,3 +180,43 @@ describe('@Command(route) and the handler params', () => {
     expectTypeOf(Tickets).toBeConstructibleWith()
   })
 })
+
+describe('typed customId params', () => {
+  const counter = route('counter/{count:int}/{order:asc|desc}/{open:bool}')
+
+  it('names each param without its type, and builds from values of their types', () => {
+    expectTypeOf<Parameters<typeof counter.build>[0]>().toEqualTypeOf<{ count: number; order: 'asc' | 'desc'; open: boolean }>()
+    counter.build({ count: 1, order: 'asc', open: true })
+    // @ts-expect-error {count:int} takes a number
+    counter.build({ count: '1', order: 'asc', open: true })
+    // @ts-expect-error {order:asc|desc} takes one of its words
+    counter.build({ count: 1, order: 'up', open: true })
+  })
+
+  it('checks a typed param the handler declares against its value, for a route and a plain string', () => {
+    class Counters {
+      @Command(counter, CommandType.BUTTON)
+      typed(_interaction: ButtonInteraction, _params: { count: number; order: 'asc' | 'desc'; open: boolean }) {
+        return undefined
+      }
+
+      // @ts-expect-error {count:int} gives a number
+      @Command(counter, CommandType.BUTTON)
+      wrong(_interaction: ButtonInteraction, _params: { count: string }) {
+        return undefined
+      }
+
+      @Command('page/{page:int}', CommandType.BUTTON)
+      plain(_interaction: ButtonInteraction, _params: { page: number }) {
+        return undefined
+      }
+
+      // @ts-expect-error {page:int} gives a number
+      @Command('page/{page:int}', CommandType.BUTTON)
+      plainWrong(_interaction: ButtonInteraction, _params: { page: string }) {
+        return undefined
+      }
+    }
+    expectTypeOf(Counters).toBeConstructibleWith()
+  })
+})

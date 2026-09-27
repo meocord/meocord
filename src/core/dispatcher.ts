@@ -35,6 +35,7 @@ import {
   type ComponentRoute,
   findComponentRouteConflicts,
   matchComponentRoute,
+  type RouteParamValue,
 } from '@src/core/component-routes.js'
 import { handleUnroutedError, type HandlerOutcome, observeUnclaimed, type RunOptions, runHandler } from '@src/core/handler-pipeline.js'
 import { closeAutocomplete, type Fallback } from '@src/core/fallback.js'
@@ -252,7 +253,7 @@ export class Dispatcher {
       const matched = matchComponentRoute(this.getComponentRoutes(), type => matchesCommandType(type, interaction), customId)
       if (matched) {
         const { route, params } = matched
-        ;(interaction as Interaction & { dynamicParams: Record<string, string> }).dynamicParams = params
+        ;(interaction as Interaction & { dynamicParams: Record<string, RouteParamValue> }).dynamicParams = params
         await this.executeCommand(this.getInstance(route.controllerClass), route.meta, interaction, call)
         return
       }
@@ -372,7 +373,7 @@ export class Dispatcher {
     // interaction on the way into the handler.
     this.logger.log('[INTERACTION]', `[${type}]`, `[${methodName}]`)
 
-    const routeParams = (interaction as Interaction & { dynamicParams?: Record<string, string> }).dynamicParams
+    const routeParams = (interaction as Interaction & { dynamicParams?: Record<string, RouteParamValue> }).dynamicParams
     const { params, collisions } = handlerInput(interaction, routeParams)
     this.warnCollisions(methodName, collisions)
 

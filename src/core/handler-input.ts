@@ -8,7 +8,7 @@ import {
   UserSelectMenuInteraction,
 } from 'discord.js'
 import { getCommandMap } from '@src/decorator/controller.decorator.js'
-import { decodeRouteParams } from '@src/common/route.js'
+import { readCustomId, type RouteParamValue } from '@src/core/component-routes.js'
 import {
   hasCustomId,
   isCustomIdRouted,
@@ -72,7 +72,7 @@ function selectChoices(interaction: Interaction): Record<string, unknown> {
  *
  * @param routeParams - The params the customId's pattern captured.
  */
-export function handlerInput(interaction: Interaction, routeParams: Record<string, string> = {}): HandlerInput {
+export function handlerInput(interaction: Interaction, routeParams: Record<string, RouteParamValue> = {}): HandlerInput {
   if (interaction.isChatInputCommand() || interaction.isAutocomplete()) {
     return { params: resolveOptionParams(interaction), collisions: [] }
   }
@@ -87,14 +87,14 @@ export function handlerInput(interaction: Interaction, routeParams: Record<strin
  * The params a handler's own customId pattern captures from an interaction, as routing would: for a
  * test that calls the handler with no params of its own.
  */
-export function routeParamsFor(prototype: object, methodName: string, interaction: Interaction): Record<string, string> {
+export function routeParamsFor(prototype: object, methodName: string, interaction: Interaction): Record<string, RouteParamValue> {
   if (!hasCustomId(interaction)) return {}
 
-  for (const metaList of Object.values(getCommandMap(prototype) ?? {})) {
+  for (const [pattern, metaList] of Object.entries(getCommandMap(prototype) ?? {})) {
     for (const meta of metaList) {
       if (meta.methodName !== methodName || !meta.regex || !matchesCommandType(meta.type, interaction)) continue
-      const match = meta.regex.exec(interaction.customId)
-      if (match) return decodeRouteParams(match.groups)
+      const params = readCustomId(pattern, meta.regex, interaction.customId)
+      if (params) return params
     }
   }
   return {}
@@ -116,7 +116,7 @@ export function routeMismatch(controller: { name: string; prototype: object }, m
   if (hasCustomId(interaction)) {
     const patterned = routes.filter(({ meta }) => isCustomIdRouted(meta.type) && meta.regex)
     if (typeof interaction.customId !== 'string' || patterned.length === 0) return undefined
-    if (patterned.some(({ meta }) => meta.regex!.test(interaction.customId))) return undefined
+    if (patterned.some(({ route, meta }) => readCustomId(route, meta.regex!, interaction.customId))) return undefined
     return describe('customId', interaction.customId, patterned)
   }
 

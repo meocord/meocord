@@ -19,7 +19,8 @@ import {
 import { isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
-import { type Route, type RouteParams } from '@src/common/route.js'
+import { isSegmentType } from '@src/core/scalar-types.js'
+import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 
 const COMMAND_METADATA_KEY = Symbol('commands')
 const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
@@ -245,7 +246,8 @@ export function getMessageHandlers(controller: any): MessageHandlerMetadata[] {
   return Reflect.getMetadata(MESSAGE_HANDLER_METADATA_KEY, controller) || []
 }
 
-const PLACEHOLDER_PATTERN = /\{(\w+)}/g
+// `{name}`, or `{name:type}` with the type read as far as the brace, so a type no segment can hold is named
+const PLACEHOLDER_PATTERN = /\{(\w+)(?::([^}/]*))?}/g
 
 /** The character a parameter will not cross, so one pattern segment maps to one value. */
 export const PARAM_SEPARATOR = '/'
@@ -258,8 +260,14 @@ const escapeLiteral = (literal: string): string => literal.replace(/[/\\^$*+?.()
  * the next `/`, so a uuid is captured whole and `profile/{uuid}` never overlaps `profile/{uuid}/{id}`;
  * `-`-separated patterns can, which {@link findAmbiguousRoutes} reports at registration.
  */
-export function createRegexFromPattern(pattern: string): { regex: RegExp; params: string[]; specificity: number } {
+export function createRegexFromPattern(pattern: string): {
+  regex: RegExp
+  params: string[]
+  types: Record<string, string>
+  specificity: number
+} {
   const params: string[] = []
+  const types: Record<string, string> = {}
   let regexPattern = ''
   let cursor = 0
   let literalLength = 0
@@ -267,7 +275,7 @@ export function createRegexFromPattern(pattern: string): { regex: RegExp; params
   PLACEHOLDER_PATTERN.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = PLACEHOLDER_PATTERN.exec(pattern)) !== null) {
-    const [placeholder, param] = match
+    const [placeholder, param, type] = match
     const literal = pattern.slice(cursor, match.index)
     const after = pattern[match.index + placeholder.length]
 
@@ -281,6 +289,11 @@ export function createRegexFromPattern(pattern: string): { regex: RegExp; params
           `preceded and followed by "${PARAM_SEPARATOR}" or by the ends of the pattern. ` +
           `Write "a${PARAM_SEPARATOR}{${param}}" rather than "a-{${param}}".`,
       )
+    }
+
+    if (type !== undefined) {
+      if (!isSegmentType(type)) throw new Error(`Invalid pattern "${pattern}": ${segmentTypeProblem(param, type)}`)
+      if (type !== 'string') types[param] = type
     }
 
     literalLength += literal.length
@@ -301,7 +314,16 @@ export function createRegexFromPattern(pattern: string): { regex: RegExp; params
   // between equal-length patterns, so the ranking is total and never falls back to
   // declaration order.
   const specificity = routeSpecificity({ literals: literalLength, params: params.length })
-  return { regex, params, specificity }
+  return { regex, params, types, specificity }
+}
+
+/** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
+function segmentTypeProblem(param: string, type: string): string {
+  const kinds = 'string, int, number, bool, or words to choose from such as {mode:on|off}'
+  if (['member', 'user', 'role', 'channel'].includes(type)) {
+    return `{${param}:${type}} is a type only a message command reads. A customId holds text: write {${param}} for its ID, and fetch it in the handler.`
+  }
+  return `{${param}:${type}} names no type a customId can hold. The types are ${kinds}.`
 }
 
 /** The keys a select menu's handler gets beside its route's params: its choices. */
@@ -344,6 +366,30 @@ type RouteAccepts<N, T, P> =
           : { "The handler's params name keys its route does not capture": Exclude<RequiredKeys<P>, RouteParams<Pattern> | ChoiceKeys<T>> }
         : unknown
     : unknown
+
+/** The pattern text of a `@Command` name: a route's pattern, or the string itself. */
+type PatternOf<N> = N extends Route<infer Pattern> ? Pattern : N extends string ? N : string
+
+/** A pattern's typed params, each with the value its segment gives; an untyped param builds from any `RouteValue`. */
+type TypedValues<Pattern extends string> = {
+  [K in keyof RouteValues<Pattern> as [RouteValue] extends [RouteValues<Pattern>[K]] ? never : K]: RouteValues<Pattern>[K]
+}
+
+/**
+ * Allows the handler when each typed customId param it declares takes the value its segment gives, such as a
+ * number for `{count:int}`. Untyped params, params with an index signature, and commands are unchecked.
+ */
+type TypedParamsAccept<N, T, P> = T extends CommandType
+  ? string extends PatternOf<N> | keyof P
+    ? unknown
+    : {
+          [K in keyof TypedValues<PatternOf<N>> & keyof P as TypedValues<PatternOf<N>>[K] extends P[K] ? never : K]: TypedValues<PatternOf<N>>[K]
+        } extends infer Mismatch
+      ? [keyof Mismatch] extends [never]
+        ? unknown
+        : { "The handler's params give a typed customId param a type its value does not fit": Mismatch }
+      : unknown
+  : unknown
 
 /**
  * Routes a command, a component or a modal submission to the method it decorates.
@@ -398,7 +444,8 @@ export function Command<
       | TypedPropertyDescriptor<(interaction: CommandInteractionType<CBC, T>) => R>
       | TypedPropertyDescriptor<() => R>
     ) &
-      RouteAccepts<N, T, P>,
+      RouteAccepts<N, T, P> &
+      TypedParamsAccept<N, T, P>,
   ) {
     const originalMethod = _descriptor.value
     if (!originalMethod) {
