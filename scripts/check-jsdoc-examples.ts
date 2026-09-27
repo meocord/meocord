@@ -132,13 +132,16 @@ function fencedCode(text: string): string {
   return (match ? match[1] : text).trimEnd()
 }
 
-/** How many sentences a summary holds, reading code spans, links and abbreviations such as "e.g." as words. */
+/**
+ * How many sentences a summary holds. Code spans and links read as capitalised words, since either can start a
+ * sentence, and abbreviations such as "e.g." as plain ones; a sentence may end inside a closing quote or bracket.
+ */
 function sentenceCount(text: string): number {
   const plain = text
-    .replace(/`[^`]*`/g, 'code')
-    .replace(/\{@link [^}]*\}/g, 'link')
+    .replace(/`[^`]*`/g, 'Code')
+    .replace(/\{@link [^}]*\}/g, 'Link')
     .replace(/\b(e\.g|i\.e|etc|vs)\./g, 'abbreviation')
-  return plain.split(/(?<=[.!?])\s+(?=[A-Z`@'"(])/).filter(sentence => sentence.trim() !== '').length
+  return plain.split(/(?<=[.!?]["'”’)]?)\s+(?=[A-Z`@'"“(])/).filter(sentence => sentence.trim() !== '').length
 }
 
 /** Whether a declaration has a comment of its own with text, not only tags. */
