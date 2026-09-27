@@ -101,6 +101,9 @@ const INVALID_TOKEN_ENV = 'DISCORD_TOKEN=not-a-real-token\n'
 /** What the bot logs when Discord refuses INVALID_TOKEN_ENV's token. */
 const REFUSED_TOKEN = 'Discord refused the bot token'
 
+/** An entry that exits with code 3 before logging in, as a startup error in the app's own code does. */
+const selfExitingMain = `console.log('Leaving before logging in')\nprocess.exitCode = 3\n`
+
 const templateMain = readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', 'src', 'main.ts.template'), 'utf8')
 
 /** The template's configuration with its dependencies bundled, and an eval devtool set as a hook sets one. */
@@ -966,11 +969,25 @@ const scenarios: Scenario[] = [
     name: 'Ctrl+C stops start --dev once the application has exited on its own',
     tier: 'slow',
     platforms: ['linux', 'darwin'],
+    // An exit a code change can fix, so the session keeps watching until the signal
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': selfExitingMain },
+    argv: ['start', '--dev'],
+    signal: { name: 'SIGINT', after: 'waiting for changes' },
+    timeoutMs: 60_000,
+    expect: { code: 0, says: ['Starting watch mode', 'The application exited with code 3; waiting for changes.'] },
+  },
+  {
+    name: 'start --dev ends with 1 when the bot cannot log in, as no code change fixes that',
+    tier: 'slow',
+    platforms: ['linux', 'darwin'],
     files: { '.env': INVALID_TOKEN_ENV },
     argv: ['start', '--dev'],
-    signal: { name: 'SIGINT', after: REFUSED_TOKEN },
     timeoutMs: 60_000,
-    expect: { code: 0, says: ['Starting watch mode'] },
+    expect: {
+      code: 1,
+      says: [REFUSED_TOKEN, 'The bot could not log in, and no code change fixes that; stopping watch mode.'],
+      never: ['waiting for changes'],
+    },
   },
   {
     name: 'a signal repeated after the window kills an application that does not stop, and exits 1',
