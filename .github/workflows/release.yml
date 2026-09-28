@@ -450,6 +450,8 @@ jobs:
     needs: [lint, test-result, coverage, build, windows, release-checks]
     runs-on: ubuntu-latest
     environment: Production
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
     concurrency:
       group: release-${{ github.ref }}
     permissions:
@@ -503,6 +505,7 @@ jobs:
       # opens the release pull request as that identity instead, so its checks start like any
       # other. Without it, the workflow's token is used and the runs wait for approval.
       - name: Open the release pull request, or publish
+        id: changesets
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -511,3 +514,47 @@ jobs:
           pr-title: 'chore: release'
           commit-message: 'chore: release'
           create-github-releases: true
+
+  # Asks the docs site to add the version just published, rather than wait for its hourly schedule:
+  # it starts the docs repository's version sync (meocord/docs, .github/workflows/sync-versions.yml),
+  # which verifies the package and opens a pull request there. It runs as the docs bot, a GitHub App
+  # whose token here can only start workflows in meocord/docs. The app's credentials live in the
+  # Production environment, set by the maintainer: the variable DOCS_BOT_CLIENT_ID and the secret
+  # DOCS_BOT_PRIVATE_KEY. A job of its own, so nothing it runs sits beside the publishing identity,
+  # and nothing in it fails the release: the version is already on npm, and the schedule still runs.
+  docs-sync:
+    name: Docs sync
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    environment: Production
+    permissions: {}
+    steps:
+      - name: Skip without the docs bot
+        if: vars.DOCS_BOT_CLIENT_ID == ''
+        run: echo "::notice title=Docs sync not configured::The docs site's hourly schedule will pick up this release."
+
+      - name: Mint the docs bot's token
+        id: token
+        if: vars.DOCS_BOT_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DOCS_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+          owner: meocord
+          repositories: docs
+          permission-actions: write
+
+      - name: Start the docs sync
+        if: steps.token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          if ! gh workflow run sync-versions.yml --repo meocord/docs; then
+            echo "::warning title=Docs sync not started::Starting meocord/docs's version sync failed; its hourly schedule will pick up this release."
+          fi
+
+      - name: Report a token the docs bot could not mint
+        if: steps.token.outcome == 'failure'
+        run: echo "::warning title=Docs sync not started::The docs bot's token could not be minted; the docs site's hourly schedule will pick up this release."
