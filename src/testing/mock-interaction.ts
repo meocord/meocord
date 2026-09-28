@@ -58,6 +58,7 @@ import {
   SnowflakeUtil,
 } from 'discord.js'
 import { createDiscordError } from './response.js'
+import { discordDefault, REAL_GETTER } from './discord-defaults.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 
 // ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ export type MockProps<T> = {
 
 const SKIP = new Set(['constructor', 'toString', 'valueOf', 'toJSON', 'then'])
 
-type StubValue = Mock | object
+type StubValue = Mock | object | string | number | boolean | null
 
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>): object {
   const stubs = externalStubs ?? new Map<string, StubValue>()
@@ -152,6 +153,20 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>): obj
 
       // Return cached stub
       if (stubs.has(key)) return stubs.get(key)
+
+      // A value discord.js always gives, in its shape, rather than a stub: kept once read, or its getter run live
+      const known = discordDefault(target, key)
+      if (known === REAL_GETTER) {
+        try {
+          return Reflect.get(target, prop, proxy)
+        } catch {
+          // A getter that reads what the mock lacks falls back to a stub
+        }
+      } else if (known !== undefined) {
+        const value = known(proxy as never) as StubValue
+        stubs.set(key, value)
+        return value
+      }
 
       // Walk the prototype chain to check if it's a function
       let proto: object | null = Object.getPrototypeOf(target)
@@ -420,9 +435,11 @@ const MOCK_BOT_ID = '1300000000000000000'
  *
  * @remarks
  * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a `channelId` and a
- * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM. Replies follow
- * Discord's order, so a second `reply()` rejects, and {@link getResponse} reports what `respond()` sent. Every method
- * is a mock function, and one that returns a promise in discord.js resolves.
+ * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM, and with one its
+ * `member` is its user. Other data Discord always sends reads as Discord sends it, such as `false` for a flag and
+ * `null` for what may be absent; what picks the handler, `commandName` or `customId`, is the test's to give. Replies
+ * follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports what `respond()` sent. Every
+ * method is a mock function, and one that returns a promise in discord.js resolves.
  *
  * @param Class - The discord.js class to mock.
  * @param props - Values for properties the class declares `readonly`; see {@link MockProps}.
@@ -633,15 +650,16 @@ export function createMockInteraction<T extends object>(
     if (unset('guildId')) {
       instance.guildId = null
       if (unset('guild')) Object.defineProperty(instance, 'guild', { value: null, writable: true, configurable: true })
-      // A member once a test gives the mock a guildId, as discord.js has one for an interaction in a server
-      let member: unknown
-      if (unset('member')) {
-        Object.defineProperty(instance, 'member', {
-          get: () => (own('guildId') ? (member ??= stubDeep({})) : null),
-          enumerable: true,
-          configurable: true,
-        })
-      }
+    }
+    // The user as a member while the mock has a guildId, as discord.js has one for an interaction in a server
+    let member: unknown
+    if (unset('member')) {
+      Object.defineProperty(instance, 'member', {
+        get: () => (own('guildId') ? (member ??= memberOf(own('user'))) : null),
+        set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
+        enumerable: true,
+        configurable: true,
+      })
     }
   }
 
@@ -833,6 +851,10 @@ export function createMockClient(): DeepMocked<Client> {
 export interface MockGuildOverrides {
   /** The guild's id. */
   id?: string
+  /** The guild's name, `'Guild'` unless given. */
+  name?: string
+  /** The language the guild's community set, `'en-US'` unless given; `t.forGuild()` reads it. */
+  preferredLocale?: Locale
   /** Members in `members.cache`, by their id. */
   members?: readonly GuildMember[]
   /** Roles in `roles.cache`, by their id. */
@@ -858,7 +880,8 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  * @remarks
  * A manager's `fetch(id)`, `create()` and `edit()` resolve to a mock of its item, and a list fetch to an empty
  * collection. Members, roles and channels given are put in their managers' caches, where dispatch looks first when it
- * resolves a message's typed params.
+ * resolves a message's typed params. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given,
+ * so `t.forGuild(guild)` translates as for a new English server.
  *
  * @example
  * ```ts
@@ -877,6 +900,8 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   instance.id = nextSnowflake()
 
   if (overrides.id !== undefined) instance.id = overrides.id
+  if (overrides.name !== undefined) instance.name = overrides.name
+  if (overrides.preferredLocale !== undefined) instance.preferredLocale = overrides.preferredLocale
   instance.members = managerWith(GuildMemberManager.prototype, overrides.members as never)
   instance.channels = managerWith(GuildChannelManager.prototype, overrides.channels as never)
   instance.roles = managerWith(RoleManager.prototype, overrides.roles as never)
@@ -932,6 +957,11 @@ export function createMockChannel<T extends BaseChannel>(Class: InteractionClass
   }
 
   return stubDeep(instance) as DeepMocked<T>
+}
+
+/** A member of a server, as the given user. */
+function memberOf(user: unknown): object {
+  return stubDeep(Object.assign(Object.create(GuildMember.prototype) as object, { user }))
 }
 
 /** The guild a mock message carries: a guild with the same stubbed managers as createMockGuild. */
@@ -1126,8 +1156,9 @@ function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
  *
  * @remarks
  * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted, and `edit()`
- * and `reply()` resolve to a new mock message. Without overrides the message is empty. The users, roles and channels
- * the content mentions are cached as the gateway delivers them.
+ * and `reply()` resolve to a new mock message. Without overrides the message is empty, in a server, with its author
+ * as its `member`; with `guild: null` it is a direct message. The users, roles and channels the content mentions are
+ * cached as the gateway delivers them.
  *
  * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *
@@ -1162,14 +1193,12 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   // Getters on the prototype — the proxy sees them as functions and returns
   // a mock fn, which is wrong. Pre-initialize as own properties to shadow
   // the prototype getters.
-  Object.defineProperty(instance, 'member', {
-    value: stubDeep(Object.create(GuildMember.prototype)),
-    writable: true,
-  })
   const channel = stubDeep(Object.assign(Object.create(TextChannel.prototype), { id: nextSnowflake() })) as { id: string }
   const guild = (overrides.guild === undefined ? createMockGuildForMessage() : overrides.guild) as { id: string } | null
   Object.defineProperty(instance, 'channel', { value: channel, writable: true })
   Object.defineProperty(instance, 'guild', { value: guild, writable: true })
+  // The author as a member of the message's server; a direct message has none
+  Object.defineProperty(instance, 'member', { value: guild ? memberOf(instance.author) : null, writable: true })
   // In a server's text channel, the ids matching the objects; with no guild, a DM
   instance.channelId = channel.id
   instance.guildId = guild?.id ?? null
@@ -1200,6 +1229,10 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
 
   const alreadyDeleted = () => new Error('This message has already been deleted.')
 
+  stubs.set(
+    'inGuild',
+    createMockFn(() => Boolean(instance.guildId)),
+  )
   stubs.set(
     'delete',
     createMockFn(async () => {
