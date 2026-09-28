@@ -492,10 +492,13 @@ copies or substantial portions of the Software.
   /**
    * Compiles meocord.config.ts to dist/meocord.config.mjs so the config
    * can be loaded at runtime without jiti, tsconfig, or source files.
+   *
+   * @param options.exitOnFailure - Exits 1 when it fails; a watch session reloading the config keeps running instead.
+   * @returns Whether the config compiled, or there was none to compile.
    */
-  async compileConfig() {
+  async compileConfig({ exitOnFailure = true } = {}): Promise<boolean> {
     const configPath = path.resolve(this.projectRoot, 'meocord.config.ts')
-    if (!fs.existsSync(configPath)) return
+    if (!fs.existsSync(configPath)) return true
 
     // Compiled beside dist and moved in only once it built, so a failed compile leaves the last good one.
     // Each compile stages in a folder of its own, so two at once, such as the watcher's and a build's, never collide.
@@ -535,12 +538,16 @@ copies or substantial portions of the Software.
       fs.renameSync(path.join(staging, 'meocord.config.mjs'), path.join(dist, 'meocord.config.mjs'))
       fs.rmSync(staging, { recursive: true, force: true })
       this.logger.info('Config compiled to dist/meocord.config.mjs')
+      return true
     } catch (error) {
       if (staging) fs.rmSync(staging, { recursive: true, force: true })
-      // The built application reads only the compiled config, so without it the bot cannot start.
       this.logger.error(`Failed to compile meocord.config.ts: ${error instanceof Error ? error.message : error}`)
-      await wait(100)
-      process.exit(1)
+      // The built application reads only the compiled config, so without it the bot cannot start
+      if (exitOnFailure) {
+        await wait(100)
+        process.exit(1)
+      }
+      return false
     }
   }
 
@@ -722,16 +729,17 @@ copies or substantial portions of the Software.
 
       // The folder rather than the files, so an editor that saves by replacing a file is still seen
       const fsWatcher = fs.watch(this.projectRoot, (_event, filename) => {
-        if (!filename || !(filename in reloads)) return
+        if (!filename || !Object.hasOwn(reloads, filename)) return
         changed.add(filename)
         clearTimeout(debounceWatcher)
         debounceWatcher = setTimeout(async () => {
           if (!isRunning) return
-          isRunning = false
           const files = changed
           changed = new Set()
           for (const file of files) this.logger.log(reloads[file])
-          if (files.has('meocord.config.ts')) await this.compileConfig()
+          // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
+          if (files.has('meocord.config.ts') && !(await this.compileConfig({ exitOnFailure: false }))) return
+          isRunning = false
           await watching?.close()
           await watch()
         }, 300)

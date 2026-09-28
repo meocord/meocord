@@ -201,6 +201,9 @@ export class ReadyService implements OnReady {
 }
 `
 
+/** What a config looks like halfway through an edit: it no longer parses. */
+const HALF_WRITTEN = '\nexport const halfWritten = {\n'
+
 /** A change to a file that leaves what it does as it was. */
 const touched = (current: string) => `${current}\n`
 
@@ -985,10 +988,10 @@ const scenarios: Scenario[] = [
         code: 0,
         counts: {
           'Starting bot': 2,
-          'Stopping the bot before it came online': 1,
+          'The bot was still logging in': 1,
           'Bot is online!': 1,
           'Ready hook ran': 1,
-          'Bot has shut down': 1,
+          'Bot has shut down': 2,
         },
         never: ['modified-tsconfig.json'],
       },
@@ -1011,6 +1014,25 @@ const scenarios: Scenario[] = [
       },
     },
     {
+      name: `start --dev on ${runtime} keeps watching through a meocord.config.ts that does not compile, and reloads once it does`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [
+        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => `${current}${HALF_WRITTEN}` } },
+        { after: 'Failed to compile meocord.config.ts', files: { 'meocord.config.ts': current => current.replace(HALF_WRITTEN, '') } },
+      ],
+      signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        counts: { 'Failed to compile meocord.config.ts': 1, 'MeoCord config change detected': 2, 'Ready hook ran': 2 },
+      },
+    },
+    {
       name: `start --prod on ${runtime} stops at once on Ctrl+C while the bot logs in`,
       tier: runtime === 'node' ? 'fast' : 'slow',
       platforms: ['linux', 'darwin'],
@@ -1022,58 +1044,90 @@ const scenarios: Scenario[] = [
       timeoutMs: 60_000,
       expect: {
         code: 0,
-        says: ['Stopping the bot before it came online'],
+        says: ['Shutting down bot', 'The bot was still logging in', 'Bot has shut down'],
         never: ['Bot is online!', 'Ready hook ran', 'Application started'],
       },
     },
   ]),
+  // Each stop is tested in both phases, reached by what the output shows rather than by timing: online, once the local
+  // Discord's READY has run the ready hook, and mid-login, against an API that never answers
   ...(
     [
       ['Ctrl+C', { name: 'SIGINT', to: 'group' }],
       ['SIGINT to the CLI alone', { name: 'SIGINT', to: 'cli' }],
       ['SIGTERM to the CLI alone', { name: 'SIGTERM', to: 'cli' }],
     ] as const
-  ).flatMap(([label, signal]): Scenario[] => [
-    {
-      name: `${label} stops start --prod and shuts the bot down`,
-      tier: 'slow',
-      platforms: ['linux', 'darwin'],
-      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': stalledApp, dist: null },
-      argv: ['start', '--prod', '--build'],
-      signal: { ...signal, after: 'Starting bot' },
-      timeoutMs: 60_000,
-      expect: { code: 0, says: ['Shutting down bot', 'Bot has shut down'] },
-    },
-    {
-      name: `${label} shuts every shard down in process sharding`,
-      tier: 'slow',
-      platforms: ['linux', 'darwin'],
-      files: {
-        '.env': INVALID_TOKEN_ENV,
-        'src/app.ts': stalledApp,
-        // Registration off, so the refused token stops the shards rather than the manager before them
-        'meocord.config.ts': configWith("sharding: { mode: 'process', shards: 2 },\n  shutdownTimeout: 1000,").replace(
-          'commands: {',
-          'commands: {\n    register: false,',
-        ),
-        dist: null,
+  ).flatMap(([label, signal]) =>
+    (
+      [
+        {
+          phase: 'once the bot is online',
+          app: { 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+          discord: { readyDelayMs: 0 },
+          after: 'Ready hook ran',
+          says: [] as string[],
+          never: ['still logging in'],
+        },
+        {
+          phase: 'while the bot logs in',
+          app: { 'src/app.ts': stalledApp },
+          discord: undefined,
+          after: 'Starting bot',
+          says: ['The bot was still logging in'],
+          never: ['Bot is online!'],
+        },
+      ] as const
+    ).flatMap(({ phase, app, discord, after, says, never }): Scenario[] => [
+      {
+        name: `${label} stops start --prod and shuts the bot down ${phase}`,
+        tier: 'slow',
+        platforms: ['linux', 'darwin'],
+        files: { '.env': INVALID_TOKEN_ENV, ...app, dist: null },
+        discord,
+        argv: ['start', '--prod', '--build'],
+        signal: { ...signal, after },
+        timeoutMs: 60_000,
+        expect: { code: 0, says: ['Shutting down bot', ...says, 'Bot has shut down'], never: [...never] },
       },
-      argv: ['start', '--prod', '--build'],
-      signal: { ...signal, after: 'Starting bot' },
-      timeoutMs: 60_000,
-      expect: { code: 0, says: ['Shutting down the shards', 'Bot has shut down', 'Every shard has shut down'], never: ['Stopping every shard now'] },
-    },
-    {
-      name: `${label} stops start --dev and the bot it watches`,
-      tier: 'slow',
-      platforms: ['linux', 'darwin'],
-      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': stalledApp },
-      argv: ['start', '--dev'],
-      signal: { ...signal, after: 'Starting bot' },
-      timeoutMs: 60_000,
-      expect: { code: 0, says: ['Starting watch mode', 'Bot has shut down'] },
-    },
-  ]),
+      {
+        name: `${label} shuts every shard down in process sharding ${phase}`,
+        tier: 'slow',
+        platforms: ['linux', 'darwin'],
+        files: {
+          '.env': INVALID_TOKEN_ENV,
+          ...app,
+          // Registration off, so the refused token stops the shards rather than the manager before them
+          'meocord.config.ts': configWith("sharding: { mode: 'process', shards: 2 },\n  shutdownTimeout: 1000,").replace(
+            'commands: {',
+            'commands: {\n    register: false,',
+          ),
+          dist: null,
+        },
+        discord,
+        argv: ['start', '--prod', '--build'],
+        // Every shard reaches the phase before the stop
+        signal: { ...signal, after, times: 2 },
+        timeoutMs: 60_000,
+        expect: {
+          code: 0,
+          says: ['Shutting down the shards', ...says, 'Bot has shut down', 'Every shard has shut down'],
+          counts: { 'Bot has shut down': 2 },
+          never: ['Stopping every shard now', ...never],
+        },
+      },
+      {
+        name: `${label} stops start --dev and the bot it watches ${phase}`,
+        tier: 'slow',
+        platforms: ['linux', 'darwin'],
+        files: { '.env': INVALID_TOKEN_ENV, ...app },
+        discord,
+        argv: ['start', '--dev'],
+        signal: { ...signal, after },
+        timeoutMs: 60_000,
+        expect: { code: 0, says: ['Starting watch mode', ...says, 'Bot has shut down'], never: [...never] },
+      },
+    ]),
+  ),
   {
     name: 'Ctrl+C stops start --dev once the application has exited on its own',
     tier: 'slow',

@@ -9,7 +9,7 @@ import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/in
 import { type FakeDiscord, startFakeDiscord } from '../../scripts/lib/fake-discord.js'
 
 const { logged, config } = vi.hoisted(() => ({
-  logged: { error: [] as unknown[][], warn: [] as unknown[][] },
+  logged: { log: [] as unknown[][], error: [] as unknown[][], warn: [] as unknown[][] },
   config: { discordToken: 'test-token' } as { discordToken: string; shutdownTimeout?: number },
 }))
 
@@ -17,7 +17,7 @@ const { logged, config } = vi.hoisted(() => ({
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   Logger: class {
-    log = vi.fn()
+    log = (...args: unknown[]) => logged.log.push(args)
     debug = vi.fn()
     info = vi.fn()
     verbose = vi.fn()
@@ -76,6 +76,7 @@ describe('lifecycle hooks', () => {
   let signalListeners: Record<'SIGINT' | 'SIGTERM', NodeJS.SignalsListener[]>
 
   beforeEach(() => {
+    logged.log.length = 0
     logged.error.length = 0
     logged.warn.length = 0
     delete config.shutdownTimeout
@@ -672,6 +673,18 @@ describe('lifecycle hooks', () => {
       expect(exit).toHaveBeenCalledWith(0)
       expect(await outcome).toBe('The bot was stopped before it came online.')
       expect(fake.events).not.toContain('ready')
+    })
+
+    it('says it shut down, as a stop once online does', async () => {
+      await stoppedWhileLoggingIn()
+
+      expect(logged.log.map(([message]) => message)).toEqual(
+        expect.arrayContaining([
+          'Shutting down bot...',
+          'The bot was still logging in, so it stops without coming online',
+          'Bot has shut down',
+        ]),
+      )
     })
 
     it('closes the client once its login completes, over its one gateway session, with no ready hook run', async () => {
