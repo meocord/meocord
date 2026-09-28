@@ -251,6 +251,30 @@ const refusedMessagePattern = templateFile('src/controllers/message/sample.messa
 )
 const REFUSED_MESSAGE_PATTERN = "SampleMessageController.baka: @MessageHandler('baka {rest...} {x}')"
 
+/** Two controllers of one name, one counting a cooldown: MeoCordFactory.create refuses them, whichever build runs. */
+const sameNamedShop = (command: string, cooldown: boolean) => `import { type ChatInputCommandInteraction } from 'discord.js'
+import { Command, Controller, Cooldown } from 'meocord/decorator'
+import { CommandType } from 'meocord/enum'
+
+@Controller()
+export class Shop {
+  @Command('${command}', CommandType.SLASH)${cooldown ? '\n  @Cooldown({ seconds: 5 })' : ''}
+  async ${command}(interaction: ChatInputCommandInteraction) {
+    await interaction.reply('${command}')
+  }
+}
+`
+const appWithSameNamedShops = templateFile('src/app.ts')
+  .replace(
+    "import { AppPresenter }",
+    "import { Shop as BuyShop } from '@src/controllers/shop/buy.controller'\nimport { Shop as BrowseShop } from '@src/controllers/shop/browse.controller'\nimport { AppPresenter }",
+  )
+  .replace('  controllers: [\n', '  controllers: [\n    BuyShop,\n    BrowseShop,\n')
+const SAME_NAMED_SHOPS = '@Cooldown and @Once tell classes apart by name'
+
+/** The refused message pattern, its module importing a helper class of the controller's own name. */
+const refusedBesideSameNamedHelper = `import { SampleMessageController as Helper } from '@src/helpers/sample-message-controller'\nReflect.set(globalThis, 'helper', new Helper())\n${refusedMessagePattern}`
+
 /** An entry that leaves bootstrap's rejection unhandled, as a hand-written main.ts may. */
 const unhandledMain = `import App from '@src/app'
 import { MeoCordFactory } from 'meocord/core'
@@ -1295,6 +1319,34 @@ const scenarios: Scenario[] = [
       expect: { code: 0, says: [REFUSED_PATTERN, 'The application exited with code 1; waiting for changes.'], never: RAW_REPORT },
     },
   ]),
+  // A production build keeps every class's own name, as development does, however many modules declare it
+  {
+    name: 'start --prod refuses two same-named controllers with a cooldown, as a development build does',
+    tier: 'fast',
+    files: {
+      '.env': INVALID_TOKEN_ENV,
+      'src/app.ts': appWithSameNamedShops,
+      'src/controllers/shop/buy.controller.ts': sameNamedShop('buy', true),
+      'src/controllers/shop/browse.controller.ts': sameNamedShop('browse', false),
+      dist: null,
+    },
+    argv: ['start', '--prod', '--build'],
+    timeoutMs: 60_000,
+    expect: { code: 1, says: [SAME_NAMED_SHOPS], never: ['Starting bot'] },
+  },
+  {
+    name: 'start --prod names a controller as its source does, beside a same-named class in another module',
+    tier: 'fast',
+    files: {
+      '.env': INVALID_TOKEN_ENV,
+      'src/helpers/sample-message-controller.ts': 'export class SampleMessageController {}\n',
+      'src/controllers/message/sample.message.controller.ts': refusedBesideSameNamedHelper,
+      dist: null,
+    },
+    argv: ['start', '--prod', '--build'],
+    timeoutMs: 60_000,
+    expect: { code: 1, says: [REFUSED_MESSAGE_PATTERN], never: ['_SampleMessageController', 'Starting bot'] },
+  },
   ...(
     [
       ['Ctrl+C', { name: 'SIGINT', to: 'group' }],

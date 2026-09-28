@@ -23,12 +23,16 @@ const TINY_PNG = Buffer.from(
 const MAIN = `
 import 'reflect-metadata'
 import icon from './icon.png'
+import { Shop as OtherShop } from './shop'
 
 function Injectable(): ClassDecorator {
   return () => {}
 }
 
 class Dependency {}
+
+// A module of the same bundle declares a Shop too
+class Shop {}
 
 @Injectable()
 class Consumer {
@@ -41,6 +45,7 @@ console.log(JSON.stringify({
   metadataResolves: Array.isArray(paramTypes) && paramTypes[0] === Dependency,
   consumerName: Consumer.name,
   dependencyName: Dependency.name,
+  shopNames: [Shop.name, OtherShop.name],
   icon,
 }))
 `
@@ -49,6 +54,7 @@ interface RunResult {
   metadataResolves: boolean
   consumerName: string
   dependencyName: string
+  shopNames: string[]
   icon: string
 }
 
@@ -80,6 +86,7 @@ beforeAll(() => {
     JSON.stringify({ compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: 'es2022' } }),
   )
   writeFileSync(path.join(fixture, 'src', 'main.ts'), MAIN)
+  writeFileSync(path.join(fixture, 'src', 'shop.ts'), 'export class Shop {}\n')
   writeFileSync(path.join(fixture, 'src', 'icon.png'), TINY_PNG)
 })
 
@@ -99,6 +106,13 @@ describe('the Rsbuild pipeline, built and run', () => {
 
     expect(result.consumerName).toBe('Consumer')
     expect(result.dependencyName).toBe('Dependency')
+  })
+
+  // Hoisting modules into one scope would rename one of them, and MeoCord keys cooldowns by class name
+  it.each(['production', 'development'] as const)('keeps the name of each of two same-named classes in a %s build', async mode => {
+    const result = await buildAndRun(mode)
+
+    expect(result.shopNames).toEqual(['Shop', 'Shop'])
   })
 
   // Rsbuild reads the asset prefix from a different option in each mode, so one passing says

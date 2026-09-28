@@ -305,9 +305,7 @@ describe.each([
     expect(hooked).toBe(true)
     expect(lines[0]).toBe(`    at explode (${source('boom.ts')}:2:${thrower?.[2]})`)
     expect(thrower?.slice(0, 2)).toEqual([source('boom.ts'), '2'])
-    // Bun reports a call's column further along than Node does. In a minified bundle that position can
-    // map to the statement before the call: here line 11, the try, rather than 12.
-    expect(caller?.slice(0, 2)).toEqual([source('main.ts'), mode === 'production' ? '11' : '12'])
+    expect(caller?.slice(0, 2)).toEqual([source('main.ts'), '12'])
   })
 })
 
@@ -330,7 +328,7 @@ describe('the stack hook alongside others', () => {
   ])('hands a hook set before it the mapped call sites, on %s', (_name, runtime, flags) => {
     const { stack } = run(root, runtime, flags)
 
-    expect(stack).toBe(`before ${source('boom.ts')}:2 ${source('main.ts')}:${runtime === 'node' ? 12 : 11}`)
+    expect(stack).toBe(`before ${source('boom.ts')}:2 ${source('main.ts')}:12`)
   })
 
   // As follow-redirects, which axios loads, does at import: Bun's own hook throws on such a target
