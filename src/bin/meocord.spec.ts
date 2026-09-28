@@ -32,6 +32,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, watch } from 'node:fs'
 import { FORCE_STOP_GRACE_MS, MeoCordCLI } from '@src/bin/meocord.js'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { namePathProblem, nextStepFor } from '@src/bin/generator.js'
 import { ControllerType } from '@src/enum/controller.enum.js'
 import { RUNTIME_OVERRIDE_ENV } from '@src/util/runtime.util.js'
@@ -351,6 +352,52 @@ describe('spawning the application', () => {
 
       expect(first.removeAllListeners).toHaveBeenCalledWith('exit')
       expect(spawnMock).toHaveBeenCalledTimes(1)
+    })
+
+    describe('when the running application does not exit', () => {
+      afterEach(() => vi.useRealTimers())
+
+      function restartOnce(shutdownTimeout?: number) {
+        vi.useFakeTimers()
+        vi.mocked(loadMeoCordCliConfig).mockReturnValue(shutdownTimeout === undefined ? undefined : ({ shutdownTimeout } as never))
+        const first = createChild()
+        spawnMock.mockReturnValueOnce(first as never)
+        const cli = new MeoCordCLI() as unknown as { restartApp: () => void; logger: { warn: ReturnType<typeof vi.fn> } }
+        cli.restartApp()
+        cli.restartApp()
+        const onExit = first.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
+        return { first, onExit, warned: () => vi.mocked(cli.logger.warn).mock.calls.map(([message]) => String(message)) }
+      }
+
+      it('kills it once its shutdownTimeout and the grace period have passed, and says why', () => {
+        const { first, warned } = restartOnce(3_000)
+
+        vi.advanceTimersByTime(3_000 + FORCE_STOP_GRACE_MS - 1)
+        expect(first.kill).not.toHaveBeenCalledWith('SIGKILL')
+
+        vi.advanceTimersByTime(1)
+        expect(first.kill).toHaveBeenCalledWith('SIGKILL')
+        expect(warned()).toContainEqual(expect.stringContaining('its shutdownTimeout of 3000 ms'))
+      })
+
+      it('waits the default shutdownTimeout when none is configured', () => {
+        const { first } = restartOnce()
+
+        vi.advanceTimersByTime(DEFAULT_SHUTDOWN_TIMEOUT_MS + FORCE_STOP_GRACE_MS - 1)
+        expect(first.kill).not.toHaveBeenCalledWith('SIGKILL')
+        vi.advanceTimersByTime(1)
+        expect(first.kill).toHaveBeenCalledWith('SIGKILL')
+      })
+
+      it('kills nothing once it has exited', () => {
+        const { first, onExit, warned } = restartOnce(3_000)
+
+        onExit()
+        vi.advanceTimersByTime(3_000 + FORCE_STOP_GRACE_MS)
+
+        expect(first.kill).not.toHaveBeenCalledWith('SIGKILL')
+        expect(warned()).toEqual([])
+      })
     })
 
     // A child that exits on its own never emits `exit` again, so waiting for one would never restart it

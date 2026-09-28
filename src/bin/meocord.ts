@@ -19,6 +19,7 @@ import { configureCommandHelp, ensureReady } from '@src/util/meocord-cli.util.js
 import { resolveOwnVersion } from '@src/util/package-version.util.js'
 import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { DEV_RUNNER_ENV, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
 import packageJson from '../../package.json' with { type: 'json' }
 import { fileURLToPath } from 'url'
@@ -625,8 +626,22 @@ copies or substantial portions of the Software.
       return
     }
 
+    // The application gives up on its onShutdown hooks after shutdownTimeout; one still running after that and a
+    // grace period would hold the restart forever, so it is killed
+    const shutdownTimeout = loadMeoCordCliConfig()?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
+    const overdue = setTimeout(() => {
+      if (!stillRunning(previous)) return
+      this.logger.warn(
+        `The application did not exit within ${shutdownTimeout + FORCE_STOP_GRACE_MS} ms of being asked to stop, ` +
+          `its shutdownTimeout of ${shutdownTimeout} ms and ${FORCE_STOP_GRACE_MS} ms more; killing it to start the new build.`,
+      )
+      previous.kill('SIGKILL')
+    }, shutdownTimeout + FORCE_STOP_GRACE_MS)
+    overdue.unref()
+
     previous.removeAllListeners('exit')
     previous.once('exit', () => {
+      clearTimeout(overdue)
       if (!this.stopping) this.appProcess = this.launchDevApp()
     })
     previous.kill()
