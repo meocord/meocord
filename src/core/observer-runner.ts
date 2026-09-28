@@ -8,6 +8,7 @@ import { bindShared } from '@src/core/interceptor-runner.js'
 import { MetadataKey } from '@src/enum/index.js'
 import { appliesTo } from '@src/core/stage-scope.js'
 import { respond, type ResponsePhase } from '@src/common/response/response-state.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /** Private metadata: marks a class `@Observer` decorated. */
 export const OBSERVER_CLASS = Symbol('observer_class')
@@ -24,7 +25,7 @@ export function assertObservers(where: string, observers: readonly unknown[]): v
   for (const observer of observers) {
     if (typeof observer !== 'function' || !Reflect.getMetadata(OBSERVER_CLASS, observer)) {
       const name = typeof observer === 'function' ? observer.name : String(observer)
-      throw new Error(`${where} takes classes decorated with @Observer(), not ${name}.`)
+      throw refuse(new Error(`${where} takes classes decorated with @Observer(), not ${name}.`))
     }
   }
 }

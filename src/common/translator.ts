@@ -1,5 +1,6 @@
 import { type Guild, type Interaction, Locale } from 'discord.js'
 import { type MeoCordMessages } from '@src/interface/index.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /**
  * The plural categories `Intl.PluralRules` selects between.
@@ -423,10 +424,10 @@ export function createTranslator<
   const { default: defaultLocale, locales } = options
   for (const locale of Object.keys(locales)) {
     if (!DISCORD_LOCALES.has(locale)) {
-      throw new Error(`"${locale}" is not a Discord locale. Use discord.js Locale values, such as en-US or es-ES.`)
+      throw refuse(new Error(`"${locale}" is not a Discord locale. Use discord.js Locale values, such as en-US or es-ES.`))
     }
   }
-  if (!locales[defaultLocale]) throw new Error(`The default locale "${defaultLocale}" has no catalog in locales.`)
+  if (!locales[defaultLocale]) throw refuse(new Error(`The default locale "${defaultLocale}" has no catalog in locales.`))
 
   // Typed by the default catalog; at runtime every catalog is read the same way.
   return new CatalogTranslator(defaultLocale as Locale, locales as Partial<Record<Locale, CatalogShape>>) as unknown as Translator<

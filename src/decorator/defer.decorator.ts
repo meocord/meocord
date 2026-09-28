@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { DEFER_OPTIONS, deferMisuseError, type DeferOptions, nonInteractionHandler } from '@src/core/defer.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /**
  * Acknowledges an interaction for its handler, then locks a component's message while the handler runs.
@@ -40,7 +41,7 @@ export function Defer(options: DeferOptions = {}): MethodDecorator {
   return (target: object, propertyKey: string | symbol) => {
     const methodName = String(propertyKey)
     const kind = nonInteractionHandler(target, methodName)
-    if (kind) throw deferMisuseError(target.constructor.name, methodName, kind)
+    if (kind) throw refuse(deferMisuseError(target.constructor.name, methodName, kind))
     Reflect.defineMetadata(DEFER_OPTIONS, { ...options }, target, methodName)
   }
 }

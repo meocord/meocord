@@ -5,6 +5,7 @@ import { routeSpecificity } from '@src/core/route-specificity.js'
 import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
 import { type GivenFlag, isSpace, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /** One word of a message pattern: a literal word, or a param with the type it declares, if any. */
 export type PatternToken = { literal: string } | { param: string; rest: boolean; optional: boolean; type?: string }
@@ -223,7 +224,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
         if (own.hidden !== undefined && typeof own.hidden !== 'boolean') throw new Error(`hidden is true or false, not ${JSON.stringify(own.hidden)}.`)
         aliases = aliasPatterns(pattern, parsed.tokens, own.aliases)
       } catch (error) {
-        throw new Error(`@MessageHandler('${pattern}') in ${controllerClass.name}.${method}: ${(error as Error).message}`)
+        throw refuse(new Error(`@MessageHandler('${pattern}') in ${controllerClass.name}.${method}: ${(error as Error).message}`))
       }
       const shared = {
         controllerClass,
@@ -252,10 +253,10 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
         routes.splice(j--, 1)
         continue
       }
-      throw new Error(
+      throw refuse(new Error(
         `${describeRoute(a)} in ${a.controllerClass.name}.${a.method} and ${describeRoute(b)} in ${b.controllerClass.name}.${b.method} ` +
           `match the same messages, so only one of them could ever run. Change one pattern, or give one its own prefix.`,
-      )
+      ))
     }
   }
   return routes

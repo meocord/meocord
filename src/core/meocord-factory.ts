@@ -31,7 +31,7 @@ import {
   tokenDependencies,
   tokenName,
 } from '@src/core/providers.js'
-import { markExplained } from '@src/common/explained-error.js'
+import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
@@ -46,6 +46,7 @@ import {
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { claimAmbientAppTheme, registerClientTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
+import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
 
 /**
  * Recursively binds a class and all its constructor dependencies to the container in singleton scope.
@@ -53,7 +54,7 @@ import { registerClientTranslator } from '@src/common/meocord-text.js'
 function bindDependencies(container: Container, cls: any, providers: ProviderMap): void {
   // A provided class is bound by its own provider, wherever in the list that provider comes
   if (container.isBound(cls) || providers.has(cls)) return
-  if (injectedTokens(cls).includes(ExecutionContext)) throw singletonContextError(cls)
+  if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
 
   makeInjectable(cls)
 
@@ -61,7 +62,7 @@ function bindDependencies(container: Container, cls: any, providers: ProviderMap
 
   // By constructor type or @inject token; an interface-typed parameter records Object, which is skipped
   for (const dep of injectedTokens(cls)) {
-    if (dep === Translator && !container.isBound(Translator)) throw missingTranslatorError(cls)
+    if (dep === Translator && !container.isBound(Translator)) throw refuse(missingTranslatorError(cls))
     if (isAppClassToken(dep)) bindDependencies(container, dep, providers)
   }
 }
@@ -133,23 +134,33 @@ export class MeoCordFactory {
    * @returns The application, which `start()` logs in.
    * @throws Error when the class has no `@MeoCord`, when the built config is missing, when a provider cannot
    *   be bound, such as one for a token MeoCord binds itself, or when two handlers take one command, or two builder
-   *   classes build one, naming both.
+   *   classes build one, naming both. It is logged first, as one line, and the exit code set to 1, so
+   *   `isExplainedError()` tells a caller not to log it again.
    */
   static create(target: ServiceIdentifier): MeoCordApplication {
+    try {
+      return this.createApplication(target)
+    } catch (error) {
+      // Reported here, so it reads the same whether main.ts catches it or not; the error still rejects the call
+      if (isRefusal(error) && !isExplainedError(error)) {
+        this.logger.error(describeRefusal(error, process.cwd()))
+        markExplained(error)
+        if (process.exitCode === undefined || process.exitCode === 0) process.exitCode = 1
+      }
+      throw error
+    }
+  }
+
+  private static createApplication(target: ServiceIdentifier): MeoCordApplication {
     const options = Reflect.getMetadata(MetadataKey.AppOptions, target)
 
     if (!options) {
-      if (typeof target === 'function') {
-        this.logger.error(`No @MeoCord() options found for class: ${(target as any).name}`)
-      } else {
-        this.logger.error('No @MeoCord() options found for the provided target.')
-      }
-      throw new Error('Target class is not decorated with @MeoCord().')
+      throw refuse(new Error('Target class is not decorated with @MeoCord().'))
     }
 
     const meocordConfig = loadMeoCordConfig()
     if (!meocordConfig) {
-      throw new Error('MeoCord config not found: dist/meocord.config.mjs is missing or failed to load. Run `meocord build`.')
+      throw refuse(new Error('MeoCord config not found: dist/meocord.config.mjs is missing or failed to load. Run `meocord build`.'))
     }
 
     // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
@@ -218,7 +229,7 @@ export class MeoCordFactory {
     // a class token that is provided is not also bound as itself
     for (const [token, provider] of providers) {
       if (container.isBound(token as ServiceIdentifier)) {
-        throw new Error(`${tokenName(token)} is bound by MeoCord, so @MeoCord({ providers }) cannot provide it.`)
+        throw refuse(new Error(`${tokenName(token)} is bound by MeoCord, so @MeoCord({ providers }) cannot provide it.`))
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))
     }
@@ -262,10 +273,10 @@ export class MeoCordFactory {
     const byName = new Map<string, new (...args: any[]) => unknown>()
     for (const cls of appClasses) {
       if (byName.has(cls.name) && meocordConfig.sharding?.mode === 'process') {
-        throw new Error(
+        throw refuse(new Error(
           `Two classes are named ${cls.name}; with process sharding, ShardContext.call finds a service in ` +
             `another shard by its name, so give each controller and service a distinct name.`,
-        )
+        ))
       }
       byName.set(cls.name, cls)
     }

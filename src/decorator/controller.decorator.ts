@@ -25,6 +25,7 @@ import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 const COMMAND_METADATA_KEY = Symbol('commands')
 const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
@@ -296,17 +297,17 @@ export function createRegexFromPattern(pattern: string): {
     // no correct reading -- `profile-{uuid}` and `profile-{uuid}-{id}` both take
     // `profile-a-b`. Registration is the last point where that is still fixable.
     if ((literal !== '' && !literal.endsWith(PARAM_SEPARATOR)) || (after !== undefined && after !== PARAM_SEPARATOR)) {
-      throw new Error(
+      throw refuse(new Error(
         `Invalid pattern "${pattern}": {${param}} must occupy a whole segment, so it has to be ` +
           `preceded and followed by "${PARAM_SEPARATOR}" or by the ends of the pattern. ` +
           `Write "a${PARAM_SEPARATOR}{${param}}" rather than "a-{${param}}".`,
-      )
+      ))
     }
 
     if (type !== undefined) {
-      if (!isSegmentType(type)) throw new Error(`Invalid pattern "${pattern}": ${segmentTypeProblem(param, type)}`)
+      if (!isSegmentType(type)) throw refuse(new Error(`Invalid pattern "${pattern}": ${segmentTypeProblem(param, type)}`))
       if (choicesOf(type)?.includes('')) {
-        throw new Error(`Invalid pattern "${pattern}": {${param}:${type}} lists an empty word to choose from, which no segment can be.`)
+        throw refuse(new Error(`Invalid pattern "${pattern}": {${param}:${type}} lists an empty word to choose from, which no segment can be.`))
       }
       if (type !== 'string') types[param] = type
     }
@@ -489,7 +490,7 @@ export function Command<
   ) {
     const originalMethod = _descriptor.value
     if (!originalMethod) {
-      throw new Error(`Missing implementation for method ${propertyKey}`)
+      throw refuse(new Error(`Missing implementation for method ${propertyKey}`))
     }
 
     // Wrap original method for interaction type validation
@@ -527,19 +528,19 @@ export function Command<
       } catch (error) {
         const detail = error instanceof Error ? error.message.split('\n')[0] : String(error)
         if (subcommandPath) {
-          throw new Error(
+          throw refuse(new Error(
             `${where} declares the builder ${builderOrType.name} on "${commandName}", which is a subcommand path: the ` +
               `builder of its command, "${command}", describes it, and building it from the path failed (${detail}). ` +
               declareInstead,
             { cause: error },
-          )
+          ))
         }
         // discord.js builders validate as they are set, and their errors name neither the command nor the field.
-        throw new Error(
+        throw refuse(new Error(
           `${builderOrType.name} could not build "${commandName}": ${detail}. Check its names, descriptions and ` +
             `localizations, which Discord limits to 32 and 100 characters.`,
           { cause: error },
-        )
+        ))
       }
       // A builder that names its command itself still works on the path, registered once with its command
       if (subcommandPath) {
@@ -551,7 +552,7 @@ export function Command<
       guilds = Reflect.getMetadata(BUILDER_GUILDS, builderOrType)
       commandType = Reflect.getMetadata(MetadataKey.CommandType, builderOrType) as CommandType
       if (!(commandType in CommandType)) {
-        throw new Error(`Metadata for 'commandType' is missing on builder ${builderOrType.name}`)
+        throw refuse(new Error(`Metadata for 'commandType' is missing on builder ${builderOrType.name}`))
       }
       if (commandType === CommandType.CONTEXT_MENU) {
         assertContextMenuKind(target, propertyKey, builderOrType.name, commandName, builderInstance)
@@ -561,7 +562,13 @@ export function Command<
     }
 
     if (isCustomIdRouted(commandType)) {
-      const { regex: generatedRegex, params, specificity: patternSpecificity } = createRegexFromPattern(commandName)
+      let pattern: ReturnType<typeof createRegexFromPattern>
+      try {
+        pattern = createRegexFromPattern(commandName)
+      } catch (error) {
+        throw refuse(new Error(`${target.constructor.name}.${propertyKey}: ${(error as Error).message}`, { cause: error }))
+      }
+      const { regex: generatedRegex, params, specificity: patternSpecificity } = pattern
       regex = generatedRegex
       dynamicParams = params
       specificity = patternSpecificity
@@ -602,11 +609,11 @@ function assertContextMenuKind(target: object, propertyKey: string, builderName:
   const registered = (built as { type?: ApplicationCommandType } | undefined)?.type
   if (!declared || registered === undefined || declared.kind === registered) return
   const kind = registered === ApplicationCommandType.User ? 'user' : 'message'
-  throw new Error(
+  throw refuse(new Error(
     `${target.constructor.name}.${propertyKey} takes a ${declared.name} context menu interaction, but ${builderName} ` +
       `registers "${commandName}" as a ${kind} context menu command. Declare the handler's interaction as the kind the ` +
       `builder's setType() names.`,
-  )
+  ))
 }
 
 /**

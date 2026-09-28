@@ -4,6 +4,7 @@ import { registrationKey, serialise } from '@src/core/command-registration.js'
 import { CommandType } from '@src/enum/index.js'
 import { type CommandMetadata } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 type ControllerClass = new (...args: any[]) => unknown
 
@@ -57,11 +58,11 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
         const key = `${meta.type}\0${name}`
         const earlier = (handlers.get(key) ?? []).find(other => overlap(other.meta, meta))
         if (earlier) {
-          throw new Error(
+          throw refuse(new Error(
             `${where(earlier)} and ${where(here)} both handle the ${describe(meta.type, name, contextMenuKind(meta) ?? contextMenuKind(earlier.meta))}, ` +
               `so only ${where(earlier)} would ever run. Keep one handler for it, or give the other a name or ` +
               `subcommand path of its own.`,
-          )
+          ))
         }
         handlers.set(key, [...(handlers.get(key) ?? []), here])
 
@@ -78,12 +79,12 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
         if (!built) {
           builders.set(registered, { ...here, name: typeof body.name === 'string' ? body.name : name })
         } else if (built.meta.builderClass !== meta.builderClass) {
-          throw new Error(
+          throw refuse(new Error(
             `${built.meta.builderClass!.name} on ${where(built)} and ${meta.builderClass.name} on ${where(here)} both ` +
               `build the ${describe(meta.type, built.name, contextMenuKind(meta))}, and Discord registers one command ` +
               `per name and type, so only the first would be. Keep one builder, on a single @Command, and declare ` +
               `the other handlers with CommandType.${meta.type}.`,
-          )
+          ))
         }
       }
     }
