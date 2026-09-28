@@ -55,6 +55,7 @@ import { type MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
  * it receives the event's arguments, such as a `GuildMember` for `guildMemberAdd`. `@Guard({ types })` limits a
  * guard to the calls it is written for.
  *
+ * @pipeline guards where `@UseGuard` or `@MeoCord({ guards })` applies the class
  * @group Types
  * @see {@link Guard}
  * @see {@link UseGuard}
@@ -235,6 +236,7 @@ export interface CallHandler {
  * call, so per-call state lives in local variables, and a use's params come from `context.getParams()`. A
  * global interceptor also runs around `@On` and `@Once` handlers.
  *
+ * @pipeline interceptors where `@UseInterceptor` or `@MeoCord({ interceptors })` applies the class
  * @group Types
  * @see {@link Interceptor}
  * @see {@link CallHandler}
@@ -369,6 +371,7 @@ export interface ResponsePresenter {
  * the method's, then the controller's, then the global ones. When none matches, the built-in fallback logs the
  * error and answers the user. One instance is shared by every call.
  *
+ * @pipeline filters where `@UseFilter` or `@MeoCord({ filters })` applies the class
  * @group Types
  * @see {@link Catch}
  * @see {@link UseFilter}
@@ -394,6 +397,7 @@ export interface ExceptionFilter<E = unknown> {
  * @typeParam In - The value it receives.
  * @typeParam Out - The value the handler receives in its place.
  *
+ * @pipeline pipes where `@UsePipe` or `@Validate`'s `pipes` applies the class, after validation
  * @group Types
  * @see {@link Pipe}
  * @see {@link UsePipe}

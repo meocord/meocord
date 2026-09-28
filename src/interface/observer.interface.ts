@@ -68,6 +68,8 @@ export interface DispatchResult {
  * `onReady` and `onShutdown` hooks run with theirs; it cannot inject `ExecutionContext`, which both methods
  * receive. `@Observer({ types })` limits it to some kinds of call.
  *
+ * @pipeline observers-start in `onStart`, before anything else runs
+ * @pipeline observers-settled in `onSettled`, once the call has settled
  * @group Types
  * @see {@link Observer}
  * @see {@link DispatchResult}
