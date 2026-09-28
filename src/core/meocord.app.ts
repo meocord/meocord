@@ -20,6 +20,7 @@ import { type MessageCommandOptions } from '@src/interface/index.js'
 
 import { globalStagesOf, runHandler } from '@src/core/handler-pipeline.js'
 import { createFallback, type Fallback, replyWithUserError } from '@src/core/fallback.js'
+import { claimCooldownNotice } from '@src/core/cooldown-runner.js'
 
 
 import { stageClass, stageTypes } from '@src/core/stage-scope.js'
@@ -110,7 +111,9 @@ async function reportFatalLogin(code: FatalLoginCode, reason: string): Promise<v
 
 export class MeoCordApp implements MeoCordApplication {
   private readonly logger = new Logger(MeoCordApp.name)
-  private readonly fallback: Fallback = createFallback(this.logger, () => this.messageOptions)
+  private readonly fallback: Fallback = createFallback(this.logger, () => this.messageOptions, {
+    cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
+  })
   private readonly bot: Client
   private activityInterval: ReturnType<typeof setInterval> | null = null
 

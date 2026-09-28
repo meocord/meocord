@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { Container, type ServiceIdentifier } from 'inversify'
-import { COOLDOWN_POLICY, DEFAULT_COOLDOWN_STORE_TIMEOUT_MS } from '@src/core/cooldown-runner.js'
+import { claimCooldownNotice, COOLDOWN_POLICY, DEFAULT_COOLDOWN_STORE_TIMEOUT_MS } from '@src/core/cooldown-runner.js'
 import {
   BaseInteraction,
   Client,
@@ -532,7 +532,10 @@ export class TestingModule {
       messageOptions: this.messageOptions,
       logger,
       // Strict: an answer MeoCord fails to build rejects the dispatch, where a bot logs it and carries on
-      fallback: createFallback(logger, () => this.messageOptions, { strict: true }),
+      fallback: createFallback(logger, () => this.messageOptions, {
+        strict: true,
+        cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
+      }),
       // A mock's client is the one bot every mock client is, so a mention of it starts a command
       botUserId: event => {
         const id = event.client?.user?.id

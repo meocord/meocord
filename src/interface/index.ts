@@ -526,11 +526,30 @@ export interface MessageCommandOptions {
   deleteUsageRepliesAfter?: number
   /**
    * Begins every text reply MeoCord sends to a message with the theme's `emojis.warning`: a command's usage, a
-   * guard's or validation's reason, and a `UserError`'s message, an `@On` listener's of a message event included.
+   * guard's or validation's reason, a `UserError`'s message, an `@On` listener's of a message event included, and the
+   * direct messages `dmOnError` and `dmOnCooldown` send.
    * The emoji is the call's resolved theme's, so it follows `@UseTheme` and `themeFor`.
    * @defaultValue `false`
    */
   replyEmoji?: boolean
+  /**
+   * Tells the author of a message command, in a direct message, when it fails with an error no filter handled,
+   * naming the command, the channel and the server. The error is logged as without it, and nothing is said in the
+   * channel: a message cannot be answered privately there. A command sent in a direct message is answered in it.
+   * The text is `meocord.dm.error`, in the server's language. A member whose direct messages are closed is not told.
+   * Only patterned handlers are answered, not a listener for every message.
+   * @defaultValue `false`
+   */
+  dmOnError?: boolean
+  /**
+   * Tells the author of a message command, in a direct message, when a `@Cooldown` refuses it, with how long to
+   * wait, once per wait: retrying before it ends sends nothing more. The notice is counted in the app's cooldown
+   * store, so it holds across shards with a shared store. The text is `meocord.dm.cooldown`, around the cooldown's
+   * own wait text, in the server's language. A command sent in a direct message is answered in it, and a member
+   * whose direct messages are closed is not told. Only patterned handlers are answered.
+   * @defaultValue `false`
+   */
+  dmOnCooldown?: boolean
   /**
    * Answers `!help` with the message commands the caller can use, and `!help <command>` with one of them, from the
    * `description` each handler gives. `true` uses the word `help`; `{ command, aliases }` names other words. It

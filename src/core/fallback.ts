@@ -1,6 +1,6 @@
 import { type AutocompleteInteraction, Message } from 'discord.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
-import { CommandNotFoundError, CooldownError, CooldownStoreError, GuardDeniedError, MessageUsageError, UserError, ValidationError } from '@src/common/errors.js'
+import { CommandNotFoundError, CooldownError, cooldownText, CooldownStoreError, GuardDeniedError, MessageUsageError, UserError, ValidationError } from '@src/common/errors.js'
 import { type Logger } from '@src/common/logger.js'
 import { responseOf } from '@src/common/response/response-state.js'
 import { describeInteraction } from '@src/util/interaction.util.js'
@@ -8,12 +8,12 @@ import { isUserOutcome } from '@src/common/user-outcome.js'
 import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { useTheme } from '@src/core/theme-scope.js'
 import { errorText } from '@src/common/translate-error.js'
-import { interactionLocale, messageLocale, translatorOfClient } from '@src/common/meocord-text.js'
+import { interactionLocale, messageLocale, renderText, translatorOfClient } from '@src/common/meocord-text.js'
 import { type MessageCommandOptions } from '@src/interface/index.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
 
 /** The app's message options the fallback's replies to messages follow. */
-type MessageReplyOptions = Pick<MessageCommandOptions, 'deleteUsageRepliesAfter' | 'replyEmoji'>
+type MessageReplyOptions = Pick<MessageCommandOptions, 'deleteUsageRepliesAfter' | 'replyEmoji' | 'dmOnError' | 'dmOnCooldown'>
 
 /**
  * Answers an error no filter handled, for the call `context` describes. Resolves to the error that kept it from
@@ -24,9 +24,21 @@ export type Fallback = (error: unknown, context: ExecutionContext) => Promise<un
 /** How the fallback treats an answer it fails to build: logged in a bot, and also rethrown when `strict`, as in a test. */
 export interface FallbackOptions {
   strict?: boolean
+  /** Whether a caller a cooldown refused is yet to be told during this wait; see `claimCooldownNotice`. */
+  cooldownNotice?: (refusal: CooldownError) => Promise<boolean>
 }
 
 const UNKNOWN_INTERACTION = 10062
+/** Discord's refusal of a direct message: the member's are closed, or they blocked the bot. */
+const CANNOT_MESSAGE_USER = 50007
+
+/** A message command as its author typed it, prefix and command words, as the dispatcher matched it. */
+const invocations = new WeakMap<Message, string>()
+
+/** Records how `message` invoked its command, such as `!roll`, for a direct message about it to name. */
+export function noteInvocation(message: Message, invocation: string): void {
+  invocations.set(message, invocation)
+}
 
 function errorCode(error: unknown): unknown {
   return typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined
@@ -134,6 +146,43 @@ function isCommand(context: ExecutionContext): boolean {
   return controller !== undefined && getMessageHandlers(controller.prototype).some(handler => handler.method === method && handler.pattern !== undefined)
 }
 
+/**
+ * Tells a message command's author what went wrong, where only they see it: in a direct message naming the
+ * command, channel and server, or, for a command sent in one, as a reply there. A member whose direct messages
+ * are closed is not told, at debug level; any other failed send is logged as {@link logFailedSend} does.
+ */
+async function tellPrivately(
+  context: ExecutionContext,
+  error: unknown,
+  logger: Logger,
+  withEmoji: boolean | undefined,
+  answering: Answering,
+): Promise<void> {
+  const message = context.getMessage()
+  if (!message) return
+  const call = describeCall(context)
+  const content = answering.build('the direct message', call, () => {
+    const translator = translatorOfClient(message.client)
+    const locale = messageLocale(message)
+    if (!message.guild) return replyText(errorText(error, translator, locale), withEmoji)
+    const channel = 'name' in message.channel && message.channel.name ? `#${message.channel.name}` : `<#${message.channelId}>`
+    const place = { command: invocations.get(message) ?? message.content.split(/\s+/)[0]!, channel, server: message.guild.name }
+    const text =
+      error instanceof CooldownError
+        ? { key: 'meocord.dm.cooldown', params: { ...place, wait: cooldownText(error.retryAfterMs) } }
+        : { key: 'meocord.dm.error', params: place }
+    return replyText(renderText(translator, locale, text), withEmoji)
+  })
+  if (content === undefined) return
+  try {
+    if (message.guild) await message.author.send({ content, allowedMentions: { parse: [] } })
+    else await message.reply({ content, allowedMentions: { repliedUser: false, parse: [] } })
+  } catch (failure) {
+    if (errorCode(failure) === CANNOT_MESSAGE_USER) logger.debug(`Could not tell ${message.author.id} about ${call}: they take no direct messages`)
+    else logFailedSend(logger, 'send a direct message about a command', failure)
+  }
+}
+
 /** How long a reply showing a command's usage stays, in seconds, when the app does not say. */
 export const DEFAULT_USAGE_REPLY_SECONDS = 10
 
@@ -202,12 +251,22 @@ export function createFallback(
         if (isCommand(context)) await answerUsage(error, context, logger, messageOptions(), answering)
         return
       }
-      // A message sent too often is ignored, as a cooldown means; it is not a fault to report.
-      if (error instanceof CooldownError) logger.debug(`Cooldown (${error.per}) skipped ${describeCall(context)}`)
+      const replies = messageOptions()
+      // A message sent too often is ignored, as a cooldown means; it is not a fault to report. Its author is told
+      // privately when the app asks, once per wait
+      if (error instanceof CooldownError) {
+        logger.debug(`Cooldown (${error.per}) skipped ${describeCall(context)}`)
+        if (replies?.dmOnCooldown && isCommand(context) && (await options.cooldownNotice?.(error))) {
+          await tellPrivately(context, error, logger, replies.replyEmoji, answering)
+        }
+      }
       // Logged once per outage where the store failed, rather than for every call it refused
       else if (error instanceof CooldownStoreError) logger.debug(`Cooldown store down; skipped ${describeCall(context)}`)
-      else if (error instanceof UserError) await tellAuthor(context, error, logger, messageOptions()?.replyEmoji, answering)
-      else logger.error(`Error handling ${describeCall(context)}:`, error)
+      else if (error instanceof UserError) await tellAuthor(context, error, logger, replies?.replyEmoji, answering)
+      else {
+        logger.error(`Error handling ${describeCall(context)}:`, error)
+        if (replies?.dmOnError && isCommand(context)) await tellPrivately(context, error, logger, replies.replyEmoji, answering)
+      }
       return
     }
 
