@@ -15,7 +15,7 @@ describe('component routes', () => {
       open() {}
     }
     expect(() => buildComponentRoutes([Profile, Card])).toThrow(
-      /"profile\/\{uid\}" in Profile\.show and "profile\/\{uid\}" in Card\.open match the same button customIds/,
+      /Profile\.show: "profile\/\{uid\}" and "profile\/\{uid\}" in Card\.open match the same button customIds/,
     )
   })
 
@@ -28,7 +28,7 @@ describe('component routes', () => {
       @Command('profile/{id}/edit', CommandType.BUTTON)
       alsoEdit() {}
     }
-    expect(() => buildComponentRoutes([Profile])).toThrow(/Profile\.edit and .* in Profile\.alsoEdit match the same/)
+    expect(() => buildComponentRoutes([Profile])).toThrow(/^Profile\.edit: .* in Profile\.alsoEdit match the same/)
   })
 
   it('refuses a base controller and its subclass registered together, which share every route', () => {
@@ -39,7 +39,7 @@ describe('component routes', () => {
     }
     @Controller()
     class Admin extends Moderation {}
-    expect(() => buildComponentRoutes([Moderation, Admin])).toThrow(/in Moderation\.ban and .* in Admin\.ban/)
+    expect(() => buildComponentRoutes([Moderation, Admin])).toThrow(/^Moderation\.ban: .* in Admin\.ban match the same/)
   })
 
   it('keeps one route for a handler declared under two spellings of one pattern', () => {

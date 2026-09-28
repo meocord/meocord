@@ -132,7 +132,8 @@ export class MeoCordApp implements MeoCordApplication {
   ) {
     this.lifecycleUnits = lifecycleUnits ?? classUnits(container, lifecycleClasses)
     this.bot = this.discordClient
-    // Built now, so a pattern that cannot be read or two that match the same messages stop the bot before login
+    // Built now, so a pattern that cannot be read or two that match the same messages or customIds stop the bot as it
+    // is created, before start() attaches anything
     this.dispatcher = new Dispatcher({
       container,
       controllerClasses,
@@ -142,6 +143,7 @@ export class MeoCordApp implements MeoCordApplication {
       botUserId: () => this.bot.user?.id,
       warnUnanswered,
     })
+    this.dispatcher.getComponentRoutes()
     this.shutdownTimeout =
       typeof shutdownTimeout === 'number' && shutdownTimeout >= 0 ? shutdownTimeout : DEFAULT_SHUTDOWN_TIMEOUT_MS
   }
@@ -272,8 +274,6 @@ export class MeoCordApp implements MeoCordApplication {
     this.attachEventHandlers()
     this.warnAboutMissingRequirements()
     this.noteGlobalStagesOnEvents()
-    // Built now rather than on the first click, so overlapping patterns are reported at startup
-    this.dispatcher.getComponentRoutes()
 
     const login = this.bot.login(this.discordToken)
     const stopped = new Promise<never>((_, reject) => {

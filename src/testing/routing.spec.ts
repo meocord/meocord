@@ -127,7 +127,7 @@ describe('findRouteConflicts', () => {
     @MeoCord({ controllers: [Twice], clientOptions: { intents: [] } })
     class TwiceApp {}
 
-    const same = /"ban\/\{id\}" in Twice\.ban and "ban\/\{userId\}" in Twice\.alsoBan match the same button customIds/
+    const same = /Twice\.ban: "ban\/\{id\}" and "ban\/\{userId\}" in Twice\.alsoBan match the same button customIds/
     expect(() => findRouteConflicts(TwiceApp)).toThrow(same)
     expect(() => resolveRoute(TwiceApp, { type: CommandType.BUTTON, customId: 'ban/1' })).toThrow(same)
   })

@@ -175,7 +175,7 @@ describe('typed customId params of one shape', () => {
       @Command('s/{w:on|off}', CommandType.BUTTON) first() {}
       @Command('s/{v:off|on}', CommandType.BUTTON) second() {}
     }
-    expect(() => buildComponentRoutes([Twice])).toThrow(/"s\/\{w:on\|off\}" in Twice\.first and "s\/\{v:off\|on\}" in Twice\.second match the same/)
+    expect(() => buildComponentRoutes([Twice])).toThrow(/Twice\.first: "s\/\{w:on\|off\}" and "s\/\{v:off\|on\}" in Twice\.second match the same/)
   })
 
   it('runs the narrower type first, whatever order they are declared in', async () => {

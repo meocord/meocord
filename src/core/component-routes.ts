@@ -3,6 +3,7 @@ import { type CommandMetadata } from '@src/interface/index.js'
 import { createRegexFromPattern, findAmbiguousRoutes, getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
 import { decodeRouteParams } from '@src/common/route.js'
 import { parseSegment } from '@src/core/scalar-types.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 export type ControllerClass = new (...args: any[]) => any
 
@@ -50,11 +51,11 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
         }
         // One handler under two spellings, such as 'card/{id}' and 'card/{cardId}', is one route
         if (earlier.controllerClass === controllerClass && earlier.meta.methodName === meta.methodName) continue
-        throw new Error(
-          `"${earlier.pattern}" in ${earlier.controllerClass.name}.${earlier.meta.methodName} and "${pattern}" in ` +
+        throw refuse(new Error(
+          `${earlier.controllerClass.name}.${earlier.meta.methodName}: "${earlier.pattern}" and "${pattern}" in ` +
             `${controllerClass.name}.${meta.methodName} match the same ${typeLabel(meta.type)} customIds, so only one ` +
             `of them could ever run. Change one pattern.`,
-        )
+        ))
       }
     }
   }

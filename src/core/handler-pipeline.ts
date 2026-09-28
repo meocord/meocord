@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
 import { MetadataKey } from '@src/enum/index.js'
+import { refuse } from '@src/util/refusal.util.js'
 import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
@@ -85,7 +86,7 @@ export function appStages(app: object): GlobalStages {
       }
     | undefined
   if (!options) {
-    throw new Error(`${(app as { name?: string }).name || 'The app'} is not decorated with @MeoCord().`)
+    throw refuse(new Error(`${(app as { name?: string }).name || 'The app class'}: not decorated with @MeoCord().`))
   }
   return {
     guards: [...(options.guards ?? [])],
@@ -217,10 +218,10 @@ function assertDistinctNamesWhereKeyed(classes: readonly (new (...args: any[]) =
   for (const cls of classes) {
     const other = byName.get(cls.name)
     if (other && other !== cls && (keyedByName(cls) || keyedByName(other))) {
-      throw new Error(
-        `Two classes are named ${cls.name}, and @Cooldown and @Once tell classes apart by name, so they would share counts. ` +
-          `Rename one of them.`,
-      )
+      throw refuse(new Error(
+        `${cls.name}: two classes have this name; @Cooldown and @Once tell classes apart by name, so they would share ` +
+          `their counts. Rename one of them.`,
+      ))
     }
     byName.set(cls.name, cls)
   }
@@ -238,22 +239,21 @@ function assertInputStagesOnInteractions(controller: new (...args: any[]) => unk
   ]
   for (const [method, kind] of others) {
     const { schema, pipes } = handlerInputStages(prototype, method)
+    const handler =
+      kind === 'message'
+        ? 'a message handler without a pattern'
+        : `${kind === 'autocomplete' || kind === 'event' ? 'an' : 'a'} ${kind} handler`
     if (schema || pipes.length > 0) {
-      const handler =
-        kind === 'message'
-          ? 'a message handler without a pattern'
-          : `${kind === 'autocomplete' || kind === 'event' ? 'an' : 'a'} ${kind} handler`
-      throw new Error(
-        `${controller.name}.${method} is ${handler}; @Validate and @UsePipe apply only to interaction and patterned ` +
-          `message handlers, whose options, customId params, modal fields and pattern params they check.`,
-      )
+      throw refuse(new Error(
+        `${controller.name}.${method}: @Validate and @UsePipe are for interaction and patterned message handlers, ` +
+          `whose options, customId params, modal fields and pattern params they check, and this is ${handler}.`,
+      ))
     }
     // A controller's own @Cooldown skips these handlers; one on the method itself is a mistake.
     if (kind !== 'message' && methodCooldowns(prototype, method).length > 0) {
-      throw new Error(
-        `${controller.name}.${method} is ${kind === 'autocomplete' || kind === 'event' ? 'an' : 'a'} ${kind} handler; @Cooldown applies only to ` +
-          `interaction and message handlers.`,
-      )
+      throw refuse(new Error(
+        `${controller.name}.${method}: @Cooldown is for interaction and message handlers, and this is ${handler}.`,
+      ))
     }
   }
 }

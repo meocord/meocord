@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
+import { refuse } from '@src/util/refusal.util.js'
 
 /**
  * File written beside a bundle that carries native addons, naming the platform it was built for.
@@ -73,9 +74,9 @@ export function assertBuiltForThisPlatform(distDir = process.argv[1] ? path.dirn
   const running = currentPlatform()
   if (isSamePlatform(built, running)) return
 
-  throw new Error(
-    `This build carries native addons compiled for ${describePlatform(built)}, but is running on ` +
-      `${describePlatform(running)}. Compiled binaries only load on the platform they were built for. ` +
+  throw refuse(new Error(
+    `${path.basename(distDir)}: this build carries native addons compiled for ${describePlatform(built)}, but is ` +
+      `running on ${describePlatform(running)}. Compiled binaries only load on the platform they were built for. ` +
       'Build on the same platform you deploy to -- for a container, run `meocord build` inside the image.',
-  )
+  ))
 }

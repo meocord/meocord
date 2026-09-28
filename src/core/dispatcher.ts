@@ -220,12 +220,12 @@ export class Dispatcher {
   }
 
   /**
-   * Every pattern-matched route, most specific first, built once at start. The ordering lets
+   * Every pattern-matched route, most specific first, built once, as the app is created. The ordering lets
    * `gi-profile/summary/{ownerId}/{uid}` win over `gi-profile/{uuid}/{uid}` regardless of registration order.
    */
   private componentRoutes?: ComponentRoute[]
 
-  /** The component routes, built and checked for overlaps on first use; the app calls it at startup. */
+  /** The component routes, built and checked for overlaps on first use; the app calls it as it is created. */
   getComponentRoutes(): ComponentRoute[] {
     if (this.componentRoutes) return this.componentRoutes
 

@@ -255,7 +255,7 @@ describe('@Cooldown', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ controllers: [ReactionController] }).compile()).toThrow(
-      'ReactionController.thumbs is a reaction handler; @Cooldown applies only to interaction and message handlers',
+      'ReactionController.thumbs: @Cooldown is for interaction and message handlers, and this is a reaction handler.',
     )
   })
 
@@ -403,12 +403,12 @@ describe('classes that share a name', () => {
 
   it('refuse to start when either counts a cooldown', () => {
     expect(() => MeoCordTestingModule.create({ controllers: [shopWithCooldown(), plainShop()] }).compile()).toThrow(
-      'Two classes are named Shop, and @Cooldown and @Once tell classes apart by name, so they would share counts. Rename one of them.',
+      'Shop: two classes have this name; @Cooldown and @Once tell classes apart by name, so they would share their counts. Rename one of them.',
     )
   })
 
   it('refuse to start when either has a @Once handler', () => {
-    expect(() => MeoCordTestingModule.create({ controllers: [plainShop(), shopWithOnce()] }).compile()).toThrow('Two classes are named Shop')
+    expect(() => MeoCordTestingModule.create({ controllers: [plainShop(), shopWithOnce()] }).compile()).toThrow('Shop: two classes have this name')
   })
 
   it('start when neither has a cooldown or a @Once handler', () => {

@@ -1,5 +1,6 @@
 import { type ClientOptions } from 'discord.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /** Set by discord.js in every process its ShardingManager spawns. */
 export const SHARDING_MANAGER_ENV = 'SHARDING_MANAGER'
@@ -41,9 +42,10 @@ export function clientOptionsWithSharding(config: MeoCordConfig, clientOptions: 
   const own = clientOptions.shards ?? clientOptions.shardCount
   if (sharding.mode === 'process') {
     if (own !== undefined) {
-      throw new Error(
-        "sharding.mode 'process' starts one shard per process, so clientOptions.shards and shardCount must be unset.",
-      )
+      throw refuse(new Error(
+        "meocord.config.ts: sharding.mode 'process' starts one shard per process, so clientOptions.shards and shardCount " +
+          'must be unset.',
+      ))
     }
     return clientOptions
   }
@@ -61,9 +63,10 @@ export function clientOptionsWithSharding(config: MeoCordConfig, clientOptions: 
       ? clientOptions.shards === 'auto'
       : clientOptions.shardCount === shards || (Array.isArray(clientOptions.shards) && clientOptions.shards.length === shards)
   if (!agrees) {
-    throw new Error(
-      `sharding.shards (${String(shards)}) and clientOptions.shards/shardCount disagree; set the shards in one place.`,
-    )
+    throw refuse(new Error(
+      `meocord.config.ts: sharding.shards (${String(shards)}) and clientOptions.shards/shardCount disagree; set the ` +
+        'shards in one place.',
+    ))
   }
   return clientOptions
 }

@@ -33,6 +33,7 @@ const { Command, Controller, Cooldown } = await import('@src/decorator/index.js'
 const { CommandType } = await import('@src/enum/index.js')
 const { runHandler } = await import('@src/core/handler-pipeline.js')
 const { presenterFor } = await import('@src/common/response/presenter.js')
+const { isExplainedError } = await import('@src/common/explained-error.js')
 
 /** What start() runs before login: providers resolved, listed services made, the presenter bound. */
 const runStartup = (app: unknown) => (Reflect.get(app as object, 'startup') as () => Promise<void>)()
@@ -56,7 +57,6 @@ describe('MeoCordFactory.create()', () => {
     })
 
     async function refused() {
-      const { isExplainedError } = await import('@src/common/explained-error.js')
       const exitCode = process.exitCode
       class NoMetadataApp {}
       let thrown: unknown
@@ -90,6 +90,77 @@ describe('MeoCordFactory.create()', () => {
       expect(logger().error).not.toHaveBeenCalled()
       expect(explained).toBe(false)
       expect(exitCode).toBeUndefined()
+    })
+
+    const sameNamedShops = () => {
+      const counted = () => {
+        @Controller()
+        class Shop {
+          @Command('buy', CommandType.SLASH)
+          @Cooldown({ seconds: 5 })
+          async buy(..._args: any[]) {}
+        }
+        return Shop
+      }
+      const plain = () => {
+        @Controller()
+        class Shop {
+          @Command('browse', CommandType.SLASH)
+          async browse(..._args: any[]) {}
+        }
+        return Shop
+      }
+      return [counted(), plain()]
+    }
+    @Controller()
+    class Profile {
+      @Command('profile/{uid}', CommandType.BUTTON)
+      async show(..._args: any[]) {}
+    }
+    @Controller()
+    class Card {
+      @Command('profile/{id}', CommandType.BUTTON)
+      async open(..._args: any[]) {}
+    }
+
+    it.each([
+      {
+        load: 'two same-named classes, one with a cooldown',
+        controllers: sameNamedShops,
+        message: 'Shop: two classes have this name; @Cooldown and @Once tell classes apart by name, so they would share their counts. Rename one of them.',
+      },
+      {
+        load: 'two component patterns that match the same customIds',
+        controllers: () => [Profile, Card],
+        message:
+          'Profile.show: "profile/{uid}" and "profile/{id}" in Card.open match the same button customIds, so only one of them could ever run. ' +
+          'Change one pattern.',
+      },
+      {
+        load: 'sharding.shards and clientOptions.shardCount that disagree',
+        controllers: () => [],
+        config: { sharding: { mode: 'internal', shards: 2 } },
+        clientOptions: { shardCount: 3 },
+        message: 'meocord.config.ts: sharding.shards (2) and clientOptions.shards/shardCount disagree; set the shards in one place.',
+      },
+    ])('is reported as one line before login for $load', ({ controllers, config, clientOptions, message }) => {
+      Reflect.set(globalThis, BUNDLE_ENTRY, '/bots/shop/dist/main.js')
+      mockLoadConfig.mockReturnValue({ discordToken: 'test-token', ...config })
+      class ShopApp {}
+      Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: controllers(), clientOptions: { intents: [], ...clientOptions } }, ShopApp)
+
+      let thrown: unknown
+      try {
+        MeoCordFactory.create(ShopApp)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect((thrown as Error).message).toBe(message)
+      expect(logger().error).toHaveBeenCalledTimes(1)
+      // The message, then where in the application's source it comes from
+      expect(logger().error.mock.calls[0][0].split('\n')[0]).toBe(message)
+      expect(isExplainedError(thrown)).toBe(true)
     })
   })
 
