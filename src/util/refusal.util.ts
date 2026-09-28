@@ -54,15 +54,31 @@ export function describeRefusal(error: Error, root: string): string {
  * Reports a refusal the application doesn't catch as one line, with where it is in the source, and exits 1. A
  * monitor, so any other error keeps the runtime's own report. Installed by the first refusal in a built application;
  * a test or script that throws one gets the error as it is.
+ *
+ * Bun emits no monitor event for an unhandled rejection, so there a rejection listener reports a refusal instead. Any
+ * other reason is rejected again with the listener gone, for Bun to report as it would have, unless the application
+ * listens for rejections itself.
  */
 export function reportRefusals(
   log: (text: string) => void = text => new Logger('MeoCord').error(text),
   exit: (code: number) => void = code => process.exit(code),
+  { bun = process.versions.bun !== undefined, reject = (reason: unknown) => void Promise.reject(reason) } = {},
 ): void {
   reporting = true
-  process.on('uncaughtExceptionMonitor', error => {
-    if (!isRefusal(error)) return
+  const report = (error: Error) => {
     if (!isExplainedError(error)) log(describeRefusal(error, process.cwd()))
     exit(1)
+  }
+  process.on('uncaughtExceptionMonitor', error => {
+    if (isRefusal(error)) report(error)
   })
+  if (!bun) return
+
+  const onRejection = (reason: unknown) => {
+    if (isRefusal(reason)) return report(reason)
+    process.off('unhandledRejection', onRejection)
+    // With a listener of the application's own, it handles the rejection, and Bun would not have reported it
+    if (process.listenerCount('unhandledRejection') === 0) reject(reason)
+  }
+  process.on('unhandledRejection', onRejection)
 }

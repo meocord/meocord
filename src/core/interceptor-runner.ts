@@ -80,9 +80,9 @@ export async function runInterceptors(
     const interceptor = container.get<InterceptorInterface>(cls)
 
     if (typeof interceptor.intercept !== 'function') {
-      throw refuse(new Error(
+      throw new Error(
         `Interceptor ${cls.name} applied to ${context.getHandlerName()} does not have a valid intercept method.`,
-      ))
+      )
     }
     return interceptor.intercept(context.withParams(params), { handle: () => run(index + 1) })
   }
