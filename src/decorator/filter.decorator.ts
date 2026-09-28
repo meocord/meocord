@@ -29,6 +29,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * }
  * ```
  *
+ * @pipeline filters where `@UseFilter` or `@MeoCord({ filters })` applies it, around every stage and the handler
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseFilter}
