@@ -48,7 +48,6 @@ import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 
-
 /** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
 export const SLOW_READY_HOOK_MS = 10_000
 
@@ -529,16 +528,17 @@ export class MeoCordApp implements MeoCordApplication {
     this.closing = true
     runningApps.delete(this.close)
     releaseAmbientAppTheme(this.container)
+    this.logger.log('Shutting down bot...')
 
     // Nothing came online, so there are no hooks to undo; the listeners go first, so none of them runs
     if (this.abortLogin) {
-      this.logger.log('Stopping the bot before it came online')
+      this.logger.log('The bot was still logging in, so it stops without coming online')
       this.bot.removeAllListeners()
       this.abortLogin()
+      this.logger.log('Bot has shut down')
       return true
     }
 
-    this.logger.log('Shutting down bot...')
     if (this.activityInterval) clearInterval(this.activityInterval)
 
     // A login that failed never ran onReady, so there is nothing for onShutdown to undo

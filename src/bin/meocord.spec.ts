@@ -508,12 +508,12 @@ describe('spawning the application', () => {
           startDev: () => Promise<void>
           clearConsole: () => void
           relayStopSignals: () => void
-          compileConfig: () => Promise<void>
+          compileConfig: (options?: { exitOnFailure?: boolean }) => Promise<boolean>
           createBundler: () => Promise<unknown>
         }
         vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
-        const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
+        const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
         const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
           rsbuild: { onAfterBuild: (callback: () => void) => callback(), build: async () => ({ close: closeBuild }) },
         }))
@@ -542,13 +542,29 @@ describe('spawning the application', () => {
         expect(dev.compileConfig.mock.invocationCallOrder[1]).toBeLessThan(dev.createBundler.mock.invocationCallOrder[1])
       })
 
-      it('ignores the other files in the folder', async () => {
+      it.each(['package.json', 'constructor', 'toString'])('ignores %s, which it does not reload from', async file => {
         const dev = await startWatching()
 
-        dev.change('package.json')
+        dev.change(file)
         await new Promise(resolve => setTimeout(resolve, 400))
 
         expect(dev.createBundler).toHaveBeenCalledTimes(1)
+      })
+
+      it('keeps the running build when the changed config does not compile, and reloads once it does', async () => {
+        const dev = await startWatching()
+        dev.compileConfig.mockResolvedValueOnce(false)
+
+        dev.change('meocord.config.ts')
+        await vi.waitFor(() => expect(dev.compileConfig).toHaveBeenCalledTimes(2))
+        await new Promise(resolve => setTimeout(resolve, 50))
+        expect(dev.compileConfig).toHaveBeenLastCalledWith({ exitOnFailure: false })
+        expect(dev.closeBuild).not.toHaveBeenCalled()
+        expect(dev.createBundler).toHaveBeenCalledTimes(1)
+
+        dev.change('meocord.config.ts')
+        await vi.waitFor(() => expect(dev.createBundler).toHaveBeenCalledTimes(2))
+        expect(dev.closeBuild).toHaveBeenCalledTimes(1)
       })
     })
 
