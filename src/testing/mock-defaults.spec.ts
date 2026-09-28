@@ -302,6 +302,14 @@ describe("a mock guild's language", () => {
     expect(t.forGuild(createMockGuild({ preferredLocale: Locale.Indonesian }))('hello')).toBe('Halo')
   })
 
+  it("gives an interaction in a guild that guild's language as its guildLocale", () => {
+    const guild = createMockGuild({ preferredLocale: Locale.Indonesian })
+    const interaction = createMockInteraction(ChatInputCommandInteraction, { guild, guildId: guild.id })
+    expect(interaction.guildLocale).toBe('id')
+    expect(t.for(interaction, { public: true })('hello')).toBe('Halo')
+    expect(createMockInteraction(ChatInputCommandInteraction, { guildId: guild.id }).guildLocale).toBe('en-US')
+  })
+
   it("answers a message on a bare mock guild, or a message's own, in English", async () => {
     const english = 'Usage: !roll <sides>\nsides: "lots" is not a valid whole number'
     expect(await usageReply(createMockGuild())).toBe(english)

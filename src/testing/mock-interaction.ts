@@ -663,11 +663,12 @@ export function createMockInteraction<T extends object>(
     }
   }
 
-  // Discord sends the user's locale with every interaction, and the server's with one made in a server
+  // Discord sends the user's locale with every interaction, and the server's preferred one with one made in a server
   if (BaseInteraction.prototype.isPrototypeOf(instance)) {
     if (own('locale') === undefined) instance.locale = Locale.EnglishUS
     if (!Object.prototype.hasOwnProperty.call(instance, 'guildLocale')) {
-      instance.guildLocale = own('guildId') ? Locale.EnglishUS : null
+      const preferred = (own('guild') as { preferredLocale?: unknown } | null | undefined)?.preferredLocale
+      instance.guildLocale = own('guildId') ? (typeof preferred === 'string' ? preferred : Locale.EnglishUS) : null
     }
   }
 
