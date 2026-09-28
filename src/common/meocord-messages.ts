@@ -44,6 +44,10 @@ export const MEOCORD_MESSAGES = {
       notFound: 'Command not found!',
       error: 'An error occurred while executing the command.',
     },
+    dm: {
+      error: 'Something went wrong running {command} in {channel} on {server}. Try again later.',
+      cooldown: '{command} in {channel} on {server}: {wait}',
+    },
     presenter: {
       loading: 'Working on it…',
       errorTitle: 'Oops!',

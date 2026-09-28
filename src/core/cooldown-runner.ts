@@ -227,6 +227,9 @@ async function keyed(
   return counted
 }
 
+/** The store key of the cooldown each refusal came from, for {@link claimCooldownNotice}. */
+const refusalKeys = new WeakMap<CooldownError, string>()
+
 /** Asks the store about the call under the app's policy, and throws what the answer means for it. */
 async function ask(container: Container, counted: Counted[], peek: boolean, call: Peeked | undefined): Promise<void> {
   const store = cooldownStoreOf(container)
@@ -247,7 +250,29 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
     throw failure
   }
   reportRecovery(store)
-  if (!verdict.allowed) throw new CooldownError(verdict.retryAfterMs, counted[verdict.blocked ?? 0]?.per ?? counted[0].per)
+  if (verdict.allowed) return
+  const blocking = counted[verdict.blocked ?? 0] ?? counted[0]
+  const refusal = new CooldownError(verdict.retryAfterMs, blocking.per)
+  refusalKeys.set(refusal, blocking.key)
+  throw refusal
+}
+
+/**
+ * Whether the caller a cooldown refused is yet to be told so during this wait: a one-use cooldown in the same
+ * store, keyed on the refusing cooldown's own key, over the wait left. The first refusal of a wait claims it;
+ * every retry in that wait is refused it, and the next wait claims its own. A refusal `@Cooldown` did not
+ * make, or a store that fails to answer, claims nothing.
+ */
+export async function claimCooldownNotice(container: Container, refusal: CooldownError): Promise<boolean> {
+  const key = refusalKeys.get(refusal)
+  if (key === undefined) return false
+  const notice = { key: `${key}:notice`, limit: { uses: 1, windowMs: Math.max(1, refusal.retryAfterMs) } }
+  try {
+    return (await askWithin(cooldownStoreOf(container), [notice], cooldownPolicyOf(container).timeoutMs, false)).allowed
+  } catch (error) {
+    logger.debug(`Could not ask the cooldown store whether to tell a refused caller: ${String((error as Error).cause ?? error)}`)
+    return false
+  }
 }
 
 /** Whether the call is one cooldowns count: an interaction's or a message's. */

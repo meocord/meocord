@@ -33,7 +33,7 @@ function assertMessageOptions(appName: string, messages: MessageCommandOptions |
   if (prefix !== undefined && !isText(prefix) && typeof prefix !== 'function' && !(Array.isArray(prefix) && prefix.every(isText))) {
     throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function of the message returning them.`))
   }
-  for (const [name, value] of Object.entries({ caseSensitive, replyEmoji: messages.replyEmoji })) {
+  for (const [name, value] of Object.entries({ caseSensitive, replyEmoji: messages.replyEmoji, dmOnError: messages.dmOnError, dmOnCooldown: messages.dmOnCooldown })) {
     if (value !== undefined && typeof value !== 'boolean') throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { ${name} } }) takes true or false.`))
   }
   if (mention !== undefined && typeof mention !== 'boolean' && mention !== 'only') {

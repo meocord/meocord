@@ -51,10 +51,11 @@ import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
 import { Translator } from '@src/common/translator.js'
 import { useTheme } from '@src/core/theme-scope.js'
-import { closeAutocomplete, type Fallback } from '@src/core/fallback.js'
+import { closeAutocomplete, type Fallback, noteInvocation } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
 import {
   buildMessageRoutes,
+  commandWordsOf,
   matchMessageCommand,
   matchMessageSubcommands,
   matchMessageRoute,
@@ -499,6 +500,7 @@ export class Dispatcher {
     }
     if (target) {
       const { route, params, start, given } = target
+      noteInvocation(message, `${start}${commandWordsOf(route.tokens).join(' ')}`)
       const hooks = messageCommandHooks(route, params, message, start, given, this.messageOptions.types)
       await this.invokeHandler(this.getInstance(route.controllerClass), route.method, [message, params], call, hooks)
     }
