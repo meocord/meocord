@@ -239,7 +239,7 @@ void bootstrap()
  * An entry that has MeoCord refuse a pattern it catches, which starts the reporting, then leaves a rejection of its
  * own unhandled: an Error, or a string, and heard by a listener of its own, or not.
  */
-const rejectingMain = (reason: 'error' | 'string', own: boolean) => `import { route } from 'meocord/common'
+const rejectingMain = (reason: 'error' | 'string' | 'refusal', own: boolean) => `import { route } from 'meocord/common'
 
 try {
   route('item-{id}')
@@ -248,7 +248,11 @@ try {
 }
 ${own ? "process.on('unhandledRejection', reason => console.log(`The app heard: ${String(reason)}`))\n" : ''}
 async function bootstrap() {
-  throw ${reason === 'error' ? "new Error('a bug in bootstrap')" : "'a bug in bootstrap'"}
+  ${
+    reason === 'refusal'
+      ? "route('a bug in bootstrap/{id}-x')"
+      : `throw ${reason === 'error' ? "new Error('a bug in bootstrap')" : "'a bug in bootstrap'"}`
+  }
 }
 
 void bootstrap()
@@ -1195,6 +1199,16 @@ const scenarios: Scenario[] = [
         expect: { code: 0, counts: { 'The app heard: ': 1 }, says: ['a bug in bootstrap'], never: ['[ERROR]'] },
       },
     ]),
+    {
+      name: `start --prod on ${runtime} leaves a rejected refusal to the app's own listener, as the other runtime does`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': rejectingMain('refusal', true), dist: null },
+      argv: ['start', '--prod', '--build'],
+      timeoutMs: 60_000,
+      expect: { code: 0, counts: { 'The app heard: ': 1 }, says: ['Invalid pattern "a bug in bootstrap/{id}-x"'], never: ['[ERROR]'] },
+    },
     {
       name: `start --dev on ${runtime} reports a decorator it refuses as one line, and keeps watching`,
       tier: runtime === 'node' ? 'fast' : 'slow',

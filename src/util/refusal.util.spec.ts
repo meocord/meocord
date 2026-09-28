@@ -38,6 +38,26 @@ describe('describeRefusal', () => {
     expect(describeRefusal(error, root)).toBe('Invalid pattern "a-{id}"\n    in src/controllers/button/sample.button.controller.ts')
   })
 
+  // Run on every platform: a Windows stack holds file:// URLs, whose drive letter can come back in either case
+  it('names the file on Windows, from a file:// URL or a path, whatever case the drive letter is in', () => {
+    const windowsRoot = 'C:\\bots\\shop'
+    const error = refuse(new Error('Invalid pattern "a-{id}"'))
+    error.stack = [
+      'Error: Invalid pattern "a-{id}"',
+      '    at createRegexFromPattern (file:///c:/bots/shop/node_modules/meocord/dist/esm/decorator/controller.decorator.js:115:19)',
+      '    at _ts_decorate (file:///C:/bots/shop/src/app.ts:39:26)',
+      '    at <anonymous> (file:///c:/bots/shop/src/main.ts:17:1)',
+      '    at Object.x (file:///c:/Bots/Shop/src/controllers/button/sample.button.controller.ts:12:33)',
+    ].join('\n')
+
+    expect(describeRefusal(error, windowsRoot, true)).toBe(
+      'Invalid pattern "a-{id}"\n    in src/controllers/button/sample.button.controller.ts',
+    )
+
+    error.stack = ['Error: x', '    at C:\\bots\\shop\\src\\services\\shop.service.ts:3:9'].join('\n')
+    expect(describeRefusal(error, windowsRoot, true)).toBe('Invalid pattern "a-{id}"\n    in src/services/shop.service.ts')
+  })
+
   it('gives the message alone when no frame is in the source', () => {
     const error = withStack('No @MeoCord() on App', [`${root}/dist/main.js:2:5718`, `<anonymous> (${root}/src/main.ts:17:1)`])
 

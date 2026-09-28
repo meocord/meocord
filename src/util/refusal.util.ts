@@ -2,6 +2,7 @@ import path from 'path'
 import { isExplainedError } from '@src/common/explained-error.js'
 import { Logger } from '@src/common/logger.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
+import { comparablePath, framePath } from '@src/util/source-path.util.js'
 
 const REFUSAL = Symbol.for('meocord.refusal')
 
@@ -31,21 +32,25 @@ export function isRefusal(error: unknown): error is Error {
 }
 
 // A stack frame's function and file: `at fn (file:line:col)` or `at file:line:col`, the file possibly a file:// URL
-const FRAME = /^\s*at (?:(.*?) \()?(?:file:\/\/)?(.+?):\d+:\d+\)?$/
+const FRAME = /^\s*at (?:(.*?) \()?(.+?):\d+:\d+\)?$/
 
 /**
  * A refusal as the application reports it: the message, and the first file of the application's own source the stack
  * passes through, other than its entry, which only loads the rest. The file alone: a line from a development build's
  * source map can be off, and a compiler's decorate helper can be placed in any file, so those frames are skipped.
  */
-export function describeRefusal(error: Error, root: string): string {
-  const source = path.join(root, 'src') + path.sep
-  const entry = path.join(source, 'main.ts')
+export function describeRefusal(error: Error, root: string, windows = process.platform === 'win32'): string {
+  const paths = windows ? path.win32 : path.posix
+  const source = comparablePath(paths.join(root, 'src') + paths.sep, windows)
+  const entry = comparablePath(paths.join(root, 'src', 'main.ts'), windows)
+  const dependencies = comparablePath(`${paths.sep}node_modules${paths.sep}`, windows)
   for (const line of (error.stack ?? '').split('\n').slice(1)) {
-    const [, fn, file] = FRAME.exec(line) ?? []
-    if (!file?.startsWith(source) || file === entry || file.includes(`${path.sep}node_modules${path.sep}`)) continue
-    if (fn?.endsWith('decorate')) continue
-    return `${error.message}\n    in ${path.relative(root, file).split(path.sep).join('/')}`
+    const [, fn, name] = FRAME.exec(line) ?? []
+    if (!name || fn?.endsWith('decorate')) continue
+    const file = paths.normalize(framePath(name, windows))
+    const compared = comparablePath(file, windows)
+    if (!compared.startsWith(source) || compared === entry || compared.includes(dependencies)) continue
+    return `${error.message}\n    in ${paths.relative(root, file).split(paths.sep).join('/')}`
   }
   return error.message
 }
@@ -56,8 +61,8 @@ export function describeRefusal(error: Error, root: string): string {
  * a test or script that throws one gets the error as it is.
  *
  * Bun emits no monitor event for an unhandled rejection, so there a rejection listener reports a refusal instead. Any
- * other reason is rejected again with the listener gone, for Bun to report as it would have, unless the application
- * listens for rejections itself.
+ * other reason is rejected again with the listener gone, for Bun to report as it would have. While the application
+ * listens for rejections itself, every rejection is its own to handle, as under Node.
  */
 export function reportRefusals(
   log: (text: string) => void = text => new Logger('MeoCord').error(text),
@@ -75,10 +80,10 @@ export function reportRefusals(
   if (!bun) return
 
   const onRejection = (reason: unknown) => {
-    if (isRefusal(reason)) return report(reason)
-    // With a listener of the application's own, it handles the rejection, and Bun would not have reported it; this one
-    // stays, for a refusal later
+    // An application that listens for rejections handles them, a refusal too, as under Node, where the monitor sees
+    // none it handles; this listener stays, for when it no longer does
     if (process.listenerCount('unhandledRejection') > 1) return
+    if (isRefusal(reason)) return report(reason)
     process.off('unhandledRejection', onRejection)
     reject(reason)
   }
