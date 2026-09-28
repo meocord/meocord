@@ -134,7 +134,7 @@ describe('input stages on handlers without interaction input', () => {
     UsePipe('text', Trim)(Messages.prototype, 'ping', Object.getOwnPropertyDescriptor(Messages.prototype, 'ping') as never)
 
     expect(compile(Messages)).toThrow(
-      'Messages.ping is a message handler without a pattern; @Validate and @UsePipe apply only to interaction and patterned message handlers',
+      'Messages.ping: @Validate and @UsePipe are for interaction and patterned message handlers',
     )
   })
 
@@ -155,10 +155,8 @@ describe('input stages on handlers without interaction input', () => {
       async joined() {}
     }
 
-    expect(compile(Validated)).toThrow(
-      'Validated.joined is an event handler; @Validate and @UsePipe apply only to interaction and patterned message handlers',
-    )
-    expect(compile(Limited)).toThrow('Limited.joined is an event handler; @Cooldown applies only to interaction and message handlers.')
+    expect(compile(Validated)).toThrow(/^Validated\.joined: @Validate and @UsePipe are for interaction .*, and this is an event handler\.$/)
+    expect(compile(Limited)).toThrow('Limited.joined: @Cooldown is for interaction and message handlers, and this is an event handler.')
   })
 
   it('name an autocomplete handler as one too', () => {
@@ -184,8 +182,8 @@ describe('input stages on handlers without interaction input', () => {
       async suggest(_interaction: AutocompleteInteraction) {}
     }
 
-    expect(compile(Validated)).toThrow('Validated.suggest is an autocomplete handler; @Validate and @UsePipe apply only')
-    expect(compile(Limited)).toThrow('Limited.suggest is an autocomplete handler; @Cooldown applies only')
+    expect(compile(Validated)).toThrow(/^Validated\.suggest: @Validate and @UsePipe .*, and this is an autocomplete handler\.$/)
+    expect(compile(Limited)).toThrow('Limited.suggest: @Cooldown is for interaction and message handlers, and this is an autocomplete handler.')
   })
 
   it('refuse @Defer written below @MessageHandler, which runs before the handler is known', () => {
@@ -233,8 +231,8 @@ describe('classes keyed by name', () => {
   }
 
   it("count a message handler's cooldown, and a cooldown on any one of several handlers", () => {
-    expect(compile(sameNamed('message'), plain())).toThrow('Two classes are named Shop')
-    expect(compile(plain(), sameNamed('second handler'))).toThrow('Two classes are named Shop')
+    expect(compile(sameNamed('message'), plain())).toThrow('Shop: two classes have this name')
+    expect(compile(plain(), sameNamed('second handler'))).toThrow('Shop: two classes have this name')
   })
 })
 
@@ -306,7 +304,7 @@ describe('a filter class that throws under dispatch', () => {
 })
 
 describe('appStages', () => {
-  it('names an anonymous app class as "The app" when it lacks @MeoCord', () => {
-    expect(() => appStages(Object.defineProperty(class {}, 'name', { value: '' }))).toThrow('The app is not decorated with @MeoCord().')
+  it('names an anonymous app class as "The app class" when it lacks @MeoCord', () => {
+    expect(() => appStages(Object.defineProperty(class {}, 'name', { value: '' }))).toThrow('The app class: not decorated with @MeoCord().')
   })
 })

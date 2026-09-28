@@ -456,7 +456,7 @@ describe('message command startup errors', () => {
       @Validate(dice)
       all() {}
     }
-    expect(create(Listening)).toThrow(/Listening\.all is a message handler without a pattern/)
+    expect(create(Listening)).toThrow(/Listening\.all: @Validate and @UsePipe .*, and this is a message handler without a pattern\./)
   })
 })
 

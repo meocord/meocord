@@ -69,7 +69,7 @@ describe('route', () => {
       }
     }
 
-    expect(() => buildComponentRoutes([TicketController, Other])).toThrow(/TicketController\.handle and .* in Other\.other match the same/)
+    expect(() => buildComponentRoutes([TicketController, Other])).toThrow(/^TicketController\.handle: .* in Other\.other match the same/)
   })
 
   it('refuses a missing, empty or unknown value, and an id over 100 characters', () => {

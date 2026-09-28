@@ -263,9 +263,9 @@ describe('global guards from @MeoCord({ guards })', () => {
     class PlainApp {}
 
     expect(() => MeoCordTestingModule.create({ app: PlainApp }).compile()).toThrow(
-      'PlainApp is not decorated with @MeoCord().',
+      'PlainApp: not decorated with @MeoCord().',
     )
-    expect(() => inspectHandler(BaseController, 'ping', { app: PlainApp })).toThrow('PlainApp is not decorated')
+    expect(() => inspectHandler(BaseController, 'ping', { app: PlainApp })).toThrow('PlainApp: not decorated')
   })
 })
 

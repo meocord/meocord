@@ -39,6 +39,7 @@ import { Autocomplete, Command, Controller, MeoCord, MessageHandler, ReactionHan
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordApp, shutdownAndExit } from '@src/core/meocord.app.js'
 import { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } from '@src/util/dev-runner.util.js'
+import { isRefusal } from '@src/util/refusal.util.js'
 
 /** The text of the error embed the first call to a reply method sent. */
 function errorShown(method: { mock: { calls: unknown[][] } }): string | undefined {
@@ -560,7 +561,7 @@ describe('MeoCordApp', () => {
       expect(warn.mock.calls.filter(([message]: [string]) => message.includes('can match the same customId'))).toHaveLength(1)
     })
 
-    it('refuses to start, before logging in, when two handlers have the same pattern', async () => {
+    it('refuses the app as it is created, before start() attaches anything, when two handlers have the same pattern', () => {
       @Controller()
       class Profile {
         @Command('profile/{uid}', CommandType.BUTTON)
@@ -572,10 +573,15 @@ describe('MeoCordApp', () => {
         async open(..._args: any[]) {}
       }
 
-      const app = new MeoCordApp([Profile, Card] as any, createMockContainer() as any, mockClient as any, 't')
-      await expect(app.start()).rejects.toThrow(
-        '"profile/{uid}" in Profile.show and "profile/{id}" in Card.open match the same button customIds',
-      )
+      let thrown: unknown
+      try {
+        new MeoCordApp([Profile, Card] as any, createMockContainer() as any, mockClient as any, 't')
+      } catch (error) {
+        thrown = error
+      }
+      expect((thrown as Error).message).toMatch(/^Profile\.show: "profile\/\{uid\}" and "profile\/\{id\}" in Card\.open match the same button customIds/)
+      expect(isRefusal(thrown)).toBe(true)
+      expect(mockClient.on).not.toHaveBeenCalled()
       expect(mockClient.login).not.toHaveBeenCalled()
     })
 

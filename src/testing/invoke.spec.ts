@@ -265,7 +265,7 @@ describe('TestingModule.invoke', () => {
       const module = MeoCordTestingModule.create({ controllers: [LeftCard, RightCard] }).compile()
 
       await expect(module.invoke(LeftCard, 'open', createMockInteraction(ButtonInteraction, { customId: 'base/1' }))).rejects.toThrow(
-        '"base/{id}" in LeftCard.open and "base/{id}" in RightCard.open match the same button customIds, so only one of them could ever run.',
+        'LeftCard.open: "base/{id}" and "base/{id}" in RightCard.open match the same button customIds, so only one of them could ever run.',
       )
       expect(log).toEqual([])
     })

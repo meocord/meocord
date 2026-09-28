@@ -343,7 +343,7 @@ describe('where they apply', () => {
     Validate(reminder)(MessageController.prototype, 'ping', Object.getOwnPropertyDescriptor(MessageController.prototype, 'ping') as never)
 
     expect(() => MeoCordTestingModule.create({ controllers: [MessageController] }).compile()).toThrow(
-      'MessageController.ping is a message handler without a pattern; @Validate and @UsePipe apply only to interaction and patterned message handlers',
+      'MessageController.ping: @Validate and @UsePipe are for interaction and patterned message handlers',
     )
   })
 })
@@ -359,7 +359,7 @@ describe('on events', () => {
     Validate(reminder)(WelcomeController.prototype, 'greet', Object.getOwnPropertyDescriptor(WelcomeController.prototype, 'greet') as never)
 
     expect(() => MeoCordTestingModule.create({ controllers: [WelcomeController] }).compile()).toThrow(
-      'WelcomeController.greet is an event handler',
+      /^WelcomeController\.greet: @Validate and @UsePipe .*, and this is an event handler\.$/,
     )
   })
 })

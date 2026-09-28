@@ -134,8 +134,9 @@ export class MeoCordFactory {
    * @param target - The class `@MeoCord` decorates.
    * @returns The application, which `start()` logs in.
    * @throws Error when the class has no `@MeoCord`, when the built config is missing, when a provider cannot
-   *   be bound, such as one for a token MeoCord binds itself, or when two handlers take one command, or two builder
-   *   classes build one, naming both. In a built application it is logged first, as one line, so
+   *   be bound, such as one for a token MeoCord binds itself, when two handlers take one command, or two builder
+   *   classes build one, naming both, and for any other mistake it refuses as the app loads, such as two component
+   *   patterns that match the same customIds. In a built application it is logged first, as one line, so
    *   `isExplainedError()` tells a caller not to log it again.
    */
   static create(target: ServiceIdentifier): MeoCordApplication {
