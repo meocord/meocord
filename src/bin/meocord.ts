@@ -607,8 +607,11 @@ copies or substantial portions of the Software.
     }
   }
 
-  /** The running application, while a watch session owns one. */
+  /** The running application, while a watch session owns one, including while it exits to be replaced. */
   private appProcess: ChildProcess | null = null
+
+  /** Whether the running application is exiting to be replaced; a build that finishes meanwhile joins that restart. */
+  private restarting = false
 
   /** Whether a watch session is stopping, when a rebuild must not start the application again. */
   private stopping = false
@@ -621,15 +624,15 @@ copies or substantial portions of the Software.
    *
    * The replacement is spawned only once the previous process has exited. Both would
    * hold the same gateway session, and claiming it before the first lets go produces a
-   * login conflict rather than a reload.
+   * login conflict rather than a reload. Builds that finish while it exits start nothing
+   * more: the replacement runs `dist/main.js` as it stands at launch, the latest build.
    */
   private restartApp(): void {
-    if (this.stopping) return
+    if (this.stopping || this.restarting) return
     const previous = this.appProcess
-    this.appProcess = null
 
     if (!stillRunning(previous)) {
-      this.appProcess = this.launchDevApp()
+      this.launchDevApp()
       return
     }
 
@@ -646,20 +649,25 @@ copies or substantial portions of the Software.
     }, shutdownTimeout + FORCE_STOP_GRACE_MS)
     overdue.unref()
 
+    this.restarting = true
     previous.removeAllListeners('exit')
     previous.once('exit', () => {
       clearTimeout(overdue)
-      if (!this.stopping) this.appProcess = this.launchDevApp()
+      this.restarting = false
+      this.appProcess = null
+      if (!this.stopping) this.launchDevApp()
     })
     previous.kill()
   }
 
   /**
-   * Runs the application for a watch session. When it exits on its own because the bot could not log in, which no
-   * code change fixes, the session ends with its code; after any other exit, the next build starts it again.
+   * Runs the application for a watch session, as the one `appProcess` tracks. When it exits on its own because the bot
+   * could not log in, which no code change fixes, the session ends with its code; after any other exit, the next build
+   * starts it again.
    */
-  private launchDevApp(): ChildProcess {
+  private launchDevApp(): void {
     const child = this.spawnApp({ devRunner: true })
+    this.appProcess = child
     let loginFailed = false
     child.on('message', message => {
       if (isDevRunnerMessage(message)) loginFailed = message.meocord === 'login-failed'
@@ -673,7 +681,6 @@ copies or substantial portions of the Software.
       }
       this.logger.warn(`The application exited with ${code === null ? signal : `code ${code}`}; waiting for changes.`)
     })
-    return child
   }
 
   /**

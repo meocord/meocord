@@ -354,6 +354,95 @@ describe('spawning the application', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1)
     })
 
+    describe('when builds finish while the previous application is still exiting', () => {
+      type Child = ReturnType<typeof createChild>
+      const onExit = (child: Child) => child.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
+
+      function restarting() {
+        spawnMock.mockImplementation(() => createChild() as never)
+        const cli = watcher()
+        cli.restartApp()
+        const first = spawnMock.mock.results.at(-1)?.value as Child
+        cli.restartApp()
+        return { cli, first }
+      }
+
+      // A watcher can report one edit twice; a launch for each would leave a second bot running, untracked
+      it('starts one application, from the latest build, once the previous one exits', () => {
+        const { cli, first } = restarting()
+        spawnMock.mockClear()
+
+        cli.restartApp()
+        cli.restartApp()
+        expect(spawnMock).not.toHaveBeenCalled()
+        expect(first.kill).toHaveBeenCalledTimes(1)
+
+        first.exitCode = 0
+        onExit(first)()
+
+        expect(spawnMock).toHaveBeenCalledTimes(1)
+        expect(cli.appProcess).toBe(spawnMock.mock.results[0]?.value)
+      })
+
+      it('still tracks the exiting application, so a stop reaches it', () => {
+        const { cli, first } = restarting()
+
+        expect(cli.appProcess).toBe(first)
+      })
+
+      it('restarts normally after the coalesced restart', () => {
+        const { cli, first } = restarting()
+        first.exitCode = 0
+        onExit(first)()
+        const second = spawnMock.mock.results.at(-1)?.value as Child
+        spawnMock.mockClear()
+
+        cli.restartApp()
+
+        expect(second.kill).toHaveBeenCalledTimes(1)
+        expect(spawnMock).not.toHaveBeenCalled()
+        second.exitCode = 0
+        onExit(second)()
+        expect(spawnMock).toHaveBeenCalledTimes(1)
+      })
+
+      it('waits for it to exit when the session stops during the restart, and starts nothing', async () => {
+        spawnMock.mockImplementation(() => createChild() as never)
+        vi.mocked(watch).mockReturnValueOnce({ close: vi.fn() } as never)
+        let afterBuild = () => {}
+        let stop = () => {}
+        const cli = new MeoCordCLI() as unknown as {
+          startDev: () => Promise<void>
+          clearConsole: () => void
+          relayStopSignals: (app: () => unknown, stopping: () => void) => void
+          compileConfig: () => Promise<void>
+          createBundler: () => Promise<unknown>
+        }
+        vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
+        vi.spyOn(cli, 'relayStopSignals').mockImplementation((_app, stopping) => (stop = stopping))
+        vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
+        vi.spyOn(cli, 'createBundler').mockResolvedValue({
+          rsbuild: { onAfterBuild: (callback: () => void) => (afterBuild = callback), build: async () => ({ close: async () => {} }) },
+        })
+        await cli.startDev()
+        afterBuild()
+        const first = spawnMock.mock.results.at(-1)?.value as Child
+        afterBuild()
+        spawnMock.mockClear()
+
+        stop()
+        await new Promise(resolve => setTimeout(resolve, 10))
+        expect(exitSpy).not.toHaveBeenCalled()
+
+        first.exitCode = 0
+        for (const [event, listener] of [...first.once.mock.calls, ...first.on.mock.calls]) {
+          if (event === 'exit') (listener as (code: number) => void)(0)
+        }
+        await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0))
+        expect(spawnMock).not.toHaveBeenCalled()
+      })
+    })
+
     describe('when the running application does not exit', () => {
       afterEach(() => vi.useRealTimers())
 
