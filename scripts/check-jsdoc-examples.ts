@@ -41,6 +41,7 @@ interface PublicSymbol {
   isType: boolean
   summary: string
   group?: string
+  category?: string
   stages: string[]
   examples: string[]
 }
@@ -119,6 +120,7 @@ function publicSymbols(program: ts.Program, entries: Map<string, string>): Map<t
         isType: !(symbol.flags & ts.SymbolFlags.Value),
         summary,
         group: tags.find(tag => tag.name === 'group')?.text,
+        category: tags.find(tag => tag.name === 'category')?.text,
         stages: tags.filter(tag => tag.name === 'pipeline').map(tag => tag.text.split(/\s/)[0]),
         examples: tags.filter(tag => tag.name === 'example').map(tag => fencedCode(tag.text)),
       })
@@ -398,6 +400,10 @@ function main(): void {
     }
     for (const stage of item.stages) {
       if (!STAGES.includes(stage)) problems.push(`${item.name}: @pipeline ${stage} is not one of ${STAGES.join(', ')}.`)
+    }
+    // The reference says where each stage runs, from these tags
+    if (item.category === 'Pipeline stages' && item.stages.length === 0) {
+      problems.push(`${item.name}: it is a pipeline stage with no @pipeline; say where it runs.`)
     }
     item.examples.forEach((snippet, index) =>
       addExample(item.name, `${item.name}: its example${item.examples.length > 1 ? ` ${index + 1}` : ''}`, snippet),

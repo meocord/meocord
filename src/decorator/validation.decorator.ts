@@ -187,6 +187,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
  * }
  * ```
  *
+ * @pipeline pipes where `@UsePipe` or `@Validate`'s `pipes` applies it, after validation
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UsePipe}

@@ -32,6 +32,8 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * }
  * ```
  *
+ * @pipeline interceptors where `@UseInterceptor` or `@MeoCord({ interceptors })` applies it, around everything up to
+ *   the handler
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseInterceptor}

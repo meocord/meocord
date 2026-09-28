@@ -122,6 +122,7 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
  * }
  * ```
  *
+ * @pipeline guards where `@UseGuard` or `@MeoCord({ guards })` applies it, the global ones first
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseGuard}
