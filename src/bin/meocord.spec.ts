@@ -449,6 +449,62 @@ describe('spawning the application', () => {
         expect(closeBuild.mock.invocationCallOrder[0]).toBeLessThan(exitSpy.mock.invocationCallOrder[0])
       })
 
+    describe('reloading from the files the bundler does not watch', () => {
+      async function startWatching() {
+        let listener: (event: string, filename: string | null) => void = () => {}
+        vi.mocked(watch).mockImplementationOnce(((_dir: string, callback: typeof listener) => {
+          listener = callback
+          return { close: vi.fn() }
+        }) as never)
+        const closeBuild = vi.fn(async () => {})
+        const cli = new MeoCordCLI() as unknown as {
+          startDev: () => Promise<void>
+          clearConsole: () => void
+          relayStopSignals: () => void
+          compileConfig: () => Promise<void>
+          createBundler: () => Promise<unknown>
+        }
+        vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
+        vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
+        const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
+        const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
+          rsbuild: { onAfterBuild: (callback: () => void) => callback(), build: async () => ({ close: closeBuild }) },
+        }))
+        await cli.startDev()
+        return { change: (filename: string) => listener('change', filename), compileConfig, createBundler, closeBuild }
+      }
+
+      it('rebuilds once from a changed tsconfig.json, however many events one save makes', async () => {
+        const dev = await startWatching()
+
+        dev.change('tsconfig.json')
+        dev.change('tsconfig.json')
+
+        await vi.waitFor(() => expect(dev.createBundler).toHaveBeenCalledTimes(2))
+        expect(dev.closeBuild).toHaveBeenCalledTimes(1)
+        expect(dev.compileConfig).toHaveBeenCalledTimes(1)
+      })
+
+      it('compiles the config again before rebuilding from a changed meocord.config.ts', async () => {
+        const dev = await startWatching()
+
+        dev.change('meocord.config.ts')
+
+        await vi.waitFor(() => expect(dev.createBundler).toHaveBeenCalledTimes(2))
+        expect(dev.compileConfig).toHaveBeenCalledTimes(2)
+        expect(dev.compileConfig.mock.invocationCallOrder[1]).toBeLessThan(dev.createBundler.mock.invocationCallOrder[1])
+      })
+
+      it('ignores the other files in the folder', async () => {
+        const dev = await startWatching()
+
+        dev.change('package.json')
+        await new Promise(resolve => setTimeout(resolve, 400))
+
+        expect(dev.createBundler).toHaveBeenCalledTimes(1)
+      })
+    })
+
       it('runs the application with a channel for it, and production without one', async () => {
         watcher().restartApp()
         expect(lastSpawn().options.stdio).toEqual(['inherit', 'inherit', 'inherit', 'ipc'])

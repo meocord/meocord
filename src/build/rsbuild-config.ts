@@ -84,6 +84,9 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
   const cwd = process.cwd()
   const entry = options.entry ?? path.resolve(cwd, 'src', 'main.ts')
   const assetPrefix = assetPrefixFor(path.resolve(cwd, 'dist'))
+  const tsconfigPath = prepareModifiedTsConfig()
+  // A watcher takes this copy, written just before it starts, for a change; start --dev watches tsconfig.json instead
+  const generated = path.dirname(tsconfigPath) + path.sep
 
   return {
     // Rsbuild takes the asset prefix from `dev.assetPrefix` in development and from
@@ -99,11 +102,13 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
       // Equivalent to experimentalDecorators. The decorators themselves are only half of
       // what MeoCord needs -- see tools.swc below for the half that carries the metadata.
       decorators: { version: 'legacy' },
-      tsconfigPath: prepareModifiedTsConfig(),
+      tsconfigPath,
     },
     tools: {
       // Set here, not in tools.rspack, which an app's hook may replace.
       bundlerChain: chain => {
+        // MeoCord's own generated files never start a rebuild
+        chain.watchOptions({ ...chain.get('watchOptions'), ignored: (file: string) => path.resolve(file).startsWith(generated) })
         // The pre-entry records the bundle's own path from import.meta.url, which the bundler would
         // otherwise fix at build time to the pre-entry's source file. Production only: a development
         // build keeps the fixed path, and bundleEntry() goes by process.argv there.
