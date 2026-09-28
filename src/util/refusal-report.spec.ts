@@ -140,17 +140,26 @@ describe('reportRefusals under Bun, which reports an unhandled rejection without
     expect(exit).not.toHaveBeenCalled()
   })
 
-  it("leaves a rejection to the application's own listener, and still reports a refusal after it", () => {
+  it("leaves every rejection to the application's own listener, a refusal too, as Node does", () => {
     const own = vi.fn()
     process.on('unhandledRejection', own)
     const { log, exit, reject, rejected } = watch(true)
 
     rejected('a string reason')
-    rejected('another')
+    rejected(refuse(new Error('Shop.buy: refused')))
 
     expect(own).toHaveBeenCalledTimes(2)
     expect(reject).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+    expect(exit).not.toHaveBeenCalled()
     expect(process.listeners('unhandledRejection')).toHaveLength(2)
+  })
+
+  it('reports a refusal again once the application stops listening', () => {
+    const own = vi.fn()
+    process.on('unhandledRejection', own)
+    const { log, exit, rejected } = watch(true)
+    process.off('unhandledRejection', own)
 
     rejected(refuse(new Error('Shop.buy: refused')))
 

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { types } from 'node:util'
 import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
+// Relative: the pre-entry that imports this file is bundled from its source, where no alias resolves
+import { comparablePath, framePath } from '../util/source-path.util.js'
 
 type PrepareStackTrace = (error: Error, sites: NodeJS.CallSite[]) => unknown
 
@@ -16,11 +17,7 @@ export function installStackRemapper(bundle: string): boolean {
   if (!existsSync(`${bundle}.map`)) return false
 
   const directory = canonical(path.dirname(bundle))
-  // Windows paths compare without case: a drive letter can come back upper or lower
-  const inDirectory = (file: string) =>
-    process.platform === 'win32'
-      ? path.dirname(file).toLowerCase() === directory.toLowerCase()
-      : path.dirname(file) === directory
+  const inDirectory = (file: string) => comparablePath(path.dirname(file)) === comparablePath(directory)
   // One map per file, or null for a file with none or one that cannot be read
   const maps = new Map<string, TraceMap | null>()
   const mapFor = (file: string): TraceMap | null => {
@@ -78,7 +75,7 @@ function remapSite(site: NodeJS.CallSite, directory: string, mapFor: (file: stri
   const column = site.getColumnNumber()
   if (!name || !line || !column) return site
 
-  const file = name.startsWith('file://') ? fileURLToPath(name) : name
+  const file = framePath(name)
   const map = mapFor(file)
   if (!map) return site
   const position = originalPositionFor(map, { line, column: column - 1 })
