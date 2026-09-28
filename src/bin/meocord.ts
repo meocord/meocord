@@ -696,21 +696,29 @@ copies or substantial portions of the Software.
       }
       await watch()
 
+      // Inputs the bundler does not see: the config, and tsconfig.json, which the build reads through a copy MeoCord
+      // writes and the bundler never watches. A change rebuilds from them, and the rebuild restarts the application.
+      const reloads: Record<string, string> = {
+        'meocord.config.ts': 'MeoCord config change detected, reloading config...',
+        'tsconfig.json': 'tsconfig.json change detected, rebuilding...',
+      }
       let debounceWatcher: NodeJS.Timeout
+      let changed = new Set<string>()
 
-      const fsWatcher = fs.watch(path.resolve(process.cwd(), 'meocord.config.ts'), () => {
+      // The folder rather than the files, so an editor that saves by replacing a file is still seen
+      const fsWatcher = fs.watch(this.projectRoot, (_event, filename) => {
+        if (!filename || !(filename in reloads)) return
+        changed.add(filename)
         clearTimeout(debounceWatcher)
         debounceWatcher = setTimeout(async () => {
-          if (isRunning && this.appProcess) {
-            isRunning = false
-            this.logger.log('MeoCord config change detected, reloading config...')
-            if (stillRunning(this.appProcess)) {
-              this.appProcess.kill()
-              this.appProcess = null
-            }
-            await watching?.close()
-            await watch()
-          }
+          if (!isRunning) return
+          isRunning = false
+          const files = changed
+          changed = new Set()
+          for (const file of files) this.logger.log(reloads[file])
+          if (files.has('meocord.config.ts')) await this.compileConfig()
+          await watching?.close()
+          await watch()
         }, 300)
       })
 
