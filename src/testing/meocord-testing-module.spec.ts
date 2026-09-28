@@ -173,7 +173,7 @@ describe('provided tokens', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ providers: [{ provide: NotesStore, useClass: NotesStore }] }).compile()).toThrow(
-      "NotesStore injects 'database', which nothing provides: add a provider for it to the testing module's providers.",
+      "NotesStore: it injects 'database', which nothing provides: add a provider for it to the testing module's providers.",
     )
   })
 })

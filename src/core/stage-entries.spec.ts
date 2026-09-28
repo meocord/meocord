@@ -105,34 +105,34 @@ describe('a malformed entry', () => {
     ['params that are an array', { provide: Allow, params: [1] }, 'the params of Allow are not an object'],
   ])('is refused by @UseGuard when it is %s', (_label, entry, reason) => {
     expect(onMethod(UseGuard(entry as never))).toThrow(
-      `@UseGuard on Handlers.handle: ${reason}. Give a guard class, or { provide: GuardClass, params? } with params an object.`,
+      `Handlers.handle: @UseGuard: ${reason}. Give a guard class, or { provide: GuardClass, params? } with params an object.`,
     )
   })
 
   it('is refused by a class-level @UseGuard, naming the class', () => {
-    expect(() => UseGuard(null as never)(class Staff {})).toThrow('@UseGuard on Staff: null is not a class.')
+    expect(() => UseGuard(null as never)(class Staff {})).toThrow('Staff: @UseGuard: null is not a class.')
   })
 
   it('is refused by @UseInterceptor, @UseFilter, @UsePipe and @Validate', () => {
     expect(onMethod(UseInterceptor(null as never) as never)).toThrow(
-      '@UseInterceptor on Handlers.handle: null is not a class. Give an interceptor class, or { provide: InterceptorClass, params? }',
+      'Handlers.handle: @UseInterceptor: null is not a class. Give an interceptor class, or { provide: InterceptorClass, params? }',
     )
     expect(onMethod(UseFilter({ provide: Quiet, params: 'x' } as never) as never)).toThrow(
-      '@UseFilter on Handlers.handle: the params of Quiet are not an object. Give a filter class',
+      'Handlers.handle: @UseFilter: the params of Quiet are not an object. Give a filter class',
     )
-    expect(onMethod(UsePipe('text', undefined as never) as never)).toThrow('@UsePipe on Handlers.handle: undefined is not a class. Give a pipe class')
+    expect(onMethod(UsePipe('text', undefined as never) as never)).toThrow('Handlers.handle: @UsePipe: undefined is not a class. Give a pipe class')
     expect(onMethod(Validate(anything, { pipes: { text: [Upper, { provide: 42 }] } } as never) as never)).toThrow(
-      '@Validate on Handlers.handle: { provide } does not name a class. Give a pipe class',
+      'Handlers.handle: @Validate: { provide } does not name a class. Give a pipe class',
     )
   })
 
   it('is refused by @MeoCord for each list, naming the list', () => {
     const app = (options: object) => () => MeoCord({ controllers: [], clientOptions: { intents: [] }, ...options } as never)(class Bot {})
 
-    expect(app({ guards: [null] })).toThrow('@MeoCord({ guards }) on Bot: null is not a class. Give a guard class')
+    expect(app({ guards: [null] })).toThrow('Bot: @MeoCord({ guards }): null is not a class. Give a guard class')
     expect(app({ interceptors: [{ provide: Around, params: null }] })).toThrow(
-      '@MeoCord({ interceptors }) on Bot: the params of Around are not an object',
+      'Bot: @MeoCord({ interceptors }): the params of Around are not an object',
     )
-    expect(app({ filters: [{}] })).toThrow('@MeoCord({ filters }) on Bot: { provide } does not name a class')
+    expect(app({ filters: [{}] })).toThrow('Bot: @MeoCord({ filters }): { provide } does not name a class')
   })
 })

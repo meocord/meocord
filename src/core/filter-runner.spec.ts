@@ -259,7 +259,7 @@ describe('exception filters at startup', () => {
     }
 
     expect(() => compile([UsesUndecorated])).toThrow(
-      'NotAFilter is used as an exception filter but is not decorated with @Catch().',
+      'NotAFilter: used as an exception filter, but not decorated with @Catch().',
     )
   })
 
@@ -274,7 +274,7 @@ describe('exception filters at startup', () => {
     class ContextApp {}
 
     expect(() => MeoCordTestingModule.create({ app: ContextApp }).compile()).toThrow(
-      'ContextFilter is resolved once and shared, so it cannot inject ExecutionContext',
+      'ContextFilter: resolved once and shared, so it cannot inject ExecutionContext',
     )
   })
 })

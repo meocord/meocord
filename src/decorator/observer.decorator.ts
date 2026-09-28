@@ -50,7 +50,7 @@ export function Observer(
 ) {
   return function (target: new (...args: any[]) => DispatchObserver) {
     if (typeof (target.prototype as Partial<DispatchObserver>).onSettled !== 'function') {
-      throw refuse(new Error(`${target.name} is an @Observer but has no onSettled method.`))
+      throw refuse(new Error(`${target.name}: an @Observer needs an onSettled method, and it has none.`))
     }
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Observer')

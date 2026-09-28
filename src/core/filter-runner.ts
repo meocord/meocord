@@ -63,7 +63,7 @@ const ownFilterLevels = perHandler((prototype: object, methodName: string) => {
 export function prepareFilter(container: Container, entry: FilterEntry): void {
   const cls = filterClass(entry)
   if (!Reflect.hasOwnMetadata(CATCH_TYPES, cls)) {
-    throw refuse(new Error(`${cls.name || 'A filter'} is used as an exception filter but is not decorated with @Catch().`))
+    throw refuse(new Error(`${cls.name || 'A filter'}: used as an exception filter, but not decorated with @Catch().`))
   }
   bindShared(container, cls)
 }

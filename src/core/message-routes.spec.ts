@@ -284,7 +284,7 @@ describe('message route ranking', () => {
       alsoRoll() {}
     }
     expect(() => buildMessageRoutes([First, Second])).toThrow(
-      /"roll \{sides\}" in First\.roll and "ROLL \{count\}" in Second\.alsoRoll match the same messages/,
+      /First\.roll: "roll \{sides\}" and "ROLL \{count\}" in Second\.alsoRoll match the same messages/,
     )
   })
 
@@ -353,7 +353,7 @@ describe('message route ranking', () => {
       @MessageHandler('b {page}')
       browse() {}
     }
-    expect(() => buildMessageRoutes([Clash])).toThrow(/"b \{target\}", an alias of "ban \{target\}", in Clash\.ban and "b \{page\}" in Clash\.browse match the same messages/)
+    expect(() => buildMessageRoutes([Clash])).toThrow(/Clash\.ban: "b \{target\}", an alias of "ban \{target\}", and "b \{page\}" in Clash\.browse match the same messages/)
   })
 
   it('keeps flags written between the command words when it compiles an alias', () => {
@@ -376,7 +376,7 @@ describe('message route ranking', () => {
       }
       return () => buildMessageRoutes([Only])
     }
-    expect(build('ban {target}', { aliases: ['b {x}'] })).toThrow(/Only\.handle: "b \{x\}" is not an alias/)
+    expect(build('ban {target}', { aliases: ['b {x}'] })).toThrow(/Only\.handle: @MessageHandler\('ban \{target\}'\): "b \{x\}" is not an alias/)
     expect(build('ban {target}', { aliases: [' '] })).toThrow(/" " is not an alias/)
     expect(build('ban {target}', { aliases: 'b' })).toThrow(/aliases takes a list of command words/)
     expect(build('{word}', { aliases: ['w'] })).toThrow(/this one begins with a param/)

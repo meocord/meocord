@@ -222,7 +222,7 @@ const refusedMessagePattern = templateFile('src/controllers/message/sample.messa
   "@MessageHandler('baka')",
   "@MessageHandler('baka {rest...} {x}')",
 )
-const REFUSED_MESSAGE_PATTERN = "@MessageHandler('baka {rest...} {x}') in SampleMessageController.baka"
+const REFUSED_MESSAGE_PATTERN = "SampleMessageController.baka: @MessageHandler('baka {rest...} {x}')"
 
 /** An entry that leaves bootstrap's rejection unhandled, as a hand-written main.ts may. */
 const unhandledMain = `import App from '@src/app'

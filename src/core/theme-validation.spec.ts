@@ -113,12 +113,12 @@ describe('themeProblems', () => {
 describe('assertValidTheme', () => {
   it('throws every problem at once, one per line', () => {
     expect(() => assertValidTheme({ colors: { primary: '#GGG' }, buttons: { danger: 5 } }, '@MeoCord({ theme }) on App')).toThrow(
-      /^The theme has 2 problems:\n {2}@MeoCord\(\{ theme \}\) on App: theme\.colors\.primary: .*\n {2}@MeoCord\(\{ theme \}\) on App: theme\.buttons\.danger: /,
+      /^@MeoCord\(\{ theme \}\) on App: the theme has 2 problems:\n {2}theme\.colors\.primary: .*\n {2}theme\.buttons\.danger: /,
     )
   })
 
   it('says one problem in the singular', () => {
-    expect(() => assertValidTheme({ buttons: { danger: 5 } }, 'x')).toThrow(/^The theme has 1 problem:\n/)
+    expect(() => assertValidTheme({ buttons: { danger: 5 } }, 'x')).toThrow(/^x: the theme has 1 problem:\n/)
   })
 
   it('returns nothing for a valid theme', () => {

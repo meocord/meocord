@@ -59,7 +59,7 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
         const earlier = (handlers.get(key) ?? []).find(other => overlap(other.meta, meta))
         if (earlier) {
           throw refuse(new Error(
-            `${where(earlier)} and ${where(here)} both handle the ${describe(meta.type, name, contextMenuKind(meta) ?? contextMenuKind(earlier.meta))}, ` +
+            `${where(earlier)}: it and ${where(here)} both handle the ${describe(meta.type, name, contextMenuKind(meta) ?? contextMenuKind(earlier.meta))}, ` +
               `so only ${where(earlier)} would ever run. Keep one handler for it, or give the other a name or ` +
               `subcommand path of its own.`,
           ))
@@ -80,7 +80,7 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
           builders.set(registered, { ...here, name: typeof body.name === 'string' ? body.name : name })
         } else if (built.meta.builderClass !== meta.builderClass) {
           throw refuse(new Error(
-            `${built.meta.builderClass!.name} on ${where(built)} and ${meta.builderClass.name} on ${where(here)} both ` +
+            `${where(built)}: its builder ${built.meta.builderClass!.name} and ${meta.builderClass.name} on ${where(here)} both ` +
               `build the ${describe(meta.type, built.name, contextMenuKind(meta))}, and Discord registers one command ` +
               `per name and type, so only the first would be. Keep one builder, on a single @Command, and declare ` +
               `the other handlers with CommandType.${meta.type}.`,

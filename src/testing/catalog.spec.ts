@@ -109,7 +109,7 @@ describe('the translator in a testing module', () => {
 
   it('is refused, with what to pass, when nothing provides it', () => {
     expect(() => MeoCordTestingModule.create({ controllers: [PingController] }).compile()).toThrow(
-      'PingService injects Translator, but @MeoCord has no i18n',
+      'PingService: it injects Translator, but @MeoCord has no i18n',
     )
   })
 })

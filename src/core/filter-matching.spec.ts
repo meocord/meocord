@@ -84,7 +84,7 @@ describe('a misused filter', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ controllers: [AnonymousController] }).compile()).toThrow(
-      'A filter is used as an exception filter but is not decorated with @Catch().',
+      'A filter: used as an exception filter, but not decorated with @Catch().',
     )
   })
 

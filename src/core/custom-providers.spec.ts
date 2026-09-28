@@ -300,7 +300,7 @@ describe('@MeoCord({ providers })', () => {
     }
 
     expect(() => create(loaded, { services: [NotesStore] })).toThrow(
-      "NotesStore injects 'database', which nothing provides: add a provider for it to @MeoCord({ providers }).",
+      "NotesStore: it injects 'database', which nothing provides: add a provider for it to @MeoCord({ providers }).",
     )
   })
 
@@ -308,7 +308,7 @@ describe('@MeoCord({ providers })', () => {
     const loaded = await load()
 
     expect(() => create(loaded, { providers: [{ provide: 'repository', useFactory: () => ({}), inject: ['database'] }] })).toThrow(
-      "The provider for 'repository' injects 'database', which nothing provides: add a provider for it to @MeoCord({ providers }).",
+      "'repository': its provider injects 'database', which nothing provides: add a provider for it to @MeoCord({ providers }).",
     )
   })
 
@@ -316,7 +316,7 @@ describe('@MeoCord({ providers })', () => {
     const loaded = await load()
 
     expect(() => create(loaded, { providers: [{ provide: 'a' } as Provider] })).toThrow(
-      "The provider for 'a' in @MeoCord({ providers }) needs exactly one of useValue, useClass and useFactory.",
+      "App: @MeoCord({ providers }): the provider for 'a' needs exactly one of useValue, useClass and useFactory.",
     )
     expect(() =>
       create(loaded, {
@@ -325,9 +325,9 @@ describe('@MeoCord({ providers })', () => {
           { provide: 'a', useValue: 2 },
         ],
       }),
-    ).toThrow("'a' is provided twice in @MeoCord({ providers }).")
+    ).toThrow("App: @MeoCord({ providers }): 'a' is provided twice.")
     expect(() => create(loaded, { providers: [{ provide: loaded.discord.Client, useValue: {} }] })).toThrow(
-      'Client is bound by MeoCord, so @MeoCord({ providers }) cannot provide it.',
+      'App: @MeoCord({ providers }) cannot provide Client, which MeoCord binds itself.',
     )
   })
 })

@@ -39,11 +39,11 @@ export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator
   return function (target: object, propertyKey?: string | symbol) {
     const onClass = propertyKey === undefined
     const owner = (onClass ? target : target.constructor) as { name: string }
-    const where = `@UseTheme on ${owner.name}${onClass ? '' : `.${String(propertyKey)}`}`
+    const where = `${owner.name}${onClass ? '' : `.${String(propertyKey)}`}: @UseTheme`
     assertValidTheme(theme, where)
     const key = onClass ? CLASS_THEME : METHOD_THEME
     const existing = onClass ? Reflect.getOwnMetadata(key, target) : Reflect.getOwnMetadata(key, target, propertyKey!)
-    if (existing !== undefined) throw refuse(new Error(`${where}: it has a @UseTheme already; give it one, with every role it changes.`))
+    if (existing !== undefined) throw refuse(new Error(`${where}: there is one already; give it one, with every role it changes.`))
     const layer = copyLayer(theme)
     if (onClass) Reflect.defineMetadata(key, layer, target)
     else Reflect.defineMetadata(key, layer, target, propertyKey!)

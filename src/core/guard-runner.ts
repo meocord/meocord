@@ -86,7 +86,7 @@ export function untypedParameter(cls: object): number {
  */
 export function singletonContextError(cls: abstract new (...args: any[]) => unknown): Error {
   return new Error(
-    `${cls.name || 'A class'} is resolved once and shared, so it cannot inject ExecutionContext: it would keep ` +
+    `${cls.name || 'A class'}: resolved once and shared, so it cannot inject ExecutionContext: it would keep ` +
       `the first call's context for every later call. Inject ExecutionContext only into guards.`,
   )
 }

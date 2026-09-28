@@ -50,7 +50,7 @@ describe('assertDistinctCommands', () => {
     }
 
     expect(() => assertDistinctCommands([StatsController, AdminController])).toThrow(
-      'StatsController.stats and AdminController.adminStats both handle the slash command "stats", so only ' +
+      'StatsController.stats: it and AdminController.adminStats both handle the slash command "stats", so only ' +
         'StatsController.stats would ever run. Keep one handler for it, or give the other a name or subcommand path of its own.',
     )
   })
@@ -72,7 +72,7 @@ describe('assertDistinctCommands', () => {
 
     expect(() => assertDistinctCommands([SettingsController])).not.toThrow()
     expect(() => assertDistinctCommands([SettingsController, NotifyController])).toThrow(
-      'SettingsController.email and NotifyController.notifyEmail both handle the slash command "settings notify email"',
+      'SettingsController.email: it and NotifyController.notifyEmail both handle the slash command "settings notify email"',
     )
   })
 
@@ -95,7 +95,7 @@ describe('assertDistinctCommands', () => {
     }
 
     expect(() => assertDistinctCommands([StatsController])).toThrow(
-      'StatsBuilder on StatsController.stats and CopiedStatsBuilder on StatsController.statistics both build the slash command ' +
+      'StatsController.stats: its builder StatsBuilder and CopiedStatsBuilder on StatsController.statistics both build the slash command ' +
         '"stats", and Discord registers one command per name and type, so only the first would be. Keep one builder, ' +
         'on a single @Command, and declare the other handlers with CommandType.SLASH.',
     )
@@ -135,7 +135,7 @@ describe('assertDistinctCommands', () => {
     expect(() => assertDistinctCommands([ReportController])).not.toThrow()
     // Without a builder, a handler takes both kinds, so it meets the first
     expect(() => assertDistinctCommands([ReportController, ModerationController])).toThrow(
-      'ReportController.reportUser and ModerationController.report both handle the user context menu command "Report"',
+      'ReportController.reportUser: it and ModerationController.report both handle the user context menu command "Report"',
     )
   })
 
@@ -165,7 +165,7 @@ describe('the testing module', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ controllers: [StatsController, AdminController] }).compile()).toThrow(
-      'StatsController.stats and AdminController.adminStats both handle the slash command "stats"',
+      'StatsController.stats: it and AdminController.adminStats both handle the slash command "stats"',
     )
   })
 })

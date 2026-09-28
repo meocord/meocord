@@ -354,7 +354,7 @@ describe('interceptors shared across calls', () => {
 
   it('cannot inject ExecutionContext, which fails when the module compiles', () => {
     expect(() => MeoCordTestingModule.create({ controllers: [UsesContextInterceptor] }).compile()).toThrow(
-      'InjectsContext is resolved once and shared, so it cannot inject ExecutionContext',
+      'InjectsContext: resolved once and shared, so it cannot inject ExecutionContext',
     )
   })
 

@@ -327,7 +327,7 @@ describe('where they apply', () => {
         async twice(_interaction: ChatInputCommandInteraction, _params: { minutes: number; note: string }) {}
       }
       return TwiceController
-    }).toThrow('TwiceController.twice has more than one @Validate; one @Validate per handler: combine the schemas into one.')
+    }).toThrow('TwiceController.twice: more than one @Validate; one @Validate per handler: combine the schemas into one.')
   })
 
   it('refuses @Validate on a message handler without a pattern at startup', () => {

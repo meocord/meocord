@@ -793,7 +793,7 @@ describe('@Defer', () => {
       'Events.joined',
     ],
   ])('refuses %s handler at decoration, naming its kind', (kind, declare, handler) => {
-    expect(declare).toThrow(`@Defer is for interaction handlers, but ${handler} is ${kind} handler. Remove @Defer from it.`)
+    expect(declare).toThrow(`${handler}: @Defer is for interaction handlers, and this is ${kind} handler. Remove @Defer from it.`)
   })
 
   it('accepts a command in a controller that also has message, reaction, autocomplete and event handlers', () => {
@@ -829,7 +829,7 @@ describe('@Defer', () => {
         async hi(_message: Message) {}
       }
       return Messages
-    }).toThrow('@Defer is for interaction handlers, but Messages.hi is a message handler')
+    }).toThrow('Messages.hi: @Defer is for interaction handlers, and this is a message handler')
   })
 })
 

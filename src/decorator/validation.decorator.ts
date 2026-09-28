@@ -100,7 +100,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends SchemaP
     }
     if (Reflect.hasOwnMetadata(METHOD_VALIDATION, target, propertyKey)) {
       throw refuse(new Error(
-        `${target.constructor.name}.${propertyKey} has more than one @Validate; one @Validate per handler: combine the schemas into one.`,
+        `${target.constructor.name}.${propertyKey}: more than one @Validate; one @Validate per handler: combine the schemas into one.`,
       ))
     }
     const inlinePipes = Object.values(options.pipes ?? {}).flatMap(entries => (Array.isArray(entries) ? entries : [entries]))

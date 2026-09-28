@@ -23,7 +23,7 @@ interface NoteStore {
 }
 
 const explanation = (cls: string, injectedBy?: string) =>
-  `${cls} cannot be created: parameter 1 of its constructor has no runtime type. Usually ${cls} and a class it ` +
+  `${cls}: parameter 1 of its constructor has no runtime type, so it cannot be created. Usually ${cls} and a class it ` +
   `injects import each other${injectedBy ? ` (${injectedBy})` : ''}, or the parameter is typed with an interface ` +
   'or an `import type`. Move what they both need into a third service, or inject the parameter with @Inject(token).'
 
