@@ -525,7 +525,8 @@ jobs:
   docs-sync:
     name: Docs sync
     needs: release
-    if: needs.release.outputs.published == 'true'
+    # Named directly, with !cancelled(): the implicit success() also reads the skipped slow scenarios job on a push
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     environment: Production
     permissions: {}
