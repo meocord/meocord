@@ -224,6 +224,55 @@ const refusedMessagePattern = templateFile('src/controllers/message/sample.messa
 )
 const REFUSED_MESSAGE_PATTERN = "@MessageHandler('baka {rest...} {x}') in SampleMessageController.baka"
 
+/** An entry that leaves bootstrap's rejection unhandled, as a hand-written main.ts may. */
+const unhandledMain = `import App from '@src/app'
+import { MeoCordFactory } from 'meocord/core'
+
+async function bootstrap() {
+  await MeoCordFactory.create(App).start()
+}
+
+void bootstrap()
+`
+
+/**
+ * An entry that has MeoCord refuse a pattern it catches, which starts the reporting, then leaves a rejection of its
+ * own unhandled: an Error, or a string, and heard by a listener of its own, or not.
+ */
+const rejectingMain = (reason: 'error' | 'string', own: boolean) => `import { route } from 'meocord/common'
+
+try {
+  route('item-{id}')
+} catch {
+  console.log('Refused a pattern and caught it')
+}
+${own ? "process.on('unhandledRejection', reason => console.log(`The app heard: ${String(reason)}`))\n" : ''}
+async function bootstrap() {
+  throw ${reason === 'error' ? "new Error('a bug in bootstrap')" : "'a bug in bootstrap'"}
+}
+
+void bootstrap()
+`
+
+/** A bun test file whose one test expects MeoCordFactory.create to refuse the app. */
+const refusedAppTest = `import { expect, test } from 'bun:test'
+import { Controller, MeoCord, MessageHandler } from 'meocord/decorator'
+import { MeoCordFactory } from 'meocord/core'
+
+@Controller()
+class BadMessages {
+  @MessageHandler('x {rest...} {y}')
+  async m() {}
+}
+
+@MeoCord({ controllers: [BadMessages], clientOptions: { intents: [] } })
+class BadApp {}
+
+test('refuses the app', () => {
+  expect(() => MeoCordFactory.create(BadApp)).toThrow('must be last')
+})
+`
+
 /** What a runtime prints for an error it reports itself, which a refusal never needs. */
 const RAW_REPORT = ['node_modules/meocord/dist', 'Node.js v', 'Error during startup']
 
@@ -1096,6 +1145,16 @@ const scenarios: Scenario[] = [
       },
     },
   ]),
+  {
+    name: 'bun test passes a test that expects MeoCordFactory.create to refuse the app, and exits 0',
+    tier: 'slow',
+    platforms: ['linux', 'darwin'],
+    files: { 'src/refused-app.test.ts': refusedAppTest, dist: null },
+    before: [['build', '--prod']],
+    command: ['bun', 'test', 'src/refused-app.test.ts'],
+    timeoutMs: 60_000,
+    expect: { code: 0, says: ['1 pass', '0 fail'], never: ['[ERROR]'] },
+  },
   // Each stop is tested in both phases, reached by what the output shows rather than by timing: online, once the local
   // Discord's READY has run the ready hook, and mid-login, against an API that never answers
   // A refusal as the application loads reads as one line and exits 1, a decorator's or MeoCordFactory.create's alike
@@ -1120,6 +1179,49 @@ const scenarios: Scenario[] = [
       timeoutMs: 60_000,
       expect: { code: 1, says: [REFUSED_MESSAGE_PATTERN], never: [...RAW_REPORT, 'Starting bot'] },
     },
+    {
+      name: `start --prod on ${runtime} reports a refusal a main.ts leaves unhandled once, and exits 1`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: {
+        '.env': INVALID_TOKEN_ENV,
+        'src/main.ts': unhandledMain,
+        'src/controllers/message/sample.message.controller.ts': refusedMessagePattern,
+        dist: null,
+      },
+      argv: ['start', '--prod', '--build'],
+      timeoutMs: 60_000,
+      expect: { code: 1, counts: { [REFUSED_MESSAGE_PATTERN]: 1 }, never: [...RAW_REPORT, 'Bun v'] },
+    },
+    ...(
+      [
+        ['an Error', 'error'],
+        ['a string', 'string'],
+      ] as const
+    ).flatMap(([label, reason]): Scenario[] => [
+      {
+        name: `start --prod on ${runtime} leaves ${label} rejection after a refusal to the runtime's own report`,
+        tier: runtime === 'node' ? 'fast' : 'slow',
+        platforms: ['linux', 'darwin'],
+        runtime,
+        files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': rejectingMain(reason, false), dist: null },
+        argv: ['start', '--prod', '--build'],
+        timeoutMs: 60_000,
+        // The code and the report the runtime gives with no listener of MeoCord's
+        expect: { code: 1, says: ['a bug in bootstrap', runtime === 'node' ? 'Node.js v' : 'Bun v'], never: ['[ERROR]'] },
+      },
+      {
+        name: `start --prod on ${runtime} leaves ${label} rejection after a refusal to the app's own listener`,
+        tier: runtime === 'node' ? 'fast' : 'slow',
+        platforms: ['linux', 'darwin'],
+        runtime,
+        files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': rejectingMain(reason, true), dist: null },
+        argv: ['start', '--prod', '--build'],
+        timeoutMs: 60_000,
+        expect: { code: 0, counts: { 'The app heard: ': 1 }, says: ['a bug in bootstrap'], never: ['[ERROR]'] },
+      },
+    ]),
     {
       name: `start --dev on ${runtime} reports a decorator it refuses as one line, and keeps watching`,
       tier: runtime === 'node' ? 'fast' : 'slow',

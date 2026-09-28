@@ -47,6 +47,7 @@ import { type MeoCordConfig } from '@src/interface/index.js'
 import { claimAmbientAppTheme, registerClientTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
+import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
 
 /**
  * Recursively binds a class and all its constructor dependencies to the container in singleton scope.
@@ -134,18 +135,18 @@ export class MeoCordFactory {
    * @returns The application, which `start()` logs in.
    * @throws Error when the class has no `@MeoCord`, when the built config is missing, when a provider cannot
    *   be bound, such as one for a token MeoCord binds itself, or when two handlers take one command, or two builder
-   *   classes build one, naming both. It is logged first, as one line, and the exit code set to 1, so
+   *   classes build one, naming both. In a built application it is logged first, as one line, so
    *   `isExplainedError()` tells a caller not to log it again.
    */
   static create(target: ServiceIdentifier): MeoCordApplication {
     try {
       return this.createApplication(target)
     } catch (error) {
-      // Reported here, so it reads the same whether main.ts catches it or not; the error still rejects the call
-      if (isRefusal(error) && !isExplainedError(error)) {
+      // Reported here in a built application, so it reads the same whether main.ts catches it or not; main.ts, or the
+      // report of an uncaught refusal, exits 1. A test or script gets the error as it is.
+      if (isBuiltApplication() && isRefusal(error) && !isExplainedError(error)) {
         this.logger.error(describeRefusal(error, process.cwd()))
         markExplained(error)
-        if (process.exitCode === undefined || process.exitCode === 0) process.exitCode = 1
       }
       throw error
     }
