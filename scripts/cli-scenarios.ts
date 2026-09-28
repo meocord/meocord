@@ -201,6 +201,33 @@ export class ReadyService implements OnReady {
 }
 `
 
+/** Present while an application of `slowStopService` stops. */
+const STOPPING_MARKER = '.bot-stopping'
+
+/** `readyService` with an onShutdown hook that takes 3 s, and a constructor that says when it runs during one. */
+const slowStopService = `import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { Service } from 'meocord/decorator'
+import { type OnReady, type OnShutdown } from 'meocord/interface'
+
+@Service()
+export class ReadyService implements OnReady, OnShutdown {
+  constructor() {
+    if (existsSync('${STOPPING_MARKER}')) console.log('Started while another bot was stopping')
+  }
+
+  onReady() {
+    console.log('Ready hook ran')
+  }
+
+  async onShutdown() {
+    writeFileSync('${STOPPING_MARKER}', '')
+    console.log('Slow shutdown began')
+    await new Promise(resolve => setTimeout(resolve, 3_000))
+    rmSync('${STOPPING_MARKER}')
+  }
+}
+`
+
 /** What a config looks like halfway through an edit: it no longer parses. */
 const HALF_WRITTEN = '\nexport const halfWritten = {\n'
 
@@ -1094,6 +1121,26 @@ const scenarios: Scenario[] = [
           'Bot has shut down': 2,
         },
         never: ['modified-tsconfig.json'],
+      },
+    },
+    {
+      name: `start --dev on ${runtime} starts one bot, after the old one exits, for builds that finish while it stops`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': slowStopService, [STOPPING_MARKER]: null },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [
+        { after: 'Ready hook ran', files: { 'src/ready.service.ts': touched } },
+        { after: 'Slow shutdown began', files: { 'src/ready.service.ts': touched } },
+      ],
+      signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        counts: { 'Starting bot': 2, 'Ready hook ran': 2, 'Slow shutdown began': 2, 'Bot has shut down': 2 },
+        never: ['Started while another bot was stopping'],
       },
     },
     {
