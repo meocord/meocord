@@ -72,7 +72,7 @@ describe('context menu commands', () => {
       }
       return Mismatched
     }).toThrow(
-      'Mismatched.report takes a message context menu interaction, but ReportUserBuilder registers "Report" as a user ' +
+      'Mismatched.report: it takes a message context menu interaction, but ReportUserBuilder registers "Report" as a user ' +
         "context menu command. Declare the handler's interaction as the kind the builder's setType() names.",
     )
   })

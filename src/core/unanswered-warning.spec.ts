@@ -139,6 +139,6 @@ describe('the warning for an interaction left unanswered', () => {
       @loaded.MeoCord({ controllers: [], clientOptions: { intents: [] }, warnUnanswered: 'yes' as never })
       class App {}
       void App
-    }).toThrow('@MeoCord({ warnUnanswered }) on App takes true or false.')
+    }).toThrow('App: @MeoCord({ warnUnanswered }) takes true or false.')
   })
 })

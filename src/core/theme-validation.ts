@@ -126,10 +126,11 @@ export function themeProblems(theme: unknown, where?: string): string[] {
  * reaching Discord, which would refuse the message.
  *
  * @param theme - A theme as an app wrote it, or any part of one.
- * @param where - Where it was set, such as `@MeoCord({ theme }) on App`.
+ * @param where - Where it was set, such as `App: @MeoCord({ theme })`, to begin the error with.
  */
 export function assertValidTheme(theme: unknown, where: string): void {
-  const problems = themeProblems(theme, where)
+  // Each problem without the place, which begins the error once
+  const problems = themeProblems(theme)
   if (problems.length === 0) return
-  throw refuse(new Error(`The theme has ${problems.length} problem${problems.length === 1 ? '' : 's'}:\n${problems.map(problem => `  ${problem}`).join('\n')}`))
+  throw refuse(new Error(`${where}: the theme has ${problems.length} problem${problems.length === 1 ? '' : 's'}:\n${problems.map(problem => `  ${problem}`).join('\n')}`))
 }

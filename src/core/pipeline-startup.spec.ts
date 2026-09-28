@@ -38,7 +38,7 @@ class NeedsContext implements InterceptorInterface {
 const compile = (...controllers: (new (...args: any[]) => unknown)[]) => () =>
   MeoCordTestingModule.create({ controllers }).compile()
 
-const refusedInterceptor = 'NeedsContext is resolved once and shared, so it cannot inject ExecutionContext'
+const refusedInterceptor = 'NeedsContext: resolved once and shared, so it cannot inject ExecutionContext'
 
 describe('stages checked at startup', () => {
   it.each([
@@ -113,7 +113,7 @@ describe('stages checked at startup', () => {
       async piped(_interaction: ChatInputCommandInteraction, _params: { id: unknown }) {}
     }
 
-    expect(compile(Piped)).toThrow('ContextPipe is resolved once and shared, so it cannot inject ExecutionContext')
+    expect(compile(Piped)).toThrow('ContextPipe: resolved once and shared, so it cannot inject ExecutionContext')
   })
 })
 
@@ -196,7 +196,7 @@ describe('input stages on handlers without interaction input', () => {
       async hi(_message: Message) {}
     }
 
-    expect(compile(Deferred)).toThrow('@Defer is for interaction handlers, but Deferred.hi is a message handler')
+    expect(compile(Deferred)).toThrow('Deferred.hi: @Defer is for interaction handlers, and this is a message handler')
   })
 })
 

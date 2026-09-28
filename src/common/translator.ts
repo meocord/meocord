@@ -276,7 +276,7 @@ export interface FoundMessage {
 /** For a class that injects `Translator` in an app that configured none. */
 export function missingTranslatorError(cls: { name: string }): Error {
   return new Error(
-    `${cls.name} injects Translator, but @MeoCord has no i18n. Pass @MeoCord({ i18n: t }), where t comes from createTranslator.`,
+    `${cls.name}: it injects Translator, but @MeoCord has no i18n. Pass @MeoCord({ i18n: t }), where t comes from createTranslator.`,
   )
 }
 

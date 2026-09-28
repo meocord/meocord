@@ -180,7 +180,7 @@ describe('stage types', () => {
         }
       }
       return NeverGuard
-    }).toThrow('@Guard({ types: [] }) on NeverGuard lists no types, so it would never run')
+    }).toThrow('NeverGuard: @Guard({ types: [] }) lists no types, so it would never run')
 
     expect(() => {
       @Interceptor({ types: [] })
@@ -190,7 +190,7 @@ describe('stage types', () => {
         }
       }
       return NeverInterceptor
-    }).toThrow('@Interceptor({ types: [] }) on NeverInterceptor lists no types')
+    }).toThrow('NeverInterceptor: @Interceptor({ types: [] }) lists no types')
   })
 
   it('refuses an interceptor limited to autocomplete, which interceptors never run for', () => {
@@ -202,7 +202,7 @@ describe('stage types', () => {
         }
       }
       return CompletionTimer
-    }).toThrow("@Interceptor({ types: ['autocomplete'] }) on CompletionTimer can never run")
+    }).toThrow("CompletionTimer: @Interceptor({ types: ['autocomplete'] }) can never run")
   })
 
   it('lets a subclass inherit the types of the guard it extends', async () => {

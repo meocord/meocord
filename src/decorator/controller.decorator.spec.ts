@@ -594,7 +594,7 @@ describe('a builder on a subcommand path', () => {
       }
       void SettingsSlashController
     }).toThrow(
-      'SettingsSlashController.notifyEmail declares the builder SettingsCommandBuilder on "settings notify email", which ' +
+      'SettingsSlashController.notifyEmail: the builder SettingsCommandBuilder is declared on "settings notify email", which ' +
         'is a subcommand path: the builder of its command, "settings", describes it, and building it from the path ' +
         `failed (Invalid string format). ${declareInstead}`,
     )
@@ -619,7 +619,7 @@ describe('a builder on a subcommand path', () => {
     expect(getCommandMap(SettingsSlashController.prototype)['settings notify email']).toHaveLength(1)
     expect(warn.mock.calls).toEqual([
       [
-        'SettingsSlashController.notifyEmail declares the builder FixedNameBuilder on "settings notify email", which is ' +
+        'SettingsSlashController.notifyEmail: the builder FixedNameBuilder is declared on "settings notify email", which is ' +
           `a subcommand path; the builder of its command, "settings", describes it. ${declareInstead}`,
       ],
     ])

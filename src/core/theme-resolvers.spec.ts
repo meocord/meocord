@@ -678,7 +678,7 @@ describe('a result that is not a plain object', () => {
       @MeoCord({ controllers: [], clientOptions: { intents: [] }, theme: new Row() as never })
       class FromRow {}
       return FromRow
-    }).toThrow('@MeoCord({ theme }) on FromRow: theme must be a plain object of groups (got a Row)')
+    }).toThrow('FromRow: @MeoCord({ theme }): the theme has 1 problem:\n  theme must be a plain object of groups (got a Row)')
   })
 })
 
@@ -690,11 +690,11 @@ describe('@MeoCord\'s theme options', () => {
   }
 
   it('refuses a resolver it does not know, one that is not a function, and cache options out of range', () => {
-    expect(declare({ themeFor: { server: () => undefined } })).toThrow("@MeoCord({ themeFor }) on Checked has no resolver 'server'")
-    expect(declare({ themeFor: { guild: 'blue' } })).toThrow('@MeoCord({ themeFor }) on Checked: guild must be a function')
-    expect(declare({ themeCache: { maxGuilds: 0 } })).toThrow('@MeoCord({ themeCache }) on Checked: maxGuilds must be a whole number above 0')
-    expect(declare({ themeCache: { ttl: 5 } })).toThrow("@MeoCord({ themeCache }) on Checked has no option 'ttl'")
-    expect(declare({ themeForTimeoutMs: -1 })).toThrow('@MeoCord({ themeForTimeoutMs }) on Checked must be a number of milliseconds above 0')
+    expect(declare({ themeFor: { server: () => undefined } })).toThrow("Checked: @MeoCord({ themeFor }) has no resolver 'server'")
+    expect(declare({ themeFor: { guild: 'blue' } })).toThrow('Checked: @MeoCord({ themeFor }): guild must be a function')
+    expect(declare({ themeCache: { maxGuilds: 0 } })).toThrow('Checked: @MeoCord({ themeCache }): maxGuilds must be a whole number above 0')
+    expect(declare({ themeCache: { ttl: 5 } })).toThrow("Checked: @MeoCord({ themeCache }) has no option 'ttl'")
+    expect(declare({ themeForTimeoutMs: -1 })).toThrow('Checked: @MeoCord({ themeForTimeoutMs }) must be a number of milliseconds above 0')
     // Past setTimeout's limit, Node would wait 1 ms and time every lookup out at once
     expect(declare({ themeForTimeoutMs: 3_000_000_000 })).toThrow('and at most 2147483647 (got 3000000000)')
     expect(declare({ themeForTimeoutMs: 2_147_483_647 })).not.toThrow()

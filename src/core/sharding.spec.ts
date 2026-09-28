@@ -130,7 +130,7 @@ describe('sharding', () => {
       config.current = current as MeoCordConfig
 
       expect(() => loaded.MeoCordFactory.create(duplicated(loaded))).toThrow(
-        'StatsController.stats and AdminController.adminStats both handle the slash command "stats"',
+        'StatsController.stats: it and AdminController.adminStats both handle the slash command "stats"',
       )
     })
   })
@@ -201,7 +201,7 @@ describe('sharding', () => {
       })()
 
       expect(() => loaded.MeoCordFactory.create(appClass(loaded, { services: [first, second] }))).toThrow(
-        'Two classes are named Stats',
+        'Stats: two classes have this name',
       )
     })
   })

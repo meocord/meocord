@@ -342,7 +342,7 @@ describe('observers themselves', () => {
       @Observer()
       class NotAnObserver {}
       void NotAnObserver
-    }).toThrow('NotAnObserver is an @Observer but has no onSettled method.')
+    }).toThrow('NotAnObserver: an @Observer needs an onSettled method, and it has none.')
   })
 })
 
@@ -425,7 +425,7 @@ describe('@Observer({ types })', () => {
         }
       }
       void Nothing
-    }).toThrow('@Observer({ types: [] }) on Nothing lists no types, so it would never run.')
+    }).toThrow('Nothing: @Observer({ types: [] }) lists no types, so it would never run.')
   })
 })
 

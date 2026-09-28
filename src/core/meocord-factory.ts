@@ -156,7 +156,7 @@ export class MeoCordFactory {
     const options = Reflect.getMetadata(MetadataKey.AppOptions, target)
 
     if (!options) {
-      throw refuse(new Error('Target class is not decorated with @MeoCord().'))
+      throw refuse(new Error(`${typeof target === 'function' ? target.name : String(target)}: not decorated with @MeoCord(), so there is no app to create.`))
     }
 
     const meocordConfig = loadMeoCordConfig()
@@ -230,7 +230,7 @@ export class MeoCordFactory {
     // a class token that is provided is not also bound as itself
     for (const [token, provider] of providers) {
       if (container.isBound(token as ServiceIdentifier)) {
-        throw refuse(new Error(`${tokenName(token)} is bound by MeoCord, so @MeoCord({ providers }) cannot provide it.`))
+        throw refuse(new Error(`${(target as { name?: string }).name}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`))
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))
     }
@@ -275,7 +275,7 @@ export class MeoCordFactory {
     for (const cls of appClasses) {
       if (byName.has(cls.name) && meocordConfig.sharding?.mode === 'process') {
         throw refuse(new Error(
-          `Two classes are named ${cls.name}; with process sharding, ShardContext.call finds a service in ` +
+          `${cls.name}: two classes have this name; with process sharding, ShardContext.call finds a service in ` +
             `another shard by its name, so give each controller and service a distinct name.`,
         ))
       }

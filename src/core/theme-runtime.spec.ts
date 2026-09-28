@@ -403,7 +403,7 @@ describe('a theme that is not valid', () => {
       @MeoCord({ controllers: [], clientOptions: { intents: [] }, theme: { colors: { primary: '#GGGGGG' } } })
       class Broken {}
       return Broken
-    }).toThrow(/@MeoCord\(\{ theme \}\) on Broken: theme\.colors\.primary/)
+    }).toThrow(/Broken: @MeoCord\(\{ theme \}\): the theme has 1 problem:\n {2}theme\.colors\.primary/)
   })
 
   it('stops @UseTheme where it applies, naming the class and the method', () => {
@@ -415,7 +415,7 @@ describe('a theme that is not valid', () => {
         x() {}
       }
       return Broken
-    }).toThrow(/@UseTheme on Broken\.x: theme\.emojis\.loading/)
+    }).toThrow(/Broken\.x: @UseTheme: the theme has 1 problem:\n {2}theme\.emojis\.loading/)
   })
 
   it('keeps the theme @MeoCord checked, whatever happens to the object afterwards', async () => {
@@ -443,7 +443,7 @@ describe('a theme that is not valid', () => {
       @UseTheme({ colors: { info: '#000002' } })
       class Twice {}
       return Twice
-    }).toThrow('@UseTheme on Twice: it has a @UseTheme already')
+    }).toThrow('Twice: @UseTheme: there is one already')
   })
 })
 

@@ -42,34 +42,34 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
     // A class listed alone, as Nest takes one: say where a class goes instead
     if (typeof entry === 'function') {
       const name = tokenName(entry)
-      const listing = where.startsWith('@MeoCord')
+      const listing = where.includes('@MeoCord')
         ? 'list a service in @MeoCord({ services })'
         : 'a class a controller or service injects is bound for you, so it needs no listing'
       throw refuse(new Error(
-        `${name} in ${where} is a class, not a provider: ${listing}. To put something in its place, write ` +
+        `${where}: ${name} is a class, not a provider: ${listing}. To put something in its place, write ` +
           `{ provide: ${name}, useValue } or { provide: ${name}, useClass }.`,
       ))
     }
     if (!entry || typeof entry !== 'object' || !isToken(entry.provide)) {
-      throw refuse(new Error(`${where} has a provider without a token: set provide to a class, a string or a symbol.`))
+      throw refuse(new Error(`${where}: a provider has no token: set provide to a class, a string or a symbol.`))
     }
     const name = tokenName(entry.provide)
     const kinds = (['useValue', 'useClass', 'useFactory'] as const).filter(kind => kind in entry)
     if (kinds.length !== 1) {
-      throw refuse(new Error(`The provider for ${name} in ${where} needs exactly one of useValue, useClass and useFactory.`))
+      throw refuse(new Error(`${where}: the provider for ${name} needs exactly one of useValue, useClass and useFactory.`))
     }
     if ('useClass' in entry && typeof entry.useClass !== 'function') {
-      throw refuse(new Error(`The provider for ${name} in ${where} has a useClass that is not a class.`))
+      throw refuse(new Error(`${where}: the provider for ${name} has a useClass that is not a class.`))
     }
     if ('useFactory' in entry) {
       if (typeof entry.useFactory !== 'function') {
-        throw refuse(new Error(`The provider for ${name} in ${where} has a useFactory that is not a function.`))
+        throw refuse(new Error(`${where}: the provider for ${name} has a useFactory that is not a function.`))
       }
       if (entry.inject !== undefined && !(Array.isArray(entry.inject) && entry.inject.every(isToken))) {
-        throw refuse(new Error(`The provider for ${name} in ${where} has an inject that is not a list of tokens.`))
+        throw refuse(new Error(`${where}: the provider for ${name} has an inject that is not a list of tokens.`))
       }
     }
-    if (map.has(entry.provide)) throw refuse(new Error(`${name} is provided twice in ${where}.`))
+    if (map.has(entry.provide)) throw refuse(new Error(`${where}: ${name} is provided twice.`))
     map.set(entry.provide, provider)
   }
   return map
@@ -112,7 +112,7 @@ export function assertProvided(container: Container, providers: ProviderMap, cla
   for (const cls of classes) {
     const token = injectedTokens(cls).find(missing)
     if (token !== undefined) {
-      throw refuse(new Error(`${cls.name} injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`))
+      throw refuse(new Error(`${cls.name}: it injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`))
     }
   }
   for (const [provided, provider] of providers) {
@@ -124,7 +124,7 @@ export function assertProvided(container: Container, providers: ProviderMap, cla
     const token = dependencies.find(missing)
     if (token !== undefined) {
       throw refuse(new Error(
-        `The provider for ${tokenName(provided)} injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`,
+        `${tokenName(provided)}: its provider injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`,
       ))
     }
   }
@@ -169,7 +169,7 @@ export function assertTypedParameters(classes: readonly AnyClass[]): void {
         : ` (${injectors.length === 1 ? injectors[0] : `${injectors.slice(0, -1).join(', ')} and ${injectors.at(-1)}`} ` +
           `inject${injectors.length === 1 ? 's' : ''} ${cls.name})`
     throw refuse(new Error(
-      `${cls.name} cannot be created: parameter ${index + 1} of its constructor has no runtime type. Usually ` +
+      `${cls.name}: parameter ${index + 1} of its constructor has no runtime type, so it cannot be created. Usually ` +
         `${cls.name} and a class it injects import each other${injectedBy}, or the parameter is typed with an ` +
         'interface or an `import type`. Move what they both need into a third service, or inject the parameter ' +
         'with @Inject(token).',

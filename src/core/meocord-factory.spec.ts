@@ -44,7 +44,7 @@ describe('MeoCordFactory.create()', () => {
 
   it('throws when the target has no @MeoCord() options metadata', () => {
     class NoMetadataApp {}
-    expect(() => MeoCordFactory.create(NoMetadataApp)).toThrow('Target class is not decorated with @MeoCord().')
+    expect(() => MeoCordFactory.create(NoMetadataApp)).toThrow('NoMetadataApp: not decorated with @MeoCord(), so there is no app to create.')
   })
 
   describe('a refused app', () => {
@@ -75,9 +75,9 @@ describe('MeoCordFactory.create()', () => {
 
       const { thrown, explained, exitCode } = await refused()
 
-      expect(thrown.message).toBe('Target class is not decorated with @MeoCord().')
+      expect(thrown.message).toBe('NoMetadataApp: not decorated with @MeoCord(), so there is no app to create.')
       expect(logger().error).toHaveBeenCalledTimes(1)
-      expect(logger().error.mock.calls[0][0]).toMatch(/^Target class is not decorated with @MeoCord\(\)\./)
+      expect(logger().error.mock.calls[0][0]).toMatch(/^NoMetadataApp: not decorated with @MeoCord\(\)/)
       expect(explained).toBe(true)
       // main.ts, or the report of an uncaught refusal, sets it
       expect(exitCode).toBeUndefined()
@@ -86,7 +86,7 @@ describe('MeoCordFactory.create()', () => {
     it('reaches a test or a script as it is: nothing logged, and the exit code left alone', async () => {
       const { thrown, explained, exitCode } = await refused()
 
-      expect(thrown.message).toBe('Target class is not decorated with @MeoCord().')
+      expect(thrown.message).toBe('NoMetadataApp: not decorated with @MeoCord(), so there is no app to create.')
       expect(logger().error).not.toHaveBeenCalled()
       expect(explained).toBe(false)
       expect(exitCode).toBeUndefined()
@@ -156,7 +156,7 @@ describe('MeoCordFactory.create()', () => {
       MyApp,
     )
 
-    expect(() => MeoCordFactory.create(MyApp)).toThrow('ContextInterceptor is resolved once and shared')
+    expect(() => MeoCordFactory.create(MyApp)).toThrow('ContextInterceptor: resolved once and shared')
   })
 
   it('makes the @MeoCord({ presenter }) the one respond() uses for the bot client, before login', async () => {
@@ -206,7 +206,7 @@ describe('MeoCordFactory.create()', () => {
     )
 
     expect(() => MeoCordFactory.create(MyApp)).toThrow(
-      'ContextService is resolved once and shared, so it cannot inject ExecutionContext',
+      'ContextService: resolved once and shared, so it cannot inject ExecutionContext',
     )
   })
 
@@ -269,7 +269,7 @@ describe('MeoCordFactory.create()', () => {
     it('says what to pass when a class injects Translator without one', () => {
       mockLoadConfig.mockReturnValue({ discordToken: 'test-token' })
 
-      expect(() => MeoCordFactory.create(appWith())).toThrow('PingService injects Translator, but @MeoCord has no i18n')
+      expect(() => MeoCordFactory.create(appWith())).toThrow('PingService: it injects Translator, but @MeoCord has no i18n')
     })
   })
 

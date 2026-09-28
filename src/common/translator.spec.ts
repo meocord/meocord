@@ -177,7 +177,7 @@ describe('lookups, and what never resolves', () => {
 describe('missingTranslatorError', () => {
   it('names the class and says what to pass', () => {
     expect(missingTranslatorError({ name: 'BanService' }).message).toBe(
-      'BanService injects Translator, but @MeoCord has no i18n. Pass @MeoCord({ i18n: t }), where t comes from createTranslator.',
+      'BanService: it injects Translator, but @MeoCord has no i18n. Pass @MeoCord({ i18n: t }), where t comes from createTranslator.',
     )
   })
 })

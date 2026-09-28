@@ -213,7 +213,7 @@ describe('a shared stage', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ controllers: [AnonymousStage] }).compile()).toThrow(
-      'A class is resolved once and shared, so it cannot inject ExecutionContext',
+      'A class: resolved once and shared, so it cannot inject ExecutionContext',
     )
   })
 
@@ -235,7 +235,7 @@ describe('a shared stage', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ controllers: [SneakyController] }).compile()).toThrow(
-      "Sneaky is resolved once and shared, so it cannot inject ExecutionContext: it would keep the first call's context for every later call.",
+      "Sneaky: resolved once and shared, so it cannot inject ExecutionContext: it would keep the first call's context for every later call.",
     )
   })
 })

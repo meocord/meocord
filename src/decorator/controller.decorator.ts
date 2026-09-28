@@ -490,7 +490,7 @@ export function Command<
   ) {
     const originalMethod = _descriptor.value
     if (!originalMethod) {
-      throw refuse(new Error(`Missing implementation for method ${propertyKey}`))
+      throw refuse(new Error(`${target.constructor.name}.${propertyKey}: @Command is on something with no implementation.`))
     }
 
     // Wrap original method for interaction type validation
@@ -529,7 +529,7 @@ export function Command<
         const detail = error instanceof Error ? error.message.split('\n')[0] : String(error)
         if (subcommandPath) {
           throw refuse(new Error(
-            `${where} declares the builder ${builderOrType.name} on "${commandName}", which is a subcommand path: the ` +
+            `${where}: the builder ${builderOrType.name} is declared on "${commandName}", which is a subcommand path: the ` +
               `builder of its command, "${command}", describes it, and building it from the path failed (${detail}). ` +
               declareInstead,
             { cause: error },
@@ -537,7 +537,7 @@ export function Command<
         }
         // discord.js builders validate as they are set, and their errors name neither the command nor the field.
         throw refuse(new Error(
-          `${builderOrType.name} could not build "${commandName}": ${detail}. Check its names, descriptions and ` +
+          `${where}: ${builderOrType.name} could not build "${commandName}": ${detail}. Check its names, descriptions and ` +
             `localizations, which Discord limits to 32 and 100 characters.`,
           { cause: error },
         ))
@@ -545,14 +545,14 @@ export function Command<
       // A builder that names its command itself still works on the path, registered once with its command
       if (subcommandPath) {
         logger.warn(
-          `${where} declares the builder ${builderOrType.name} on "${commandName}", which is a subcommand path; the ` +
+          `${where}: the builder ${builderOrType.name} is declared on "${commandName}", which is a subcommand path; the ` +
             `builder of its command, "${command}", describes it. ${declareInstead}`,
         )
       }
       guilds = Reflect.getMetadata(BUILDER_GUILDS, builderOrType)
       commandType = Reflect.getMetadata(MetadataKey.CommandType, builderOrType) as CommandType
       if (!(commandType in CommandType)) {
-        throw refuse(new Error(`Metadata for 'commandType' is missing on builder ${builderOrType.name}`))
+        throw refuse(new Error(`${where}: the builder ${builderOrType.name} is not decorated with @CommandBuilder, so there is no command type to register.`))
       }
       if (commandType === CommandType.CONTEXT_MENU) {
         assertContextMenuKind(target, propertyKey, builderOrType.name, commandName, builderInstance)
@@ -610,7 +610,7 @@ function assertContextMenuKind(target: object, propertyKey: string, builderName:
   if (!declared || registered === undefined || declared.kind === registered) return
   const kind = registered === ApplicationCommandType.User ? 'user' : 'message'
   throw refuse(new Error(
-    `${target.constructor.name}.${propertyKey} takes a ${declared.name} context menu interaction, but ${builderName} ` +
+    `${target.constructor.name}.${propertyKey}: it takes a ${declared.name} context menu interaction, but ${builderName} ` +
       `registers "${commandName}" as a ${kind} context menu command. Declare the handler's interaction as the kind the ` +
       `builder's setType() names.`,
   ))

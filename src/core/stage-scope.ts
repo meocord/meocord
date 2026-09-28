@@ -20,14 +20,14 @@ export function defineStageTypes(
   if (!types) return
   if (types.length === 0) {
     throw refuse(new Error(
-      `@${decorator}({ types: [] }) on ${cls.name} lists no types, so it would never run. List the types it ` +
+      `${cls.name}: @${decorator}({ types: [] }) lists no types, so it would never run. List the types it ` +
         `runs for, or leave types out to run for every type.`,
     ))
   }
   // Interceptors never run for autocomplete, which must answer within three seconds
   if (decorator === 'Interceptor' && types.every(type => type === 'autocomplete')) {
     throw refuse(new Error(
-      `@Interceptor({ types: ['autocomplete'] }) on ${cls.name} can never run: interceptors skip autocomplete ` +
+      `${cls.name}: @Interceptor({ types: ['autocomplete'] }) can never run: interceptors skip autocomplete ` +
         `handlers. List the types it should run for instead.`,
     ))
   }
@@ -65,7 +65,7 @@ export function assertStageEntries(
     if (!reason) continue
     const Kind = `${kind[0].toUpperCase()}${kind.slice(1)}`
     throw refuse(new Error(
-      `${decorator} on ${where}: ${reason}. Give ${kind === 'interceptor' ? 'an' : 'a'} ${kind} class, or ` +
+      `${where}: ${decorator}: ${reason}. Give ${kind === 'interceptor' ? 'an' : 'a'} ${kind} class, or ` +
         `{ provide: ${Kind}Class, params? } with params an object.`,
     ))
   }

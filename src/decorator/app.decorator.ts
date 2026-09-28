@@ -26,22 +26,22 @@ import { copyLayer } from '@src/core/theme-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
 
 /** Refuses a `messages` option of the wrong type where the app is declared, rather than at the first message. */
-function assertMessageOptions(messages: MessageCommandOptions | undefined, i18n: Translator<any> | undefined): void {
+function assertMessageOptions(appName: string, messages: MessageCommandOptions | undefined, i18n: Translator<any> | undefined): void {
   if (!messages) return
   const { prefix, mention, caseSensitive } = messages
   const isText = (value: unknown) => typeof value === 'string'
   if (prefix !== undefined && !isText(prefix) && typeof prefix !== 'function' && !(Array.isArray(prefix) && prefix.every(isText))) {
-    throw refuse(new TypeError('@MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function of the message returning them.'))
+    throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function of the message returning them.`))
   }
   for (const [name, value] of Object.entries({ caseSensitive, replyEmoji: messages.replyEmoji })) {
-    if (value !== undefined && typeof value !== 'boolean') throw refuse(new TypeError(`@MeoCord({ messages: { ${name} } }) takes true or false.`))
+    if (value !== undefined && typeof value !== 'boolean') throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { ${name} } }) takes true or false.`))
   }
   if (mention !== undefined && typeof mention !== 'boolean' && mention !== 'only') {
-    throw refuse(new TypeError("@MeoCord({ messages: { mention } }) takes true, false or 'only'."))
+    throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { mention } }) takes true, false or 'only'.`))
   }
   const { types, deleteUsageRepliesAfter } = messages
   if (deleteUsageRepliesAfter !== undefined && !(typeof deleteUsageRepliesAfter === 'number' && deleteUsageRepliesAfter >= 0 && Number.isFinite(deleteUsageRepliesAfter))) {
-    throw refuse(new TypeError('@MeoCord({ messages: { deleteUsageRepliesAfter } }) takes a number of seconds, or 0 to keep usage replies.'))
+    throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { deleteUsageRepliesAfter } }) takes a number of seconds, or 0 to keep usage replies.`))
   }
   const { help } = messages
   // One word each, since help is asked for by its first word
@@ -56,20 +56,20 @@ function assertMessageOptions(messages: MessageCommandOptions | undefined, i18n:
       (help.aliases === undefined || (Array.isArray(help.aliases) && help.aliases.every(isWord)))
     )
   ) {
-    throw refuse(new TypeError('@MeoCord({ messages: { help } }) takes true, false, or { command, aliases } of single words.'))
+    throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { help } }) takes true, false, or { command, aliases } of single words.`))
   }
   for (const [name, type] of Object.entries(types ?? {})) {
-    if (name in BUILT_IN_TYPES) throw refuse(new TypeError(`@MeoCord({ messages: { types } }): "${name}" is a built-in type; give yours another name.`))
+    if (name in BUILT_IN_TYPES) throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { types } }): "${name}" is a built-in type; give yours another name.`))
     if (typeof type?.parse !== 'function') {
-      throw refuse(new TypeError(`@MeoCord({ messages: { types } }): "${name}" needs a parse(word, message) function.`))
+      throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { types } }): "${name}" needs a parse(word, message) function.`))
     }
-    if (type.labelKey !== undefined) assertLabelKey(name, type.labelKey, i18n)
+    if (type.labelKey !== undefined) assertLabelKey(appName, name, type.labelKey, i18n)
   }
 }
 
 /** Refuses a type's `labelKey` that no message of the app's default catalog has, as it would be shown as the key. */
-function assertLabelKey(name: string, labelKey: unknown, i18n: Translator<any> | undefined): void {
-  const where = `@MeoCord({ messages: { types } }): "${name}" has labelKey`
+function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: Translator<any> | undefined): void {
+  const where = `${appName}: @MeoCord({ messages: { types } }): "${name}" has labelKey`
   if (typeof labelKey !== 'string') throw refuse(new TypeError(`${where} ${String(labelKey)}; it takes a message key, such as 'types.${name}'.`))
   if (!i18n) throw refuse(new TypeError(`${where} '${labelKey}', which needs @MeoCord({ i18n }).`))
   const catalogs = (i18n as unknown as { [CATALOGS]?: Partial<Record<string, CatalogShape>> })[CATALOGS]
@@ -179,18 +179,18 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     assertStageEntries('@MeoCord({ guards })', 'guard', target.name, options.guards ?? [])
     assertStageEntries('@MeoCord({ interceptors })', 'interceptor', target.name, options.interceptors ?? [])
     assertStageEntries('@MeoCord({ filters })', 'filter', target.name, options.filters ?? [])
-    assertObservers(`@MeoCord({ observers }) on ${target.name}`, options.observers ?? [])
+    assertObservers(`${target.name}: @MeoCord({ observers })`, options.observers ?? [])
     // Checked where the app is declared, so a malformed provider fails at import rather than at start
-    providerMap(options.providers ?? [], '@MeoCord({ providers })')
-    assertMessageOptions(options.messages, options.i18n)
+    providerMap(options.providers ?? [], `${target.name}: @MeoCord({ providers })`)
+    assertMessageOptions(target.name, options.messages, options.i18n)
     assertCooldownPolicy(target.name, options)
     if (options.warnUnanswered !== undefined && typeof options.warnUnanswered !== 'boolean') {
-      throw refuse(new TypeError(`@MeoCord({ warnUnanswered }) on ${target.name} takes true or false.`))
+      throw refuse(new TypeError(`${target.name}: @MeoCord({ warnUnanswered }) takes true or false.`))
     }
     // Copied first, so what is checked is what the app runs with, whatever happens to the object afterwards
     assertThemeFor(target.name, options)
     const theme = options.theme === undefined ? undefined : copyLayer(options.theme)
-    if (theme !== undefined) assertValidTheme(theme, `@MeoCord({ theme }) on ${target.name}`)
+    if (theme !== undefined) assertValidTheme(theme, `${target.name}: @MeoCord({ theme })`)
     makeInjectable(target)
 
     Reflect.defineMetadata(MetadataKey.AppOptions, theme === undefined ? options : { ...options, theme }, target)
@@ -207,26 +207,26 @@ function assertThemeFor(
 ): void {
   if (themeFor !== undefined) {
     if (themeFor === null || typeof themeFor !== 'object') {
-      throw refuse(new TypeError(`@MeoCord({ themeFor }) on ${appName} takes { guild?, user? }, each a function returning part of a theme.`))
+      throw refuse(new TypeError(`${appName}: @MeoCord({ themeFor }) takes { guild?, user? }, each a function returning part of a theme.`))
     }
     for (const [key, resolver] of Object.entries(themeFor)) {
-      if (key !== 'guild' && key !== 'user') throw refuse(new TypeError(`@MeoCord({ themeFor }) on ${appName} has no resolver '${key}': give guild or user.`))
+      if (key !== 'guild' && key !== 'user') throw refuse(new TypeError(`${appName}: @MeoCord({ themeFor }) has no resolver '${key}': give guild or user.`))
       if (resolver !== undefined && typeof resolver !== 'function') {
-        throw refuse(new TypeError(`@MeoCord({ themeFor }) on ${appName}: ${key} must be a function returning part of a theme.`))
+        throw refuse(new TypeError(`${appName}: @MeoCord({ themeFor }): ${key} must be a function returning part of a theme.`))
       }
     }
   }
   const whole = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value > 0
   if (themeCache !== undefined) {
     if (themeCache === null || typeof themeCache !== 'object') {
-      throw refuse(new TypeError(`@MeoCord({ themeCache }) on ${appName} takes { ttlSeconds?, maxGuilds?, maxUsers? }.`))
+      throw refuse(new TypeError(`${appName}: @MeoCord({ themeCache }) takes { ttlSeconds?, maxGuilds?, maxUsers? }.`))
     }
     for (const [key, value] of Object.entries(themeCache)) {
       if (!['ttlSeconds', 'maxGuilds', 'maxUsers'].includes(key)) {
-        throw refuse(new TypeError(`@MeoCord({ themeCache }) on ${appName} has no option '${key}': give ttlSeconds, maxGuilds or maxUsers.`))
+        throw refuse(new TypeError(`${appName}: @MeoCord({ themeCache }) has no option '${key}': give ttlSeconds, maxGuilds or maxUsers.`))
       }
       if (value !== undefined && !(key === 'ttlSeconds' ? typeof value === 'number' && value > 0 && Number.isFinite(value) : whole(value))) {
-        throw refuse(new TypeError(`@MeoCord({ themeCache }) on ${appName}: ${key} must be ${key === 'ttlSeconds' ? 'a number of seconds above 0' : 'a whole number above 0'} (got ${JSON.stringify(value)}).`))
+        throw refuse(new TypeError(`${appName}: @MeoCord({ themeCache }): ${key} must be ${key === 'ttlSeconds' ? 'a number of seconds above 0' : 'a whole number above 0'} (got ${JSON.stringify(value)}).`))
       }
     }
   }
@@ -236,7 +236,7 @@ function assertThemeFor(
     !(typeof themeForTimeoutMs === 'number' && Number.isFinite(themeForTimeoutMs) && themeForTimeoutMs > 0 && themeForTimeoutMs <= MAX_TIMEOUT_MS)
   ) {
     throw refuse(new TypeError(
-      `@MeoCord({ themeForTimeoutMs }) on ${appName} must be a number of milliseconds above 0 and at most ${MAX_TIMEOUT_MS} (got ${JSON.stringify(themeForTimeoutMs)}).`,
+      `${appName}: @MeoCord({ themeForTimeoutMs }) must be a number of milliseconds above 0 and at most ${MAX_TIMEOUT_MS} (got ${JSON.stringify(themeForTimeoutMs)}).`,
     ))
   }
 }
@@ -247,14 +247,14 @@ function assertCooldownPolicy(
   { cooldownStoreFailure, cooldownStoreTimeoutMs }: { cooldownStoreFailure?: unknown; cooldownStoreTimeoutMs?: unknown },
 ): void {
   if (cooldownStoreFailure !== undefined && cooldownStoreFailure !== 'deny' && cooldownStoreFailure !== 'allow') {
-    throw refuse(new TypeError(`@MeoCord({ cooldownStoreFailure }) on ${appName} must be 'deny' or 'allow' (got ${JSON.stringify(cooldownStoreFailure)}).`))
+    throw refuse(new TypeError(`${appName}: @MeoCord({ cooldownStoreFailure }) must be 'deny' or 'allow' (got ${JSON.stringify(cooldownStoreFailure)}).`))
   }
   if (
     cooldownStoreTimeoutMs !== undefined &&
     !(typeof cooldownStoreTimeoutMs === 'number' && Number.isFinite(cooldownStoreTimeoutMs) && cooldownStoreTimeoutMs > 0)
   ) {
     throw refuse(new TypeError(
-      `@MeoCord({ cooldownStoreTimeoutMs }) on ${appName} must be a number of milliseconds above 0 (got ${JSON.stringify(cooldownStoreTimeoutMs)}).`,
+      `${appName}: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0 (got ${JSON.stringify(cooldownStoreTimeoutMs)}).`,
     ))
   }
 }

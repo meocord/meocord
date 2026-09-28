@@ -297,10 +297,10 @@ describe('classes shared across calls', () => {
     }
 
     expect(() => MeoCordTestingModule.create({ controllers: [UsesContextService] }).compile()).toThrow(
-      'ContextService is resolved once and shared, so it cannot inject ExecutionContext',
+      'ContextService: resolved once and shared, so it cannot inject ExecutionContext',
     )
     expect(() => MeoCordTestingModule.create({ controllers: [InjectsContext] }).compile()).toThrow(
-      'InjectsContext is resolved once and shared',
+      'InjectsContext: resolved once and shared',
     )
   })
 })

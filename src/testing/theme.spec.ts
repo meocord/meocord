@@ -86,7 +86,7 @@ describe('overrideTheme', () => {
 
   it('checks the theme where it is given, and keeps a copy', async () => {
     expect(() => MeoCordTestingModule.create({ controllers: [Shop] }).overrideTheme({ colors: { primary: '#GGG' } })).toThrow(
-      /^The theme has 1 problem:\n {2}overrideTheme: theme\.colors\.primary: '#GGG' is not a colour/,
+      /^overrideTheme: the theme has 1 problem:\n {2}theme\.colors\.primary: '#GGG' is not a colour/,
     )
 
     const theme: ThemeOverride = { colors: { primary: '#0000B3' } }
@@ -187,7 +187,7 @@ describe('createMockTheme', () => {
   })
 
   it('checks the overrides and never freezes them', () => {
-    expect(() => createMockTheme({ buttons: { danger: 5 as never } })).toThrow(/^The theme has 1 problem:\n {2}createMockTheme: theme\.buttons\.danger: 5/)
+    expect(() => createMockTheme({ buttons: { danger: 5 as never } })).toThrow(/^createMockTheme: the theme has 1 problem:\n {2}theme\.buttons\.danger: 5/)
 
     const overrides: ThemeOverride = { colors: { primary: '#0000F3' } }
     createMockTheme(overrides)
@@ -228,7 +228,7 @@ describe('withTheme', () => {
   })
 
   it('checks a theme it is given', () => {
-    expect(() => withTheme({ colors: { primary: '#GGG' } }, () => undefined)).toThrow(/^The theme has 1 problem:\n {2}withTheme: theme\.colors\.primary/)
+    expect(() => withTheme({ colors: { primary: '#GGG' } }, () => undefined)).toThrow(/^withTheme: the theme has 1 problem:\n {2}theme\.colors\.primary/)
   })
 })
 
