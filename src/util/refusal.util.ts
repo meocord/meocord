@@ -76,9 +76,11 @@ export function reportRefusals(
 
   const onRejection = (reason: unknown) => {
     if (isRefusal(reason)) return report(reason)
+    // With a listener of the application's own, it handles the rejection, and Bun would not have reported it; this one
+    // stays, for a refusal later
+    if (process.listenerCount('unhandledRejection') > 1) return
     process.off('unhandledRejection', onRejection)
-    // With a listener of the application's own, it handles the rejection, and Bun would not have reported it
-    if (process.listenerCount('unhandledRejection') === 0) reject(reason)
+    reject(reason)
   }
   process.on('unhandledRejection', onRejection)
 }
