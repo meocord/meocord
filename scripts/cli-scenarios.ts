@@ -26,6 +26,7 @@ import { type AddressInfo } from 'net'
 import { tmpdir } from 'os'
 import path from 'path'
 import { ControllerType } from '../src/enum/controller.enum.js'
+import { startFakeDiscord } from './lib/fake-discord.js'
 import { cleanEnv, installedCliOf, mustRun, outputOf, pack, renderApp } from './lib/packed-app.js'
 
 type Tier = 'fast' | 'slow'
@@ -57,7 +58,11 @@ interface Scenario {
    * A signal sent once the output shows `after`: to the whole process group, as a terminal's Ctrl+C is,
    * or to the CLI alone, as Docker, pm2 and systemd send one. `repeatAfterMs` sends it again that much later.
    */
-  signal?: { name: NodeJS.Signals; after: string; to?: 'group' | 'cli'; repeatAfterMs?: number }
+  signal?: { name: NodeJS.Signals; after: string; times?: number; to?: 'group' | 'cli'; repeatAfterMs?: number }
+  /** Files changed while it runs, each once the output shows `after` `times` times; restored afterwards. */
+  edits?: { after: string; times?: number; files: Record<string, (current: string) => string> }[]
+  /** Runs a local Discord, given to the app in `DISCORD_API_ENV`, whose gateway answers IDENTIFY that late. */
+  discord?: { readyDelayMs: number }
   timeoutMs?: number
   expect: {
     code: number
@@ -65,6 +70,8 @@ interface Scenario {
     says?: string[]
     /** Text the output must not contain. */
     never?: string[]
+    /** How many times each text must appear in the output. */
+    counts?: Record<string, number>
     /** Paths, relative to cwd, that must exist afterwards. */
     creates?: string[]
     /** Paths, relative to cwd, that must not exist afterwards. */
@@ -172,6 +179,30 @@ const stalledApp = `import { MeoCord } from 'meocord/decorator'
 @MeoCord({ controllers: [], clientOptions: { intents: [], rest: { api: process.env.${STALLED_API_ENV} } } })
 export default class App {}
 `
+
+/** Where a scenario's local Discord listens; see `Scenario.discord`. */
+const DISCORD_API_ENV = 'MEOCORD_SCENARIO_DISCORD_API'
+
+/** An application that logs in to the scenario's local Discord, with an onReady hook that says it ran. */
+const readyApp = `import { MeoCord } from 'meocord/decorator'
+import { ReadyService } from '@src/ready.service'
+
+@MeoCord({ controllers: [], services: [ReadyService], clientOptions: { intents: [], rest: { api: process.env.${DISCORD_API_ENV} } } })
+export default class App {}
+`
+const readyService = `import { Service } from 'meocord/decorator'
+import { type OnReady } from 'meocord/interface'
+
+@Service()
+export class ReadyService implements OnReady {
+  onReady() {
+    console.log('Ready hook ran')
+  }
+}
+`
+
+/** A change to a file that leaves what it does as it was. */
+const touched = (current: string) => `${current}\n`
 
 /** An entry that ignores the signals that stop a bot, as one stuck in its shutdown does. */
 const ignoringMain = `for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => console.log(\`Ignored \${signal}\`))
@@ -318,11 +349,20 @@ function run(command: string, args: string[], dir: string, scenario: Scenario): 
       if (signal.to === 'cli') child.kill(signal.name)
       else toGroup(signal.name)
     }
+    const shown = (text: string, times = 1) => outputOf({ stdout, stderr }).split(text).length - 1 >= times
+    const edits = [...(scenario.edits ?? [])]
+    let signalled = false
     const watcher =
-      signal &&
+      (signal || edits.length > 0) &&
       setInterval(() => {
-        if (!outputOf({ stdout, stderr }).includes(signal.after)) return
-        clearInterval(watcher)
+        for (const edit of edits.filter(pending => shown(pending.after, pending.times))) {
+          edits.splice(edits.indexOf(edit), 1)
+          for (const [file, change] of Object.entries(edit.files)) {
+            writeFileSync(path.join(dir, file), change(readFileSync(path.join(dir, file), 'utf8')))
+          }
+        }
+        if (!signal || signalled || !shown(signal.after, signal.times)) return
+        signalled = true
         // A moment for the process to settle, as a person pressing Ctrl+C gives it
         setTimeout(() => {
           send()
@@ -348,6 +388,10 @@ async function check(scenario: Scenario): Promise<string[]> {
   const kept = new Map((scenario.expect.keeps ?? []).map(file => [file, readFileSync(path.join(dir, file), 'utf8')]))
   const runtime = runtimeBinary(scenario.runtime ?? 'node')
   const hidden: { from: string; to: string }[] = []
+  const edited = (scenario.edits ?? []).flatMap(edit => Object.keys(edit.files))
+  const restoreEdited = applyFiles(dir, Object.fromEntries(edited.map(file => [file, readFileSync(path.join(dir, file), 'utf8')])))
+  const discord = scenario.discord && (await startFakeDiscord(scenario.discord))
+  if (discord) scenario = { ...scenario, env: { ...scenario.env, [DISCORD_API_ENV]: discord.api } }
 
   try {
     for (const argv of scenario.before ?? []) {
@@ -372,6 +416,10 @@ async function check(scenario: Scenario): Promise<string[]> {
     const said = output.replace(/\\/g, '/')
     for (const text of scenario.expect.says ?? []) if (!said.includes(text)) problems.push(`does not say "${text}"`)
     for (const text of scenario.expect.never ?? []) if (said.includes(text)) problems.push(`says "${text}"`)
+    for (const [text, times] of Object.entries(scenario.expect.counts ?? {})) {
+      const seen = said.split(text).length - 1
+      if (seen !== times) problems.push(`says "${text}" ${seen} times, expected ${times}`)
+    }
     for (const file of scenario.expect.creates ?? []) {
       if (createdBefore.has(file) || !existsSync(path.join(dir, file))) problems.push(`did not create ${file}`)
     }
@@ -391,6 +439,8 @@ async function check(scenario: Scenario): Promise<string[]> {
     if (problems.length > 0) problems.push(`output:\n${output.replace(/^/gm, '      ')}`)
     return problems
   } finally {
+    await discord?.close()
+    restoreEdited()
     for (const { from, to } of hidden) renameSync(to, from)
     // Anything the run wrote goes, so the next scenario starts from the same app.
     for (const file of filesIn(dir)) if (!filesBefore.has(file)) rmSync(path.join(dir, file), { force: true })
@@ -918,6 +968,65 @@ const scenarios: Scenario[] = [
 
   // Slow: stop signals, sent to the whole process group as a terminal's Ctrl+C is, or to the CLI alone
   // as Docker, pm2 and systemd send them. Either way the bot shuts down through its own path, once.
+  // A restart of start --dev is one sequence: the old bot stops, even mid-login, and one new bot starts
+  ...(['node', 'bun'] as const).flatMap((runtime): Scenario[] => [
+    {
+      name: `start --dev on ${runtime} restarts once for a change made while the bot logs in`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+      discord: { readyDelayMs: 3_000 },
+      argv: ['start', '--dev'],
+      edits: [{ after: 'Starting bot', files: { 'src/ready.service.ts': touched } }],
+      signal: { name: 'SIGINT', after: 'Ready hook ran' },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        counts: {
+          'Starting bot': 2,
+          'Stopping the bot before it came online': 1,
+          'Bot is online!': 1,
+          'Ready hook ran': 1,
+          'Bot has shut down': 1,
+        },
+        never: ['modified-tsconfig.json'],
+      },
+    },
+    {
+      name: `start --dev on ${runtime} rebuilds once for an edit to tsconfig.json, and never for its own copy`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [{ after: 'Ready hook ran', files: { 'tsconfig.json': touched } }],
+      signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        counts: { 'tsconfig.json change detected': 1, 'Starting bot': 2, 'Ready hook ran': 2 },
+        never: ['modified-tsconfig.json'],
+      },
+    },
+    {
+      name: `start --prod on ${runtime} stops at once on Ctrl+C while the bot logs in`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService, dist: null },
+      discord: { readyDelayMs: 10_000 },
+      argv: ['start', '--prod', '--build'],
+      signal: { name: 'SIGINT', after: 'Starting bot' },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        says: ['Stopping the bot before it came online'],
+        never: ['Bot is online!', 'Ready hook ran', 'Application started'],
+      },
+    },
+  ]),
   ...(
     [
       ['Ctrl+C', { name: 'SIGINT', to: 'group' }],
