@@ -7,6 +7,7 @@
   "scripts": {
     "build:dev": "{{runtimePrefix}}meocord build --dev",
     "build:prod": "{{runtimePrefix}}meocord build --prod",
+    "start": "{{runtimePrefix}}meocord start --prod",
     "start:dev": "{{runtimePrefix}}meocord start --dev",
     "start:prod": "{{runtimePrefix}}meocord start --prod",
     "register": "{{runtimePrefix}}meocord register --build",

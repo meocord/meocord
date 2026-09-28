@@ -18,8 +18,13 @@ rewriting history.
 
 ```shell
 {{packageManager}} run start:dev    # watch mode, rebuilds and restarts on change
-{{packageManager}} run start:prod   # production
+{{packageManager}} run build:prod   # a production build
+{{packageManager}} start            # starts the last production build
 ```
+
+`start` runs the production build as it is, so build again after a change. A host that runs
+`npm start` for you starts the bot the same way; give it `{{packageManager}} run build:prod` as
+its build step. `start:prod` is the same command.
 
 The bot runs on whichever runtime you launch it with — launch with bun and it is a bun
 process, launch with node and it is a node process. Node needs to be 22.13 or newer.
