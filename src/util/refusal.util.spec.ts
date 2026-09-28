@@ -1,4 +1,3 @@
-import path from 'path'
 import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
 
 describe('refuse', () => {
@@ -17,8 +16,9 @@ describe('refuse', () => {
   })
 })
 
+// Each case names its platform, so it means the same on every OS the specs run on
 describe('describeRefusal', () => {
-  const root = path.join(path.sep, 'bots', 'shop')
+  const root = '/bots/shop'
   const withStack = (message: string, frames: string[]) => {
     const error = refuse(new Error(message))
     error.stack = [`Error: ${message}`, ...frames.map(frame => `    at ${frame}`)].join('\n')
@@ -35,7 +35,7 @@ describe('describeRefusal', () => {
       `<anonymous> (${root}/src/main.ts:17:1)`,
     ])
 
-    expect(describeRefusal(error, root)).toBe('Invalid pattern "a-{id}"\n    in src/controllers/button/sample.button.controller.ts')
+    expect(describeRefusal(error, root, false)).toBe('Invalid pattern "a-{id}"\n    in src/controllers/button/sample.button.controller.ts')
   })
 
   // Run on every platform: a Windows stack holds file:// URLs, whose drive letter can come back in either case
@@ -61,6 +61,21 @@ describe('describeRefusal', () => {
   it('gives the message alone when no frame is in the source', () => {
     const error = withStack('No @MeoCord() on App', [`${root}/dist/main.js:2:5718`, `<anonymous> (${root}/src/main.ts:17:1)`])
 
-    expect(describeRefusal(error, root)).toBe('No @MeoCord() on App')
+    expect(describeRefusal(error, root, false)).toBe('No @MeoCord() on App')
+  })
+
+  // It runs while the refusal is reported, so no frame may make it throw
+  it.each([false, true])('gives the message alone for frames it cannot read, with windows %s', windows => {
+    const error = withStack('Refused', [
+      'createRegexFromPattern (file:///bots/shop/node_modules/meocord/dist/esm/decorator/controller.decorator.js:115:19)',
+      'x (file://server/share/app.ts:1:1)',
+      'y (file:///C:/bots/%5C/app.ts:1:1)',
+      'eval (eval at <anonymous> (file:///bots/shop/dist/main.js:1:1), <anonymous>:1:1)',
+      'ModuleJob.run (node:internal/modules/esm/module_job:447:25)',
+      'Array.forEach (<anonymous>)',
+      'native',
+    ])
+
+    expect(describeRefusal(error, windows ? 'C:\\bots\\shop' : root, windows)).toBe('Refused')
   })
 })
