@@ -7,6 +7,14 @@ import { type PipeInterface, type StandardSchemaV1 } from '@src/interface/index.
 import { CooldownError, cooldownMessage, CooldownStore, type CooldownLimit, MemoryCooldownStore } from '@src/common/index.js'
 import { createChatInputOptions, createMockInteraction, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
 
+/** Applies a method decorator to a handler, as writing it above one does. */
+const onHandler = (decorator: MethodDecorator) => () => {
+  class Shop {
+    buy() {}
+  }
+  decorator(Shop.prototype, 'buy', Object.getOwnPropertyDescriptor(Shop.prototype, 'buy')!)
+}
+
 const ran: string[] = []
 
 const positive: StandardSchemaV1<unknown, { amount: number }> = {
@@ -251,11 +259,11 @@ describe('@Cooldown', () => {
     )
   })
 
-  it('refuses options it cannot count', () => {
-    expect(() => Cooldown({ seconds: 0 })).toThrow('positive number of seconds')
-    expect(() => Cooldown({ seconds: 5, uses: 1.5 })).toThrow('whole number of uses')
-    expect(() => Cooldown({ seconds: 5, per: 'server' as never })).toThrow("not 'server'")
-    expect(() => Cooldown({ seconds: 5, by: 'uid' as never })).toThrow('@Cooldown takes by as a function of the call')
+  it('refuses options it cannot count, where it applies', () => {
+    expect(onHandler(Cooldown({ seconds: 0 }))).toThrow('positive number of seconds')
+    expect(onHandler(Cooldown({ seconds: 5, uses: 1.5 }))).toThrow('whole number of uses')
+    expect(onHandler(Cooldown({ seconds: 5, per: 'server' as never }))).toThrow("not 'server'")
+    expect(onHandler(Cooldown({ seconds: 5, by: 'uid' as never }))).toThrow('@Cooldown takes by as a function of the call')
   })
 
   it('is reported by inspectHandler, with its defaults', () => {
@@ -514,8 +522,8 @@ describe('@Cooldown, rule by rule', () => {
   })
 
   it('refuses no uses, or fewer', () => {
-    expect(() => Cooldown({ seconds: 5, uses: 0 })).toThrow('whole number of uses of at least 1, not 0')
-    expect(() => Cooldown({ seconds: 5, uses: -2 })).toThrow('not -2')
+    expect(onHandler(Cooldown({ seconds: 5, uses: 0 }))).toThrow('whole number of uses of at least 1, not 0')
+    expect(onHandler(Cooldown({ seconds: 5, uses: -2 }))).toThrow('not -2')
   })
 })
 

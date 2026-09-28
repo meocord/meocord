@@ -5,6 +5,7 @@ import { METHOD_PIPES, METHOD_VALIDATION, type PipeEntry, type ValidationMetadat
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 export type Handler = (interaction: any, params: any, ...rest: any[]) => unknown
 
@@ -84,19 +85,23 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends SchemaP
     pipes?: Pipes
   } = {},
 ) {
-  if (typeof schema?.['~standard']?.validate !== 'function') {
-    throw new Error('@Validate takes a Standard Schema, such as a zod, valibot or arktype schema.')
-  }
-
   return function <M extends Handler>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsInput<ParamsOf<M>, ValidatedInput<S, Pipes>>,
   ): void {
-    if (Reflect.hasOwnMetadata(METHOD_VALIDATION, target, propertyKey)) {
-      throw new Error(
-        `${target.constructor.name}.${propertyKey} has more than one @Validate; one @Validate per handler: combine the schemas into one.`,
+    // Checked where it applies, so the refusal names the handler
+    if (typeof schema?.['~standard']?.validate !== 'function') {
+      throw refuse(
+        new Error(
+          `${target.constructor.name}.${propertyKey}: @Validate takes a Standard Schema, such as a zod, valibot or arktype schema.`,
+        ),
       )
+    }
+    if (Reflect.hasOwnMetadata(METHOD_VALIDATION, target, propertyKey)) {
+      throw refuse(new Error(
+        `${target.constructor.name}.${propertyKey} has more than one @Validate; one @Validate per handler: combine the schemas into one.`,
+      ))
     }
     const inlinePipes = Object.values(options.pipes ?? {}).flatMap(entries => (Array.isArray(entries) ? entries : [entries]))
     assertStageEntries('@Validate', 'pipe', `${target.constructor.name}.${propertyKey}`, inlinePipes)

@@ -5,6 +5,7 @@ import { injectedTokens, perHandler, singletonContextError, sourcePrototype, sta
 import { ExecutionContext, type HandlerExecutionContext } from '@src/common/execution-context.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 export type InterceptorClass = new (...args: any[]) => InterceptorInterface
 
@@ -43,7 +44,7 @@ export const handlerInterceptors = perHandler((prototype: object, methodName: st
 /** Binds `cls` and its unbound dependencies as singletons, refusing any that injects `ExecutionContext`. */
 export function bindShared(container: Container, cls: new (...args: any[]) => unknown): void {
   if (container.isBound(cls)) return
-  if (injectedTokens(cls).includes(ExecutionContext)) throw singletonContextError(cls)
+  if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
 
   makeInjectable(cls)
   container.bind(cls).toSelf().inSingletonScope()
@@ -79,9 +80,9 @@ export async function runInterceptors(
     const interceptor = container.get<InterceptorInterface>(cls)
 
     if (typeof interceptor.intercept !== 'function') {
-      throw new Error(
+      throw refuse(new Error(
         `Interceptor ${cls.name} applied to ${context.getHandlerName()} does not have a valid intercept method.`,
-      )
+      ))
     }
     return interceptor.intercept(context.withParams(params), { handle: () => run(index + 1) })
   }

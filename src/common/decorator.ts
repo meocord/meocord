@@ -1,4 +1,5 @@
 import { MetadataKey } from '@src/enum/index.js'
+import { decoratedName, refuse } from '@src/util/refusal.util.js'
 
 /**
  * Composes several class or method decorators into one.
@@ -51,8 +52,8 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
  * @param metadataKey - The key to store the value under.
  * @param metadataValue - The value to store.
  * @returns A decorator for a class or a method.
- * @throws Error when `metadataKey` is one MeoCord reserves, such as `'guards'`: a value there would replace
- *   what the framework stores.
+ * @throws Error when `metadataKey` is one MeoCord reserves, such as `'guards'`, as the decorator applies: a value
+ *   there would replace what the framework stores.
  *
  * @example
  * ```ts
@@ -70,13 +71,17 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
  * @see {@link createMetadata}
  */
 export function SetMetadata<V = any>(metadataKey: string, metadataValue: V): ClassDecorator & MethodDecorator {
-  if (RESERVED_KEYS.has(metadataKey)) {
-    throw new Error(
-      `SetMetadata cannot use the key "${metadataKey}": MeoCord stores its own metadata under it, and a value ` +
-        `there would replace it. Choose another key, or declare the decorator with createMetadata, whose key is unique.`,
-    )
-  }
   return function (target: any, propertyKey?: string | symbol): void {
+    // Checked where it applies, so the refusal names the handler or controller
+    if (RESERVED_KEYS.has(metadataKey)) {
+      throw refuse(
+        new Error(
+          `${decoratedName(target, propertyKey)}: SetMetadata cannot use the key "${metadataKey}": MeoCord stores its own ` +
+            `metadata under it, and a value there would replace it. Choose another key, or declare the decorator with ` +
+            `createMetadata, whose key is unique.`,
+        ),
+      )
+    }
     if (propertyKey !== undefined) {
       Reflect.defineMetadata(metadataKey, metadataValue, target, propertyKey)
     } else {

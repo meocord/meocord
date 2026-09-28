@@ -47,6 +47,29 @@ describe('MeoCordFactory.create()', () => {
     expect(() => MeoCordFactory.create(NoMetadataApp)).toThrow('Target class is not decorated with @MeoCord().')
   })
 
+  it('reports a refusal once, as its message, and exits 1 however the caller handles the throw', async () => {
+    const { isExplainedError } = await import('@src/common/explained-error.js')
+    const logger = (MeoCordFactory as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger
+    const exitCode = process.exitCode
+    class NoMetadataApp {}
+
+    let thrown: unknown
+    try {
+      MeoCordFactory.create(NoMetadataApp)
+    } catch (error) {
+      thrown = error
+    }
+    try {
+      expect(process.exitCode).toBe(1)
+    } finally {
+      process.exitCode = exitCode
+    }
+
+    expect(logger.error).toHaveBeenCalledTimes(1)
+    expect(logger.error.mock.calls[0][0]).toMatch(/^Target class is not decorated with @MeoCord\(\)\./)
+    expect(isExplainedError(thrown)).toBe(true)
+  })
+
   it('throws when meocord config is missing', () => {
     mockLoadConfig.mockReturnValue(null)
 

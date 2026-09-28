@@ -3,6 +3,7 @@ import { type ThemeOverride } from '@src/interface/index.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { CLASS_THEME, METHOD_THEME, THEMED_CLASSES } from '@src/core/theme-runtime.js'
 import { copyLayer } from '@src/core/theme-scope.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /**
  * Sets part of the theme for a controller's handlers, or for one handler.
@@ -42,7 +43,7 @@ export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator
     assertValidTheme(theme, where)
     const key = onClass ? CLASS_THEME : METHOD_THEME
     const existing = onClass ? Reflect.getOwnMetadata(key, target) : Reflect.getOwnMetadata(key, target, propertyKey!)
-    if (existing !== undefined) throw new Error(`${where}: it has a @UseTheme already; give it one, with every role it changes.`)
+    if (existing !== undefined) throw refuse(new Error(`${where}: it has a @UseTheme already; give it one, with every role it changes.`))
     const layer = copyLayer(theme)
     if (onClass) Reflect.defineMetadata(key, layer, target)
     else Reflect.defineMetadata(key, layer, target, propertyKey!)

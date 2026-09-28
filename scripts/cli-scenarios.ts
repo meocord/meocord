@@ -206,6 +206,26 @@ const HALF_WRITTEN = '\nexport const halfWritten = {\n'
 
 /** A change to a file that leaves what it does as it was. */
 const touched = (current: string) => `${current}\n`
+/** A template file of the generated app, to change one line of. */
+const templateFile = (file: string) =>
+  readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', `${file}.template`), 'utf8')
+
+/** A customId pattern whose param shares its segment with a literal, which @Command refuses as the class loads. */
+const refusedPatternButton = templateFile('src/controllers/button/sample.button.controller.ts').replace(
+  "'button-with/{ownerId}'",
+  "'button-with-{ownerId}'",
+)
+const REFUSED_PATTERN = 'SampleButtonController.handleButtonWithId: Invalid pattern "button-with-{ownerId}"'
+
+/** A message pattern with words after its rest param, which MeoCordFactory.create refuses. */
+const refusedMessagePattern = templateFile('src/controllers/message/sample.message.controller.ts').replace(
+  "@MessageHandler('baka')",
+  "@MessageHandler('baka {rest...} {x}')",
+)
+const REFUSED_MESSAGE_PATTERN = "@MessageHandler('baka {rest...} {x}') in SampleMessageController.baka"
+
+/** What a runtime prints for an error it reports itself, which a refusal never needs. */
+const RAW_REPORT = ['node_modules/meocord/dist', 'Node.js v', 'Error during startup']
 
 /** An entry that ignores the signals that stop a bot, as one stuck in its shutdown does. */
 const ignoringMain = `for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => console.log(\`Ignored \${signal}\`))
@@ -1051,6 +1071,40 @@ const scenarios: Scenario[] = [
   ]),
   // Each stop is tested in both phases, reached by what the output shows rather than by timing: online, once the local
   // Discord's READY has run the ready hook, and mid-login, against an API that never answers
+  // A refusal as the application loads reads as one line and exits 1, a decorator's or MeoCordFactory.create's alike
+  ...(['node', 'bun'] as const).flatMap((runtime): Scenario[] => [
+    {
+      name: `start --prod on ${runtime} reports a decorator it refuses as one line, and exits 1`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/controllers/button/sample.button.controller.ts': refusedPatternButton, dist: null },
+      argv: ['start', '--prod', '--build'],
+      timeoutMs: 60_000,
+      expect: { code: 1, says: [REFUSED_PATTERN], never: [...RAW_REPORT, 'Starting bot'] },
+    },
+    {
+      name: `start --prod on ${runtime} reports what MeoCordFactory.create refuses as one line, and exits 1`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/controllers/message/sample.message.controller.ts': refusedMessagePattern, dist: null },
+      argv: ['start', '--prod', '--build'],
+      timeoutMs: 60_000,
+      expect: { code: 1, says: [REFUSED_MESSAGE_PATTERN], never: [...RAW_REPORT, 'Starting bot'] },
+    },
+    {
+      name: `start --dev on ${runtime} reports a decorator it refuses as one line, and keeps watching`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/controllers/button/sample.button.controller.ts': refusedPatternButton },
+      argv: ['start', '--dev'],
+      signal: { name: 'SIGINT', after: 'waiting for changes' },
+      timeoutMs: 60_000,
+      expect: { code: 0, says: [REFUSED_PATTERN, 'The application exited with code 1; waiting for changes.'], never: RAW_REPORT },
+    },
+  ]),
   ...(
     [
       ['Ctrl+C', { name: 'SIGINT', to: 'group' }],

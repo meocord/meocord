@@ -6,8 +6,13 @@ describe('SetMetadata', () => {
   it.each(['guards', 'commandType', 'design:paramtypes', 'inversify:container', 'meocord:app-options', '@inversifyjs/core/classIsInjectableFlagReflectKey'])(
     'refuses the key MeoCord keeps its own metadata under, %s',
     key => {
-      expect(() => SetMetadata(key, [])).toThrow(`SetMetadata cannot use the key "${key}"`)
-      expect(() => SetMetadata(key, [])).toThrow('createMetadata')
+      const applied = () => {
+        @SetMetadata(key, [])
+        class Shop {}
+        return Shop
+      }
+      expect(applied).toThrow(`Shop: SetMetadata cannot use the key "${key}"`)
+      expect(applied).toThrow('createMetadata')
     },
   )
 

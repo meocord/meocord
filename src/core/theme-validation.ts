@@ -1,5 +1,6 @@
 import { ButtonStyle, Colors } from 'discord.js'
 import { type ReservedThemeRole } from '@src/interface/index.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /**
  * The role names MeoCord keeps for roles it may add, in any group: the runtime copy of `ReservedThemeRole`, which
@@ -130,5 +131,5 @@ export function themeProblems(theme: unknown, where?: string): string[] {
 export function assertValidTheme(theme: unknown, where: string): void {
   const problems = themeProblems(theme, where)
   if (problems.length === 0) return
-  throw new Error(`The theme has ${problems.length} problem${problems.length === 1 ? '' : 's'}:\n${problems.map(problem => `  ${problem}`).join('\n')}`)
+  throw refuse(new Error(`The theme has ${problems.length} problem${problems.length === 1 ? '' : 's'}:\n${problems.map(problem => `  ${problem}`).join('\n')}`))
 }

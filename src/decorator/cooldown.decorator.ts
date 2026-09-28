@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { CLASS_COOLDOWNS, type CooldownOptions, METHOD_COOLDOWNS, type StoredCooldown } from '@src/core/cooldown-runner.js'
 import { type Handler, type NoInput, type ParamsOf } from '@src/decorator/validation.decorator.js'
+import { decoratedName, refuse } from '@src/util/refusal.util.js'
 
 /**
  * Allows the descriptor when the handler's params give `by` what it reads. Params `by` leaves
@@ -77,17 +78,12 @@ export function Cooldown<P extends object = Record<string, unknown>>(
 ): CooldownByDecorator<P>
 export function Cooldown(options: CooldownOptions<any>): ClassDecorator & MethodDecorator {
   const { seconds, uses = 1, per = 'user', by } = options
-  if (!(seconds > 0)) throw new Error(`@Cooldown needs a positive number of seconds, not ${seconds}.`)
-  if (!Number.isInteger(uses) || uses < 1) throw new Error(`@Cooldown needs a whole number of uses of at least 1, not ${uses}.`)
-  if (!['user', 'guild', 'channel', 'global'].includes(per)) {
-    throw new Error(`@Cooldown counts per 'user', 'guild', 'channel' or 'global', not '${String(per)}'.`)
-  }
-  if (by !== undefined && typeof by !== 'function') {
-    throw new Error('@Cooldown takes by as a function of the call, returning the value to count by.')
-  }
   const cooldown: StoredCooldown = { ...options, uses, per }
 
   return function (target: object, propertyKey?: string | symbol) {
+    // Checked where it applies, so the refusal names the handler or controller
+    const problem = cooldownProblem(seconds, uses, per, by)
+    if (problem) throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${problem}`))
     // Decorators apply bottom-up; prepending keeps them in the order they read.
     if (propertyKey === undefined) {
       const existing = (Reflect.getOwnMetadata(CLASS_COOLDOWNS, target) as StoredCooldown[]) ?? []
@@ -97,4 +93,17 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
       Reflect.defineMetadata(METHOD_COOLDOWNS, [cooldown, ...existing], target, propertyKey)
     }
   } as ClassDecorator & MethodDecorator
+}
+
+/** Why a cooldown's options cannot be counted, or undefined when they can. */
+function cooldownProblem(seconds: number, uses: number, per: string, by: unknown): string | undefined {
+  if (!(seconds > 0)) return `@Cooldown needs a positive number of seconds, not ${seconds}.`
+  if (!Number.isInteger(uses) || uses < 1) return `@Cooldown needs a whole number of uses of at least 1, not ${uses}.`
+  if (!['user', 'guild', 'channel', 'global'].includes(per)) {
+    return `@Cooldown counts per 'user', 'guild', 'channel' or 'global', not '${per}'.`
+  }
+  if (by !== undefined && typeof by !== 'function') {
+    return '@Cooldown takes by as a function of the call, returning the value to count by.'
+  }
+  return undefined
 }

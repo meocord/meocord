@@ -4,6 +4,7 @@ import { OBSERVER_CLASS } from '@src/core/observer-runner.js'
 import { type DispatchObserver } from '@src/interface/index.js'
 import { type ExecutionContextType } from '@src/common/execution-context.js'
 import { defineStageTypes } from '@src/core/stage-scope.js'
+import { refuse } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as a dispatch observer, told about every call once it has settled, for metrics and audit logs.
@@ -49,7 +50,7 @@ export function Observer(
 ) {
   return function (target: new (...args: any[]) => DispatchObserver) {
     if (typeof (target.prototype as Partial<DispatchObserver>).onSettled !== 'function') {
-      throw new Error(`${target.name} is an @Observer but has no onSettled method.`)
+      throw refuse(new Error(`${target.name} is an @Observer but has no onSettled method.`))
     }
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Observer')
