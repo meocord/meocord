@@ -781,6 +781,8 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
  *
  * Use it for the member a command acts on, such as a user option's value, or a message's author.
  *
+ * @param props - Values for the user's properties, such as `{ bot: true }` for a bot; see {@link MockProps}.
+ *
  * @example
  * ```ts
  * import { expect } from 'vitest'
@@ -797,7 +799,8 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
  * @category Mocks
  * @see {@link createMockInteraction}
  */
-export const createMockUser = (): DeepMocked<User> => createMockInteraction(User, { id: nextSnowflake(), bot: false })
+export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
+  createMockInteraction(User, { id: nextSnowflake(), bot: false, ...props })
 
 /**
  * Creates a mock {@link Client}, with `users`, `channels`, `guilds` and `application.commands` ready to stub.
@@ -906,7 +909,7 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   instance.members = managerWith(GuildMemberManager.prototype, overrides.members as never)
   instance.channels = managerWith(GuildChannelManager.prototype, overrides.channels as never)
   instance.roles = managerWith(RoleManager.prototype, overrides.roles as never)
-  instance.bans = stubDeep(Object.create(GuildBanManager.prototype))
+  instance.bans = managerWith(GuildBanManager.prototype, undefined)
 
   return stubDeep(instance) as DeepMocked<Guild>
 }
@@ -918,9 +921,10 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
  *
  * @remarks
  * The managers the class has are ready to stub: `messages`, `threads` on text, announcement, forum and media channels,
- * and `members` on threads. A subclass gets the managers of the class it extends.
+ * and `members` on threads, each with a real, empty `cache`. A subclass gets the managers of the class it extends.
  *
  * @param Class - The discord.js channel class to mock.
+ * @param props - Values for the channel's properties, such as its `id`, `name` or `topic`; see {@link MockProps}.
  *
  * @example
  * ```ts
@@ -935,27 +939,28 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
  * @category Mocks
  * @see {@link createMockGuild}
  */
-export function createMockChannel<T extends BaseChannel>(Class: InteractionClass<T>): DeepMocked<T> {
+export function createMockChannel<T extends BaseChannel>(Class: InteractionClass<T>, props: MockProps<T> = {}): DeepMocked<T> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
   instance.id = nextSnowflake()
   const is = (Base: { prototype: object }) => Base.prototype.isPrototypeOf(Class.prototype) || Class === Base
 
   // Text and announcement channels: messages, and threads made in the channel
   if (is(TextChannel) || is(NewsChannel)) {
-    instance.messages = stubDeep(Object.create(GuildMessageManager.prototype))
-    instance.threads = stubDeep(Object.create(GuildTextThreadManager.prototype))
+    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.threads = managerWith(GuildTextThreadManager.prototype, undefined)
   }
   // Forum and media channels hold posts, each a thread started with its first message
   if (is(ForumChannel) || is(MediaChannel)) {
-    instance.threads = stubDeep(Object.create(GuildForumThreadManager.prototype))
+    instance.threads = managerWith(GuildForumThreadManager.prototype, undefined)
   }
   if (is(DMChannel)) {
-    instance.messages = stubDeep(Object.create(DMMessageManager.prototype))
+    instance.messages = managerWith(DMMessageManager.prototype, undefined)
   }
   if (is(ThreadChannel)) {
-    instance.messages = stubDeep(Object.create(GuildMessageManager.prototype))
-    instance.members = stubDeep(Object.create(ThreadMemberManager.prototype))
+    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.members = managerWith(ThreadMemberManager.prototype, undefined)
   }
+  Object.assign(instance, props)
 
   return stubDeep(instance) as DeepMocked<T>
 }
@@ -972,7 +977,7 @@ function createMockGuildForMessage(): object {
   guild.members = managerWith(GuildMemberManager.prototype, undefined)
   guild.channels = managerWith(GuildChannelManager.prototype, undefined)
   guild.roles = managerWith(RoleManager.prototype, undefined)
-  guild.bans = stubDeep(Object.create(GuildBanManager.prototype))
+  guild.bans = managerWith(GuildBanManager.prototype, undefined)
   return stubDeep(guild)
 }
 
