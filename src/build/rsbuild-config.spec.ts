@@ -35,6 +35,15 @@ describe('createRsbuildConfig', () => {
     })
   })
 
+  // Hoisting modules into one scope renames a class another module names too; the pipeline spec builds it
+  it.each(['production', 'development'] as const)('keeps each module in its own scope in a %s build', async mode => {
+    const { createRsbuild } = await import('@rsbuild/core')
+    const rsbuild = await createRsbuild({ config: createRsbuildConfig({ mode }) })
+    const [rspackConfig] = await rsbuild.initConfigs()
+
+    expect(rspackConfig.optimization?.concatenateModules).toBe(false)
+  })
+
   describe('minification', () => {
     // Rsbuild 2 leaves Node builds unminified unless told otherwise.
     it('minifies production builds', () => {
