@@ -166,4 +166,11 @@ describe('generated scripts', () => {
   it.each(['npm', 'pnpm', 'yarn'])('calls the framework directly for a %s project', pm => {
     expect(render(pm)['start:dev']).toBe('meocord start --dev')
   })
+
+  // `npm start`, and a host that runs it, start the production build; building stays its own step
+  it.each(['bun', 'npm', 'pnpm', 'yarn'])('starts the production build as the %s project\'s start script', pm => {
+    const scripts = render(pm)
+    expect(scripts.start).toBe(`${runtimePrefixFor(pm)}meocord start --prod`)
+    expect(scripts.start).toBe(scripts['start:prod'])
+  })
 })

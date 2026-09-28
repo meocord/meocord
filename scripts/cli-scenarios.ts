@@ -773,6 +773,33 @@ const scenarios: Scenario[] = [
     command: ['npm', 'run', 'start:prod', '--', '--build'],
     expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN] },
   },
+  // What a host that runs `npm start` does after its build step
+  {
+    name: 'npm start in an app npm installed starts the production build, and stops at a refused token',
+    tier: 'slow',
+    cwd: 'npm-app',
+    files: { '.env': INVALID_TOKEN_ENV, dist: null },
+    before: [['build', '--prod']],
+    command: ['npm', 'start'],
+    expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN], never: ['watch mode'] },
+  },
+  {
+    name: 'bun run start in an app bun installed starts the production build, and stops at a refused token',
+    tier: 'slow',
+    files: { '.env': INVALID_TOKEN_ENV, dist: null },
+    before: [['build', '--prod']],
+    command: ['bun', 'run', 'start'],
+    expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN], never: ['watch mode'] },
+  },
+  {
+    name: 'npm start without a token says where the token comes from',
+    tier: 'slow',
+    cwd: 'npm-app',
+    files: { '.env': 'DISCORD_TOKEN=\n', dist: null },
+    before: [['build', '--prod']],
+    command: ['npm', 'start'],
+    expect: { code: 1, says: ['Discord token is missing', '.env'], never: ['Starting bot'] },
+  },
 
   {
     name: 'two of every generated component, listed beside the samples, build and start without a routing warning',
