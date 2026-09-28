@@ -26,7 +26,7 @@ import { HandlerExecutionContext, UnroutedExecutionContext } from '@src/common/e
 import { MessageHandler, On } from '@src/decorator/index.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
-import { createMockInteraction, createMockMessage } from '@src/testing/index.js'
+import { createDiscordError, createMockInteraction, createMockMessage } from '@src/testing/index.js'
 
 const createLogger = () =>
   ({ error: vi.fn(), warn: vi.fn(), debug: vi.fn(), log: vi.fn() }) as unknown as Logger & {
@@ -276,17 +276,33 @@ describe('the fallback', () => {
       expect(interaction.followUp).toHaveBeenCalledTimes(1)
     })
 
-    it('logs any other failure at debug level and never throws', async () => {
+    it('logs a delivery Discord refuses at debug level and never throws', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
-      interaction.reply.mockRejectedValueOnce(discordError(50001))
+      interaction.reply.mockRejectedValueOnce(createDiscordError(50001))
 
       const debug = vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+      const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
 
       await fail(interaction)
 
       expect(interaction.followUp).not.toHaveBeenCalled()
       expect(debug).toHaveBeenCalledWith(expect.stringContaining('Could not deliver the error reply'))
+      expect(error).not.toHaveBeenCalledWith(expect.stringContaining('Could not deliver'), expect.anything())
       debug.mockRestore()
+      error.mockRestore()
+    })
+
+    it('logs a delivery that fails for any other reason as an error, a fault rather than a refusal', async () => {
+      const interaction = createMockInteraction(ChatInputCommandInteraction)
+      const broken = new TypeError('payload.embeds is not iterable')
+      interaction.reply.mockRejectedValueOnce(broken)
+
+      const error = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+
+      await fail(interaction)
+
+      expect(error).toHaveBeenCalledWith('Could not deliver the error reply:', broken)
+      error.mockRestore()
     })
 
     it('never throws when the 40060 retry fails too', async () => {

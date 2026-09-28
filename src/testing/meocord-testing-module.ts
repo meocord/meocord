@@ -531,7 +531,8 @@ export class TestingModule {
       controllerClasses: this.controllers,
       messageOptions: this.messageOptions,
       logger,
-      fallback: createFallback(logger, () => this.messageOptions),
+      // Strict: an answer MeoCord fails to build rejects the dispatch, where a bot logs it and carries on
+      fallback: createFallback(logger, () => this.messageOptions, { strict: true }),
       // A mock's client is the one bot every mock client is, so a mention of it starts a command
       botUserId: event => {
         const id = event.client?.user?.id
