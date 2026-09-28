@@ -25,7 +25,7 @@ import {
   type ParamRefsOf,
   type StandardSchemaV1,
 } from '@src/interface/index.js'
-import { createMockGuild, createMockMessage } from '@src/testing/index.js'
+import { createDiscordError, createMockGuild, createMockMessage } from '@src/testing/index.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { error: [] as unknown[][], warn: [] as unknown[][] } }))
 
@@ -837,7 +837,7 @@ describe('typed message params and usage replies', () => {
 
     const message = await sendIn(client, `!pay <@${TARGET}> 0.5`)
     const reply = await replyOf(message)
-    vi.mocked(reply!.delete).mockRejectedValue(new Error('Missing Permissions'))
+    vi.mocked(reply!.delete).mockRejectedValue(createDiscordError(50013, 'Missing Permissions'))
     await vi.advanceTimersByTimeAsync(2_000)
 
     expect(reply!.delete).toHaveBeenCalledTimes(1)

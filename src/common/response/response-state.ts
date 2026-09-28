@@ -18,6 +18,8 @@ import {
 import { Logger } from '@src/common/logger.js'
 import { UserError } from '@src/common/errors.js'
 import { textFor } from '@src/common/meocord-text.js'
+import { logFailedSend } from '@src/common/response/send-failure.js'
+import { describeInteraction } from '@src/util/interaction.util.js'
 import { getInstallContext, type InstallContext } from '@src/common/response/install-context.js'
 import {
   flagNames,
@@ -356,8 +358,8 @@ export interface ResponseState {
   modal(modal: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData): Promise<void>
 
   /**
-   * Presents an error, styled by the application's presenter, and never throws; a delivery failure is
-   * logged at debug level.
+   * Presents an error, styled by the application's presenter, and never throws. A delivery Discord refuses, such
+   * as for a missing permission, is logged at debug level; a presenter that fails, or any other failure, as an error.
    *
    * - Unanswered: a private reply.
    * - A command whose reply is deferred: `'reply'` edits that reply into the error; `'private'` edits a
@@ -475,7 +477,7 @@ export class InteractionResponse implements ResponseState {
     try {
       await this.acknowledge(options)
     } catch (error) {
-      logger.debug(`Could not acknowledge: ${String(error)}`)
+      logFailedSend(logger, 'acknowledge', error)
     }
   }
 
@@ -500,7 +502,7 @@ export class InteractionResponse implements ResponseState {
       }
       this.acknowledge(options)
         .then(() => (this.pendingLock ? this.lock(this.pendingLock) : undefined))
-        .catch(error => logger.debug(`Could not acknowledge in time: ${String(error)}`))
+        .catch(error => logFailedSend(logger, 'acknowledge in time', error))
     }, delayMs)
     this.timer.unref?.()
   }
@@ -610,7 +612,7 @@ export class InteractionResponse implements ResponseState {
     try {
       await this.restore()
     } catch (error) {
-      logger.debug(`Could not restore the message: ${String(error)}`)
+      logFailedSend(logger, 'restore the message', error)
     }
   }
 
@@ -651,7 +653,7 @@ export class InteractionResponse implements ResponseState {
     try {
       await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
     } catch (error) {
-      logger.debug(`Could not delete the deferred reply: ${String(error)}`)
+      logFailedSend(logger, 'delete the deferred reply', error)
     }
   }
 
@@ -816,17 +818,31 @@ export class InteractionResponse implements ResponseState {
    * `ifUnanswered`, for MeoCord's own answers alone: the answer is moot once anything else has answered, as for
    * "Command not found!" to a click a collector took, so Discord refusing it as already answered ends it.
    */
-  async error(error: unknown, options: ResponseErrorOptions = {}, { ifUnanswered = false }: { ifUnanswered?: boolean } = {}): Promise<void> {
+  async error(error: unknown, options: ResponseErrorOptions = {}, answer: { ifUnanswered?: boolean } = {}): Promise<void> {
+    try {
+      await this.presentAnswer(error, options, answer)
+    } catch (renderError) {
+      logger.error(`Could not write the error answer for ${describeInteraction(this.interaction as Interaction)}:`, renderError)
+    }
+  }
+
+  /**
+   * {@link error}, but throwing when the presenter fails to build the view, for MeoCord's own fallback to report
+   * that fault; a failed delivery is logged, as by `error()`.
+   */
+  async presentAnswer(error: unknown, options: ResponseErrorOptions = {}, { ifUnanswered = false }: { ifUnanswered?: boolean } = {}): Promise<void> {
     // A UserError is the user's own mistake: its message, for them alone, unless told otherwise
     const own = error instanceof UserError
     const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
     const theme = await themeForInteraction(this.interaction)
+    await this.acknowledging?.catch(() => undefined)
+    // Built before anything is sent, so a presenter that fails throws to the caller rather than passing for a refusal
+    const view = this.view(error, message, this.v2, theme)
     try {
-      await this.acknowledging?.catch(() => undefined)
-      await this.presentError(error, message, visibility, theme, ifUnanswered)
+      await this.presentError(view, visibility, ifUnanswered)
     } catch (deliveryError) {
       if (errorCode(deliveryError) !== ALREADY_ACKNOWLEDGED) {
-        logger.debug(`Could not deliver the error reply: ${String(deliveryError)}`)
+        logFailedSend(logger, 'deliver the error reply', deliveryError)
         return
       }
       // Answered by something discord.js did not see: follow up once instead, unless the answer was only for
@@ -834,9 +850,9 @@ export class InteractionResponse implements ResponseState {
       this.phase = 'replied'
       if (ifUnanswered) return
       try {
-        await this.followUp(this.privateError(error, message, theme))
+        await this.followUp(this.privateError(view))
       } catch (retryError) {
-        logger.debug(`Could not deliver the error reply: ${String(retryError)}`)
+        logFailedSend(logger, 'deliver the error reply', retryError)
       }
     }
   }
@@ -850,15 +866,15 @@ export class InteractionResponse implements ResponseState {
     return themedView(presenterFor(this.interaction.client).error(this.presenterContext(v2, theme), { message, error, tone }), theme)
   }
 
-  private privateError(error: unknown, message: string, theme: ResolvedTheme): ResponsePayload {
-    const body = this.render(this.view(error, message, this.v2, theme), this.v2)
+  private privateError(view: ResponseView): ResponsePayload {
+    const body = this.render(view, this.v2)
     return { ...body, flags: Number(body.flags ?? 0) | MessageFlags.Ephemeral } as ResponsePayload
   }
 
-  private async presentError(error: unknown, message: string, visibility: 'reply' | 'private', theme: ResolvedTheme, ifUnanswered = false): Promise<void> {
+  private async presentError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered = false): Promise<void> {
     this.sync()
     if (this.phase === 'unanswered') {
-      await this.reply(toBody(this.privateError(error, message, theme)))
+      await this.reply(toBody(this.privateError(view)))
       return
     }
     // Answered meanwhile, as by a collector while the theme was looked up: an answer only for an unanswered one is moot
@@ -866,25 +882,25 @@ export class InteractionResponse implements ResponseState {
 
     if (answersWithOwnMessage(this.interaction)) {
       if (this.phase === 'deferred' && visibility === 'reply') {
-        await this.editMessage(this.render(this.view(error, message, this.v2, theme), this.v2))
+        await this.editMessage(this.render(view, this.v2))
         return
       }
       // A private follow-up edits a private deferral into it, and replaces a public one
-      await this.followUp(this.privateError(error, message, theme))
+      await this.followUp(this.privateError(view))
       return
     }
 
     // The message the component is on: whether it is private does not change with edits.
     const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
     if (current?.flags?.has(MessageFlags.Ephemeral)) {
-      const appended = this.appendError(current, this.view(error, message, this.v2, theme))
+      const appended = this.appendError(current, view)
       if (this.fits(appended)) {
         await this.editMessage(appended)
         return
       }
     }
     await this.restore()
-    await this.followUp(this.privateError(error, message, theme))
+    await this.followUp(this.privateError(view))
   }
 
   /** Whether a message stays within Discord's limits of 10 embeds and of Components V2 components. */

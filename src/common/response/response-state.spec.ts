@@ -564,7 +564,11 @@ describe('respond()', () => {
         },
       })
 
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+
       await expect(respond(interaction).error(new Error('x'))).resolves.toBeUndefined()
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('Could not write the error answer for'), expect.objectContaining({ message: 'presenter broke' }))
+      logged.mockRestore()
     })
 
     it("styles the error with the client's presenter", async () => {

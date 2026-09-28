@@ -381,8 +381,9 @@ export class MeoCordApp implements MeoCordApplication {
             this.logger.debug(`Refused ${where}: ${error.message}`)
             // The newest message the event carries: an edit's new message, not its old one
             const message = [...context.getArgs()].reverse().find((arg): arg is Message => arg instanceof Message)
-            if (message) await replyWithUserError(message, error, this.logger, this.messageOptions?.replyEmoji)
+            if (message) return replyWithUserError(message, error, this.logger, this.messageOptions?.replyEmoji)
           } else logError(error)
+          return undefined
         }
         const listener = async (...args: unknown[]) => {
           try {

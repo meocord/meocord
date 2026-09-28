@@ -353,7 +353,7 @@ async function handleError(
   context: FilterContext,
   error: unknown,
   { fallback }: RunOptions,
-): Promise<void> {
+): Promise<unknown> {
   const filter = matchFilter(levels, error)
   if (filter) {
     try {
@@ -366,7 +366,7 @@ async function handleError(
     }
   }
   if (!fallback) throw error
-  await fallback(error, context)
+  return fallback(error, context)
 }
 
 /**
@@ -464,8 +464,10 @@ async function runPipeline(
   } catch (error) {
     outcome = outcomeOf(error)
     failure = { error }
-    await handleError(filters, container, contextOf(), error, options)
-    handled = true
+    const unanswered = await handleError(filters, container, contextOf(), error, options)
+    // The fallback could not build its answer: the call ends in that fault, unanswered
+    if (unanswered === undefined) handled = true
+    else [outcome, failure] = ['error', { error: unanswered }]
     return { ran, error }
   } finally {
     await response?.release()
@@ -507,11 +509,14 @@ async function answerUnrouted(container: Container, args: readonly unknown[], er
   const startedAt = options.startedAt ?? performance.now()
   const context = new UnroutedExecutionContext(args)
   let handled = false
+  let outcome = outcomeOf(error)
+  let failure: { error: unknown } = { error }
   try {
-    await handleError([[...globalStagesOf(container).filters]], container, context, error, options)
-    handled = true
+    const unanswered = await handleError([[...globalStagesOf(container).filters]], container, context, error, options)
+    if (unanswered === undefined) handled = true
+    else [outcome, failure] = ['error', { error: unanswered }]
   } finally {
-    await observe(container, () => context, { outcome: outcomeOf(error), startedAt, handled, failure: { error } }, options)
+    await observe(container, () => context, { outcome, startedAt, handled, failure }, options)
   }
 }
 

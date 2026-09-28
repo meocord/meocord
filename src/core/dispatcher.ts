@@ -48,6 +48,7 @@ import {
 } from '@src/core/handler-pipeline.js'
 import { computeMessageHelp, helpInvocation, helpWords, isListable, matchHelpRequest, renderMessageHelp, splitReply } from '@src/core/message-help.js'
 import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
+import { logFailedSend } from '@src/common/response/send-failure.js'
 import { Translator } from '@src/common/translator.js'
 import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback } from '@src/core/fallback.js'
@@ -204,7 +205,7 @@ export class Dispatcher {
     const fallback: Fallback = record
       ? async (error, context) => {
           record.unhandled(error)
-          await this.fallback(error, context)
+          return this.fallback(error, context)
         }
       : this.fallback
     return { startedAt, fallback, record }
@@ -533,7 +534,7 @@ export class Dispatcher {
       try {
         for (const reply of replies) await message.reply({ allowedMentions: { repliedUser: false, parse: [] }, ...reply })
       } catch (failure) {
-        this.logger.debug(`Could not answer a help request: ${String(failure)}`)
+        logFailedSend(this.logger, 'answer a help request', failure)
       }
     })
     return true
