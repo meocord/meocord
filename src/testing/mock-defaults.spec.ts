@@ -320,3 +320,42 @@ describe("a mock guild's language", () => {
     expect(await usageReply(createMockGuild({ preferredLocale: Locale.Indonesian }))).toBe('Cara pakai: !roll <sides>\nsides: "lots" bukan bilangan bulat yang sah')
   })
 })
+
+describe("a factory's overrides", () => {
+  it('make a user a bot, and name it, as a test gives', () => {
+    const bot = createMockUser({ id: '100000000000000009', bot: true, username: 'helper' })
+    expect([bot.id, bot.bot, bot.username, bot.tag]).toEqual(['100000000000000009', true, 'helper', 'helper'])
+    expect(createMockUser().bot).toBe(false)
+  })
+
+  it("set a channel's data, keeping its class's managers", () => {
+    const channel = createMockChannel(TextChannel, { id: '100000000000000010', name: 'general', topic: 'Say hi' })
+    expect([channel.id, channel.name, channel.topic, channel.type]).toEqual(['100000000000000010', 'general', 'Say hi', ChannelType.GuildText])
+    expect(channel.messages.cache.size).toBe(0)
+  })
+
+  it("give channels' and a guild's managers real, empty caches", () => {
+    expect(createMockChannel(TextChannel).threads.cache.size).toBe(0)
+    expect(createMockChannel(ThreadChannel).members.cache.size).toBe(0)
+    expect(createMockChannel(DMChannel).messages.cache.size).toBe(0)
+    expect(createMockGuild().bans.cache.size).toBe(0)
+    expect(createMockMessage().guild!.bans.cache.size).toBe(0)
+  })
+
+  it('apply every field a message and a guild take', () => {
+    const client = createMockClient()
+    const users = [createMockUser()]
+    const guild = createMockGuild({ id: '100000000000000011', name: 'Kopi', preferredLocale: Locale.Indonesian, members: [], roles: [], channels: [] })
+    const message = createMockMessage({ id: '100000000000000012', content: 'hi', flags: 4, guild, client, users, editedTimestamp: 5 })
+    expect([message.id, message.content, message.flags.bitfield, message.guild, message.client, message.editedTimestamp]).toEqual([
+      '100000000000000012',
+      'hi',
+      4,
+      guild,
+      client,
+      5,
+    ])
+    expect(client.users.cache.get(users[0].id)).toBe(users[0])
+    expect([guild.id, guild.name, guild.preferredLocale]).toEqual(['100000000000000011', 'Kopi', 'id'])
+  })
+})
