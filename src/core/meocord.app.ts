@@ -80,6 +80,13 @@ export async function shutdownAndExit(): Promise<void> {
   process.exit(closed.every(Boolean) ? 0 : 1)
 }
 
+/** What `start()` rejects with when shutdown begins before the bot came online, which shutdown has logged. */
+function stoppedBeforeOnline(): Error {
+  const error = new Error('The bot was stopped before it came online.')
+  markExplained(error)
+  return error
+}
+
 /** One pair of signal listeners for the process, however many apps it starts. */
 function installSignalHandlers(): void {
   if (signalHandlersInstalled) return
@@ -154,6 +161,9 @@ export class MeoCordApp implements MeoCordApplication {
   private lifecycleEntries?: LifecycleEntry[]
 
   private readonly close = () => this.closeClient()
+
+  /** Ends a `start()` whose login is still in flight when shutdown begins; unset outside the login. */
+  private abortLogin?: () => void
 
   /**
    * Runs an event handler so its failure is logged against the event instead of surfacing as an
@@ -264,9 +274,18 @@ export class MeoCordApp implements MeoCordApplication {
     // Built now rather than on the first click, so overlapping patterns are reported at startup
     this.dispatcher.getComponentRoutes()
 
+    const login = this.bot.login(this.discordToken)
+    const stopped = new Promise<never>((_, reject) => {
+      this.abortLogin = () => {
+        // discord.js's destroy() never settles during the gateway handshake, so the client is closed once login has
+        login.then(() => this.bot.destroy()).catch(() => undefined)
+        reject(stoppedBeforeOnline())
+      }
+    })
     try {
-      await this.bot.login(this.discordToken)
+      await Promise.race([login, stopped])
     } catch (error) {
+      if (this.closing) throw error
       runningApps.delete(this.close)
       // A bot that never came online is not the app whose theme is read outside calls
       releaseAmbientAppTheme(this.container)
@@ -287,7 +306,11 @@ export class MeoCordApp implements MeoCordApplication {
       await tellDevRunner({ meocord: 'login-failed' })
       MeoCordApp.toldDevRunnerLoginFailed = true
       throw error
+    } finally {
+      this.abortLogin = undefined
     }
+    // A shutdown that began as the login completed has the client to close; the bot is not reported online
+    if (this.closing) throw stoppedBeforeOnline()
     if (MeoCordApp.failedLoginSetExitCode && process.exitCode === 1) {
       process.exitCode = undefined
       MeoCordApp.failedLoginSetExitCode = false
@@ -507,6 +530,15 @@ export class MeoCordApp implements MeoCordApplication {
     this.closing = true
     runningApps.delete(this.close)
     releaseAmbientAppTheme(this.container)
+
+    // Nothing came online, so there are no hooks to undo; the listeners go first, so none of them runs
+    if (this.abortLogin) {
+      this.logger.log('Stopping the bot before it came online')
+      this.bot.removeAllListeners()
+      this.abortLogin()
+      return true
+    }
+
     this.logger.log('Shutting down bot...')
     if (this.activityInterval) clearInterval(this.activityInterval)
 

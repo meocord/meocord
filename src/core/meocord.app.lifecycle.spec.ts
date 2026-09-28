@@ -5,6 +5,7 @@ import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
+import { type FakeDiscord, startFakeDiscord } from '../../scripts/lib/fake-discord.js'
 
 const { logged, config } = vi.hoisted(() => ({
   logged: { error: [] as unknown[][], warn: [] as unknown[][] },
@@ -625,6 +626,62 @@ describe('lifecycle hooks', () => {
 
         expect(exit).not.toHaveBeenCalled()
       })
+    })
+  })
+
+  // A real client against a gateway that answers IDENTIFY late: discord.js's destroy() never settles in that window
+  describe('a stop while the bot is logging in', () => {
+    let fake: FakeDiscord
+
+    beforeEach(async () => {
+      fake = await startFakeDiscord({ readyDelayMs: 500 })
+    })
+
+    afterEach(() => fake.close())
+
+    async function stoppedWhileLoggingIn() {
+      const loaded = await load()
+      const readyHooks: string[] = []
+
+      @loaded.Service()
+      class Scheduler implements OnReady {
+        onReady() {
+          readyHooks.push('scheduler')
+        }
+      }
+
+      @loaded.MeoCord({ controllers: [], services: [Scheduler], clientOptions: { intents: [], rest: { api: fake.api } } })
+      class App {}
+
+      const destroy = vi.spyOn(loaded.discord.Client.prototype, 'destroy')
+      const outcome = loaded.MeoCordFactory.create(App)
+        .start()
+        .then(
+          () => 'online',
+          (error: Error) => error.message,
+        )
+      await fake.waitFor('identified')
+      await loaded.shutdownAndExit()
+      return { outcome, destroy, readyHooks }
+    }
+
+    it('ends the start at once and exits 0, before the gateway is ready', async () => {
+      const { outcome } = await stoppedWhileLoggingIn()
+
+      expect(exit).toHaveBeenCalledWith(0)
+      expect(await outcome).toBe('The bot was stopped before it came online.')
+      expect(fake.events).not.toContain('ready')
+    })
+
+    it('closes the client once its login completes, over its one gateway session, with no ready hook run', async () => {
+      const { destroy, readyHooks } = await stoppedWhileLoggingIn()
+      expect(destroy).not.toHaveBeenCalled()
+
+      await fake.waitFor('closed')
+
+      expect(destroy).toHaveBeenCalledTimes(1)
+      expect(fake.events).toEqual(['connected', 'identified', 'ready', 'closed'])
+      expect(readyHooks).toEqual([])
     })
   })
 
