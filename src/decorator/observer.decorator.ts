@@ -32,7 +32,8 @@ import { refuse } from '@src/util/refusal.util.js'
  * }
  * ```
  *
- * @pipeline observers around the whole call, answered or not
+ * @pipeline observers-start before anything else runs
+ * @pipeline observers-settled once the call has settled and been answered, however it ended
  * @group Decorators
  * @category Pipeline stages
  * @see {@link https://meocord.dev/docs/4.1/observers | Observers}

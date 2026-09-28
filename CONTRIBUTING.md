@@ -144,9 +144,11 @@ structured enough for the generator. On hover the whole comment fits a screen, a
 - **`@example`:** one, in a fenced `ts` block, at most 12 lines of real code. Every decorator, function and class
   has one; a type may skip it. See below for how it is compiled.
 - **`@pipeline <stage> [clause]`:** where a symbol that runs in the pipeline runs. The stage is one of, in the
-  order a call runs: `observers`, `filters`, `defer`, `parse`, `guards`, `cooldown-check`, `fetch`,
-  `interceptors`, `validation`, `pipes`, `cooldowns`, `lock`, `handler`. A symbol that runs in two places takes
-  one tag per place, and every symbol in the `Pipeline stages` category takes at least one.
+  order a call runs: `observers-start`, `filters`, `defer`, `parse`, `guards`, `cooldown-check`, `fetch`,
+  `interceptors`, `validation`, `pipes`, `cooldowns`, `defer-lock`, `handler`, `fallback`, `observers-settled`.
+  These are the stages of the docs' pipeline figure, whose sync refuses any other. A symbol that runs in two places
+  takes one tag per place, and every symbol in the `Pipeline stages` category takes at least one, as do the
+  interfaces a stage implements.
 - **`@group`:** the section of the API reference, and its URL. Every public symbol has one of `Controllers`,
   `Decorators`, `Responses`, `Utilities`, `Testing`, `Configuration`, `CLI`, `Types`.
 - **`@category`:** an optional subgroup: for `Decorators`, `App`, `Controllers`, `Handlers`, `Pipeline stages` or

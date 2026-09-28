@@ -18,8 +18,27 @@ const examplesDir = path.join(repoRoot, '.jsdoc-examples')
 
 /** The groups the docs site files symbols under; see CONTRIBUTING.md. */
 const GROUPS = ['Controllers', 'Decorators', 'Responses', 'Utilities', 'Testing', 'Configuration', 'CLI', 'Types']
-/** The pipeline stages `@pipeline` names, in the order a call runs. */
-const STAGES = ['observers', 'filters', 'defer', 'parse', 'guards', 'cooldown-check', 'fetch', 'interceptors', 'validation', 'pipes', 'cooldowns', 'lock', 'handler']
+/**
+ * The pipeline stages `@pipeline` names, in the order a call runs: the stages of the docs' pipeline figure, whose sync
+ * refuses a tag naming any other. No symbol is the fallback, so none names it.
+ */
+const STAGES = [
+  'observers-start',
+  'filters',
+  'defer',
+  'parse',
+  'guards',
+  'cooldown-check',
+  'fetch',
+  'interceptors',
+  'validation',
+  'pipes',
+  'cooldowns',
+  'defer-lock',
+  'handler',
+  'fallback',
+  'observers-settled',
+]
 
 const compilerOptions: ts.CompilerOptions = {
   module: ts.ModuleKind.NodeNext,

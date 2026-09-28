@@ -30,7 +30,7 @@ import { refuse } from '@src/util/refusal.util.js'
  * ```
  *
  * @pipeline defer before the guards, acknowledging the interaction
- * @pipeline lock after the cooldowns count the call, just before the handler
+ * @pipeline defer-lock after the cooldowns count the call, just before the handler
  * @group Decorators
  * @category Pipeline stages
  * @see {@link DeferOptions}
