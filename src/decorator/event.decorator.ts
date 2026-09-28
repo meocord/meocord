@@ -32,8 +32,8 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
  * `@ReactionHandler`, which route them.
  *
  * @remarks
- * The handler's parameters are typed from discord.js's `ClientEvents`. It runs through the pipeline, so global
- * guards apply to it, and an error it throws is logged without stopping the bot. Handling `interactionCreate`
+ * The handler's parameters are typed from discord.js's `ClientEvents`. It runs through the pipeline, so the app's
+ * global guards apply to it, and its class's and its own, and an error it throws is logged without stopping the bot. Handling `interactionCreate`
  * or `messageCreate` here runs alongside MeoCord's own dispatch of them.
  *
  * @param event - The client event to handle, such as `'guildMemberAdd'`.
@@ -46,7 +46,7 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
  * }
  * ```
  *
- * @pipeline handler with the global guards, interceptors and filters that apply to events
+ * @pipeline handler with the guards, interceptors and filters that apply to events: the app's global ones, its class's and its own
  * @group Decorators
  * @category Handlers
  * @see {@link Once}
@@ -75,7 +75,7 @@ export function On<E extends keyof ClientEvents>(event: E) {
  * }
  * ```
  *
- * @pipeline handler with the global guards, interceptors and filters that apply to events
+ * @pipeline handler with the guards, interceptors and filters that apply to events: the app's global ones, its class's and its own
  * @group Decorators
  * @category Handlers
  * @see {@link On}

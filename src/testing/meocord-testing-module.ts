@@ -1072,8 +1072,9 @@ export class MeoCordTestingModule {
    * {@link TestingModuleOptions.app} gives them. A test replaces what it must, by token, before anything is made.
    *
    * @remarks
-   * A factory runs only when what it provides is first resolved, by `get()` or `init()`, so a factory the test
-   * replaces never runs. The app's listed services are made at `init()`, as the bot makes them before it logs in.
+   * `compile()` runs no factory; `init()` runs each one the module provides, as the bot does before it logs in, so
+   * a factory the test replaces never runs, and one it keeps runs at `init()`. The app's listed services are made
+   * at `init()` too.
    * The module makes no Discord `Client`: a class that injects one needs it in `providers`.
    *
    * @param app - The class `@MeoCord` decorates.

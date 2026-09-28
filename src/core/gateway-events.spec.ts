@@ -25,6 +25,7 @@ import {
   Service,
   UseFilter,
   UseGuard,
+  UseInterceptor,
 } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
@@ -300,6 +301,36 @@ describe('gateway event handlers', () => {
 
       expect(canActivate).toHaveBeenCalledTimes(1)
       expect(handled).toHaveBeenCalledWith('heartbeat')
+    })
+  })
+
+  describe('interceptors', () => {
+    it("runs an @On handler's own interceptor around it, with type \"event\"", async () => {
+      const order: string[] = []
+
+      @Interceptor()
+      class Timing implements InterceptorInterface {
+        async intercept(context: ExecutionContext, next: CallHandler) {
+          order.push(`before ${context.getType()}`)
+          const result = await next.handle()
+          order.push('after')
+          return result
+        }
+      }
+
+      @Service()
+      class Welcome {
+        @On('guildMemberAdd')
+        @UseInterceptor(Timing)
+        greet() {
+          order.push('handler')
+        }
+      }
+
+      const client = await startApp({ services: [Welcome] })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect(order).toEqual(['before event', 'handler', 'after'])
     })
   })
 
