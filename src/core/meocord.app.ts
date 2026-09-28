@@ -46,9 +46,8 @@ import { registerCommands } from '@src/core/command-registration.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 
-/** How long shutdown waits for the `onShutdown` hooks when `shutdownTimeout` is not configured. */
-export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000
 
 /** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
 export const SLOW_READY_HOOK_MS = 10_000

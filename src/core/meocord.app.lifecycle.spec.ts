@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { type Client } from 'discord.js'
 import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
@@ -440,7 +441,7 @@ describe('lifecycle hooks', () => {
       vi.useFakeTimers()
 
       const done = loaded.shutdownAndExit()
-      await vi.advanceTimersByTimeAsync(loaded.DEFAULT_SHUTDOWN_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS)
       await done
 
       expect(logged.warn.flat().join(' ')).toContain('did not finish')
