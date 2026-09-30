@@ -94,9 +94,9 @@ type PlaceholderAt<After extends string> = After extends `${infer Name}}${infer 
 
 /**
  * The params a catalog message takes: one per `{name}` placeholder, whose name is ASCII letters, digits or `_`, and
- * `count` for a plural message. Other text in braces, such as `{ and }`, is the message's own.
+ * `count` for a plural message.
  *
- * A translator's `t(key, params)` is checked against it, so a placeholder left out or misspelt fails to compile.
+ * Other text in braces, such as `{ and }`, is the message's own. A translator's `t(key, params)` is checked against it, so a placeholder left out or misspelt fails to compile.
  * Use it to type params you build before translating.
  *
  * @group Types
