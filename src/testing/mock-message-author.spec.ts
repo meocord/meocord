@@ -1,8 +1,8 @@
 import 'reflect-metadata'
-import { type GuildMember, type Message, type User } from 'discord.js'
+import { ButtonInteraction, type GuildMember, type Message, type User } from 'discord.js'
 import { Controller, Cooldown, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createMock, createMockClient, createMockGuild, createMockMessage, createMockUser } from './mock-interaction.js'
+import { createMock, createMockClient, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
 
 describe('createMockMessage with an author', () => {
   it('is sent by the author given, cached on its client', () => {
@@ -55,6 +55,48 @@ describe('createMockMessage with an author', () => {
     const message = createMockMessage({ author: client.user!, client })
 
     expect(message.author).toBe(client.user)
+  })
+})
+
+describe("an interaction's member", () => {
+  it("is the member the server caches for the interaction's user", () => {
+    const user = createMockUser()
+    const cachedMember = createMock<GuildMember>({ id: user.id, user })
+    const guild = createMockGuild({ members: [cachedMember] })
+
+    const click = createMockInteraction(ButtonInteraction, { user, guild, guildId: guild.id })
+
+    expect(click.member).toBe(cachedMember)
+  })
+
+  it('has the user\'s id, the user and the guild otherwise', () => {
+    const user = createMockUser()
+    const guild = createMockGuild()
+
+    const click = createMockInteraction(ButtonInteraction, { user, guild, guildId: guild.id })
+
+    expect(click.member!.id).toBe(user.id)
+    expect(click.member!.user).toBe(user)
+    expect((click.member as GuildMember).guild).toBe(guild)
+  })
+
+  it('is shared with a message from the same user in the same server, whichever comes first', () => {
+    const author = createMockUser()
+    const guild = createMockGuild()
+    const message = createMockMessage({ author, guild })
+    const click = createMockInteraction(ButtonInteraction, { user: author, guild, guildId: guild.id })
+
+    expect(click.member).toBe(message.member)
+
+    const user = createMockUser()
+    const first = createMockInteraction(ButtonInteraction, { user, guild, guildId: guild.id })
+    const later = createMockMessage({ author: user, guild })
+
+    expect(later.member).toBe(first.member)
+  })
+
+  it('is null outside a server', () => {
+    expect(createMockInteraction(ButtonInteraction, { user: createMockUser() }).member).toBeNull()
   })
 })
 

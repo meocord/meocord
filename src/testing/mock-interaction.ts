@@ -436,7 +436,8 @@ const MOCK_BOT_ID = '1300000000000000000'
  * @remarks
  * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a `channelId` and a
  * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM, and with one its
- * `member` is its user. Other data Discord always sends reads as Discord sends it, such as `false` for a flag and
+ * `member` is its user: for a `user` given, the `guild`'s cached member for that user, so a message and an interaction
+ * from one user share it. Other data Discord always sends reads as Discord sends it, such as `false` for a flag and
  * `null` for what may be absent; what picks the handler, `commandName` or `customId`, is the test's to give. Replies
  * follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports what `respond()` sent. Every
  * method is a mock function, and one that returns a promise in discord.js resolves.
@@ -645,7 +646,8 @@ export function createMockInteraction<T extends object>(
     const unset = (key: string) => !Object.prototype.hasOwnProperty.call(instance, key)
     const generatedId = unset('id') ? (instance.id = nextSnowflake()) : undefined
     defineCreatedTime(instance, generatedId)
-    if (unset('user')) instance.user = mockUser()
+    const userGiven = !unset('user')
+    if (!userGiven) instance.user = mockUser()
     if (unset('channelId')) instance.channelId = nextSnowflake()
     if (unset('guildId')) {
       instance.guildId = null
@@ -655,7 +657,7 @@ export function createMockInteraction<T extends object>(
     let member: unknown
     if (unset('member')) {
       Object.defineProperty(instance, 'member', {
-        get: () => (own('guildId') ? (member ??= memberOf(own('user'))) : null),
+        get: () => (own('guildId') ? (member ??= memberFor(own('guild'), own('user') as { id: string }, userGiven)) : null),
         set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
         enumerable: true,
         configurable: true,
@@ -965,14 +967,19 @@ export function createMockChannel<T extends BaseChannel>(Class: InteractionClass
   return stubDeep(instance) as DeepMocked<T>
 }
 
-/** A member of a server, as the given user. */
-function memberOf(user: unknown): object {
-  return stubDeep(Object.assign(Object.create(GuildMember.prototype) as object, { user }))
+/** A member of `guild` as the user with `id`: its id, user and guild own values, as the gateway delivers a member. */
+function memberIn(guild: unknown, id: string, user: unknown): object {
+  const own = { id: { value: id }, user: { value: user }, ...(guild ? { guild: { value: guild } } : {}) }
+  return stubDeep(Object.defineProperties(Object.create(GuildMember.prototype), own))
 }
 
-/** A member of `guild` as the user with `id`, its id and guild own values, as the gateway delivers a member. */
-function memberIn(guild: unknown, id: string, user: unknown): object {
-  return stubDeep(Object.defineProperties(Object.create(GuildMember.prototype), { id: { value: id }, user: { value: user }, guild: { value: guild } }))
+/**
+ * The member a server has for `user`. A user the test gave is looked up in the guild's member cache, and cached
+ * there when missing, as the gateway resolves a member, so every mock from that user in that server shares it.
+ */
+function memberFor(guild: unknown, user: { id: string }, given: boolean): object {
+  const make = () => memberIn(guild, user.id, user)
+  return given ? cached(cacheOf((guild as Guild | null | undefined)?.members), user.id, make) : make()
 }
 
 /** The guild a mock message carries: a guild with the same stubbed managers as createMockGuild. */
@@ -1215,7 +1222,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   // The author as a member of the message's server; a direct message has none. A given author's member is the one
   // the server caches, as the gateway resolves it, so every message from that author has the same member
   const author = overrides.author
-  const member = !guild ? null : author ? cached(cacheOf((guild as Guild).members), author.id, () => memberIn(guild, author.id, author)) : memberOf(instance.author)
+  const member = guild ? memberFor(guild, instance.author as { id: string }, author !== undefined) : null
   Object.defineProperty(instance, 'member', { value: member, writable: true })
   // In a server's text channel, the ids matching the objects; with no guild, a DM
   instance.channelId = channel.id
