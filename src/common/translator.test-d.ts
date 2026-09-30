@@ -1,7 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
 import { createTranslator, defineCatalog, translateError, type Translator } from '@src/common/index.js'
-import { type CatalogIssues, type LocaleIssues } from '@src/common/translator.js'
+import { type CatalogIssues, type LocaleIssues, type Placeholders } from '@src/common/translator.js'
+import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
 
 const enUS = defineCatalog({
   ban: { description: 'Ban a member', done: 'Banned {user} for {days} days.' },
@@ -83,6 +84,26 @@ describe('locales', () => {
   it('translates into an explicit locale', () => {
     t.locale(Locale.Japanese)('ping')
     t.locale('es-419')('ping')
+  })
+})
+
+describe('placeholders', () => {
+  type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+  // Each case whose params the compiler reads otherwise than the table says, by its text
+  type Mismatched<Case = (typeof PLACEHOLDER_CASES)[number]> = Case extends { text: infer Text; params: readonly (infer Param)[] }
+    ? Same<Placeholders<Text>, Param> extends true
+      ? never
+      : Text
+    : never
+
+  it('reads a {param} as translating does: word characters between braces, and nothing else', () => {
+    expectTypeOf<Mismatched>().toEqualTypeOf<never>()
+  })
+
+  it("takes no params for a message whose braces hold no param", () => {
+    const braces = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ wrap: 'Wrap text in { and }.' }) } })
+    braces.default('wrap')
+    createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ wrap: 'Wrap text in { and }.' }), id: { wrap: 'Bungkus dengan { dan }.' } } })
   })
 })
 

@@ -1,4 +1,4 @@
-import { type CatalogShape, CATALOGS, type Translator } from '@src/common/translator.js'
+import { type CatalogShape, CATALOGS, placeholderNames, type Translator } from '@src/common/translator.js'
 import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 interface Leaf { key: string; plural: boolean }
@@ -23,10 +23,10 @@ function at(catalog: CatalogShape, key: string): unknown {
 const MEOCORD_KEYS = new Set(leaves(MEOCORD_MESSAGES).map(({ key }) => key))
 const isMeoCordKey = (key: string) => key.startsWith('meocord.')
 
-/** The `{name}` placeholders of a message, every form of a plural's, as translating fills them. */
+/** The `{param}` names of a message, every form of a plural's, as translating fills them. */
 function placeholders(message: unknown): Set<string> {
   const texts = typeof message === 'string' ? [message] : Object.values(message as Record<string, unknown>)
-  return new Set(texts.flatMap(text => (typeof text === 'string' ? [...text.matchAll(/\{(\w+)}/g)].map(match => match[1]) : [])))
+  return new Set(texts.flatMap(text => (typeof text === 'string' ? placeholderNames(text) : [])))
 }
 
 /** A message as a report shows it: the text, or a plural's `other` form. */
@@ -107,7 +107,7 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
       }
       const original = at(defaultCatalog, key)
       const stray = locale === translator.defaultLocale ? [] : strayParams(message, original)
-      if (stray.length > 0) problems.push(`${key} takes no ${stray.map(name => `{${name}}`).join(', ')} (the default is "${shown(original)}")`)
+      for (const name of stray) problems.push(`${key} takes no {${name}}; the default is "${shown(original)}"`)
     }
     if (options.meocord && !locale.startsWith('en-')) {
       for (const key of MEOCORD_KEYS) if (at(catalog, key) === undefined) problems.push(`missing ${key}`)
@@ -118,7 +118,7 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
         else {
           const english = at(MEOCORD_MESSAGES, key)
           const stray = strayParams(at(catalog, key), english)
-          if (stray.length > 0) problems.push(`${key} takes no ${stray.map(name => `{${name}}`).join(', ')} (MeoCord's English is "${shown(english)}")`)
+          for (const name of stray) problems.push(`${key} takes no {${name}}: MeoCord's English is "${shown(english)}"`)
         }
       } else if (!referenceKeys.has(key)) problems.push(`${key} is not in the default catalog`)
     }
