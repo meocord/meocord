@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
 import { createTranslator, defineCatalog, translateError, type Translator } from '@src/common/index.js'
-import { type CatalogIssues } from '@src/common/translator.js'
+import { type CatalogIssues, type LocaleIssues } from '@src/common/translator.js'
 
 const enUS = defineCatalog({
   ban: { description: 'Ban a member', done: 'Banned {user} for {days} days.' },
@@ -83,6 +83,51 @@ describe('locales', () => {
   it('translates into an explicit locale', () => {
     t.locale(Locale.Japanese)('ping')
     t.locale('es-419')('ping')
+  })
+})
+
+describe("other locales' params", () => {
+  it("takes any of the default message's params, in any order, and {count} in a plural's forms", () => {
+    createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': enUS,
+        id: defineCatalog({
+          ban: { description: 'Blokir anggota', done: '{days} hari untuk {user}.' },
+          warnings: { one: 'Satu peringatan', other: '{count} peringatan untuk {user}' },
+        }),
+        // A param left out, and a plural form without {count}
+        ja: { ban: { done: '{user}をBAN' }, warnings: { other: '警告' } },
+      },
+    })
+  })
+
+  it("rejects a {param} the default message doesn't take", () => {
+    // @ts-expect-error Property '"id: ban.done takes no {usr}; the default is "Banned {user} for {days} days.""' is missing
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { ban: { done: 'Melarang {usr}.' } } } })
+    // @ts-expect-error a plural's param translated: {jumlah} is not the default's
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { warnings: { other: '{jumlah} peringatan' } } } })
+    // @ts-expect-error a {param} in a message whose default takes none
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { ping: 'Pong {user}!' } } })
+    // @ts-expect-error checked in a catalog made with defineCatalog too
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: defineCatalog({ ban: { done: 'Melarang {usr}.' } }) } })
+  })
+
+  it('names the locale, the message, the param and the default in the error', () => {
+    expectTypeOf<LocaleIssues<{ ban: { done: 'Melarang {usr}.' } }, typeof enUS, 'id'>>().toEqualTypeOf<
+      `id: ban.done takes no {usr}; the default is "Banned {user} for {days} days."`
+    >()
+    expectTypeOf<LocaleIssues<{ warnings: { one: '{n} x'; other: '{jumlah} y' } }, typeof enUS, 'id'>>().toEqualTypeOf<
+      | `id: warnings takes no {n}; the default is "{count} warnings for {user}"`
+      | `id: warnings takes no {jumlah}; the default is "{count} warnings for {user}"`
+    >()
+    expectTypeOf<LocaleIssues<{ ping: 'Pong {x}!' }, typeof enUS, 'ja'>>().toEqualTypeOf<`ja: ping takes no {x}; the default is "Pong!"`>()
+    expectTypeOf<LocaleIssues<{ ban: { done: '{user} {days}' }; ping: 'Pong' }, typeof enUS, 'id'>>().toEqualTypeOf<never>()
+  })
+
+  it('leaves a message typed `string`, as a plain or JSON catalog has, to expectCompleteCatalog', () => {
+    const id: { ban: { done: string } } = { ban: { done: 'Melarang {usr}.' } }
+    createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id } })
   })
 })
 
