@@ -105,6 +105,31 @@ describe('placeholders', () => {
     braces.default('wrap')
     createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ wrap: 'Wrap text in { and }.' }), id: { wrap: 'Bungkus dengan { dan }.' } } })
   })
+
+  // '{p0} {p1} … ' up to N params, their names, and a name of 4,096 characters
+  type Numbered<N extends number, I extends unknown[] = [], Text extends string = ''> = I['length'] extends N
+    ? Text
+    : Numbered<N, [...I, unknown], `${Text}{p${I['length']}} `>
+  type Names<N extends number, I extends unknown[] = [], Found = never> = I['length'] extends N
+    ? Found
+    : Names<N, [...I, unknown], Found | `p${I['length']}`>
+  type Twice<S extends string> = `${S}${S}`
+  type LongName = Twice<Twice<Twice<Twice<Twice<Twice<Twice<Twice<Twice<Twice<Twice<Twice<'a'>>>>>>>>>>>>
+
+  it('reads a message with many params, and a long name, and t() takes all of them', () => {
+    expectTypeOf<Same<Placeholders<Numbered<49>>, Names<49>>>().toEqualTypeOf<true>()
+    expectTypeOf<Same<Placeholders<Numbered<300>>, Names<300>>>().toEqualTypeOf<true>()
+    expectTypeOf<Placeholders<`Banned {${LongName}}.`>>().toEqualTypeOf<LongName>()
+    expectTypeOf<Placeholders<`{${LongName}ñ} {user}`>>().toEqualTypeOf<'user'>()
+
+    const many = { forty: '' as Numbered<49>, hundreds: '' as Numbered<300>, long: '' as `Banned {${LongName}}.` }
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': many, id: many } })
+    t.default('forty', {} as Record<Names<49>, string>)
+    t.default('hundreds', {} as Record<Names<300>, string>)
+    t.default('long', {} as Record<LongName, string>)
+    // @ts-expect-error the last param is missing
+    t.default('hundreds', {} as Record<Exclude<Names<300>, 'p299'>, string>)
+  })
 })
 
 describe("other locales' params", () => {
