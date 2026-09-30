@@ -74,6 +74,38 @@ describe('expectCompleteCatalog', () => {
     expect(report).not.toMatch(/en-GB: .*meocord/)
   })
 
+  it("names a {param} a translation uses that the default message doesn't take, from the strings themselves", () => {
+    // Read from JSON, the strings are `string` to the type checker, so only this test sees their params
+    const id = { ban: { description: 'Blokir {anggota}', done: 'Diblokir {usr} dan {x}.' }, warnings: { other: '{jumlah} peringatan' } }
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: id as never } })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(
+      'The catalogs are incomplete:\n' +
+        '  id: ban.description takes no {anggota} (the default is "Ban a member"); ' +
+        'ban.done takes no {usr}, {x} (the default is "Banned {user}."); ' +
+        'warnings takes no {jumlah} (the default is "{count} warnings")',
+    )
+  })
+
+  it("takes a translation that leaves a param out, reorders them, or leaves {count} out of a plural's form", () => {
+    const id = { ban: { description: 'Blokir anggota', done: 'Diblokir.' }, warnings: { one: 'Satu', other: 'Peringatan: {count}' } }
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: id as never } })
+
+    expect(() => expectCompleteCatalog(t)).not.toThrow()
+  })
+
+  it("names a {param} a translation of MeoCord's own texts uses that MeoCord's English doesn't take", () => {
+    const id = { ...{ ban: { description: 'Blokir anggota', done: '{user} diblokir.' }, warnings: { other: '{count} peringatan' } } }
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': enUS, id: { ...id, meocord: { usage: { heading: 'Cara pakai: {command}' } } } as never },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(
+      '  id: meocord.usage.heading takes no {command} (MeoCord\'s English is "Usage: {usage}")',
+    )
+  })
+
   it('refuses a translator it cannot read', () => {
     expect(() => expectCompleteCatalog({} as Translator)).toThrow('takes a translator made by createTranslator')
   })

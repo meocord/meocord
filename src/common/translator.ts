@@ -99,7 +99,8 @@ type ParamsArgs<M> = [keyof MessageParams<M>] extends [never] ? [params?: Record
 export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>) => string
 
 /**
- * What a locale other than the default provides: any part of the default catalog, with any wording.
+ * What a locale other than the default provides: any part of the default catalog, in its own wording, using only
+ * the `{params}` the default's messages take.
  *
  * A message it leaves out falls back to a related locale, then to the default.
  *
@@ -128,6 +129,40 @@ export type CatalogIssues<C> = C extends { readonly meocord: infer G } ? MeoCord
 
 /** Refuses a `meocord` group with a mistake, naming each one, where a mismatched text would otherwise read as `never`. */
 type MeoCordReport<Issues> = [Issues] extends [never] ? unknown : Readonly<Record<Issues & string, never>>
+
+/** The params a default message takes: its placeholders, and `count` for a plural. */
+type DefaultParams<M> = M extends string ? Placeholders<M> : IsPlural<M> extends true ? Placeholders<M[keyof M & PluralCategory]> | 'count' : never
+
+/** The placeholders a locale's message uses, in every form of a plural. */
+type UsedParams<T> = T extends string ? Placeholders<T> : T extends object ? Placeholders<T[keyof T & PluralCategory]> : never
+
+/** A default message as an error shows it: the text, or a plural's `other` form. */
+type ShownText<M> = M extends string ? M : M extends { readonly other: infer Other extends string } ? Other : ''
+
+/** One issue per `{param}` a locale's message uses that the default's doesn't take. */
+type ParamIssue<T, M, Where extends string> = [Exclude<UsedParams<T>, DefaultParams<M>>] extends [never]
+  ? never
+  : `${Where} takes no {${Exclude<UsedParams<T>, DefaultParams<M>> & string}}; the default is "${ShownText<M>}"`
+
+/**
+ * What is wrong with a locale's params, one message per `{param}` its message uses that the default's doesn't take.
+ * A message typed `string`, as a plain or JSON catalog's is, can't be read, so only `expectCompleteCatalog` checks it.
+ */
+export type LocaleIssues<T, C, L extends string, Path extends string = ''> = {
+  [K in keyof T & string]: K extends 'meocord'
+    ? never
+    : K extends keyof C
+      ? C[K] extends string
+        ? string extends T[K]
+          ? never
+          : ParamIssue<T[K], C[K], `${L}: ${Path}${K}`>
+        : IsPlural<C[K]> extends true
+          ? string extends T[K][keyof T[K] & PluralCategory]
+            ? never
+            : ParamIssue<T[K], C[K], `${L}: ${Path}${K}`>
+          : LocaleIssues<T[K], C[K], L, `${Path}${K}.`>
+      : never
+}[keyof T & string]
 
 /** A locale's catalog with nothing the default lacks: each key is `never` where the default has none. */
 type WithinDefault<T, C> = {
@@ -188,7 +223,8 @@ export function defineCatalog<const T extends CatalogShape>(catalog: T & MeoCord
  * A locale is resolved to the catalog that serves it: the exact locale, then another of the same language (`es-419` to
  * `es-ES`, `en-GB` to `en-US`), then the default. A message missing from that catalog is looked up the same way.
  *
- * @typeParam C - The default catalog, whose keys and params every locale is checked against.
+ * @typeParam C - The default catalog. Every locale's keys are checked against it, and so are the `{params}` of
+ *   each message whose text the compiler can read; see {@link createTranslator}.
  *
  * @example
  * ```ts
@@ -386,6 +422,19 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
  * Create it at module scope: command builders run when their class is decorated, before any container exists, and use
  * it for names and descriptions. Pass the same instance to `@MeoCord({ i18n })` to inject it as `Translator`.
  *
+ * Each locale is checked against the default catalog when the code compiles: every key must be one the default has,
+ * and a message may use only the `{params}` the default's message takes, and `{count}` in a plural's forms, in any
+ * order, all or some. The error names each mistake, such as:
+ *
+ * ```text
+ * id: ban.done takes no {usr}; the default is "Banned {user}."
+ * ```
+ *
+ * @remarks
+ * The compiler reads a message's params only from its text, which a catalog made with `defineCatalog`, written with
+ * `as const` or written inline keeps. A catalog from a plain variable or a JSON file types each message as `string`, so
+ * its params are checked by `expectCompleteCatalog` from `meocord/testing` instead, when a test runs.
+ *
  * @param options.default - The locale whose catalog is the reference and the last fallback.
  * @param options.locales - A catalog per discord.js `Locale`, including the default's.
  * @throws When the default locale has no catalog, or a key is not a Discord locale.
@@ -419,7 +468,8 @@ export function createTranslator<
     locales: Locales &
       DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> }
   } & LiteralCatalog<Locales[Default]> &
-    MeoCordReport<{ [L in keyof Locales]: CatalogIssues<Locales[L]> }[keyof Locales]>,
+    MeoCordReport<{ [L in keyof Locales]: CatalogIssues<Locales[L]> }[keyof Locales]> &
+    MeoCordReport<{ [L in Exclude<keyof Locales, Default>]: LocaleIssues<Locales[L], Locales[Default], L & string> }[Exclude<keyof Locales, Default>]>,
 ): Translator<Locales[Default]> {
   const { default: defaultLocale, locales } = options
   for (const locale of Object.keys(locales)) {
