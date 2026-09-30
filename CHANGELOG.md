@@ -1,5 +1,44 @@
 # meocord
 
+## 4.1.0-beta.9
+
+### Minor Changes
+
+- [#280](https://github.com/meocord/meocord/pull/280) [`c79cd44`](https://github.com/meocord/meocord/commit/c79cd44c4badc87f26a936e57fa1cc33f4cc4136) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A translation's `{params}` are checked against the default catalog's. Until now only its keys were, so a translation that misspelt a param, such as `'Diblokir {usr}.'` for `'Banned {user}.'`, compiled and showed the user `{usr}` as written.
+
+  - **When the code compiles**, `createTranslator` refuses a message that uses a `{param}` its default message doesn't take, and a plural's form may use `{count}` besides. The error names each one, such as `id: ban.done takes no {usr}; the default is "Banned {user}."`. A translation may use the default's params in any order, and leave some out. The compiler reads a message's params only from a catalog whose text it keeps: one made with `defineCatalog`, written with `as const`, or written inline.
+  - **When a test runs**, `expectCompleteCatalog` from `meocord/testing` reports the same mistakes from the catalogs' own strings, so a catalog from a plain variable or a JSON file is checked too. It also reports a `{param}` that a translation of MeoCord's own texts uses and MeoCord's English doesn't take.
+
+  A `{param}` is the same thing in every check and when translating: ASCII letters, digits or `_` between braces. Other text in braces, such as `Wrap text in { and }.`, is the message's own. So a default message with such braces no longer makes `t('wrap')` ask for params it doesn't use. A message may also hold hundreds of params: one with 47 or more failed to compile with "Type instantiation is excessively deep and possibly infinite".
+
+  If your build or a test now fails, rename the param to the one the default message uses. A translation may leave a param out, but it can't add one: the translator only fills the params the default message names.
+
+- [#281](https://github.com/meocord/meocord/pull/281) [`c59ddc2`](https://github.com/meocord/meocord/commit/c59ddc28ab25a123c87fbb4f6c6dd7f394a63efb) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `createMockMessage` takes an `author`, so a test can send several messages as one user. Before, every mock message came from a new person, so a per-user `@Cooldown` or a check on who sent a message couldn't be tested through `dispatch()` without assigning `message.author` by hand.
+
+  ```ts
+  const author = createMockUser()
+  await module.dispatch(createMockMessage({ author, content: '!daily' }))
+  await module.dispatch(createMockMessage({ author, content: '!daily' })) // refused by the cooldown
+  ```
+
+  - The author is cached on the message's client, so a mention of it resolves to the same user.
+  - In a server, the message's `member` is the guild's cached member for that user, such as one given to `createMockGuild({ members })`, or a new member with the author's id, which is then cached. Every message from that author in one server (the same `guild` given to each) has the same member.
+  - `author: client.user` gives a message the bot itself sent.
+  - An interaction's `member` works the same way: for a `user` the test gives, it is the `guild`'s cached member for that user, or a new member with its id, user and guild, which is then cached. A message and an interaction from one user in one server share the member, whichever is made first.
+  - A message built without `author` is unchanged.
+
+### Patch Changes
+
+- [#277](https://github.com/meocord/meocord/pull/277) [`55fe3e4`](https://github.com/meocord/meocord/commit/55fe3e4db223b342b7951e8e36e83cd479cfd21d) Thanks [@l7aromeo](https://github.com/l7aromeo)! - More mistakes MeoCord refuses as the bot loads are reported as one line, naming what to change first, instead of `Error during startup:` and a stack. This covers two classes of one name when either uses `@Cooldown` or `@Once`, `@Validate`, `@UsePipe` or `@Cooldown` on a handler they don't apply to, two component `customId` patterns that match the same ids, `sharding` settings in `meocord.config.ts` that `clientOptions` contradicts, and a self-contained build started on a platform its native addons weren't built for.
+
+  - Two component patterns that match the same ids, and the warning about two that can, are now reported by `MeoCordFactory.create()`, before `start()` attaches anything, and `meocord register` reports them too.
+  - The messages lead with the class, handler or file they are about, such as `Shop: two classes have this name; …`. A test that matches the old wording needs updating.
+
+- [#278](https://github.com/meocord/meocord/pull/278) [`2d26fc3`](https://github.com/meocord/meocord/commit/2d26fc397808f6888405690a5dbeedf3e912f93e) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A production build keeps every class's own name. Before, when two modules declared a class of the same name, even a helper that never reaches MeoCord, `meocord build --prod` renamed one of them, such as `Shop` to `shop_controller_Shop`. A development build and your tests kept `Shop`. So in production, cooldowns were counted under the renamed class, errors and logs named it, and `ExecutionContext.getClass().name` returned it.
+
+  - If a controller was renamed this way, its cooldowns start over once, when you deploy this version. Nothing to do: the counts under the old name expire on their own.
+  - Two classes of one name are now refused in production as they already were in development and tests. That covers two controllers where either uses `@Cooldown` or `@Once`, and any two controllers or services under process sharding. If your bot stops at startup with this refusal, rename one of the two classes; the message names it.
+
 ## 4.1.0-beta.8
 
 ### Minor Changes
