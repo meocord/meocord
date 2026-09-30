@@ -970,6 +970,11 @@ function memberOf(user: unknown): object {
   return stubDeep(Object.assign(Object.create(GuildMember.prototype) as object, { user }))
 }
 
+/** A member of `guild` as the user with `id`, its id and guild own values, as the gateway delivers a member. */
+function memberIn(guild: unknown, id: string, user: unknown): object {
+  return stubDeep(Object.defineProperties(Object.create(GuildMember.prototype), { id: { value: id }, user: { value: user }, guild: { value: guild } }))
+}
+
 /** The guild a mock message carries: a guild with the same stubbed managers as createMockGuild. */
 function createMockGuildForMessage(): object {
   const guild = Object.create(Guild.prototype) as Record<string, unknown>
@@ -994,6 +999,12 @@ export interface MockMessageOverrides {
   id?: string
   /** The message's text. */
   content?: string
+  /**
+   * Who sent it, such as a user from `createMockUser`, or the client's own user for a message the bot sent; a new
+   * person otherwise. It is cached on the client, so two messages from one author count as one user's, and in a
+   * server its `member` is the guild's cached member for that user, or one made for it.
+   */
+  author?: User
   /** Its top-level components: action rows, or Components V2 such as a container. */
   components?: readonly (APIMessageTopLevelComponent | JSONEncodable<APIMessageTopLevelComponent>)[]
   /** Its embeds. */
@@ -1048,10 +1059,7 @@ function mentionsOf(content: string | undefined, client: unknown, guild: unknown
       ? new Collection(
           users.map(id => [
             id,
-            cached(guildCaches.members, id, () => {
-              const user = cached(userCache, id, () => mockUser(id))
-              return stubDeep(Object.defineProperties(Object.create(GuildMember.prototype), { id: { value: id }, user: { value: user }, guild: { value: guild } }))
-            }),
+            cached(guildCaches.members, id, () => memberIn(guild, id, cached(userCache, id, () => mockUser(id)))),
           ]),
         )
       : null,
@@ -1162,9 +1170,10 @@ function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
  *
  * @remarks
  * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted, and `edit()`
- * and `reply()` resolve to a new mock message. Without overrides the message is empty, in a server, with its author
- * as its `member`; with `guild: null` it is a direct message. The users, roles and channels the content mentions are
- * cached as the gateway delivers them.
+ * and `reply()` resolve to a new mock message. Without overrides the message is empty, in a server, from a new
+ * person who is its `member`; with `guild: null` it is a direct message. Give `author` to send several messages as
+ * one user, such as to reach a per-user cooldown. An author given, and the users, roles and channels the content
+ * mentions, are cached as the gateway delivers them.
  *
  * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *
@@ -1194,7 +1203,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   instance.deleted = false
 
   // Constructor-assigned — set as prototype-based stubs; a user rather than a bot, as dispatch handles only those
-  instance.author = mockUser()
+  instance.author = overrides.author ?? mockUser()
 
   // Getters on the prototype — the proxy sees them as functions and returns
   // a mock fn, which is wrong. Pre-initialize as own properties to shadow
@@ -1203,8 +1212,11 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   const guild = (overrides.guild === undefined ? createMockGuildForMessage() : overrides.guild) as { id: string } | null
   Object.defineProperty(instance, 'channel', { value: channel, writable: true })
   Object.defineProperty(instance, 'guild', { value: guild, writable: true })
-  // The author as a member of the message's server; a direct message has none
-  Object.defineProperty(instance, 'member', { value: guild ? memberOf(instance.author) : null, writable: true })
+  // The author as a member of the message's server; a direct message has none. A given author's member is the one
+  // the server caches, as the gateway resolves it, so every message from that author has the same member
+  const author = overrides.author
+  const member = !guild ? null : author ? cached(cacheOf((guild as Guild).members), author.id, () => memberIn(guild, author.id, author)) : memberOf(instance.author)
+  Object.defineProperty(instance, 'member', { value: member, writable: true })
   // In a server's text channel, the ids matching the objects; with no guild, a DM
   instance.channelId = channel.id
   instance.guildId = guild?.id ?? null
@@ -1217,7 +1229,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   const client = overrides.client ?? createMockClient()
   Object.defineProperty(instance, 'client', { value: client, writable: true })
   const userCache = cacheOf(client.users)
-  for (const user of overrides.users ?? []) userCache?.set(user.id, user)
+  for (const user of [...(overrides.users ?? []), ...(author ? [author] : [])]) userCache?.set(user.id, user)
 
   // MessageMentions — constructor-assigned; what the content mentions, cached as the gateway delivers it
   instance.mentions = mentionsOf(overrides.content, client, guild)
