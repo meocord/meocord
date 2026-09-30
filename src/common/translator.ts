@@ -70,10 +70,31 @@ export type MessageAt<C, K extends string> = K extends `${infer Head}.${infer Re
     ? C[K]
     : never
 
-type Placeholders<S> = S extends `${string}{${infer Name}}${infer Rest}` ? Name | Placeholders<Rest> : never
+/** Each character of a string, as a union; tail-recursive, so a long string stays within the compiler's depth. */
+type Chars<S extends string, Found = never> = S extends `${infer First}${infer Rest}` ? Chars<Rest, Found | First> : Found
+
+/** A character `\w` matches without the `u` flag: ASCII letters, digits and `_`. */
+type WordChar = Chars<'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'>
+
+/** Whether a string is one or more word characters. */
+type IsWord<S extends string> = S extends `${WordChar}${infer Rest}` ? (Rest extends '' ? true : IsWord<Rest>) : false
 
 /**
- * The params a catalog message takes: one per `{name}` placeholder, and `count` for a plural message.
+ * The `{param}` names of a message, read as translating reads them with `/\{(\w+)}/g`: word characters between
+ * braces. Where the braces hold anything else, reading resumes after the `{`, so `{{user}}` takes `user`.
+ */
+export type Placeholders<S> = S extends `${string}{${infer After}` ? PlaceholderAt<After> : never
+
+/** The params from just after a `{`: a param when word characters close there, else whatever follows. */
+type PlaceholderAt<After extends string> = After extends `${infer Name}}${infer Rest}`
+  ? IsWord<Name> extends true
+    ? Name | Placeholders<Rest>
+    : Placeholders<After>
+  : never
+
+/**
+ * The params a catalog message takes: one per `{name}` placeholder, whose name is ASCII letters, digits or `_`, and
+ * `count` for a plural message. Other text in braces, such as `{ and }`, is the message's own.
  *
  * A translator's `t(key, params)` is checked against it, so a placeholder left out or misspelt fails to compile.
  * Use it to type params you build before translating.
@@ -344,8 +365,16 @@ export function pluralForm({ message, locale }: FoundMessage, count: unknown): s
   return message[rules.select(Number(count)) as PluralCategory] ?? message.other
 }
 
+/** A `{param}`: word characters between braces, the reading `Placeholders` follows at compile time. */
+const PLACEHOLDER = /\{(\w+)}/g
+
+/** The `{param}` names of a message, in order, as translating fills them. */
+export function placeholderNames(message: string): string[] {
+  return [...message.matchAll(PLACEHOLDER)].map(([, name]) => name)
+}
+
 function interpolate(message: string, params: Record<string, unknown>): string {
-  return message.replace(/\{(\w+)}/g, (whole, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : whole))
+  return message.replace(PLACEHOLDER, (whole, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : whole))
 }
 
 class CatalogTranslator<C extends CatalogShape> extends Translator<C> {

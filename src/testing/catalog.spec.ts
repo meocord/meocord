@@ -1,6 +1,8 @@
 import { createTranslator, defineCatalog, Translator } from '@src/common/index.js'
 import { Controller, MeoCord, Service } from '@src/decorator/index.js'
 import { expectCompleteCatalog, MeoCordTestingModule } from '@src/testing/index.js'
+import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
+import { placeholderNames } from '@src/common/translator.js'
 
 const enUS = defineCatalog({
   ban: { description: 'Ban a member', done: 'Banned {user}.' },
@@ -81,9 +83,10 @@ describe('expectCompleteCatalog', () => {
 
     expect(() => expectCompleteCatalog(t)).toThrow(
       'The catalogs are incomplete:\n' +
-        '  id: ban.description takes no {anggota} (the default is "Ban a member"); ' +
-        'ban.done takes no {usr}, {x} (the default is "Banned {user}."); ' +
-        'warnings takes no {jumlah} (the default is "{count} warnings")',
+        '  id: ban.description takes no {anggota}; the default is "Ban a member"; ' +
+        'ban.done takes no {usr}; the default is "Banned {user}."; ' +
+        'ban.done takes no {x}; the default is "Banned {user}."; ' +
+        'warnings takes no {jumlah}; the default is "{count} warnings"',
     )
   })
 
@@ -102,8 +105,15 @@ describe('expectCompleteCatalog', () => {
     })
 
     expect(() => expectCompleteCatalog(t)).toThrow(
-      '  id: meocord.usage.heading takes no {command} (MeoCord\'s English is "Usage: {usage}")',
+      '  id: meocord.usage.heading takes no {command}: MeoCord\'s English is "Usage: {usage}"',
     )
+  })
+
+  it.each(PLACEHOLDER_CASES)('reads the params of $text as translating and the compiler do', ({ text, params }) => {
+    expect(placeholderNames(text)).toEqual(params)
+    // A translation that keeps the text's braces takes the same params, so nothing is reported
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { m: text } as never, id: { m: `${text} ~` } as never } })
+    expect(() => expectCompleteCatalog(t)).not.toThrow()
   })
 
   it('refuses a translator it cannot read', () => {
