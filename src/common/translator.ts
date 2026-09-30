@@ -76,28 +76,41 @@ type Chars<S extends string, Found = never> = S extends `${infer First}${infer R
 /** A character `\w` matches without the `u` flag: ASCII letters, digits and `_`. */
 type WordChar = Chars<'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'>
 
-/** Whether a string is one or more word characters. */
-type IsWord<S extends string> = S extends `${WordChar}${infer Rest}` ? (Rest extends '' ? true : IsWord<Rest>) : false
+/**
+ * Whether a string is one or more word characters. It reads 16 at a time, so a name up to 16,000 characters long stays
+ * within the compiler's 1,000 steps of tail recursion.
+ */
+type IsWord<S extends string> =
+  S extends `${infer A}${infer B}${infer C}${infer D}${infer E}${infer F}${infer G}${infer H}${infer I}${infer J}${infer K}${infer L}${infer M}${infer N}${infer O}${infer P}${infer Rest}`
+    ? [A | B | C | D | E | F | G | H | I | J | K | L | M | N | O | P] extends [WordChar]
+      ? Rest extends ''
+        ? true
+        : IsWord<Rest>
+      : false
+    : S extends `${WordChar}${infer Rest}`
+      ? Rest extends ''
+        ? true
+        : IsWord<Rest>
+      : false
 
 /**
  * The `{param}` names of a message, read as translating reads them with `/\{(\w+)}/g`: word characters between
- * braces. Where the braces hold anything else, reading resumes after the `{`, so `{{user}}` takes `user`.
+ * braces. Where the braces hold anything else, reading resumes after the `{`, so `{{user}}` takes `user`. Each `{` is
+ * one step of tail recursion, with the names found so far in `Found`, so a message may hold about 1,000 of them.
  */
-export type Placeholders<S> = S extends `${string}{${infer After}` ? PlaceholderAt<After> : never
+export type Placeholders<S, Found = never> = S extends `${string}{${infer After}`
+  ? Placeholders<[ParamAt<After>] extends [never] ? After : After extends `${string}}${infer Rest}` ? Rest : After, Found | ParamAt<After>>
+  : Found
 
-/** The params from just after a `{`: a param when word characters close there, else whatever follows. */
-type PlaceholderAt<After extends string> = After extends `${infer Name}}${infer Rest}`
-  ? IsWord<Name> extends true
-    ? Name | Placeholders<Rest>
-    : Placeholders<After>
-  : never
+/** The param a `{` opens, from the text after it: the name when word characters close there. */
+type ParamAt<After extends string> = After extends `${infer Name}}${string}` ? (IsWord<Name> extends true ? Name : never) : never
 
 /**
  * The params a catalog message takes: one per `{name}` placeholder, whose name is ASCII letters, digits or `_`, and
  * `count` for a plural message.
  *
- * Other text in braces, such as `{ and }`, is the message's own. A translator's `t(key, params)` is checked against it, so a placeholder left out or misspelt fails to compile.
- * Use it to type params you build before translating.
+ * Other text in braces, such as `{ and }`, is the message's own. A translator's `t(key, params)` is checked against
+ * it, so a placeholder left out or misspelt fails to compile. Use it to type params you build before translating.
  *
  * @group Types
  * @see {@link createTranslator}
