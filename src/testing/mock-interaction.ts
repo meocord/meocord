@@ -436,11 +436,12 @@ const MOCK_BOT_ID = '1300000000000000000'
  * @remarks
  * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a `channelId` and a
  * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM, and with one its
- * `member` is its user: for a `user` given, the `guild`'s cached member for that user, so a message and an interaction
- * from one user share it. Other data Discord always sends reads as Discord sends it, such as `false` for a flag and
- * `null` for what may be absent; what picks the handler, `commandName` or `customId`, is the test's to give. Replies
- * follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports what `respond()` sent. Every
- * method is a mock function, and one that returns a promise in discord.js resolves.
+ * `member` is its user: for a `user` given, when the test gives the `guild`, the guild's cached member for that user,
+ * so a message and an interaction from one user in that server share it. Other data Discord always sends reads as
+ * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
+ * or `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and
+ * {@link getResponse} reports what `respond()` sent. Every method is a mock function, and one that returns a promise in
+ * discord.js resolves.
  *
  * @param Class - The discord.js class to mock.
  * @param props - Values for properties the class declares `readonly`; see {@link MockProps}.
@@ -1008,8 +1009,8 @@ export interface MockMessageOverrides {
   content?: string
   /**
    * Who sent it, such as a user from `createMockUser`, or the client's own user for a message the bot sent; a new
-   * person otherwise. It is cached on the client, so two messages from one author count as one user's, and in a
-   * server its `member` is the guild's cached member for that user, or one made for it.
+   * person otherwise. Two messages from one author count as one user's, such as for a per-user cooldown. It is cached
+   * on the message's client, and in a server its `member` is the guild's cached member for that user, or a new one.
    */
   author?: User
   /** Its top-level components: action rows, or Components V2 such as a container. */
