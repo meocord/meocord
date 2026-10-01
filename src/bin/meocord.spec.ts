@@ -722,36 +722,39 @@ describe('spawning the application', () => {
       // A bot that holds on to its stop signal, as one that ignores SIGTERM does, must not outlive the session
       it('stops the bot it started through its own stop, and exits 1 once it has, when it cannot watch the project', async () => {
         vi.useFakeTimers()
-        vi.mocked(watch).mockImplementationOnce(() => {
-          throw new Error('ENOSPC: System limit for number of file watchers reached')
-        })
-        const cli = devCli({
-          bundler: async () => ({
-            rsbuild: { onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
-          }),
-        })
-        const child = createChild() as ReturnType<typeof createChild> & { connected: boolean; send: ReturnType<typeof vi.fn> }
-        child.connected = true
-        child.send = vi.fn()
-        spawnMock.mockReturnValueOnce(child as never)
+        try {
+          vi.mocked(watch).mockImplementationOnce(() => {
+            throw new Error('ENOSPC: System limit for number of file watchers reached')
+          })
+          const cli = devCli({
+            bundler: async () => ({
+              rsbuild: { onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
+            }),
+          })
+          const child = createChild() as ReturnType<typeof createChild> & { connected: boolean; send: ReturnType<typeof vi.fn> }
+          child.connected = true
+          child.send = vi.fn()
+          spawnMock.mockReturnValueOnce(child as never)
 
-        const started = cli.startDev()
-        await vi.waitFor(() => expect(child.send).toHaveBeenCalledWith({ meocord: 'stop' }))
-        expect(child.kill).not.toHaveBeenCalled()
-        expect(exitSpy).not.toHaveBeenCalled()
+          const started = cli.startDev()
+          await vi.waitFor(() => expect(child.send).toHaveBeenCalledWith({ meocord: 'stop' }))
+          expect(child.kill).not.toHaveBeenCalled()
+          expect(exitSpy).not.toHaveBeenCalled()
 
-        // Still running past its shutdownTimeout and the grace period, so it is killed
-        await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS + FORCE_STOP_GRACE_MS)
-        expect(child.kill).toHaveBeenCalledWith('SIGKILL')
-        expect(exitSpy).not.toHaveBeenCalled()
+          // Still running past its shutdownTimeout and the grace period, so it is killed
+          await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS + FORCE_STOP_GRACE_MS)
+          expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+          expect(exitSpy).not.toHaveBeenCalled()
 
-        const onExit = child.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
-        child.exitCode = 137
-        onExit()
-        await started
+          const onExit = child.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
+          child.exitCode = 137
+          onExit()
+          await started
 
-        expect(exitSpy).toHaveBeenCalledWith(1)
-        vi.useRealTimers()
+          expect(exitSpy).toHaveBeenCalledWith(1)
+        } finally {
+          vi.useRealTimers()
+        }
       })
     })
 
