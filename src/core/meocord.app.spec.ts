@@ -551,8 +551,8 @@ describe('MeoCordApp', () => {
   })
 
   // `a/{x}/c` and `a/b/{y}` both take `a/b/c`, and neither is more literal than the
-  // other, so ranking cannot settle it. Saying so at startup beats letting one of
-  // them quietly win every click.
+  // other, so the order they are listed in settles it. Saying so at startup beats
+  // letting one of them quietly win every click.
   describe('ambiguous routes', () => {
     it('warns about a pair that trades a literal for a parameter in each direction', async () => {
       @Controller()
@@ -575,6 +575,48 @@ describe('MeoCordApp', () => {
       mockClient.emit('interactionCreate', createMockInteraction(ButtonInteraction))
       await vi.advanceTimersByTimeAsync(0)
       expect(warn.mock.calls.filter(([message]: [string]) => message.includes('can match the same customId'))).toHaveLength(1)
+    })
+
+    it.each([
+      ['XC listed first', 'XC', 'BY'],
+      ['BY listed first', 'BY', 'XC'],
+    ] as const)('names the handler that runs for each pair, and the one that runs in 5.0: %s', async (_order, ...listed) => {
+      @Controller()
+      class XC {
+        @Command('a/{x}/c', CommandType.BUTTON)
+        async xc(..._args: any[]) {}
+
+        @Command('a/{x}', CommandType.BUTTON)
+        async x(..._args: any[]) {}
+      }
+      @Controller()
+      class BY {
+        @Command('a/b/{y}', CommandType.BUTTON)
+        async by(..._args: any[]) {}
+
+        @Command('a/b', CommandType.BUTTON)
+        async b(..._args: any[]) {}
+      }
+      const controllers = { XC, BY }
+
+      await new MeoCordApp(listed.map(name => controllers[name]) as any, createMockContainer() as any, mockClient as any, 't').start()
+
+      const warn = vi.mocked(Logger).mock.results[0]?.value.warn
+      const pairs = (warn.mock.calls.find(([message]: [string]) => message.includes('can match the same customId'))?.[0] as string)
+        .split('\n')
+        .filter(line => line.startsWith('  '))
+      expect(pairs).toEqual(
+        listed[0] === 'XC'
+          ? [
+              '  "a/{x}/c"  vs  "a/b/{y}": XC.xc runs, as its controller is listed first. In the next major version (5.0), ' +
+                'BY.by runs instead, as "a/b/{y}" spells out the first segment where the two differ.',
+              '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.',
+            ]
+          : [
+              '  "a/b/{y}"  vs  "a/{x}/c": BY.by runs, as its controller is listed first.',
+              '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.',
+            ],
+      )
     })
 
     it('refuses the app as it is created, before start() attaches anything, when two handlers have the same pattern', () => {

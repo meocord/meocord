@@ -336,3 +336,56 @@ describe('autocomplete handlers Discord never asks', () => {
     )
   })
 })
+
+describe('two @Autocomplete handlers of one option', () => {
+  @CommandBuilder(CommandType.SLASH)
+  class FruitBuilder {
+    build(name: string) {
+      return new SlashCommandBuilder()
+        .setName(name)
+        .setDescription('Fruit')
+        .addStringOption(option => option.setName('name').setDescription('Name').setAutocomplete(true))
+    }
+  }
+  @Controller()
+  class Fruit {
+    @Command('fruit', FruitBuilder)
+    fruit() {}
+  }
+  @Controller()
+  class First {
+    @Autocomplete('fruit', 'name')
+    one() {}
+
+    @Autocomplete('fruit')
+    anyOption() {}
+  }
+  @Controller()
+  class Second {
+    @Autocomplete('fruit', 'name')
+    two() {}
+
+    @Autocomplete('fruit')
+    alsoAnyOption() {}
+  }
+  const duplicated = () => warned.find(line => line.includes('completes the same'))
+  const expected =
+    '2 @Autocomplete handlers never run, since another completes the same first:\n' +
+    '  Second.two: First.one also completes the option "name" of "fruit", and runs first. Keep one, or give this one a ' +
+    'path or option of its own.\n' +
+    '  Second.alsoAnyOption: First.anyOption also completes every option of "fruit", and runs first. Keep one, or give ' +
+    'this one a path or option of its own.\n' +
+    'The next major version (5.0) refuses to start with these.'
+
+  it('are named at create(), the one dispatch runs first and the one it never runs', () => {
+    create([Fruit, First, Second])
+
+    expect(duplicated()).toBe(expected)
+  })
+
+  it('are named in the testing module too', () => {
+    MeoCordTestingModule.create({ controllers: [Fruit, First, Second] }).compile()
+
+    expect(duplicated()).toBe(expected)
+  })
+})

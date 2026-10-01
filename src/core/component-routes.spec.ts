@@ -1,6 +1,6 @@
 import { Command, Controller } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { buildComponentRoutes, findComponentRouteConflicts } from '@src/core/component-routes.js'
+import { buildComponentRoutes, findComponentRouteConflicts, matchComponentRoute } from '@src/core/component-routes.js'
 
 describe('component routes', () => {
   it('refuses two handlers with the same pattern, naming both', () => {
@@ -77,5 +77,24 @@ describe('component routes', () => {
     }
     const routes = buildComponentRoutes([Overlap])
     expect(findComponentRouteConflicts(routes)).toEqual([{ type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'] }])
+  })
+
+  // As in 4.0; the startup warning about the pair names the one that runs
+  it('ranks two equally specific overlapping patterns in the order their controllers are listed', () => {
+    @Controller()
+    class XC {
+      @Command('a/{x}/c', CommandType.BUTTON)
+      xc() {}
+    }
+    @Controller()
+    class BY {
+      @Command('a/b/{y}', CommandType.BUTTON)
+      by() {}
+    }
+    const winner = (controllers: (new () => unknown)[]) =>
+      matchComponentRoute(buildComponentRoutes(controllers), () => true, 'a/b/c')?.route.pattern
+
+    expect(winner([XC, BY])).toBe('a/{x}/c')
+    expect(winner([BY, XC])).toBe('a/b/{y}')
   })
 })

@@ -34,6 +34,7 @@ import {
   buildComponentRoutes,
   type ComponentRoute,
   findComponentRouteConflicts,
+  literalFirst,
   matchComponentRoute,
   type RouteParamValue,
 } from '@src/core/component-routes.js'
@@ -243,10 +244,14 @@ export class Dispatcher {
     const conflicts = findComponentRouteConflicts(routes)
     if (conflicts.length === 0) return
 
+    // Each pair lists the route that ranks first, which runs for the ids both match
+    const routeOf = new Map(routes.map(route => [`${route.meta.type}\0${route.pattern}`, route]))
+    const outcome = ({ type, patterns: [left, right] }: (typeof conflicts)[number]) =>
+      ambiguityOutcome(routeOf.get(`${type}\0${left}`)!, routeOf.get(`${type}\0${right}`)!)
     this.logger.warn(
       `${conflicts.length} pattern pair(s) can match the same customId, so which one runs is decided by ` +
         `ranking rather than by the ids themselves:\n` +
-        conflicts.map(({ patterns: [left, right] }) => `  "${left}"  vs  "${right}"`).join('\n') +
+        conflicts.map(conflict => `  "${conflict.patterns[0]}"  vs  "${conflict.patterns[1]}": ${outcome(conflict)}`).join('\n') +
         `\nA parameter stops at "${PARAM_SEPARATOR}", so separating these segments with it makes them distinct.`,
     )
   }
@@ -626,4 +631,19 @@ export class Dispatcher {
       return null
     }
   }
+}
+
+/**
+ * Which of two overlapping routes runs for the ids both match, and why: `runs` ranks first. Between equally
+ * specific patterns, the order they are listed in decides until 5.0, which prefers the earlier literal segment.
+ */
+function ambiguityOutcome(runs: ComponentRoute, other: ComponentRoute): string {
+  const name = ({ controllerClass, meta }: ComponentRoute) => `${controllerClass.name}.${meta.methodName}`
+  if ((runs.meta.specificity ?? 0) !== (other.meta.specificity ?? 0)) return `${name(runs)} runs, as its pattern is more specific.`
+  const listed = runs.controllerClass === other.controllerClass ? 'it is declared first' : 'its controller is listed first'
+  const next = literalFirst(other.pattern, runs.pattern)
+    ? ` In the next major version (5.0), ${name(other)} runs instead, as "${other.pattern}" spells out the first ` +
+      'segment where the two differ.'
+    : ''
+  return `${name(runs)} runs, as ${listed}.${next}`
 }
