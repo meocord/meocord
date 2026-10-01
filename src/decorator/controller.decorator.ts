@@ -2,12 +2,17 @@ import 'reflect-metadata'
 import {
   ApplicationCommandType,
   type AutocompleteInteraction,
+  type ChannelSelectMenuInteraction,
+  type MentionableSelectMenuInteraction,
   Message,
   MessageContextMenuCommandInteraction,
   MessageReaction,
   type OmitPartialGroupDMChannel,
   type PartialMessageReaction,
+  type RoleSelectMenuInteraction,
+  type StringSelectMenuInteraction,
   UserContextMenuCommandInteraction,
+  type UserSelectMenuInteraction,
 } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CheckedParams, type MessageHandlerOptions, type ReactionEvent, type ReactionHandlerSettings } from '@src/interface/index.js'
@@ -349,18 +354,24 @@ function segmentTypeProblem(param: string, type: string): string {
   return `{${param}:${type}} names no type a customId can hold. The types are ${kinds}.`
 }
 
-/** The keys a select menu's handler gets beside its route's params: its choices. */
-type ChoiceKeys<T> = T extends CommandType.SELECT_MENU
-  ? 'values'
+/** What the interaction holds under `K`, as a handler gets it: a discord.js Collection's values as an array. */
+type ChoiceOf<I, K extends keyof I> = I[K] extends ReadonlyMap<unknown, infer V> ? V[] : I[K]
+
+/** What a select menu's handler gets beside its route's params: its choices, each as discord.js resolves it. */
+type ChoiceTypes<T> = T extends CommandType.SELECT_MENU
+  ? { values: ChoiceOf<StringSelectMenuInteraction, 'values'> }
   : T extends CommandType.USER_SELECT_MENU
-    ? 'values' | 'users' | 'members'
+    ? { [K in 'values' | 'users' | 'members']: ChoiceOf<UserSelectMenuInteraction, K> }
     : T extends CommandType.ROLE_SELECT_MENU
-      ? 'values' | 'roles'
+      ? { [K in 'values' | 'roles']: ChoiceOf<RoleSelectMenuInteraction, K> }
       : T extends CommandType.CHANNEL_SELECT_MENU
-        ? 'values' | 'channels'
+        ? { [K in 'values' | 'channels']: ChoiceOf<ChannelSelectMenuInteraction, K> }
         : T extends CommandType.MENTIONABLE_SELECT_MENU
-          ? 'values' | 'users' | 'members' | 'roles'
-          : never
+          ? { [K in 'values' | 'users' | 'members' | 'roles']: ChoiceOf<MentionableSelectMenuInteraction, K> }
+          : Record<never, never>
+
+/** The keys a select menu's handler gets beside its route's params: its choices. */
+type ChoiceKeys<T> = keyof ChoiceTypes<T>
 
 type RequiredKeys<P> = { [K in keyof P]-?: object extends Pick<P, K> ? never : K }[keyof P]
 
@@ -387,25 +398,45 @@ type Handles<I, Args extends unknown[], R> = [I] extends [ContextMenuInteraction
     : (interaction: I, ...args: Args) => R
   : (interaction: I, ...args: Args) => R
 
-/**
- * Allows the handler when each key its params require is one a call to it gets: a param of its route, or a
- * select menu's choice. Value types are left to `@Validate`. Plain strings, commands, whose params are their
- * options, modals, whose fields are keyed by customId, and params with an index signature, as a handler
- * without them infers, are unchecked.
- */
-type RouteAccepts<N, T, P> =
-  N extends Route<infer Pattern>
-    ? string extends Pattern | keyof P
-      ? unknown
-      : T extends RouteCheckedType
-        ? [Exclude<RequiredKeys<P>, RouteParams<Pattern> | ChoiceKeys<T>>] extends [never]
-          ? unknown
-          : { "The handler's params name keys its route does not capture": Exclude<RequiredKeys<P>, RouteParams<Pattern> | ChoiceKeys<T>> }
-        : unknown
-    : unknown
-
 /** The pattern text of a `@Command` name: a route's pattern, or the string itself. */
 type PatternOf<N> = N extends Route<infer Pattern> ? Pattern : N extends string ? N : string
+
+/**
+ * Allows the handler when each key its params require is one a call to it gets: a param of its pattern, a
+ * `route()`'s or a plain string's, or a select menu's choice. Commands, whose params are their options, modals,
+ * whose fields are keyed by customId, and params with an index signature, as a handler without them infers, are
+ * unchecked.
+ */
+type RouteAccepts<N, T, P> = string extends PatternOf<N> | keyof P
+  ? unknown
+  : T extends RouteCheckedType
+    ? [Exclude<RequiredKeys<P>, RouteParams<PatternOf<N>> | ChoiceKeys<T>>] extends [never]
+      ? unknown
+      : { "The handler's params name keys its route does not capture": Exclude<RequiredKeys<P>, RouteParams<PatternOf<N>> | ChoiceKeys<T>> }
+    : unknown
+
+/** A readonly array as the array it reads, so `readonly Role[]` is compared as `Role[]`. */
+type AsArray<T> = T extends readonly (infer E)[] ? E[] : T
+
+/**
+ * Allows the handler when each select menu choice it declares can hold what discord.js gives: the type itself, a
+ * wider one, or one of a union, such as `GuildMember[]` for members that may be raw API members outside a cached
+ * server. A type no choice can have, such as `values: number`, is refused.
+ */
+type ChoicesAccept<N, T, P> = string extends keyof P
+  ? unknown
+  : {
+        // A route param of a choice's name takes its place, as the handler's input gives the param
+        [K in Exclude<keyof ChoiceTypes<T>, RouteParams<PatternOf<N>>> & keyof P as ChoiceTypes<T>[K] extends P[K]
+          ? never
+          : AsArray<NonNullable<P[K]>> extends ChoiceTypes<T>[K]
+            ? never
+            : K]: ChoiceTypes<T>[K]
+      } extends infer Mismatch
+    ? [keyof Mismatch] extends [never]
+      ? unknown
+      : { "The handler's params give a select menu's choices a type their values do not fit": Mismatch }
+    : unknown
 
 /** A pattern's typed params, each with the value its segment gives; an untyped param builds from any `RouteValue`. */
 type TypedValues<Pattern extends string> = {
@@ -437,9 +468,10 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  *
  * @remarks
  * A subcommand's path is its parts separated by a space, as Discord shows it: `settings notify email`. In a
- * customId pattern, `{name}` captures one `/`-separated segment into the handler's params; with a route, the
- * keys the handler's params require are checked against it when the code compiles. Two component handlers of
- * one type whose patterns match the same ids stop the bot at startup. A context menu handler receives the kind its
+ * customId pattern, `{name}` captures one `/`-separated segment into the handler's params. When the code compiles,
+ * the keys the handler's params require are checked against the pattern or route, a typed segment's value against
+ * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives. Two component
+ * handlers of one type whose patterns match the same ids stop the bot at startup. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
  * kind, the bot checks it as it starts.
  *
@@ -486,7 +518,8 @@ export function Command<
       | TypedPropertyDescriptor<() => R>
     ) &
       RouteAccepts<N, T, P> &
-      TypedParamsAccept<N, T, P>,
+      TypedParamsAccept<N, T, P> &
+      ChoicesAccept<N, T, P>,
   ) {
     const originalMethod = _descriptor.value
     if (!originalMethod) {
