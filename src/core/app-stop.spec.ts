@@ -149,4 +149,19 @@ describe('app.stop()', () => {
     expect(Client.prototype.login).not.toHaveBeenCalled()
     expect(destroy).toHaveBeenCalledTimes(1)
   })
+
+  // Between the providers being made and the login beginning, there is a turn of the event loop a stop can take
+  it('ends a start that a stop overtakes after its providers are made, before it logs in', async () => {
+    const { destroy } = login('at once')
+    const app = MeoCordFactory.create(App)
+
+    const started = app.start()
+    await Promise.resolve()
+    await Promise.resolve()
+    await app.stop()
+
+    await expect(started).rejects.toThrow('The bot was stopped before it came online.')
+    expect(Client.prototype.login).not.toHaveBeenCalled()
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
 })
