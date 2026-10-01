@@ -105,7 +105,7 @@ describe('meocord create', () => {
     expect(fs.existsSync(path.join(root, 'bot', 'package.json'))).toBe(true)
     expect(fs.existsSync(path.join(root, 'bot', 'bun.lock'))).toBe(true)
     expect(exit).not.toHaveBeenCalled()
-    expect(prompts.log.warn).toHaveBeenCalledWith(expect.stringContaining('git commit'))
+    expect(prompts.log.warn).toHaveBeenCalledWith(expect.stringContaining('cd bot && git add -A && git commit -m "Initial commit"'))
     expect(prompts.outro).toHaveBeenCalled()
   })
 })

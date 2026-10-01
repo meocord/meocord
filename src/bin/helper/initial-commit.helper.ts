@@ -5,7 +5,7 @@ export type InitialCommit =
   | { outcome: 'committed' }
   /** The app sits inside another repository, which its files are left to. */
   | { outcome: 'inside-repository' }
-  /** Git ran, but the commit did not: the repository holds the app's files, staged. */
+  /** Git made the repository, but adding or committing the app's files failed. */
   | { outcome: 'not-committed'; reason: string }
   /** Git could not make a repository, as when it is not installed. */
   | { outcome: 'no-repository'; reason: string }
