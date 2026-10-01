@@ -447,7 +447,9 @@ export class Dispatcher {
     hooks: Pick<RunOptions, 'parseArgs' | 'fetchArgs'> = {},
   ): Promise<boolean> {
     const handler = `${instance.constructor.name}.${methodName}`
-    const onUnanswered = this.options.warnUnanswered ? (phase: 'unanswered' | 'deferred') => this.warnUnansweredOnce(handler, phase) : undefined
+    const onUnanswered: RunOptions['onUnanswered'] = this.options.warnUnanswered
+      ? (phase, returnedBy) => this.warnUnansweredOnce(handler, phase, returnedBy?.name)
+      : undefined
     const outcome = await runHandler(this.container, instance, methodName, args, { ...this.runOptions(call), onUnanswered, ...hooks })
     call.record?.settled(instance.constructor as ControllerClass, methodName, outcome)
     return outcome.ran
@@ -456,12 +458,21 @@ export class Dispatcher {
   /** The handlers already warned about, so each is named once however often it runs. */
   private readonly warnedUnanswered = new Set<string>()
 
-  /** Warns, once per handler, that it left its interaction unanswered or deferred without a follow-up. */
-  private warnUnansweredOnce(handler: string, phase: 'unanswered' | 'deferred'): void {
+  /**
+   * Warns, once per handler, that it left its interaction unanswered or deferred without a follow-up, or
+   * that `interceptor` returned without running it and did the same.
+   */
+  private warnUnansweredOnce(handler: string, phase: 'unanswered' | 'deferred', interceptor?: string): void {
     if (this.warnedUnanswered.has(handler)) return
     this.warnedUnanswered.add(handler)
-    const what =
-      phase === 'unanswered'
+    const what = interceptor
+      ? phase === 'unanswered'
+        ? `${handler}: its interceptor ${interceptor} returned without running it or answering the interaction, so the user ` +
+          `saw "The application did not respond". Answer it in ${interceptor}, or call next.handle().`
+        : `${handler}: its interceptor ${interceptor} returned without running it, and the interaction it deferred was never ` +
+          `followed up, so the user saw it thinking until Discord gave up. Follow up in ${interceptor} with ` +
+          'respond(interaction).send(), or call next.handle().'
+      : phase === 'unanswered'
         ? `${handler} finished without answering its interaction, so the user saw "The application did not respond". ` +
           'Answer it with respond(interaction).send(), or acknowledge it first with @Defer().'
         : `${handler} deferred its interaction and never followed up, so the user saw it thinking until Discord gave up. ` +

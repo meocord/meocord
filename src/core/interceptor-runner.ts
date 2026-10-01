@@ -63,13 +63,14 @@ export function prepareInterceptor(container: Container, entry: InterceptorEntry
 
 /**
  * Runs `handler` inside `interceptors`, the first outermost. Each receives the call's context with its
- * own params, and continues with `next.handle()`.
+ * own params, and continues with `next.handle()`. `entering` is told of each interceptor as it is called.
  */
 export async function runInterceptors(
   interceptors: readonly InterceptorEntry[],
   container: Container,
   context: HandlerExecutionContext,
   handler: () => Promise<unknown>,
+  entering?: (cls: InterceptorClass) => void,
 ): Promise<unknown> {
   const run = async (index: number): Promise<unknown> => {
     if (index === interceptors.length) return handler()
@@ -84,6 +85,7 @@ export async function runInterceptors(
         `Interceptor ${cls.name} applied to ${context.getHandlerName()} does not have a valid intercept method.`,
       )
     }
+    entering?.(cls)
     return interceptor.intercept(context.withParams(params), { handle: () => run(index + 1) })
   }
   return run(0)

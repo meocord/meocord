@@ -10,6 +10,7 @@ import { callGuardedHandler, type GuardEntry, handlerGuards, perHandler, runGuar
 import {
   bindShared,
   handlerInterceptors,
+  type InterceptorClass,
   type InterceptorEntry,
   prepareInterceptor,
   runInterceptors,
@@ -292,8 +293,11 @@ export interface RunOptions {
   awaitObservers?: boolean
   /** When dispatch received the call, from `performance.now()`, when it started before the pipeline. */
   startedAt?: number
-  /** Told when the handler ran without an error and left its interaction unanswered, or deferred without a follow-up. */
-  onUnanswered?: (phase: 'unanswered' | 'deferred') => void
+  /**
+   * Told when a call ended without an error and left its interaction unanswered, or deferred without a
+   * follow-up, with the interceptor that returned without running the handler, if one did.
+   */
+  onUnanswered?: (phase: 'unanswered' | 'deferred', returnedBy?: InterceptorClass) => void
 }
 
 /**
@@ -425,6 +429,8 @@ async function runPipeline(
   const starting = hasObservers(container) ? notifyStart(container, contextOf()) : undefined
 
   let ran = false
+  // The innermost interceptor entered: when the handler did not run, the one that returned without it
+  let innermost: InterceptorClass | undefined
   try {
     // @Defer's first step, inside the filters so a failed acknowledgement reaches them.
     if (response) await startDefer(response, defer!, receivedAt)
@@ -459,7 +465,7 @@ async function runPipeline(
     // Autocomplete answers within three seconds and has no reply to shape, so it skips interceptors.
     const applicable = type === 'autocomplete' ? [] : interceptors.filter(entry => appliesTo(entry, type))
     if (applicable.length === 0) await handler()
-    else await runInterceptors(applicable, container, contextOf(), handler)
+    else await runInterceptors(applicable, container, contextOf(), handler, cls => (innermost = cls))
     return { ran }
   } catch (error) {
     outcome = outcomeOf(error)
@@ -471,9 +477,9 @@ async function runPipeline(
     return { ran, error }
   } finally {
     await response?.release()
-    if (options.onUnanswered && ran && outcome === 'ran' && type === 'interaction') {
+    if (options.onUnanswered && (ran || innermost) && outcome === 'ran' && type === 'interaction') {
       const phase = responsePhaseOf(contextOf())
-      if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered(phase)
+      if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered(phase, ran ? undefined : innermost)
     }
     if (options.awaitObservers) await starting
     // After the answer and the release, so the duration covers the whole call

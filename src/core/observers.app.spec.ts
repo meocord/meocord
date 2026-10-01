@@ -420,5 +420,70 @@ describe('observers at runtime', () => {
       '-:invalid:MessageUsageError',
     ])
   })
-})
 
+  it("report a call whose handler and filter both throw once, with its handler, and still run the message's listeners", async () => {
+    const loaded = await load()
+    const told: string[] = []
+    const filtered: string[] = []
+    const listened: string[] = []
+
+    @loaded.Observer()
+    class AuditObserver {
+      onSettled(context: import('@src/common/index.js').ExecutionContext, { outcome }: DispatchResult) {
+        told.push(`${context.getHandlerName() ?? '-'}:${outcome}`)
+      }
+    }
+    // Neither what the handlers throw nor what the filter throws is an Error
+    @loaded.Catch()
+    class Rethrow {
+      catch(error: unknown, context: import('@src/common/index.js').ExecutionContext) {
+        filtered.push(`${context.getHandlerName() ?? '-'}:${String(error)}`)
+        throw Symbol('filter')
+      }
+    }
+    @loaded.Controller()
+    class ShopController {
+      @loaded.Command('buy', loaded.CommandType.SLASH)
+      async buy() {
+        throw Symbol('buy')
+      }
+
+      @loaded.MessageHandler('sell')
+      async sell() {
+        throw Symbol('sell')
+      }
+
+      @loaded.MessageHandler()
+      async listen() {
+        listened.push('listen')
+      }
+    }
+
+    const clients: Client[] = []
+    vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
+      clients.push(this)
+      return Promise.resolve('token')
+    })
+    vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
+    @loaded.MeoCord({
+      controllers: [ShopController],
+      observers: [AuditObserver],
+      filters: [Rethrow],
+      messages: { prefix: '!' },
+      clientOptions: { intents: [] },
+    })
+    class App {}
+    await loaded.MeoCordFactory.create(App).start()
+    const [interact] = clients[0].listeners('interactionCreate') as ((interaction: unknown) => Promise<void>)[]
+    const [send] = clients[0].listeners('messageCreate') as ((message: unknown) => Promise<void>)[]
+
+    await interact(loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'buy', options: loaded.createChatInputOptions({}) }))
+    await send(Object.assign(loaded.createMockMessage({ content: '!sell' }), { author: { id: 'ada', bot: false } }))
+
+    await vi.waitFor(() => expect(told).toHaveLength(3))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(told).toEqual(['buy:error', 'sell:error', 'listen:ran'])
+    expect(filtered).toEqual(['buy:Symbol(buy)', 'sell:Symbol(sell)'])
+    expect(listened).toEqual(['listen'])
+  })
+})
