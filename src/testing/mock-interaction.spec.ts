@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { vi } from 'vitest'
 import {
   ActionRowBuilder,
+  ApplicationCommandOptionType,
   type APIActionRowComponent,
   type APIComponentInMessageActionRow,
   ApplicationIntegrationType,
@@ -801,6 +802,45 @@ describe('createChatInputOptions', () => {
       const options = createChatInputOptions({ name: 'hutao' })
       expect(options.getUser('name')).toBeNull()
     })
+
+    // A whole number may be an Integer or a Number option; a fraction is only ever a Number
+    it('getInteger returns null for a fraction, which only a Number option carries', () => {
+      const options = createChatInputOptions({ amount: 1.5, count: 2 })
+      expect(options.getInteger('amount')).toBeNull()
+      expect(options.getNumber('amount')).toBe(1.5)
+      expect([options.getInteger('count'), options.getNumber('count')]).toEqual([2, 2])
+      expect(options.data.map(option => option.type)).toEqual([ApplicationCommandOptionType.Number, ApplicationCommandOptionType.Integer])
+    })
+  })
+
+  describe('a user option', () => {
+    it("resolves getMember to the user's member in the interaction's server, the one its cache holds", () => {
+      const target = createMockUser()
+      const guild = createMockGuild()
+      const interaction = createMockInteraction(ChatInputCommandInteraction, {
+        guildId: guild.id,
+        guild,
+        options: createChatInputOptions({ target }),
+      })
+
+      const member = interaction.options.getMember('target') as GuildMember
+      expect(member).toBeInstanceOf(GuildMember)
+      expect(member.user).toBe(target)
+      expect(member).toBe(guild.members.cache.get(target.id))
+      expect(interaction.options.getUser('target')).toBe(target)
+    })
+
+    it('resolves getMember to null in a direct message, as Discord sends no member there', () => {
+      const interaction = createMockInteraction(ChatInputCommandInteraction, { options: createChatInputOptions({ target: createMockUser() }) })
+      expect(interaction.options.getMember('target')).toBeNull()
+    })
+
+    it('resolves getUser to the user of a member given', () => {
+      const member = createMockInteraction(ChatInputCommandInteraction, { guildId: '100000000000000001' }).member as GuildMember
+      const options = createChatInputOptions({ target: member })
+      expect(options.getUser('target')).toBe(member.user)
+      expect(options.getMember('target')).toBe(member)
+    })
   })
 
   describe('missing option behaviour', () => {
@@ -1005,7 +1045,8 @@ describe('createMockMessage', () => {
     const member = createMock<GuildMember>({ id: '1' })
     const guild = createMockGuild({ members: [member] })
     expect(guild.members.cache.get('1')).toBe(member)
-    expect(guild.roles.cache.size).toBe(0)
+    // Every server has its @everyone role, with the server's id
+    expect([...guild.roles.cache.keys()]).toEqual([guild.id])
     expect(createMockMessage().guild!.members.cache.get('1')).toBeUndefined()
   })
 
