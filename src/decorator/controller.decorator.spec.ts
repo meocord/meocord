@@ -371,11 +371,11 @@ describe('@Command interaction type validation', () => {
     expect(controller.received).toBe(interaction)
   })
 
-  it.each(cases)('rejects a button where %s was declared', type => {
+  it.each(cases)('rejects a button where %s was declared', (type, InteractionClass) => {
     const controller = controllerFor(type)
 
     expect(() => controller.handle(createMockInteraction(ButtonInteraction))).toThrow(
-      'Invalid interaction type passed to @Command for method: handle',
+      `TestController.handle: @Command('thing', CommandType.${type}) takes a ${InteractionClass.name}, not a ButtonInteraction.`,
     )
   })
 
@@ -383,7 +383,8 @@ describe('@Command interaction type validation', () => {
     const controller = controllerFor(CommandType.USER_SELECT_MENU)
 
     expect(() => controller.handle(createMockInteraction(StringSelectMenuInteraction))).toThrow(
-      'Invalid interaction type passed to @Command',
+      "TestController.handle: @Command('thing', CommandType.USER_SELECT_MENU) takes a UserSelectMenuInteraction, not a " +
+        'StringSelectMenuInteraction.',
     )
   })
 

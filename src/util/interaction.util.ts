@@ -18,21 +18,25 @@ import {
 import { CommandType } from '@src/enum/controller.enum.js'
 
 /**
- * The discord.js class check for each command type, shared by `@Command`, the dispatcher and
- * `CommandInteractionType`. A `CommandType` without an entry here fails to compile.
+ * The discord.js interaction class each command type handles, shared by `@Command`, the dispatcher and
+ * `CommandInteractionType`. A `CommandType` without an entry here fails to compile. Their constructors are private
+ * in discord.js's typings, so each is typed by what is read of it: its prototype and its name.
  */
-const INTERACTION_MATCHERS: Record<CommandType, (interaction: unknown) => boolean> = {
-  [CommandType.SLASH]: interaction => interaction instanceof ChatInputCommandInteraction,
-  [CommandType.CONTEXT_MENU]: interaction => interaction instanceof ContextMenuCommandInteraction,
-  [CommandType.PRIMARY_ENTRY_POINT]: interaction => interaction instanceof PrimaryEntryPointCommandInteraction,
-  [CommandType.BUTTON]: interaction => interaction instanceof ButtonInteraction,
-  [CommandType.SELECT_MENU]: interaction => interaction instanceof StringSelectMenuInteraction,
-  [CommandType.USER_SELECT_MENU]: interaction => interaction instanceof UserSelectMenuInteraction,
-  [CommandType.ROLE_SELECT_MENU]: interaction => interaction instanceof RoleSelectMenuInteraction,
-  [CommandType.MENTIONABLE_SELECT_MENU]: interaction => interaction instanceof MentionableSelectMenuInteraction,
-  [CommandType.CHANNEL_SELECT_MENU]: interaction => interaction instanceof ChannelSelectMenuInteraction,
-  [CommandType.MODAL_SUBMIT]: interaction => interaction instanceof ModalSubmitInteraction,
+const INTERACTION_CLASSES: Record<CommandType, { readonly prototype: object; readonly name: string }> = {
+  [CommandType.SLASH]: ChatInputCommandInteraction,
+  [CommandType.CONTEXT_MENU]: ContextMenuCommandInteraction,
+  [CommandType.PRIMARY_ENTRY_POINT]: PrimaryEntryPointCommandInteraction,
+  [CommandType.BUTTON]: ButtonInteraction,
+  [CommandType.SELECT_MENU]: StringSelectMenuInteraction,
+  [CommandType.USER_SELECT_MENU]: UserSelectMenuInteraction,
+  [CommandType.ROLE_SELECT_MENU]: RoleSelectMenuInteraction,
+  [CommandType.MENTIONABLE_SELECT_MENU]: MentionableSelectMenuInteraction,
+  [CommandType.CHANNEL_SELECT_MENU]: ChannelSelectMenuInteraction,
+  [CommandType.MODAL_SUBMIT]: ModalSubmitInteraction,
 }
+
+/** The name of the discord.js class a command type's handler takes, such as `ButtonInteraction`. */
+export const interactionClassName = (type: CommandType): string => INTERACTION_CLASSES[type]?.name ?? 'an interaction'
 
 /** Command types Discord identifies by a registered name rather than by a customId. */
 const NAME_ROUTED_TYPES: ReadonlySet<CommandType> = new Set([
@@ -43,8 +47,8 @@ const NAME_ROUTED_TYPES: ReadonlySet<CommandType> = new Set([
 
 /** Whether an interaction is the kind the given command type handles. */
 export function matchesCommandType(type: CommandType, interaction: unknown): boolean {
-  const matches = INTERACTION_MATCHERS[type]
-  return matches !== undefined && matches(interaction)
+  const handled = INTERACTION_CLASSES[type] as { prototype: object } | undefined
+  return handled !== undefined && typeof interaction === 'object' && interaction !== null && handled.prototype.isPrototypeOf(interaction)
 }
 
 /**

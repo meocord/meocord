@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js'
 import { SetMetadata } from '@src/common/decorator.js'
-import { forgetDeprecationWarnings, warnDeprecated } from '@src/common/deprecation.js'
+import { forgetDeprecationWarnings, warnDeprecated, warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { HandlerExecutionContext } from '@src/common/execution-context.js'
 import { Logger } from '@src/common/logger.js'
 import { createMetadata } from '@src/common/metadata.js'
@@ -28,6 +28,24 @@ describe('warnDeprecated', () => {
     warnDeprecated(logger, 'Old', 'New')
 
     expect(warnings()).toEqual(['Old is deprecated and will be removed in the next major version (5.0). Use New instead.'])
+  })
+})
+
+describe('warnDeprecatedBehaviour', () => {
+  it('says once a run what 5.0 does instead and what to use, and forgets it for the next spec', () => {
+    const logger = new Logger('Probe')
+
+    warnDeprecatedBehaviour(logger, 'Doing it', 'is refused', 'the other way')
+    warnDeprecatedBehaviour(logger, 'Doing it', 'is refused', 'the other way')
+    warnDeprecatedBehaviour(logger, 'Retrying it', 'rejects', 'a new one')
+    forgetDeprecationWarnings()
+    warnDeprecatedBehaviour(logger, 'Doing it', 'is refused', 'the other way')
+
+    expect(warnings()).toEqual([
+      'Doing it is deprecated; in the next major version (5.0) it is refused. Use the other way instead.',
+      'Retrying it is deprecated; in the next major version (5.0) it rejects. Use a new one instead.',
+      'Doing it is deprecated; in the next major version (5.0) it is refused. Use the other way instead.',
+    ])
   })
 })
 
