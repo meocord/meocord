@@ -52,14 +52,19 @@ async function load() {
 }
 type Loaded = Awaited<ReturnType<typeof load>>
 
-function appClass(loaded: Loaded, options: { controllers?: any[]; services?: any[]; intents?: number[] } = {}) {
-  @loaded.MeoCord({ controllers: options.controllers ?? [], services: options.services, clientOptions: { intents: options.intents ?? [] } })
+function appClass(loaded: Loaded, options: { controllers?: any[]; services?: any[]; intents?: number[]; cooldownStore?: any } = {}) {
+  @loaded.MeoCord({
+    controllers: options.controllers ?? [],
+    services: options.services,
+    cooldownStore: options.cooldownStore,
+    clientOptions: { intents: options.intents ?? [] },
+  })
   class App {}
   return App
 }
 
 /** Creates and starts the app with a client that logs in without a network. */
-async function startApp(loaded: Loaded, options: { controllers?: any[]; services?: any[] } = {}) {
+async function startApp(loaded: Loaded, options: { controllers?: any[]; services?: any[]; cooldownStore?: any } = {}) {
   const clients: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
     clients.push(this)
@@ -587,6 +592,40 @@ describe('sharding', () => {
     await startApp(loaded, { services: [Stats] })
 
     expect(await shards!.call(Stats, 'count')).toEqual([{ shardIds: [0], ok: true, value: 42 }])
+  })
+
+  // The store is the app's infrastructure, never one of its classes, whatever injects its token
+  it.each([
+    ['no class injects its token', false],
+    ['a service injects its token', true],
+  ])("refuses to reach the app's cooldown store when %s", async (_case, injected) => {
+    const loaded = await load()
+    // From its own module: the mocked index can hand back an earlier load's classes
+    const { CooldownStore, MemoryCooldownStore } = await import('@src/common/cooldown-store.js')
+    const { inject } = await import('inversify')
+    let shards: InstanceType<typeof loaded.ShardContext> | undefined
+
+    class Store extends MemoryCooldownStore {
+      ping() {
+        return 'pong'
+      }
+    }
+    @loaded.Service()
+    class Stats {
+      constructor(@inject(loaded.ShardContext) context: InstanceType<typeof loaded.ShardContext>) {
+        shards = context
+      }
+    }
+    @loaded.Service()
+    class Rewards {
+      constructor(@inject(CooldownStore) readonly store: unknown) {}
+    }
+
+    await startApp(loaded, { services: injected ? [Stats, Rewards] : [Stats], cooldownStore: Store })
+
+    expect(await shards!.call(Store as never, 'ping' as never)).toEqual([
+      { shardIds: [0], ok: false, error: expect.stringContaining('Store is not a controller, service or provided class of this app.') },
+    ])
   })
 
   it('reaches a class a provider stands in for, by the class here and by its name from another shard', async () => {
