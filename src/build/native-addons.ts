@@ -83,17 +83,21 @@ function containsNativeBinary(dir: string, depth = 0): boolean {
   })
 }
 
+/** The `node_modules` directories Node looks in for a package required from `dir`, nearest first. */
+function lookupDirs(dir: string): string[] {
+  const dirs: string[] = []
+  for (let current = path.resolve(dir); ; current = path.dirname(current)) {
+    if (path.basename(current) !== 'node_modules') dirs.push(path.join(current, 'node_modules'))
+    if (path.dirname(current) === current) return dirs
+  }
+}
+
 /**
- * Where a dependency of the package in `from` is installed: nested under it, beside it (pnpm, and
- * npm within a scope), or hoisted to the root. Undefined when it is not installed.
+ * Where `name` resolves from `from` the way Node would: nested under it, beside it in pnpm's store, or in a
+ * `node_modules` further up, else the project's. Undefined when it is not installed.
  */
-function resolveDependencyDir(name: string, from: string, root: string): string | undefined {
-  const candidates = [
-    path.join(from, 'node_modules', name),
-    path.join(path.dirname(from), name),
-    path.join(path.dirname(path.dirname(from)), name),
-    path.join(root, 'node_modules', name),
-  ]
+function resolvePackageDir(name: string, from: string, root: string): string | undefined {
+  const candidates = [...lookupDirs(from), path.join(root, 'node_modules')].map(dir => path.join(dir, name))
   return candidates.find(dir => existsSync(path.join(dir, 'package.json')))
 }
 
@@ -128,9 +132,11 @@ export function installedPackages(names: readonly string[], root: string): { nam
  * and sharp publish it as a per-platform optional dependency.
  */
 export function nativeCarrier(dir: string, name: string, root: string): string | undefined {
-  if (containsNativeBinary(dir)) return name
-  return readDependencies(dir).optional.find(dependency => {
-    const dependencyDir = resolveDependencyDir(dependency, dir, root)
+  // Where it really is: a platform package sits beside the real directory in pnpm's store, not beside a link to it
+  const real = realpathSync(dir)
+  if (containsNativeBinary(real)) return name
+  return readDependencies(real).optional.find(dependency => {
+    const dependencyDir = resolvePackageDir(dependency, real, root)
     return dependencyDir !== undefined && containsNativeBinary(dependencyDir)
   })
 }
@@ -162,20 +168,6 @@ export function packageNameOfRequest(request: string): string | undefined {
   const [first, second] = request.split('/')
   if (!first.startsWith('@')) return first
   return second ? `${first}/${second}` : undefined
-}
-
-/** Where `name` resolves from `context` the way Node would: the nearest node_modules walking up. */
-function resolveInstalledPackage(name: string, context: string, root: string): string | undefined {
-  let dir = context
-  for (;;) {
-    const candidate = path.join(dir, 'node_modules', name)
-    if (existsSync(path.join(candidate, 'package.json'))) return candidate
-    const parent = path.dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  const hoisted = path.join(root, 'node_modules', name)
-  return existsSync(path.join(hoisted, 'package.json')) ? hoisted : undefined
 }
 
 /** A native package kept out of the bundle, and where it was installed. */
@@ -211,7 +203,7 @@ export function createNativeExternals(root: string): {
     if (!name || plain.has(name)) return callback()
     if (found.has(name)) return callback(undefined, request)
 
-    const dir = resolveInstalledPackage(name, context ?? root, root)
+    const dir = resolvePackageDir(name, context ?? root, root)
     const carrier = dir ? nativeCarrier(dir, name, root) : undefined
     if (!dir || !carrier) {
       plain.add(name)
@@ -254,20 +246,11 @@ export function isBuiltFor(dir: string, platform: BuildPlatform): boolean {
   return !platform.libc || allowedBy(pkg.libc, platform.libc)
 }
 
-/** Whether a path is a package inside a `node_modules` directory, declared for another platform. */
-function isOtherPlatformPackage(source: string, platform: BuildPlatform): boolean {
-  const parent = path.basename(path.dirname(source))
-  const scopeParent = path.basename(path.dirname(path.dirname(source)))
-  const isPackageDir = parent === 'node_modules' || (parent.startsWith('@') && scopeParent === 'node_modules')
-  return isPackageDir && existsSync(path.join(source, 'package.json')) && !isBuiltFor(source, platform)
-}
-
 /**
- * Copies packages and their runtime dependencies into `<outDir>/node_modules`, where a bundle finds
- * them with nothing installed beside it. Skips `@types` packages and any whose `os`, `cpu` or `libc`
- * exclude `platform`, since bun installs both libc builds on Linux. The listed packages take the top;
- * a dependency needed in another version than the one there, as pnpm installs them side by side,
- * nests under the package that needs it, which Node's resolution reaches first. Returns the names copied.
+ * Copies packages and their runtime dependencies into `<outDir>/node_modules`, skipping `@types` and other platforms'
+ * builds (bun installs both libc builds on Linux). The listed ones take the top; each dependency goes where Node,
+ * resolving from the package that needs it, finds the version it was installed with: a copy already on its way up,
+ * else the top when the name is free, else nested under that package, as one installed nested is. Returns the names.
  */
 export function copyPackagesInto(
   packages: Map<string, string>,
@@ -275,46 +258,50 @@ export function copyPackagesInto(
   outDir: string,
   platform: BuildPlatform = currentPlatform(),
 ): string[] {
-  const topDir = path.join(outDir, 'node_modules')
-  // Each name at the top of dist/node_modules, with the directory it was copied from
-  const atTop = new Map<string, string>()
-  const written = new Set<string>()
+  const topDir = path.join(path.resolve(outDir), 'node_modules')
+  // Each package written into dist, by where it is, with the directory it was copied from
+  const written = new Map<string, string>()
   const copied = new Set<string>()
+  const pending: { target: string; dir: string }[] = []
 
-  const copy = (name: string, dir: string, into: string) => {
-    const target = path.join(into, name)
-    if (written.has(target)) return
-    written.add(target)
+  // Without its own node_modules: each dependency in there is placed like any other
+  const write = (name: string, dir: string, target: string) => {
+    written.set(target, dir)
     copied.add(name)
-    // A package's own nested node_modules comes along with it, so only hoisted dependencies
-    // need finding separately. The nested ones get the same platform check on the way.
-    cpSync(dir, target, { recursive: true, dereference: true, filter: source => source === dir || !isOtherPlatformPackage(source, platform) })
-
-    const { dependencies, optional } = readDependencies(dir)
-    for (const dependency of [...dependencies, ...optional]) {
-      if (dependency.startsWith('@types/') || existsSync(path.join(dir, 'node_modules', dependency, 'package.json'))) continue
-      const found = resolveDependencyDir(dependency, dir, root)
-      if (!found || !isBuiltFor(found, platform)) continue
-      place(dependency, realpathSync(found), path.join(target, 'node_modules'))
-    }
+    const nested = path.join(dir, 'node_modules')
+    cpSync(dir, target, { recursive: true, dereference: true, filter: source => source !== nested })
+    pending.push({ target, dir })
   }
 
-  // At the top when the name is free or holds this same copy; else beside the package that needs this version
-  const place = (name: string, dir: string, besideParent: string) => {
-    const top = atTop.get(name)
-    if (top === undefined) {
-      atTop.set(name, dir)
-      copy(name, dir, topDir)
-    } else if (top !== dir) {
-      copy(name, dir, besideParent)
+  // The copy Node finds for `name` from the package written at `from`, looking no further up than dist
+  const resolvedInDist = (name: string, from: string) => {
+    for (const dir of lookupDirs(from)) {
+      const source = written.get(path.join(dir, name))
+      if (source !== undefined) return source
+      if (dir === topDir) return undefined
     }
+    return undefined
   }
 
-  // Every listed package claims its place at the top before any dependency is placed, since the bundle requires it
-  // from there; a dependency on another version of one then nests under its parent instead
   const listed = [...packages].filter(([name]) => !name.startsWith('@types/')).map(([name, dir]) => [name, realpathSync(dir)] as const)
-  for (const [name, dir] of listed) atTop.set(name, dir)
-  for (const [name, dir] of listed) copy(name, dir, topDir)
+  for (const [name, dir] of listed) write(name, dir, path.join(topDir, name))
+
+  // A package's dependencies are all placed before any of theirs, so a copy nested under it later cannot come
+  // between one of them and a version it already resolved further up
+  for (let next = pending.shift(); next; next = pending.shift()) {
+    const { dependencies, optional } = readDependencies(next.dir)
+    for (const dependency of new Set([...dependencies, ...optional])) {
+      if (dependency.startsWith('@types/')) continue
+      const found = resolvePackageDir(dependency, next.dir, root)
+      if (!found || !isBuiltFor(found, platform)) continue
+      const dir = realpathSync(found)
+      const resolved = resolvedInDist(dependency, next.target)
+      if (resolved === dir) continue
+      const installedNested = dir.startsWith(path.join(next.dir, 'node_modules') + path.sep)
+      const target = resolved === undefined && !installedNested ? path.join(topDir, dependency) : path.join(next.target, 'node_modules', dependency)
+      if (!written.has(target)) write(dependency, dir, target)
+    }
+  }
   return [...copied]
 }
 
