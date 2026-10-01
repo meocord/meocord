@@ -847,6 +847,10 @@ function stubCallable(): Mock {
  * Every property is a mock function created on first access, and the result is assignable to `T`. Values passed as
  * `props` are used as given rather than wrapped in mock functions.
  *
+ * A type has no runtime shape, so a property `T` declares as data is a mock function too, and truthy:
+ * `if (settings.enabled)` always passes and `settings.limit > 0` never does. Pass each value the code reads, such as
+ * `createMock<Settings>({ enabled: false, limit: 3 })`.
+ *
  * @example
  * ```ts
  * import { expect } from 'vitest'

@@ -180,8 +180,8 @@ export function themeForInteraction(interaction: object): ResolvedTheme | Promis
  *
  * @remarks
  * The theme is MeoCord's defaults, then the app's theme, then each `@UseTheme` from the controller's base class down
- * to the handler. It reads the call through `AsyncLocalStorage`, and it is frozen: it is shared by every call it
- * applies to.
+ * to the handler, then `@MeoCord`'s `themeFor`: the server's theme, then the user's, each over the layers before it.
+ * It reads the call through `AsyncLocalStorage`, and it is frozen: it is shared by every call it applies to.
  *
  * @returns The resolved theme, with every role present.
  *
