@@ -56,8 +56,8 @@ export interface CooldownBatchVerdict extends CooldownVerdict {
  *
  * A store class bound with `cooldownStore` gets lifecycle hooks as a service does. Its `onReady` runs before the
  * services' and its `onShutdown` after theirs. A call that comes while `onReady` runs waits for it, within the store's
- * timeout. Its `onShutdown` runs once no call is left to ask it, so it can open a connection in one and close it in
- * the other.
+ * timeout. Its `onShutdown` runs once no call is left to ask it and every answer under way has come, even one a call
+ * stopped waiting for, so it can open a connection in one and close it in the other.
  *
  * @example
  * ```ts

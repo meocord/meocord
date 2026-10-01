@@ -134,19 +134,30 @@ describe('MeoCordTestingModule.fromApp', () => {
         peeked.push(key)
         return { allowed: true, retryAfterMs: 0 }
       }
+
+      onReady() {
+        hooks.push('provided store ready')
+      }
+
+      onShutdown() {
+        hooks.push('provided store shutdown')
+      }
     }
     const module = await MeoCordTestingModule.fromApp(NotesApp, { providers: [{ provide: CooldownStore, useValue: new OtherStore() }] })
       .overrideProvider(DATABASE)
       .useValue({ count: async () => 7 })
       .compile()
-      .init()
+      .init({ ready: true })
     const interaction = slash('notes')
 
     await module.dispatch(interaction)
+    await module.close()
 
     expect(getResponse(interaction).calls[0].payload).toMatchObject({ content: '7 notes' })
     expect(peeked).toHaveLength(1)
     expect(consumed).toEqual([])
+    // The provided store takes the store's place in the hooks too, and the app's, never bound, has none
+    expect(hooks).toEqual(['provided store ready', 'Warmup ready', 'Warmup shutdown', 'provided store shutdown'])
   })
 
   it('adds a test’s own controllers and observers beside the app’s', async () => {
