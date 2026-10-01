@@ -159,6 +159,26 @@ function reportRecovery(store: CooldownStore): void {
 /** What a container's calls wait for before asking its store: the store's own `onReady`, which may connect it. */
 const storesReady = new WeakMap<Container, Promise<void>>()
 
+/** The store operations a container's calls have under way, which its store's `onShutdown` waits for. */
+const storeOperations = new WeakMap<Container, Set<Promise<unknown>>>()
+
+/**
+ * Counts `operation` as under way on the store of `container` until it settles, so the store's `onShutdown` runs
+ * after it. An operation a call left behind, such as an answer that came after the timeout, counts too.
+ */
+export function trackStoreOperation(container: Container, operation: Promise<unknown>): void {
+  let running = storeOperations.get(container)
+  if (!running) storeOperations.set(container, (running = new Set()))
+  running.add(operation)
+  const settled = () => running.delete(operation)
+  operation.then(settled, settled)
+}
+
+/** Settles once every store operation under way on `container` has, including those started meanwhile. */
+export async function storeOperationsSettled(container: Container): Promise<void> {
+  for (let running = storeOperations.get(container); running?.size; ) await Promise.allSettled([...running])
+}
+
 /**
  * Has the calls of `container` wait until `ready` settles before asking the store, within the store's timeout: a call
  * that comes while the store's `onReady` still runs is counted once it is ready, or meets the store-failure policy
@@ -186,6 +206,8 @@ async function askWithin(
     ? typeof store.peekMany === 'function' ? store.peekMany : CooldownStore.prototype.peekMany
     : typeof store.consumeMany === 'function' ? store.consumeMany : CooldownStore.prototype.consumeMany
   const attempt = (storesReady.get(container) ?? Promise.resolve()).then(() => ask.call(store, entries))
+  // Under way until the store answers, which may be after the call stopped waiting
+  trackStoreOperation(container, attempt)
   // A rejection after the timeout has nobody left to hear it
   attempt.catch(() => undefined)
   let timer: ReturnType<typeof setTimeout> | undefined

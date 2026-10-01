@@ -1,6 +1,12 @@
 import 'reflect-metadata'
 import { Container, type ServiceIdentifier } from 'inversify'
-import { claimCooldownNotice, COOLDOWN_POLICY, cooldownPolicyFrom, type CooldownStoreFailure } from '@src/core/cooldown-runner.js'
+import {
+  claimCooldownNotice,
+  COOLDOWN_POLICY,
+  cooldownPolicyFrom,
+  type CooldownStoreFailure,
+  storeOperationsSettled,
+} from '@src/core/cooldown-runner.js'
 import {
   BaseInteraction,
   Client,
@@ -354,9 +360,23 @@ export class TestingModule {
       const entries: LifecycleEntry[] = this.lifecycle
         .filter(unit => this.constructed.has(unit.token))
         // Already made, so this returns the instance; a provided value may be anything, null included
-        .map(unit => ({ name: unit.name, instance: (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {} }))
+        .map(unit => ({
+          name: unit.name,
+          instance: (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {},
+          cooldownStore: unit.cooldownStore,
+        }))
       const failures: { name: string; error: unknown }[] = []
-      await runShutdownHooks(entries, (name, error) => failures.push({ name, error }))
+      const failed = (name: string, error: unknown) => failures.push({ name, error })
+      // As the bot does: the store shuts down last, once the store operations its calls started have settled
+      await runShutdownHooks(
+        entries.filter(entry => !entry.cooldownStore),
+        failed,
+      )
+      await storeOperationsSettled(this.container)
+      await runShutdownHooks(
+        entries.filter(entry => entry.cooldownStore),
+        failed,
+      )
       throwFailures('onShutdown', failures)
     })()
     await this.closing
@@ -1006,10 +1026,12 @@ export class TestingModuleBuilder {
     const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
     assertObservers("the testing module's observers", observers)
     bindObservers(container, observers)
+    // The store calls ask: the test's own when it provides CooldownStore, else the app's
+    const boundStore = providers.has(CooldownStore) ? CooldownStore : store
     // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
     // after what it injects
     const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
-      ...(store ? [store] : []),
+      ...(boundStore ? [boundStore] : []),
       ...providers.keys(),
       ...services,
       ...(this.options.controllers ?? []),
@@ -1018,7 +1040,7 @@ export class TestingModuleBuilder {
       token,
       name: tokenName(token),
       dependencies: tokenDependencies(container, providers, token),
-      ...(token === store && { cooldownStore: true }),
+      ...(token === boundStore && { cooldownStore: true }),
     }))
     // Recorded as the container makes each one, so close() shuts down exactly what exists
     const constructed = new Set<unknown>()

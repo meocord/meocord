@@ -34,7 +34,7 @@ import {
   type RequiringHandler,
 } from '@src/core/event-requirements.js'
 import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
-import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
+import { storeOperationsSettled, waitForCooldownStore } from '@src/core/cooldown-runner.js'
 import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
@@ -634,9 +634,11 @@ export class MeoCordApp implements MeoCordApplication {
       )
       const store = entries.filter(entry => entry.cooldownStore)
       if (store.length === 0) return
-      // The store shuts down after the last call that may ask it: no new one starts, and those under way finish
+      // The store shuts down after the last call that may ask it: no new one starts, those under way finish, and so do
+      // the store operations they started, an answer that came after a call stopped waiting included
       this.bot.removeAllListeners()
       await Promise.all(this.calls)
+      await storeOperationsSettled(this.container)
       await runShutdownHooks(store, failed)
     })()
 

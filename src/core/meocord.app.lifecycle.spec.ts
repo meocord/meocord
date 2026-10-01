@@ -52,7 +52,10 @@ async function load() {
 type Loaded = Awaited<ReturnType<typeof load>>
 
 /** Starts an app built by the factory, with a client that logs in without a network. */
-async function startApp(loaded: Loaded, options: { controllers: any[]; services?: any[]; cooldownStore?: any }) {
+async function startApp(
+  loaded: Loaded,
+  options: { controllers: any[]; services?: any[]; cooldownStore?: any; cooldownStoreTimeoutMs?: number },
+) {
   const clients: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
     clients.push(this)
@@ -64,6 +67,7 @@ async function startApp(loaded: Loaded, options: { controllers: any[]; services?
     controllers: options.controllers,
     services: options.services,
     cooldownStore: options.cooldownStore,
+    cooldownStoreTimeoutMs: options.cooldownStoreTimeoutMs,
     clientOptions: { intents: [] },
   })
   class App {}
@@ -929,6 +933,40 @@ describe('lifecycle hooks', () => {
       await Promise.all([handled, stopped])
 
       expect(events.slice(-2)).toEqual(['call done', 'store shutdown'])
+    })
+
+    // An answer that comes after its call stopped waiting still writes to the store, so the store closes after it
+    it('runs its onShutdown once a store answer its call stopped waiting for has come', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const answer = Promise.withResolvers<void>()
+      class SlowStore extends loaded.MemoryCooldownStore implements OnShutdown {
+        onShutdown() {
+          events.push('store shutdown')
+        }
+        override async consumeMany(...args: Parameters<InstanceType<typeof loaded.MemoryCooldownStore>['consumeMany']>) {
+          await answer.promise
+          events.push('store answered')
+          return super.consumeMany(...args)
+        }
+      }
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events)],
+        cooldownStore: SlowStore,
+        cooldownStoreTimeoutMs: 20,
+      })
+      await becomeReady(client)
+      await call(client, slash(loaded))
+
+      const stopped = loaded.shutdownAndExit()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).not.toContain('store shutdown')
+
+      answer.resolve()
+      await stopped
+
+      expect(events.slice(-2)).toEqual(['store answered', 'store shutdown'])
     })
   })
 })
