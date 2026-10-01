@@ -18,6 +18,7 @@ function loopback(manager: CooldownStore = new MemoryCooldownStore()): CooldownC
   return {
     send: message => setImmediate(() => answerCooldown(manager, JSON.parse(JSON.stringify(message)), deliver)),
     onMessage: listener => void listeners.push(listener),
+    onClose: () => undefined,
   }
 }
 
@@ -84,7 +85,7 @@ describe('ShardedCooldownStore', () => {
   // A manager that does not answer is a store failure, for @MeoCord({ cooldownStoreFailure }) to decide
   it('fails a call the manager never answers, once it has waited long enough to let it go', async () => {
     vi.useFakeTimers()
-    const silent: CooldownChannel = { send: () => undefined, onMessage: () => undefined }
+    const silent: CooldownChannel = { send: () => undefined, onMessage: () => undefined, onClose: () => undefined }
     const call = shardedCooldownStoreOn(silent).consume('k', limit)
     const failed = expect(call).rejects.toThrow(`did not answer a cooldown within ${SHARDED_COOLDOWN_ABANDON_MS} ms`)
 
@@ -101,9 +102,29 @@ describe('ShardedCooldownStore', () => {
       setImmediate(() => failed?.(new Error('Channel closed')))
     }],
   ])('fails a call at once when the channel to the manager has closed, %s', async (_when, send) => {
-    const closed: CooldownChannel = { send: send(), onMessage: () => undefined }
+    const closed: CooldownChannel = { send: send(), onMessage: () => undefined, onClose: () => undefined }
 
     await expect(shardedCooldownStoreOn(closed).consume('k', limit)).rejects.toThrow('Channel closed')
+  })
+
+  // The manager dies after the message went: no answer comes, so the call fails then, not at the timeouts
+  it('fails a call already sent at once when the channel to the manager closes', async () => {
+    const closing: (() => void)[] = []
+    const dying: CooldownChannel = { send: () => undefined, onMessage: () => undefined, onClose: listener => void closing.push(listener) }
+    const call = shardedCooldownStoreOn(dying).consume('k', limit)
+
+    closing.forEach(close => close())
+
+    await expect(call).rejects.toThrow('The shard manager is gone: its IPC channel has closed.')
+  })
+
+  it("hears a process's IPC close on its disconnect event", () => {
+    const on = vi.fn()
+    const listener = () => undefined
+
+    channelOver({ connected: true, send: vi.fn(), on } as unknown as Parameters<typeof channelOver>[0]).onClose(listener)
+
+    expect(on).toHaveBeenCalledWith('disconnect', listener)
   })
 
   // A shard's own process: a send on a closed channel neither throws nor, without a callback, fails the call
@@ -147,6 +168,7 @@ describe('ShardedCooldownStore', () => {
         })
       },
       onMessage: listener => void listeners.push(listener),
+      onClose: () => undefined,
     }
 
     expect(await shardedCooldownStoreOn(channel).consume('k', limit)).toEqual({ allowed: true, retryAfterMs: 0 })

@@ -59,6 +59,7 @@ describe('ShardedCooldownStore with a manager in another process', () => {
   const channel: CooldownChannel = {
     send: message => void manager.send(message),
     onMessage: listener => void manager.on('message', listener),
+    onClose: listener => void manager.on('disconnect', listener),
   }
 
   beforeAll(() => ready, 20_000)
