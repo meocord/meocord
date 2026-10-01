@@ -229,38 +229,46 @@ describe('MeoCordTestingModule.create({ app })', () => {
   })
 })
 
-// A fake store that never answers must not hang close(): it waits up to shutdownTimeout, as the bot's shutdown does
-describe("closing a module whose store never answers", () => {
+// close() stops waiting after shutdownTimeout, as the bot's shutdown does, whatever holds it up
+describe('closing a module whose shutdown never finishes', () => {
   @MeoCord({ controllers: [NotesController], cooldownStoreTimeoutMs: 20, clientOptions: { intents: [] } })
   class QuickApp {}
 
-  it('shuts the store down once its shutdownTimeout passes, though an answer is still under way', async () => {
-    const hooks: string[] = []
-    class SilentStore extends CooldownStore {
-      consume(): Promise<CooldownVerdict> {
-        return new Promise(() => {})
-      }
-
-      onShutdown() {
-        hooks.push('store shutdown')
-      }
+  class SilentStore extends CooldownStore {
+    consume(): Promise<CooldownVerdict> {
+      return new Promise(() => {})
     }
+  }
+
+  @Service()
+  class Stuck {
+    onShutdown(): Promise<void> {
+      return new Promise(() => {})
+    }
+  }
+
+  it.each([
+    ['a store answer that never comes', { store: new SilentStore(), stuck: false }],
+    ['an onShutdown that never settles', { store: undefined, stuck: true }],
+  ])('settles within shutdownTimeout through %s', async (_case, { store, stuck }) => {
     const module = MeoCordTestingModule.create({
       app: QuickApp,
       controllers: [NotesController],
       providers: [
         { provide: DATABASE, useValue: { count: async () => 1 } },
-        { provide: CooldownStore, useValue: new SilentStore() },
+        ...(store ? [{ provide: CooldownStore, useValue: store }] : []),
+        ...(stuck ? [{ provide: Stuck, useClass: Stuck }] : []),
       ],
       shutdownTimeout: 50,
     }).compile()
-    await module.dispatch(slash('notes'))
+    await module.init()
+    if (store) await module.dispatch(slash('notes'))
+    if (stuck) module.get(Stuck)
 
     const started = Date.now()
     await module.close()
 
     expect(Date.now() - started).toBeLessThan(1_000)
-    expect(hooks).toEqual(['store shutdown'])
   })
 })
 

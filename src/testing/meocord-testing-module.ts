@@ -109,9 +109,9 @@ export interface TestingModuleOptions {
   observers?: (new (...args: any[]) => DispatchObserver)[]
 
   /**
-   * How long `close()` waits, in milliseconds, for the cooldown store's operations still under way before it shuts
-   * the store down anyway, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown. Defaults to 10000.
-   * A test whose fake store never answers sets it short.
+   * How long `close()` waits, in milliseconds, for the `onShutdown` hooks and the cooldown store's operations under
+   * way, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown. Defaults to 10000. A test whose fake
+   * store never answers, or whose `onShutdown` never settles, sets it short.
    */
   shutdownTimeout?: number
 }
@@ -130,7 +130,7 @@ export interface FromAppOptions {
   controllers?: (new (...args: any[]) => any)[]
   /** `@Observer` classes told about each call, after the app's own. */
   observers?: (new (...args: any[]) => DispatchObserver)[]
-  /** How long `close()` waits for the cooldown store's operations under way; see {@link TestingModuleOptions.shutdownTimeout}. */
+  /** How long `close()` waits for the `onShutdown` hooks; see {@link TestingModuleOptions.shutdownTimeout}. */
   shutdownTimeout?: number
 }
 
@@ -287,7 +287,7 @@ export class TestingModule {
     private readonly appWarnUnanswered?: boolean,
     /** The app's listed services, made at `init()` as the bot makes them before it logs in. */
     private readonly services: readonly (new (...args: any[]) => unknown)[] = [],
-    /** How long `close()` waits for the store's operations under way, as the bot's `shutdownTimeout` does. */
+    /** How long `close()` waits for the `onShutdown` hooks, as the bot's `shutdownTimeout` does. */
     private readonly shutdownTimeout: number = DEFAULT_SHUTDOWN_TIMEOUT_MS,
   ) {}
 
@@ -350,8 +350,9 @@ export class TestingModule {
    * reads outside calls then return MeoCord's defaults until another module or app is ready.
    *
    * The cooldown store shuts down last, as the bot's does: after every other hook, and once the store operations its
-   * calls started have settled, waiting up to the module's `shutdownTimeout`, 10 seconds unless set. Give a test
-   * whose fake store never answers a short `shutdownTimeout`.
+   * calls started have settled. As the bot does, it stops waiting for the whole sequence after the module's
+   * `shutdownTimeout`, 10 seconds unless set, and logs that it did. Give a test whose fake store never answers, or
+   * whose `onShutdown` never settles, a short `shutdownTimeout`.
    *
    * @returns Once every hook has run. Rejects with the error of a hook that failed, or an
    *   `AggregateError` naming each when several did.
@@ -383,29 +384,32 @@ export class TestingModule {
         }))
       const failures: { name: string; error: unknown }[] = []
       const failed = (name: string, error: unknown) => failures.push({ name, error })
-      // As the bot does: the store shuts down last, once the store operations its calls started have settled
-      await runShutdownHooks(
-        entries.filter(entry => !entry.cooldownStore),
-        failed,
-      )
-      await this.storeOperationsSettled()
-      await runShutdownHooks(
-        entries.filter(entry => entry.cooldownStore),
-        failed,
-      )
+      // As the bot does: the store shuts down last, once the store operations its calls started have settled, and the
+      // whole sequence stops being waited for after shutdownTimeout
+      await this.withinShutdownTimeout(async () => {
+        await runShutdownHooks(
+          entries.filter(entry => !entry.cooldownStore),
+          failed,
+        )
+        await storeOperationsSettled(this.container)
+        await runShutdownHooks(
+          entries.filter(entry => entry.cooldownStore),
+          failed,
+        )
+      })
       throwFailures('onShutdown', failures)
     })()
     await this.closing
   }
 
-  /** Waits for the store's operations under way, up to `shutdownTimeout`, then says so if they are still running. */
-  private async storeOperationsSettled(): Promise<void> {
+  /** Waits for `hooks` up to `shutdownTimeout`, as the bot does, and says so when they are still running then. */
+  private async withinShutdownTimeout(hooks: () => Promise<void>): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<'timeout'>(resolve => {
       timer = setTimeout(() => resolve('timeout'), this.shutdownTimeout)
     })
     try {
-      if ((await Promise.race([storeOperationsSettled(this.container), timedOut])) === 'timeout') {
+      if ((await Promise.race([hooks(), timedOut])) === 'timeout') {
         new Logger('TestingModule').warn(`onShutdown hooks did not finish within ${this.shutdownTimeout} ms; shutting down anyway.`)
       }
     } finally {
