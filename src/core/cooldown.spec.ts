@@ -274,12 +274,28 @@ describe('@Cooldown', () => {
   })
 
   it('refuses options it cannot count, where it applies', () => {
-    for (const seconds of [0, -1, Number.NaN, Infinity, 0.0009, 1e300]) {
-      expect(onHandler(Cooldown({ seconds }))).toThrow(`@Cooldown needs a number of seconds from 0.001 to 9007199254740, not ${seconds}.`)
+    for (const seconds of [0, -1, Number.NaN, Infinity, 0.0009, 4_320_000_000_001, 1e300]) {
+      expect(onHandler(Cooldown({ seconds }))).toThrow(`@Cooldown needs a number of seconds from 0.001 to 4320000000000, not ${seconds}.`)
     }
     expect(onHandler(Cooldown({ seconds: 5, uses: 1.5 }))).toThrow('whole number of uses')
     expect(onHandler(Cooldown({ seconds: 5, per: 'server' as never }))).toThrow("not 'server'")
     expect(onHandler(Cooldown({ seconds: 5, by: 'uid' as never }))).toThrow('@Cooldown takes by as a function of the call')
+  })
+
+  // Now plus the window is when the wait ends, so the longest window still ends on a date a timestamp can show
+  it('refuses a call over the longest window with a real end, never <t:NaN:R>', async () => {
+    @Controller()
+    class Forever {
+      @Command('forever', CommandType.SLASH)
+      @Cooldown({ seconds: 4_320_000_000_000 })
+      async forever(_interaction: ChatInputCommandInteraction) {}
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Forever] }).compile()
+    await module.invoke(Forever, 'forever', slash())
+
+    const refusal = (await module.invoke(Forever, 'forever', slash()).catch((error: unknown) => error)) as CooldownError
+
+    expect(Number.isNaN(refusal.retryAt.getTime())).toBe(false)
   })
 
   it('is reported by inspectHandler, with its defaults', () => {

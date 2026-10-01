@@ -23,7 +23,7 @@ function refusalOf(decorator: MethodDecorator): Error {
 
 describe('what a refused decorator names', () => {
   it.each([
-    ['@Cooldown', () => Cooldown({ seconds: 0 }), 'Shop.buy: @Cooldown needs a number of seconds from 0.001 to 9007199254740, not 0.'],
+    ['@Cooldown', () => Cooldown({ seconds: 0 }), 'Shop.buy: @Cooldown needs a number of seconds from 0.001 to 4320000000000, not 0.'],
     ['@Validate', () => Validate({} as never), 'Shop.buy: @Validate takes a Standard Schema'],
     ['SetMetadata', () => SetMetadata('guards', []), 'Shop.buy: SetMetadata cannot use the key "guards"'],
   ])('%s names the handler it is on', (_name, decorator, message) => {
@@ -39,7 +39,7 @@ describe('what a refused decorator names', () => {
       @Controller()
       class Shop {}
       return Shop
-    }).toThrow('Shop: @Cooldown needs a number of seconds from 0.001 to 9007199254740, not 0.')
+    }).toThrow('Shop: @Cooldown needs a number of seconds from 0.001 to 4320000000000, not 0.')
   })
 
   it('names the handler of a customId pattern it cannot read', () => {
@@ -53,6 +53,6 @@ describe('what a refused decorator names', () => {
     // Built at module scope, as a composite decorator is; nothing is refused until it applies
     const Limited = applyDecorators(Cooldown({ seconds: 0 }))
 
-    expect(onBuy(Limited)).toThrow('Shop.buy: @Cooldown needs a number of seconds from 0.001 to 9007199254740, not 0.')
+    expect(onBuy(Limited)).toThrow('Shop.buy: @Cooldown needs a number of seconds from 0.001 to 4320000000000, not 0.')
   })
 })
