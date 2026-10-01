@@ -10,12 +10,16 @@ import { Logger } from '@src/common/logger.js'
 
 const logger = new Logger('Interceptor')
 
-/** A function's source when the engine wrote it: what `await` and `Promise.race` hand a promise, not code of the app's. */
+/** A function's source when the engine wrote it, as for a bound function, a built-in, or what `await` hands a promise. */
 const NATIVE_SOURCE = /\{\s*\[native code\]\s*\}$/
 
-/** Whether `onRejected` is code of the app's that handles a rejection, rather than an engine's step passing it on. */
+/**
+ * Whether `onRejected` is the app's own handling of a rejection, rather than an engine's step passing it on. The
+ * resolving functions `await` and `Promise.race` hand a promise are native and nameless, on Node and Bun alike; a
+ * bound function (`bound report`) or a built-in such as `console.error` is native but named.
+ */
 const handlesRejection = (onRejected: unknown): boolean =>
-  typeof onRejected === 'function' && !NATIVE_SOURCE.test(Function.prototype.toString.call(onRejected))
+  typeof onRejected === 'function' && (onRejected.name !== '' || !NATIVE_SOURCE.test(Function.prototype.toString.call(onRejected)))
 
 export type InterceptorClass = new (...args: any[]) => InterceptorInterface
 

@@ -435,6 +435,21 @@ class Background implements InterceptorInterface {
   }
 }
 
+// The same, with a bound method of a reporter as its handler, as `.catch(logger.error.bind(logger))` is
+const reporter = {
+  prefix: 'background reported',
+  report(this: { prefix: string }, error: Error) {
+    log.push(`${this.prefix} ${error.message}`)
+  },
+}
+@Interceptor()
+class BackgroundBound implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    void next.handle().catch(reporter.report.bind(reporter))
+    return 'queued'
+  }
+}
+
 @Interceptor()
 class CatchesCallback implements InterceptorInterface {
   async intercept(_context: ExecutionContext, next: CallHandler) {
@@ -465,6 +480,13 @@ class UnawaitedController {
   @Command('background', CommandType.SLASH)
   @UseInterceptor(Background)
   async background() {
+    await slow()
+    throw new Error('database down')
+  }
+
+  @Command('backgroundBound', CommandType.SLASH)
+  @UseInterceptor(BackgroundBound)
+  async backgroundBound() {
     await slow()
     throw new Error('database down')
   }
@@ -576,13 +598,16 @@ describe('an interceptor that returns before the call it started ends', () => {
     warn.mockRestore()
   })
 
-  it('leaves a run it took on and catches itself to it, warning of nothing', async () => {
+  it.each([
+    ['an arrow function', 'background', 'background caught database down'],
+    ['a bound method', 'backgroundBound', 'background reported database down'],
+  ] as const)('leaves a run it took on and catches itself, with %s, to it, warning of nothing', async (_how, name, caught) => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 
-    await module().invoke(UnawaitedController, 'background', slash('background'))
+    await module().invoke(UnawaitedController, name, slash(name))
     await new Promise(resolve => setTimeout(resolve, 40))
 
-    expect(log).toEqual(['background caught database down'])
+    expect(log).toEqual([caught])
     expect(warn).not.toHaveBeenCalled()
     warn.mockRestore()
   })
