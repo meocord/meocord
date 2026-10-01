@@ -5,9 +5,11 @@ import { route } from '@src/common/route.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { Command, CommandBuilder, Controller, MeoCord } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
+import { type MeoCordConfig } from '@src/interface/index.js'
 import { MeoCordTestingModule } from '@src/testing/index.js'
 
-vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'token' }) }))
+const { config } = vi.hoisted(() => ({ config: { current: { discordToken: 'token' } as MeoCordConfig } }))
+vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => config.current }))
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
 let warned: string[]
@@ -15,7 +17,11 @@ beforeEach(() => {
   warned = []
   vi.spyOn(Logger.prototype, 'warn').mockImplementation((...args: unknown[]) => void warned.push(args.map(String).join(' ')))
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+  config.current = { discordToken: 'token' }
+})
 
 @CommandBuilder(CommandType.SLASH)
 class SettingsBuilder {
@@ -148,6 +154,26 @@ describe('handlers of commands no builder registers', () => {
     create([Settings, Reports, Stats])
 
     expect(unregisteredWarning()).toBeUndefined()
+  })
+
+  it.each([
+    ['as a bot', () => {}, { discordToken: 'token' }, true],
+    ['under meocord register', () => vi.stubEnv('MEOCORD_REGISTER_ONLY', '1'), { discordToken: 'token' }, true],
+    ['as the shard manager', () => {}, { discordToken: 'token', sharding: { mode: 'process' } }, true],
+    // Its manager has given the warning
+    ['as a spawned shard', () => vi.stubEnv('SHARDING_MANAGER', 'true'), { discordToken: 'token', sharding: { mode: 'process' } }, false],
+  ] as const)('are named once for the whole bot when it runs %s', (_how, setUp, current, warns) => {
+    @Controller()
+    class Reports {
+      @Command('Report', CommandType.CONTEXT_MENU)
+      report() {}
+    }
+    setUp()
+    config.current = current as MeoCordConfig
+
+    create([Reports])
+
+    expect(unregisteredWarning() !== undefined).toBe(warns)
   })
 
   it('names, in the testing module, what is always a mistake, and leaves a fixture handler with no builder alone', () => {

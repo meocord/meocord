@@ -167,7 +167,8 @@ export class MeoCordFactory {
 
     // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
     assertDistinctCommands(options.controllers)
-    warnUnregisteredCommands(options.controllers)
+    // A shard's manager runs the same check, so a sharded bot warns once
+    if (!isShardProcess()) warnUnregisteredCommands(options.controllers)
 
     // `meocord register` reads the commands from the controllers' prototypes and sends them over REST,
     // so nothing is bound or constructed, and nothing that needs the platform's native addons runs.
