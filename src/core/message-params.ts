@@ -6,7 +6,7 @@ import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/messag
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
 import { type GivenFlag, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { type RunOptions } from '@src/core/handler-pipeline.js'
-import { bool, choicesOf, duration, number } from '@src/core/scalar-types.js'
+import { bool, choicesOf, duration, lookupTable, number } from '@src/core/scalar-types.js'
 
 type ParamToken = Extract<PatternToken, { param: string }>
 
@@ -20,7 +20,7 @@ const ROLE_MENTION = /^<@&(\d{17,20})>$/
 const CHANNEL_MENTION = /^<#(\d{17,20})>$/
 
 /** The scalar types, each turning a word into its value or `undefined`, and the Discord ones, which resolve below. */
-export const BUILT_IN_TYPES = {
+export const BUILT_IN_TYPES = lookupTable({
   string: (word: string) => word,
   int: (word: string) => number(word, true),
   number: (word: string) => number(word, false),
@@ -30,11 +30,16 @@ export const BUILT_IN_TYPES = {
   user: undefined,
   role: undefined,
   channel: undefined,
-} as const
+} as const)
+
+/** The app's own type of this name: only one the app gave, never a name its object inherits. */
+function appType(types: Record<string, MessageParamType> | undefined, type: string): MessageParamType | undefined {
+  return types && Object.hasOwn(types, type) ? types[type] : undefined
+}
 
 /** What the issues call a value of a type: a built-in type's text, an app type's `labelKey` or `label`, or the type's key. */
 function typeLabel(type: string, types: Record<string, MessageParamType> | undefined): TextParam {
-  const own = types?.[type]
+  const own = appType(types, type)
   if (own) return own.labelKey === undefined ? (own.label ?? type) : { key: own.labelKey, fallback: own.label ?? type }
   return type in BUILT_IN_TYPES ? { key: `meocord.types.${type}` } : type
 }
@@ -48,7 +53,7 @@ export const isGuildType = (type: string): boolean => GUILD_TYPES.has(type)
 
 /** Whether a pattern's `{name:type}` names a type: built in, words to choose from, or one the app adds. */
 export function isKnownParamType(type: string, types: Record<string, MessageParamType> | undefined): boolean {
-  return type in BUILT_IN_TYPES || Boolean(choicesOf(type)) || Boolean(types && type in types)
+  return type in BUILT_IN_TYPES || Boolean(choicesOf(type)) || appType(types, type) !== undefined
 }
 
 /**
@@ -210,7 +215,7 @@ export async function parseMessageParams(
   for (const item of items) {
     const { type, word } = item
     const choices = choicesOf(type)
-    const own = types?.[type]
+    const own = appType(types, type)
     let value: unknown
     if (choices) {
       value = route.caseSensitive ? choices.find(choice => choice === word) : choices.find(choice => choice.toLowerCase() === word.toLowerCase())
