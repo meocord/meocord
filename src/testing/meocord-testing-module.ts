@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { Container, type ServiceIdentifier } from 'inversify'
 import {
   claimCooldownNotice,
+  claimStoreDownNotice,
   COOLDOWN_POLICY,
   cooldownPolicyFrom,
   type CooldownStoreFailure,
@@ -596,6 +597,7 @@ export class TestingModule {
       fallback: createFallback(logger, () => this.messageOptions, {
         strict: true,
         cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
+        storeDownNotice: who => claimStoreDownNotice(this.container, who),
       }),
       // A mock's client is the one bot every mock client is, so a mention of it starts a command
       botUserId: event => {

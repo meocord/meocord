@@ -2,7 +2,7 @@ import { vi } from 'vitest'
 import { Client, type Guild, type Message } from 'discord.js'
 import { Catch, Controller, Cooldown, Guard, MeoCord, MessageHandler, UseFilter, UseGuard } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { createTranslator, GuardDeniedError, UserError } from '@src/common/index.js'
+import { CooldownStore, createTranslator, GuardDeniedError, UserError } from '@src/common/index.js'
 import { Logger } from '@src/common/logger.js'
 import { type ExceptionFilter, type GuardInterface } from '@src/interface/index.js'
 import { createDiscordError, createMockGuild, createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
@@ -179,6 +179,36 @@ describe('dmOnError', () => {
     expect(caught.author.send).not.toHaveBeenCalled()
     expect(heard.author.send).not.toHaveBeenCalled()
     expect(errors).toContainEqual([expect.stringContaining('Error handling message "listener fails"'), expect.objectContaining({ message: 'listener broke' })])
+  })
+})
+
+describe('a cooldown store that is down', () => {
+  const down = { consume: () => Promise.reject(new Error('ECONNREFUSED 127.0.0.1:6379')) }
+  const withStoreDown = (app: new () => unknown) =>
+    MeoCordTestingModule.create({ app, controllers: [Commands], providers: [{ provide: CooldownStore, useValue: down }] }).compile()
+  const by = async (module: ReturnType<typeof withStoreDown>, id: string) => {
+    const message = messageOf('!roll 6')
+    Object.assign(message.author, { id })
+    await module.dispatch(message)
+    return message
+  }
+
+  it('DMs the author of a command it refuses, once for the outage, with dmOnError', async () => {
+    const module = withStoreDown(TellingApp)
+
+    const [first, again, other] = [await by(module, 'user-1'), await by(module, 'user-1'), await by(module, 'user-2')]
+
+    expect(first.author.send).toHaveBeenCalledWith({ content: 'Gagal menjalankan !roll di #general (Cat Cafe).', allowedMentions: { parse: [] } })
+    expect(again.author.send).not.toHaveBeenCalled()
+    expect(other.author.send).toHaveBeenCalledTimes(1)
+    for (const message of [first, again, other]) expect(message.reply).not.toHaveBeenCalled()
+  })
+
+  it('says nothing without dmOnError', async () => {
+    const message = await by(withStoreDown(QuietApp), 'user-1')
+
+    expect(message.author.send).not.toHaveBeenCalled()
+    expect(message.reply).not.toHaveBeenCalled()
   })
 })
 

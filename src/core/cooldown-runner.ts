@@ -136,8 +136,8 @@ const logger = new Logger('Cooldown')
  */
 const OUTAGE_QUIET_MS = 30_000
 
-/** Each store's open outage: its failed calls, and when the first and the latest failed. */
-const outages = new WeakMap<CooldownStore, { failures: number; since: number; last: number }>()
+/** Each store's open outage: its failed calls, when the first and the latest failed, and whom it has told. */
+const outages = new WeakMap<CooldownStore, { failures: number; since: number; last: number; told: Set<string> }>()
 
 /** Logs a store's failure once per outage: the first, with its cause and what calls get until it answers. */
 function reportFailure(store: CooldownStore, error: CooldownStoreError, { failure, timeoutMs }: CooldownPolicy): void {
@@ -147,7 +147,7 @@ function reportFailure(store: CooldownStore, error: CooldownStoreError, { failur
     outage.last = Date.now()
     return
   }
-  outages.set(store, { failures: 1, since: Date.now(), last: Date.now() })
+  outages.set(store, { failures: 1, since: Date.now(), last: Date.now(), told: new Set() })
   const name = store.constructor.name
   const reason = error.timedOut ? `did not answer within ${timeoutMs} ms` : `failed: ${String((error.cause as Error | undefined)?.message ?? error.cause)}`
   if (failure === 'allow') logger.warn(`The cooldown store ${name} ${reason}. Calls run uncounted until it answers again.`)
@@ -193,6 +193,18 @@ export async function storeOperationsSettled(container: Container): Promise<void
  */
 export function waitForCooldownStore(container: Container, ready: Promise<void>): void {
   storesReady.set(container, ready)
+}
+
+/**
+ * Whether `who`, refused because the cooldown store failed, is yet to be told so during this outage. Kept in
+ * the process rather than in the store, which is what failed.
+ */
+export function claimStoreDownNotice(container: Container, who: string): boolean {
+  const told = outages.get(cooldownStoreOf(container))?.told
+  if (!told) return true
+  if (told.has(who)) return false
+  told.add(who)
+  return true
 }
 
 /**

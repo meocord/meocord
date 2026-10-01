@@ -21,7 +21,7 @@ import { type MessageCommandOptions } from '@src/interface/index.js'
 
 import { globalStagesOf, runHandler } from '@src/core/handler-pipeline.js'
 import { createFallback, type Fallback, replyWithUserError } from '@src/core/fallback.js'
-import { claimCooldownNotice } from '@src/core/cooldown-runner.js'
+import { claimCooldownNotice, claimStoreDownNotice } from '@src/core/cooldown-runner.js'
 
 
 import { stageClass, stageTypes } from '@src/core/stage-scope.js'
@@ -121,6 +121,7 @@ export class MeoCordApp implements MeoCordApplication {
   private readonly logger = new Logger(MeoCordApp.name)
   private readonly fallback: Fallback = createFallback(this.logger, () => this.messageOptions, {
     cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
+    storeDownNotice: who => claimStoreDownNotice(this.container, who),
   })
   private readonly bot: Client
   private activityInterval: ReturnType<typeof setInterval> | null = null

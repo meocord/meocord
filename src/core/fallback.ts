@@ -37,6 +37,8 @@ export interface FallbackOptions {
   strict?: boolean
   /** Whether a caller a cooldown refused is yet to be told during this wait; see `claimCooldownNotice`. */
   cooldownNotice?: (refusal: CooldownError) => Promise<boolean>
+  /** Whether a caller refused because the cooldown store failed is yet to be told; see `claimStoreDownNotice`. */
+  storeDownNotice?: (who: string) => boolean
 }
 
 const UNKNOWN_INTERACTION = 10062
@@ -345,8 +347,15 @@ export function createFallback(
           await tellPrivately(context, error, logger, replies.replyEmoji, answering)
         }
       }
-      // Logged once per outage where the store failed, rather than for every call it refused
-      else if (error instanceof CooldownStoreError) logger.debug(`Cooldown store down; skipped ${describeCall(context)}`)
+      // Logged once per outage where the store failed, rather than for every call it refused; a command's author is
+      // told privately when the app asks, once per outage
+      else if (error instanceof CooldownStoreError) {
+        logger.debug(`Cooldown store down; skipped ${describeCall(context)}`)
+        const author = context.getMessage()?.author.id
+        if (replies?.dmOnError && isCommand(context) && author !== undefined && options.storeDownNotice?.(author)) {
+          await tellPrivately(context, error, logger, replies.replyEmoji, answering)
+        }
+      }
       else if (error instanceof UserError) await tellAuthor(context, error, logger, replies?.replyEmoji, answering)
       else {
         logger.error(`Error handling ${describeCall(context)}:`, error)
