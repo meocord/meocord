@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { refuse } from '@src/util/refusal.util.js'
+import { bundleEntry, isBuiltApplication } from '@src/util/bundle-entry.util.js'
 
 /**
  * File written beside a bundle that carries native addons, naming the platform it was built for.
@@ -57,9 +58,10 @@ export function writePlatformManifest(distDir: string): void {
 /**
  * Stops a bundle from starting on a platform its native addons were not built for, with one clear
  * message instead of a linker error on the first command that loads an addon.
- * @param distDir - Directory holding the manifest. Defaults to the entry script's directory.
+ * @param distDir - Directory holding the manifest. Defaults to the built bundle's directory, which a process manager's
+ *   wrapper in `argv[1]` would hide, and else to the entry script's.
  */
-export function assertBuiltForThisPlatform(distDir = process.argv[1] ? path.dirname(process.argv[1]) : undefined): void {
+export function assertBuiltForThisPlatform(distDir = defaultDistDir()): void {
   if (!distDir) return
   const manifest = path.join(distDir, PLATFORM_MANIFEST)
   if (!existsSync(manifest)) return
@@ -79,4 +81,10 @@ export function assertBuiltForThisPlatform(distDir = process.argv[1] ? path.dirn
       `running on ${describePlatform(running)}. Compiled binaries only load on the platform they were built for. ` +
       'Build on the same platform you deploy to -- for a container, run `meocord build` inside the image.',
   ))
+}
+
+/** The built bundle's directory, or the entry script's outside a built bot. */
+function defaultDistDir(): string | undefined {
+  if (isBuiltApplication()) return path.dirname(bundleEntry())
+  return process.argv[1] ? path.dirname(process.argv[1]) : undefined
 }

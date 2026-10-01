@@ -15,9 +15,10 @@ vi.mock('@src/common/index.js', () => ({
   ),
 }))
 
-const { mockLoadConfig } = vi.hoisted(() => ({ mockLoadConfig: vi.fn() }))
+const { mockLoadConfig, mockConfigProblem } = vi.hoisted(() => ({ mockLoadConfig: vi.fn(), mockConfigProblem: vi.fn() }))
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({
   loadMeoCordConfig: mockLoadConfig,
+  compiledConfigProblem: mockConfigProblem,
 }))
 
 const { MeoCordFactory } = await import('@src/core/meocord-factory.js')
@@ -171,6 +172,29 @@ describe('MeoCordFactory.create()', () => {
     Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
 
     expect(() => MeoCordFactory.create(MyApp)).toThrow('MeoCord config not found')
+  })
+
+  // Started from elsewhere, a bot told only to build again had nothing to go on
+  it('names the file it looked for and the working directory when the config is missing', () => {
+    mockLoadConfig.mockReturnValue(undefined)
+    mockConfigProblem.mockReturnValue({ path: '/srv/bot/dist/meocord.config.mjs', missing: true })
+    class MyApp {}
+    Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
+
+    expect(() => MeoCordFactory.create(MyApp)).toThrow(
+      `MeoCord config not found at /srv/bot/dist/meocord.config.mjs (working directory ${process.cwd()}).`,
+    )
+  })
+
+  it('says a config that is there failed to load, with why, rather than asking for a build', () => {
+    mockLoadConfig.mockReturnValue(undefined)
+    mockConfigProblem.mockReturnValue({ path: '/srv/bot/dist/meocord.config.mjs', missing: false, error: new Error('dotenv is not installed') })
+    class MyApp {}
+    Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
+
+    expect(() => MeoCordFactory.create(MyApp)).toThrow(
+      'MeoCord config at /srv/bot/dist/meocord.config.mjs failed to load: dotenv is not installed. Fix meocord.config.ts, then run `meocord build`.',
+    )
   })
 
   it('returns a MeoCordApp instance when config and options are valid', () => {

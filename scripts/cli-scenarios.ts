@@ -25,6 +25,7 @@ import { createServer, type Server } from 'http'
 import { type AddressInfo } from 'net'
 import { tmpdir } from 'os'
 import path from 'path'
+import { pathToFileURL } from 'url'
 import { ControllerType } from '../src/enum/controller.enum.js'
 import { startFakeDiscord } from './lib/fake-discord.js'
 import { cleanEnv, installedCliOf, mustRun, outputOf, pack, renderApp } from './lib/packed-app.js'
@@ -638,6 +639,19 @@ const scenarios: Scenario[] = [
     files: { '.env': 'DISCORD_TOKEN=\n', 'meocord.config.ts': validConfig, dist: null },
     argv: ['build', '--prod'],
     expect: { code: 0, creates: ['dist/main.js'] },
+  },
+  // As pm2 without a cwd or a unit file without WorkingDirectory starts it: elsewhere, and argv[1] not the bundle
+  {
+    name: 'a built bot started from another directory, through a wrapper, finds its config beside its bundle',
+    tier: 'fast',
+    before: [['build', '--prod']],
+    env: { DISCORD_TOKEN: 'not-a-real-token' },
+    command: [
+      'node',
+      '-e',
+      `process.chdir(${JSON.stringify(workDir)}); import(${JSON.stringify(pathToFileURL(path.join(appDir, 'dist', 'main.js')).href)})`,
+    ],
+    expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN], never: ['MeoCord config not found'] },
   },
   {
     name: 'start --prod without a token says where the token comes from',

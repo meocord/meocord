@@ -1,5 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
+import { BUNDLE_ENTRY_KEY } from '@src/util/bundle-entry.util.js'
 import path from 'path'
 import {
   assertBuiltForThisPlatform,
@@ -75,6 +76,18 @@ describe('assertBuiltForThisPlatform', () => {
 
     expect(() => assertBuiltForThisPlatform(dir)).toThrow(new RegExp(`compiled for ${elsewhere}-${process.arch}`))
     expect(() => assertBuiltForThisPlatform(dir)).toThrow(/run `meocord build` inside the image/)
+  })
+
+  // A process manager's wrapper can be argv[1]; the manifest is beside the bundle the pre-entry recorded
+  it('reads the manifest beside the built bundle by default, not beside argv[1]', () => {
+    const elsewhere = process.platform === 'linux' ? 'darwin' : 'linux'
+    writeFileSync(path.join(dir, PLATFORM_MANIFEST), JSON.stringify({ platform: elsewhere, arch: process.arch }))
+    Reflect.set(globalThis, BUNDLE_ENTRY_KEY, path.join(dir, 'main.js'))
+    try {
+      expect(() => assertBuiltForThisPlatform()).toThrow(new RegExp(`compiled for ${elsewhere}-${process.arch}`))
+    } finally {
+      Reflect.deleteProperty(globalThis, BUNDLE_ENTRY_KEY)
+    }
   })
 
   it('does not stop the bot over a manifest it cannot read', () => {
