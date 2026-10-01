@@ -370,3 +370,56 @@ describe('a presenter without messageError', () => {
     expect(plain.flat(2).length).toBeGreaterThan(0)
   })
 })
+
+describe('a messageError that fails', () => {
+  @Service()
+  class ThrowingPresenter implements ResponsePresenter {
+    loading() {
+      return { text: 'Drawing…' }
+    }
+
+    error(_context: unknown, { message }: PresentedError) {
+      return { text: message }
+    }
+
+    messageError(): ResponseView {
+      throw new Error('canvas broke')
+    }
+  }
+
+  @Service()
+  class RejectingPresenter extends ThrowingPresenter {
+    override messageError(): ResponseView {
+      return Promise.reject(new Error('canvas broke')) as never
+    }
+  }
+
+  @MeoCord({ controllers: [DiceController], presenter: ThrowingPresenter, messages: MESSAGES, clientOptions: { intents: [] } })
+  class ThrowingApp {}
+
+  @MeoCord({ controllers: [DiceController], presenter: RejectingPresenter, messages: MESSAGES, clientOptions: { intents: [] } })
+  class RejectingApp {}
+
+  /** The reply to a usage error and the direct message of a failing command, under an app. */
+  async function answers(App: new () => unknown) {
+    const module = MeoCordTestingModule.create({ app: App, controllers: [DiceController] }).compile()
+    const usage = createMockMessage({ content: '!roll many' })
+    const broken = createMockMessage({ content: '!broken' })
+    await module.dispatch(usage)
+    await module.dispatch(broken).catch(() => undefined)
+    return JSON.parse(JSON.stringify([usage.reply.mock.calls, broken.author.send.mock.calls]).replace(/<#\d+>/g, '<#channel>'))
+  }
+
+  it.each([
+    ['throws', ThrowingApp, 'ThrowingPresenter'],
+    ['rejects', RejectingApp, 'RejectingPresenter'],
+  ])("answers in MeoCord's plain text when it %s, warning with the presenter's name", async (_how, App, name) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+    const answered = await answers(App)
+
+    expect(answered).toEqual(await answers(PlainApp))
+    expect(answered.flat(2).length).toBe(2)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${name}.messageError`), expect.objectContaining({ message: 'canvas broke' }))
+  })
+})
