@@ -20,8 +20,8 @@ globalThis[BUNDLE_ENTRY_KEY] = bundle
 // rather than the directory the build ran in, which the bundle would otherwise carry
 __webpack_public_path__ = `${path.dirname(bundle).replace(/\\/g, '/')}/`
 
-// Beside the bundle, wherever the bot was started from, through the runtime's own loader, which keeps it for the
-// factory; a config that is missing or fails to load is reported there
+// Beside the bundle, wherever the bot was started from, by the loader the runtime uses. The bundle carries its own copy
+// of it, and the module cache evaluates the config once for both; the factory reports one that is missing or fails
 const config = loadMeoCordConfig()
 
 if (config?.sourceMappedStacks !== false) installStackRemapper(bundle)
