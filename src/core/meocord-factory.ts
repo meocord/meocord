@@ -353,7 +353,8 @@ export class MeoCordFactory {
 function configMessage(): string {
   const problem = compiledConfigProblem()
   if (problem && !problem.missing) {
-    const reason = problem.error instanceof Error ? problem.error.message : String(problem.error)
+    // One full stop, whether or not the reason ends with one
+    const reason = (problem.error instanceof Error ? problem.error.message : String(problem.error)).replace(/\.$/, '')
     return `MeoCord config at ${problem.path} failed to load: ${reason}. Fix meocord.config.ts, then run \`meocord build\`.`
   }
   const where = problem?.path ?? 'meocord.config.mjs'

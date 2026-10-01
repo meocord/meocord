@@ -188,7 +188,8 @@ describe('MeoCordFactory.create()', () => {
 
   it('says a config that is there failed to load, with why, rather than asking for a build', () => {
     mockLoadConfig.mockReturnValue(undefined)
-    mockConfigProblem.mockReturnValue({ path: '/srv/bot/dist/meocord.config.mjs', missing: false, error: new Error('dotenv is not installed') })
+    // A reason that ends with a full stop of its own still gives one
+    mockConfigProblem.mockReturnValue({ path: '/srv/bot/dist/meocord.config.mjs', missing: false, error: new Error('dotenv is not installed.') })
     class MyApp {}
     Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
 

@@ -152,6 +152,20 @@ describe('ShardManager', () => {
     expect(options).toMatchObject({ totalShards: 2, mode: 'process', respawn: false, execArgv: process.execArgv })
   })
 
+  // `node -e "import('./dist/main.js')"` in a development build: no recorded bundle and no script to spawn
+  it('exits 1 before spawning anything when it cannot find the bundle to start the shards from', async () => {
+    Reflect.set(globalThis, BUNDLE_ENTRY_KEY, '/meocord/dist/esm/build/load-config.pre-entry.js')
+    const argv = vi.spyOn(process, 'argv', 'get').mockReturnValue([process.execPath])
+    const { manager, shards, exit } = setup({ shards: 1 })
+
+    await manager.start()
+    argv.mockRestore()
+
+    expect(exit).toHaveBeenCalledWith(1)
+    expect(shards).toEqual([])
+    expect(logged.error).toEqual([expect.stringMatching(/^Could not find the built bundle to start the shards from/)])
+  })
+
   it('asks Discord how many shards to run for shards: auto', async () => {
     const { manager, shards } = setup({ shards: 'auto' })
     await manager.start()
