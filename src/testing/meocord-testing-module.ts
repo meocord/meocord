@@ -64,6 +64,7 @@ import { createMockClient } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import {
   assertProvided,
   assertTypedParameters,
@@ -106,6 +107,13 @@ export interface TestingModuleOptions {
    * module waits for them before a call resolves, so a test sees what they were told.
    */
   observers?: (new (...args: any[]) => DispatchObserver)[]
+
+  /**
+   * How long `close()` waits, in milliseconds, for the cooldown store's operations still under way before it shuts
+   * the store down anyway, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown. Defaults to 10000.
+   * A test whose fake store never answers sets it short.
+   */
+  shutdownTimeout?: number
 }
 
 /**
@@ -122,6 +130,8 @@ export interface FromAppOptions {
   controllers?: (new (...args: any[]) => any)[]
   /** `@Observer` classes told about each call, after the app's own. */
   observers?: (new (...args: any[]) => DispatchObserver)[]
+  /** How long `close()` waits for the cooldown store's operations under way; see {@link TestingModuleOptions.shutdownTimeout}. */
+  shutdownTimeout?: number
 }
 
 /** What `fromApp` takes from the app beyond what `app` gives: its providers and services. */
@@ -277,6 +287,8 @@ export class TestingModule {
     private readonly appWarnUnanswered?: boolean,
     /** The app's listed services, made at `init()` as the bot makes them before it logs in. */
     private readonly services: readonly (new (...args: any[]) => unknown)[] = [],
+    /** How long `close()` waits for the store's operations under way, as the bot's `shutdownTimeout` does. */
+    private readonly shutdownTimeout: number = DEFAULT_SHUTDOWN_TIMEOUT_MS,
   ) {}
 
   private resolving?: Promise<void>
@@ -337,6 +349,10 @@ export class TestingModule {
    * It first gives up the theme read outside calls, if `init({ ready: true })` made it this module's;
    * reads outside calls then return MeoCord's defaults until another module or app is ready.
    *
+   * The cooldown store shuts down last, as the bot's does: after every other hook, and once the store operations its
+   * calls started have settled, waiting up to the module's `shutdownTimeout`, 10 seconds unless set. Give a test
+   * whose fake store never answers a short `shutdownTimeout`.
+   *
    * @returns Once every hook has run. Rejects with the error of a hook that failed, or an
    *   `AggregateError` naming each when several did.
    *
@@ -372,7 +388,7 @@ export class TestingModule {
         entries.filter(entry => !entry.cooldownStore),
         failed,
       )
-      await storeOperationsSettled(this.container)
+      await this.storeOperationsSettled()
       await runShutdownHooks(
         entries.filter(entry => entry.cooldownStore),
         failed,
@@ -380,6 +396,21 @@ export class TestingModule {
       throwFailures('onShutdown', failures)
     })()
     await this.closing
+  }
+
+  /** Waits for the store's operations under way, up to `shutdownTimeout`, then says so if they are still running. */
+  private async storeOperationsSettled(): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => resolve('timeout'), this.shutdownTimeout)
+    })
+    try {
+      if ((await Promise.race([storeOperationsSettled(this.container), timedOut])) === 'timeout') {
+        new Logger('TestingModule').warn(`onShutdown hooks did not finish within ${this.shutdownTimeout} ms; shutting down anyway.`)
+      }
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async runReady(client: Client<true>, primary: boolean): Promise<void> {
@@ -1067,6 +1098,10 @@ export class TestingModuleBuilder {
       constructed,
       warnUnanswered,
       services,
+      // As the app takes its config's: a number of milliseconds, zero or more
+      typeof this.options.shutdownTimeout === 'number' && this.options.shutdownTimeout >= 0
+        ? this.options.shutdownTimeout
+        : DEFAULT_SHUTDOWN_TIMEOUT_MS,
     )
   }
 }
@@ -1178,7 +1213,7 @@ export class MeoCordTestingModule {
     if (!appOptions) throw new TypeError(`${app?.name ?? String(app)} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.`)
     const controllers = [...new Set([...appOptions.controllers, ...(options.controllers ?? [])])]
     return new TestingModuleBuilder(
-      { app, controllers, providers: options.providers, observers: options.observers },
+      { app, controllers, providers: options.providers, observers: options.observers, shutdownTimeout: options.shutdownTimeout },
       { providers: appOptions.providers ?? [], services: appOptions.services ?? [] },
     )
   }
