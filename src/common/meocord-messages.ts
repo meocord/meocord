@@ -43,7 +43,7 @@ export const MEOCORD_MESSAGES = {
       error: 'An error occurred while executing the command.',
     },
     dm: {
-      error: 'Something went wrong running {command} in {channel} on {server}. Try again later.',
+      error: '{command} in {channel} on {server}: {reason}',
       cooldown: '{command} in {channel} on {server}: {wait}',
     },
     presenter: {

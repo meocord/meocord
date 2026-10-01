@@ -17,7 +17,7 @@ const t = createTranslator({
     id: {
       ping: 'Pong!',
       meocord: {
-        dm: { error: 'Gagal menjalankan {command} di {channel} ({server}).', cooldown: '{command} di {channel} ({server}): {wait}' },
+        dm: { error: '{command} di {channel} ({server}): {reason}', cooldown: '{command} di {channel} ({server}): {wait}' },
         cooldown: { until: 'Tunggu sampai {when}.' },
       },
     },
@@ -128,7 +128,7 @@ describe('dmOnError', () => {
 
     await expect(module.dispatch(message)).rejects.toThrow('database down')
 
-    expect(message.author.send).toHaveBeenCalledWith({ content: 'Gagal menjalankan !boom di #general (Cat Cafe).', allowedMentions: { parse: [] } })
+    expect(message.author.send).toHaveBeenCalledWith({ content: '!boom di #general (Cat Cafe): An error occurred while executing the command.', allowedMentions: { parse: [] } })
     expect(message.reply).not.toHaveBeenCalled()
     expect(errors).toContainEqual([expect.stringContaining('Error handling message "!boom"'), expect.objectContaining({ message: 'database down' })])
   })
@@ -198,10 +198,60 @@ describe('a cooldown store that is down', () => {
 
     const [first, again, other] = [await by(module, 'user-1'), await by(module, 'user-1'), await by(module, 'user-2')]
 
-    expect(first.author.send).toHaveBeenCalledWith({ content: 'Gagal menjalankan !roll di #general (Cat Cafe).', allowedMentions: { parse: [] } })
+    expect(first.author.send).toHaveBeenCalledWith({
+      content: "!roll di #general (Cat Cafe): Cooldowns can't be checked right now: try again shortly.",
+      allowedMentions: { parse: [] },
+    })
     expect(again.author.send).not.toHaveBeenCalled()
     expect(other.author.send).toHaveBeenCalledTimes(1)
     for (const message of [first, again, other]) expect(message.reply).not.toHaveBeenCalled()
+  })
+
+  it('answers a command sent in a direct message there, once for the outage', async () => {
+    // A store of its own, so its outage has told nobody yet
+    const module = MeoCordTestingModule.create({
+      app: TellingApp,
+      controllers: [Commands],
+      providers: [{ provide: CooldownStore, useValue: { consume: () => Promise.reject(new Error('ECONNREFUSED 127.0.0.1:6379')) } }],
+    }).compile()
+    const dm = async () => {
+      const message = messageOf('!roll 6', { dm: true })
+      await module.dispatch(message)
+      return message
+    }
+
+    const [first, again] = [await dm(), await dm()]
+
+    expect(first.reply).toHaveBeenCalledWith({
+      content: "Cooldowns can't be checked right now: try again shortly.",
+      allowedMentions: { repliedUser: false, parse: [] },
+    })
+    expect(again.reply).not.toHaveBeenCalled()
+    expect(first.author.send).not.toHaveBeenCalled()
+  })
+
+  // An outage ends 30 seconds after its last failure; the next one is new, and tells its authors again
+  it('tells the same author again in a later outage', async () => {
+    let failing = true
+    const flaky = {
+      consume: () => (failing ? Promise.reject(new Error('ECONNREFUSED 127.0.0.1:6379')) : Promise.resolve({ allowed: true, retryAfterMs: 0 })),
+    }
+    const module = MeoCordTestingModule.create({
+      app: TellingApp,
+      controllers: [Commands],
+      providers: [{ provide: CooldownStore, useValue: flaky }],
+    }).compile()
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+
+    const first = await by(module, 'user-1')
+    failing = false
+    vi.setSystemTime(30_000)
+    await by(module, 'user-1')
+    failing = true
+    const later = await by(module, 'user-1')
+
+    expect(first.author.send).toHaveBeenCalledTimes(1)
+    expect(later.author.send).toHaveBeenCalledTimes(1)
   })
 
   it('says nothing without dmOnError', async () => {
