@@ -435,8 +435,9 @@ jobs:
       - name: Explain the skip
         run: echo "::notice title=Real Discord not run::Pull requests from forks get no Discord secrets, so the real-Discord checks run only for branches of this repository, nightly and on main."
 
-  # Publishes, and only that: it installs nothing beyond the repository's frozen lockfile and runs
-  # no generated application, since any step here can request the token npm publishes with.
+  # Versions, and only that: with pending changesets it opens or updates the release pull request, which bumps the
+  # version and writes the changelog, and with none it does nothing. It runs `changeset version` and prettier, code from
+  # dependencies, so it holds no publishing identity: `publish` below does, and runs none of that.
   # Its needs are checked one by one, as the release checks' are, so the slow scenarios job skipped on a
   # push does not skip the release, and one that did not succeed, the release checks above all, stops it.
   release:
@@ -449,18 +450,15 @@ jobs:
       needs.release-checks.result == 'success'
     needs: [lint, test-result, coverage, build, windows, release-checks]
     runs-on: ubuntu-latest
+    # For RELEASE_TOKEN, a secret of this environment. Without `id-token` the job cannot request npm's credentials.
     environment: Production
     outputs:
-      published: ${{ steps.changesets.outputs.published }}
+      pending: ${{ steps.changesets.outputs.has-changesets }}
     concurrency:
       group: release-${{ github.ref }}
     permissions:
       contents: write
       pull-requests: write
-      # Publishing uses npm trusted publishing: npm exchanges this token with the
-      # registry for short-lived credentials, so there is no npm token in the repo.
-      # It is also what signs the provenance attestation.
-      id-token: write
     env:
       # The action commits the version bump. Husky's pre-commit hook runs the full
       # lint, which has already passed on this commit and cannot fix a generated
@@ -468,8 +466,62 @@ jobs:
       HUSKY: 0
     steps:
       # The action pushes through the GitHub API rather than the git CLI, so it needs no
-      # credentials left in the checkout — and the commits and tags it creates are signed
-      # with GitHub's key instead of landing unverified.
+      # credentials left in the checkout — and the commits it creates are signed with
+      # GitHub's key instead of landing unverified.
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      # With pending changesets, this opens or updates the release pull request and stops. With none, which is the
+      # state right after that pull request merges, it does nothing, and `publish` publishes the version committed.
+      # So the merge is the trigger, and nothing reaches npm without one.
+      # A pull request opened with the workflow's own token does not start CI on its own: GitHub
+      # holds those runs until someone approves them. RELEASE_TOKEN, when the repository has one,
+      # opens the release pull request as that identity instead, so its checks start like any
+      # other. Without it, the workflow's token is used and the runs wait for approval.
+      - name: Open or update the release pull request
+        id: changesets
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          version-script: bun run release:version
+          pr-title: 'chore: release'
+          commit-message: 'chore: release'
+
+  # Publishes, and only that, once nothing is pending. It holds the publishing identity, so it runs no code from
+  # dependencies beyond the build: the install runs no scripts, and `npm publish` runs none of the package's own
+  # lifecycle scripts (prepare is husky). Changesets' own CLI and npm are all that run beside the token.
+  publish:
+    name: Publish
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.pending == 'false' }}
+    needs: release
+    runs-on: ubuntu-latest
+    environment: Production
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+    concurrency:
+      group: publish-${{ github.ref }}
+    permissions:
+      # Pushes the version's tag and creates its GitHub release
+      contents: write
+      # Publishing uses npm trusted publishing: npm exchanges this token with the
+      # registry for short-lived credentials, so there is no npm token in the repo.
+      # It is also what signs the provenance attestation.
+      id-token: write
+    steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -496,23 +548,16 @@ jobs:
       - name: Build package
         run: bun run build
 
-      # With pending changesets, this opens or updates the release pull request and
-      # stops. With none — which is the state right after that pull request merges —
-      # it publishes the version already committed. So the merge is the trigger, and
-      # nothing reaches npm without one.
-      # A pull request opened with the workflow's own token does not start CI on its own: GitHub
-      # holds those runs until someone approves them. RELEASE_TOKEN, when the repository has one,
-      # opens the release pull request as that identity instead, so its checks start like any
-      # other. Without it, the workflow's token is used and the runs wait for approval.
-      - name: Open the release pull request, or publish
+      # Nothing is pending, so the action publishes the version committed, pushes its tag and creates its release.
+      - name: Publish
         id: changesets
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        env:
+          # npm publish runs the package's lifecycle scripts; the build is done, so none runs beside the token
+          npm_config_ignore_scripts: 'true'
         with:
           github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          version-script: bun run release:version
           publish-script: bun run release:publish
-          pr-title: 'chore: release'
-          commit-message: 'chore: release'
           create-github-releases: true
 
   # Asks the docs site to add the version just published, rather than wait for its hourly schedule:
@@ -524,9 +569,9 @@ jobs:
   # and nothing in it fails the release: the version is already on npm, and the schedule still runs.
   docs-sync:
     name: Docs sync
-    needs: release
+    needs: publish
     # Named directly, with !cancelled(): the implicit success() also reads the skipped slow scenarios job on a push
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.published == 'true' }}
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     environment: Production
     permissions: {}
