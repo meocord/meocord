@@ -18,8 +18,8 @@ import * as p from '@clack/prompts'
 import { detectInstalledPMs, getInstallCommand, type PackageManager } from '@src/util/package-manager.util.js'
 import { configureCommandHelp, ensureReady } from '@src/util/meocord-cli.util.js'
 import { resolveOwnVersion } from '@src/util/package-version.util.js'
-import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
-import { inheritedEnvironment } from '@src/util/inherited-env.util.js'
+import { buildAppCommand, isBun, resolveRuntime } from '@src/util/runtime.util.js'
+import { envFileValuesFor, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { FORCE_STOP_GRACE_MS, shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { DEV_RUNNER_ENV, type DevRunnerCommand, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
@@ -117,8 +117,6 @@ export class MeoCordCLI {
   private readonly appName = 'MeoCord'
   readonly logger = new Logger(this.appName)
   private readonly projectRoot = process.cwd()
-  /** What a bot this CLI starts inherits, taken before any config is loaded; see {@link inheritedEnvironment}. */
-  private readonly inheritedEnv = inheritedEnvironment(process.env, this.projectRoot)
   private readonly mainJSPath = path.join(this.projectRoot, 'dist', 'main.js')
   private readonly generatorCLI = new GeneratorCLI(this.appName)
   private readonly appGeneratorHelper = new AppGeneratorHelper()
@@ -129,6 +127,8 @@ export class MeoCordCLI {
    * rather than on whichever one happens to be named in the source.
    */
   private readonly runtime = resolveRuntime(process.env, process.execPath)
+  /** What a bot this CLI starts inherits, taken before any config is loaded; see {@link inheritedEnvironment}. */
+  private readonly inheritedEnv = inheritedEnvironment(process.env, this.projectRoot)
 
   /**
    * Configures and runs the MeoCord CLI.
@@ -756,6 +756,8 @@ copies or substantial portions of the Software.
     return spawn(command, args, {
       cwd: this.projectRoot,
       env: {
+        // The .env files the runtime won't read itself, as they are now; the shell's own values win over them
+        ...envFileValuesFor(isBun(this.runtime), this.projectRoot, process.env.NODE_ENV),
         ...this.inheritedEnv,
         ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
         ...this.appEnv,
@@ -798,13 +800,14 @@ copies or substantial portions of the Software.
 
       // Inputs the bundler does not see: the config, and tsconfig.json, which the build reads through a copy MeoCord
       // writes and the bundler never watches. A change rebuilds from them, and the rebuild restarts the application.
-      // .env needs no build: the bot reads it as it starts, so a change restarts it.
+      // The .env files need no build: the bot is given them as it starts, so a change restarts it.
+      const restarts = envFiles(process.env.NODE_ENV)
       const reloads: Record<string, string> = {
         'meocord.config.ts': 'MeoCord config change detected, reloading config...',
         'tsconfig.json': 'tsconfig.json change detected, rebuilding...',
-        '.env': '.env change detected, restarting...',
+        ...Object.fromEntries(restarts.map(file => [file, `${file} change detected, restarting...`])),
       }
-      const rebuilds = (files: Set<string>) => [...files].some(file => file !== '.env')
+      const rebuilds = (files: Set<string>) => [...files].some(file => !restarts.includes(file))
       let debounceWatcher: NodeJS.Timeout
       let changed = new Set<string>()
 

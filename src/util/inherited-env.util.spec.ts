@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { inheritedEnvironment } from '@src/util/inherited-env.util.js'
+import { envFileValuesFor, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
 
 let root: string
 
@@ -11,6 +11,17 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
+})
+
+// As Bun reads them, measured: a later file wins, and under test .env.local is left out
+describe('envFiles', () => {
+  it.each([
+    [undefined, ['.env', '.env.development', '.env.local', '.env.development.local']],
+    ['production', ['.env', '.env.production', '.env.local', '.env.production.local']],
+    ['test', ['.env', '.env.test', '.env.test.local']],
+  ])('lists the files for NODE_ENV %s', (nodeEnv, files) => {
+    expect(envFiles(nodeEnv)).toEqual(files)
+  })
 })
 
 describe('inheritedEnvironment', () => {
@@ -34,5 +45,23 @@ describe('inheritedEnvironment', () => {
 
   it('keeps everything when there is no .env', () => {
     expect(inheritedEnvironment({ A: '1' }, root)).toEqual({ A: '1' })
+  })
+})
+
+describe('envFileValuesFor', () => {
+  // A bot on node reads .env through the config's dotenv import, and no other file
+  it('gives a bot on node the files after .env as they are now, a later one winning', () => {
+    writeFileSync(path.join(root, '.env'), 'A=env\nD=env\n')
+    writeFileSync(path.join(root, '.env.development'), 'A=mode\nB=mode\nC=mode\n')
+    writeFileSync(path.join(root, '.env.local'), 'A=local\nB=local\n')
+    writeFileSync(path.join(root, '.env.development.local'), 'A=mode-local\n')
+
+    expect(envFileValuesFor(false, root, undefined)).toEqual({ A: 'mode-local', B: 'local', C: 'mode' })
+  })
+
+  it('gives a bot on Bun nothing, since Bun reads every file itself', () => {
+    writeFileSync(path.join(root, '.env.local'), 'A=local\n')
+
+    expect(envFileValuesFor(true, root, undefined)).toEqual({})
   })
 })
