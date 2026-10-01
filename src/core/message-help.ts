@@ -13,6 +13,7 @@ import { splitWords } from '@src/core/message-words.js'
 import { usageHeading } from '@src/common/errors.js'
 import { type TextParam, textRenderer } from '@src/common/meocord-text.js'
 import { handlerStages } from '@src/core/handler-pipeline.js'
+import { userWords } from '@src/util/user-text.util.js'
 
 /** The word the built-in help answers to when `messages.help` names no other. */
 const HELP_WORD = 'help'
@@ -200,7 +201,7 @@ export function renderMessageHelp(help: MessageHelp, render: Render = textRender
     case 'parent':
       return render(usageHeading(help.subcommands.map(entry => entry.usage).join('\n')))
     case 'unknown':
-      return text('unknown', { query: help.query, invocation: help.invocation })
+      return text('unknown', { query: userWords(help.query), invocation: help.invocation })
     case 'empty':
       return text(help.reason === 'server-only' ? 'emptyServerOnly' : 'emptyHere')
   }

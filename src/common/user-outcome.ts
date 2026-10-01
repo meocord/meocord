@@ -1,4 +1,4 @@
-import { BaseInteraction, type Interaction, Message } from 'discord.js'
+import { BaseInteraction, type Interaction } from 'discord.js'
 import {
   CommandNotFoundError,
   CooldownError,
@@ -17,11 +17,17 @@ import {
  */
 export function isUserOutcome(error: unknown, call: unknown): boolean {
   if (!(call instanceof BaseInteraction)) {
-    const answered = call instanceof Message && (error instanceof GuardDeniedError || error instanceof ValidationError)
-    return answered || error instanceof MessageUsageError || error instanceof CooldownError || error instanceof CooldownStoreError || error instanceof UserError
+    return (
+      error instanceof GuardDeniedError ||
+      error instanceof ValidationError ||
+      error instanceof MessageUsageError ||
+      error instanceof CooldownError ||
+      error instanceof CooldownStoreError ||
+      error instanceof UserError
+    )
   }
   const interaction = call as Interaction
-  if (interaction.isAutocomplete() || !interaction.isRepliable()) return false
+  if (!interaction.isAutocomplete() && !interaction.isRepliable()) return false
   return (
     error instanceof CommandNotFoundError ||
     error instanceof GuardDeniedError ||
