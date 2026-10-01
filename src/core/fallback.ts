@@ -141,6 +141,8 @@ interface PresentedReply {
   withoutFiles?: ReplyBody
   /** Warns that the reply goes without its files, and why. */
   warn?: (problem: string) => void
+  /** Why the presenter's view could not be drawn, when the plain text stands in for it: the call's fault to report. */
+  failure?: unknown
 }
 
 /** Sends a drawn reply with `send`, and again without its files should Discord refuse them as too large. */
@@ -161,8 +163,8 @@ const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ?
  * `text`, answering `error` for `message`: plain text, after the call's `emojis.warning` when `withEmoji`, unless the
  * app's presenter has `messageError`, which draws it instead: an embed, coloured as an interaction's view is, with that
  * emoji when the view has none of its own, and the view's files when Discord takes them. Should drawing or rendering
- * that view fail, `messageError` throwing or rejecting or its view being one an embed cannot hold, it is warned about,
- * and the plain text is sent, so the author is still told.
+ * that view fail, `messageError` throwing or rejecting or its view being one an embed cannot hold, the plain text
+ * stands in for it, so the author is still told, and the failure comes with it, for the caller to report once sent.
  */
 async function presentedReply(message: Message, error: unknown, text: string, withEmoji: boolean | undefined, logger: Logger): Promise<PresentedReply> {
   const presenter = presenterFor(message.client)
@@ -185,9 +187,7 @@ async function presentedReply(message: Message, error: unknown, text: string, wi
     if (files.length === 0) return { body: { embeds } }
     return { body: { embeds, files }, withoutFiles: { embeds: [renderEmbed(withoutFiles(view))] }, warn }
   } catch (failure) {
-    const name = presenter.constructor !== Object ? presenter.constructor.name : 'The presenter'
-    logger.warn(`${name}.messageError could not draw the reply to message ${quoteForLog(String(message.content))}; MeoCord's own is sent:`, failure)
-    return plain
+    return { ...plain, failure }
   }
 }
 
@@ -208,15 +208,16 @@ export async function replyWithUserError(
 }
 
 async function replyToMessage(message: Message, error: UserError, logger: Logger, withEmoji: boolean | undefined, answering: Answering): Promise<void> {
-  const reply = await answering.draw('the reply', `message ${quoteForLog(String(message.content))}`, () =>
-    presentedReply(message, error, error.message, withEmoji, logger),
-  )
+  const call = `message ${quoteForLog(String(message.content))}`
+  const reply = await answering.draw('the reply', call, () => presentedReply(message, error, error.message, withEmoji, logger))
   if (reply === undefined) return
   try {
     await sendReply(reply, body => message.reply({ ...body, allowedMentions: { repliedUser: false } }))
   } catch (replyError) {
     logFailedSend(logger, 'reply to the message', replyError)
   }
+  // The plain text answered for a presenter that failed; the failure is still the call's fault
+  if (reply.failure !== undefined) answering.fail('the reply', call, reply.failure)
 }
 
 /** Whether the call is a message command: a `@MessageHandler` with a pattern, not a listener for every message. */
@@ -261,6 +262,7 @@ async function tellPrivately(
     if (errorCode(failure) === CANNOT_MESSAGE_USER) logger.debug(`Could not tell ${message.author.id} about ${call}: they take no direct messages`)
     else logFailedSend(logger, 'send a direct message about a command', failure)
   }
+  if (reply.failure !== undefined) answering.fail('the direct message', call, reply.failure)
 }
 
 /**
@@ -296,10 +298,17 @@ async function answerUsage(
   const message = context.getMessage()
   if (!message) return
   const seconds = options?.deleteUsageRepliesAfter ?? DEFAULT_USAGE_REPLY_SECONDS
-  const body = await answering.draw('the usage reply', describeCall(context), () =>
+  const call = describeCall(context)
+  const body = await answering.draw('the usage reply', call, () =>
     presentedReply(message, error, errorText(error, translatorOfClient(message.client), messageLocale(message)), options?.replyEmoji, logger),
   )
   if (body === undefined) return
+  await sendUsage(message, body, seconds, logger)
+  if (body.failure !== undefined) answering.fail('the usage reply', call, body.failure)
+}
+
+/** Sends a usage reply, and deletes it after `seconds` unless `0`; a reply or deletion that fails is logged and left. */
+async function sendUsage(message: Message, body: PresentedReply, seconds: number, logger: Logger): Promise<void> {
   try {
     const reply = await sendReply(body, drawn => message.reply({ ...drawn, allowedMentions: { repliedUser: false, parse: [] } }))
     if (seconds > 0) {

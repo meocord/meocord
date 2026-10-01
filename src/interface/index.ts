@@ -449,7 +449,7 @@ export interface ResponsePresenter {
    * The view a message command's error reply is drawn as: its usage, a guard's or validation's reason, a `UserError`'s
    * message, and the direct messages `dmOnError` and `dmOnCooldown` send. Without this method they are plain text. The
    * view is sent as an embed, with its files. Should it throw or reject, or return a view MeoCord cannot render, the
-   * reply is sent as plain text, with a warning naming the presenter.
+   * reply is sent as plain text, and the failure is then reported as the call's fault, as for `error`.
    *
    * @param context - The message being answered, its locale and theme.
    * @param error - The words the fallback chose, the error, and its tone.
