@@ -9,7 +9,8 @@ import { type OnReady, type OnShutdown, type Provider } from '@src/interface/ind
 const { logged } = vi.hoisted(() => ({ logged: { error: [] as unknown[][] } }))
 
 // Logger is constructed with `new`, so the implementation has to be a class.
-vi.mock('@src/common/logger.js', () => ({
+vi.mock('@src/common/logger.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
   Logger: class {
     log = vi.fn()
     debug = vi.fn()

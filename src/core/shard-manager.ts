@@ -1,6 +1,7 @@
 import { fetchRecommendedShardCount, REST, Routes, type Shard, ShardingManager, type ShardingManagerOptions } from 'discord.js'
 import { type ChildProcess } from 'node:child_process'
 import { Logger } from '@src/common/index.js'
+import { hideInLogs } from '@src/common/logger.js'
 import { MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { answerCooldown } from '@src/common/sharded-cooldown-store.js'
 import { registerCommands, type RegistrationRest } from '@src/core/command-registration.js'
@@ -65,6 +66,8 @@ export class ShardManager implements MeoCordApplication {
   private readonly stopRequest: ReturnType<typeof stopRequests>
 
   constructor(private readonly options: ShardManagerOptions) {
+    // The manager holds the credential for its shards and logs their failures, without an app of its own to register it
+    hideInLogs(options.token)
     this.exit = options.exit ?? (code => process.exit(code))
     this.sleep = options.sleep ?? sleep
     this.stopRequest = stopRequests(options.now)

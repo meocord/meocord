@@ -5,11 +5,13 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
 }))
 
 import { stripVTControlCharacters } from 'node:util'
+import { ChatInputCommandInteraction, Client, GatewayIntentBits } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { resetLogLevel } from '@src/common/log-level.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { BUNDLE_ENTRY_KEY } from '@src/util/bundle-entry.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
+import { createMockInteraction, createMockMessage } from '@src/testing/mock-interaction.js'
 
 describe('Logger', () => {
   let logSpy: MockInstance<typeof console.log>
@@ -74,6 +76,64 @@ describe('Logger', () => {
 
   it('works without a context', () => {
     expect(() => new Logger().log('no context')).not.toThrow()
+  })
+})
+
+describe('what Logger prints of an object', () => {
+  const HIDDEN = 'a-non-enumerable-value-only-for-this-spec'
+  const printed = (spies: MockInstance[]) =>
+    spies.flatMap(spy => spy.mock.calls.flat()).map(part => stripVTControlCharacters(String(part))).join('\n')
+
+  beforeEach(() => {
+    vi.stubEnv('MEOCORD_LOG_LEVEL', 'debug')
+    resetLogLevel()
+  })
+
+  it('never prints what discord.js keeps non-enumerable, at any level', () => {
+    const spies = (['log', 'warn', 'error', 'debug'] as const).map(method =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
+    )
+    // A ready client, as the one a handler's interaction holds
+    const client = new Client<true>({ intents: [GatewayIntentBits.Guilds] })
+    client.token = HIDDEN
+    // What a handler logs holds the client, as every interaction, message and guild does
+    const held = [
+      client,
+      { client },
+      createMockInteraction(ChatInputCommandInteraction, { client }),
+      createMockMessage({ content: 'hi', client }),
+    ]
+    const logger = new Logger('Probe')
+    for (const level of ['log', 'info', 'warn', 'error', 'debug', 'verbose'] as const)
+      for (const value of held) logger[level]('Seen:', value)
+
+    expect(spies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(24)
+    expect(printed(spies)).not.toContain(HIDDEN)
+  })
+
+  it("prints an error in full: its stack, its own properties, its cause and an AggregateError's errors", () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const cause = Object.assign(new Error('the store refused'), { code: 'ECONNREFUSED' })
+    new Logger().error('Failed:', new Error('Could not save', { cause }))
+    new Logger().error(new AggregateError([new Error('first failure'), new Error('second failure')], 'Both failed'))
+
+    const out = printed([errorSpy])
+    expect(out).toContain('Error: Could not save')
+    expect(out).toMatch(/\n\s+at /)
+    expect(out).toContain('the store refused')
+    expect(out).toContain('ECONNREFUSED')
+    expect(out).toContain('first failure')
+    expect(out).toContain('second failure')
+  })
+
+  it('prints data four levels below the object it is given', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    new Logger().log({ guild: { settings: { roles: { staff: { id: 'level five' } } } } })
+    new Logger().log({ one: { two: { three: { four: { five: { six: 'level six' } } } } } })
+
+    const out = printed([logSpy])
+    expect(out).toContain('level five')
+    expect(out).not.toContain('level six')
   })
 })
 
