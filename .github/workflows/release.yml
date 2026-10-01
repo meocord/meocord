@@ -387,10 +387,12 @@ jobs:
     environment: e2e
     permissions:
       contents: read
-    # One run at a time across workflows, since every run logs in as the same bot; none is cancelled
+    # One run at a time across workflows, since every run logs in as the same bot; none is cancelled. Pending runs
+    # queue in the order they arrive, rather than each new one replacing the one already waiting.
     concurrency:
       group: discord-e2e
       cancel-in-progress: false
+      queue: max
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
