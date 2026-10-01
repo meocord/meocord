@@ -175,8 +175,12 @@ export class MeoCordApp implements MeoCordApplication {
   /** The resolved instances whose hooks ran at ready, so shutdown calls the same ones; `undefined` before ready. */
   private lifecycleEntries?: LifecycleEntry[]
 
-  /** Closes the app once, however many stops and signals ask: whether the client was destroyed cleanly. */
-  private readonly close = (): Promise<boolean> => (this.stopped ??= this.closeClient())
+  /**
+   * Closes the app once, however many stops and signals ask: whether the client was destroyed cleanly. The app stays
+   * among the running ones until the close settles, so a signal or a manager's request meanwhile waits for it.
+   */
+  private readonly close = (): Promise<boolean> =>
+    (this.stopped ??= this.closeClient().finally(() => runningApps.delete(this.close)))
 
   /** The stop under way or done, which a later stop waits for. */
   private stopped?: Promise<boolean>
@@ -655,7 +659,6 @@ export class MeoCordApp implements MeoCordApplication {
    */
   private async closeClient(): Promise<boolean> {
     this.closing = true
-    runningApps.delete(this.close)
     releaseAmbientAppTheme(this.container)
     this.logger.log('Shutting down bot...')
 
