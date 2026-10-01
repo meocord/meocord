@@ -1,16 +1,24 @@
-import { MentionableSelectMenuInteraction } from 'discord.js'
-import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { Collection, MentionableSelectMenuInteraction, Role } from 'discord.js'
+import { createMockInteraction, createMockUser, getResponse, MeoCordTestingModule } from 'meocord/testing'
 import { {{className}}MentionableSelectMenuController } from './{{kebabCaseName}}.mentionable-select-menu.controller.js'
 
 describe('{{className}}MentionableSelectMenuController', () => {
   const module = MeoCordTestingModule.create({ controllers: [{{className}}MentionableSelectMenuController] }).compile()
 
-  it('answers with what was selected', async () => {
-    const interaction = createMockInteraction(MentionableSelectMenuInteraction, { customId: '{{commandName}}' })
+  it('answers with how many users and roles were selected', async () => {
+    const user = createMockUser({ username: 'ada' })
+    const role = createMockInteraction(Role, { id: '1', name: 'Staff' })
+    const interaction = createMockInteraction(MentionableSelectMenuInteraction, {
+      customId: '{{commandName}}',
+      users: new Collection([[user.id, user]]),
+      roles: new Collection([[role.id, role]]),
+    })
 
     await module.invoke({{className}}MentionableSelectMenuController, 'handle{{className}}', interaction)
 
     // A component's answer edits the message it is on
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['update'])
+    const [answer] = getResponse(interaction).calls
+    expect(answer?.method).toBe('update')
+    expect(answer?.payload).toMatchObject({ content: 'Selected 1 user(s) and 1 role(s).' })
   })
 })
