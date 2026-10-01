@@ -163,7 +163,8 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
       filename: { js: '[name].js', image: '[name][ext]', svg: '[name][ext]', font: '[name][ext]', media: '[name][ext]' },
       // What `import image from './x.png'` evaluates to at runtime. A bot passes that string
       // to fs or to a Discord attachment, so it has to be a real path on disk, which Rsbuild's
-      // web-oriented default is not.
+      // web-oriented default is not. The pre-entry replaces it at runtime with the bundle's own
+      // directory, so a dist copied elsewhere finds its assets; this is what is left without one.
       assetPrefix,
       // Rsbuild inlines assets under 4 KB as base64 data URIs, so the same import would give a
       // path for a large file and a `data:` string for a small one. A bot reads its assets

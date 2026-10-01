@@ -16,6 +16,10 @@ globalThis[Symbol.for('meocord.bundleEntry')] = entry
 const started = process.argv[1]
 const bundle = entry.endsWith('load-config.pre-entry.js') ? started && existsSync(started) && realpathSync(started) : entry
 
+// Assets are beside the bundle too, wherever dist was copied to: an asset import is this directory and its file name,
+// rather than the directory the build ran in, which the bundle would otherwise carry
+if (bundle) __webpack_public_path__ = `${path.dirname(bundle).replace(/\\/g, '/')}/`
+
 // Beside the bundle, wherever the bot was started from, as the runtime loader reads it
 const compiledPath = bundle
   ? path.join(path.dirname(bundle), 'meocord.config.mjs')
