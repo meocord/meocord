@@ -9,8 +9,7 @@ export const BUNDLE_ENTRY_KEY = Symbol.for('meocord.bundleEntry')
  */
 export function bundleEntry(): string | undefined {
   const recorded = (globalThis as Record<symbol, unknown>)[BUNDLE_ENTRY_KEY]
-  // A development build fixes import.meta.url at build time, so there it names the pre-entry's source
-  if (typeof recorded === 'string' && !recorded.endsWith('load-config.pre-entry.js')) return recorded
+  if (typeof recorded === 'string') return recorded
   const started = process.argv[1]
   return started && existsSync(started) ? realpathSync(started) : undefined
 }

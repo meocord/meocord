@@ -119,6 +119,17 @@ describe('prepareModifiedTsConfig', () => {
     expect(written.compilerOptions.paths['@lib/*']).toEqual([path.resolve(process.cwd(), 'src', 'lib/*')])
   })
 
+  // As documented: a baseUrl only an extended file sets isn't read, so this file's own paths stay on the project
+  it('resolves path aliases from the project when baseUrl comes only through extends', () => {
+    mockTsConfig({ extends: './tsconfig.base.json', compilerOptions: { paths: { '@lib/*': ['lib/*'] } } })
+
+    prepareModifiedTsConfig()
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
+    expect(written.compilerOptions.paths['@lib/*']).toEqual([path.resolve(process.cwd(), 'lib/*')])
+    expect(mockReadFileSync).not.toHaveBeenCalledWith(path.resolve(process.cwd(), 'tsconfig.base.json'), expect.anything())
+  })
+
   // The copy lives in the temp directory, where a relative extends would name a file that is not there
   it('makes a relative extends absolute, from the project', () => {
     mockTsConfig({ extends: './tsconfig.base.json', compilerOptions: {} })
