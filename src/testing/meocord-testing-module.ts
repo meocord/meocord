@@ -428,8 +428,10 @@ export class TestingModule {
    * Calling the controller method directly runs its guards but no interceptors, validation or
    * filters; `invoke` is the way to test everything dispatch runs around a handler.
    *
-   * `invoke` tests one handler you name, and an error no filter handles rejects the call. To test what
-   * the bot does with an input, which handler it reaches and what the user is sent, use
+   * `invoke` tests one handler you name, and an error no filter handles rejects the call. That
+   * includes the errors the bot answers the user with: a guard's `GuardDeniedError`, a `UserError` and
+   * a `CooldownError` reject `invoke`, where `dispatch` resolves `{ ran, error }` and sends the answer.
+   * To test what the bot does with an input, which handler it reaches and what the user is sent, use
    * {@link dispatch}.
    *
    * @param controller - A controller passed to `MeoCordTestingModule.create`.
@@ -455,10 +457,14 @@ export class TestingModule {
    * const module = MeoCordTestingModule.create({ controllers: [ModerationController] }).compile()
    * const interaction = createMockInteraction(ChatInputCommandInteraction)
    *
+   * // A guard that returns false
    * const { ran } = await module.invoke(ModerationController, 'ban', interaction)
    *
    * expect(ran).toBe(false)
    * expect(interaction.reply).not.toHaveBeenCalled()
+   *
+   * // A guard that throws GuardDeniedError, or a handler that throws UserError
+   * await expect(module.invoke(ModerationController, 'kick', interaction)).rejects.toThrow(GuardDeniedError)
    * ```
    */
   async invoke<C extends new (...args: any[]) => unknown, M extends HandlerName<C>>(
