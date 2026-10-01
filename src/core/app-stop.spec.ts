@@ -164,4 +164,28 @@ describe('app.stop()', () => {
     expect(Client.prototype.login).not.toHaveBeenCalled()
     expect(destroy).toHaveBeenCalledTimes(1)
   })
+
+  it('stops rotating the activities, so no timer of the app is left', async () => {
+    const { clients } = login('at once')
+    @MeoCord({ controllers: [Ping], activities: [{ name: 'with yarn' }], clientOptions: { intents: [] } })
+    class Rotating {}
+    const app = MeoCordFactory.create(Rotating)
+    await app.start()
+    vi.useFakeTimers()
+    try {
+      const setActivity = vi.fn()
+      Object.defineProperty(clients[0], 'user', { value: { setActivity }, configurable: true })
+      await ready(clients[0])
+      vi.advanceTimersByTime(10_000)
+      const rotated = setActivity.mock.calls.length
+
+      await app.stop()
+      vi.advanceTimersByTime(60_000)
+
+      expect(rotated).toBeGreaterThan(0)
+      expect(setActivity).toHaveBeenCalledTimes(rotated)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
