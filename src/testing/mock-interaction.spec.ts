@@ -851,11 +851,13 @@ describe('createChatInputOptions', () => {
       expect(option.member).toBeInstanceOf(GuildMember)
     })
 
-    it('carries no member in its data in a direct message', () => {
+    it('carries no member in its data in a direct message, even one read before', () => {
       const options = createChatInputOptions({ target: createMockUser() })
+      expect(options.getMember('target')).toBeInstanceOf(GuildMember)
+
       createMockInteraction(ChatInputCommandInteraction, { options })
 
-      expect(options.data[0].member).toBeUndefined()
+      expect([options.data[0].member, options.getMember('target')]).toEqual([undefined, null])
     })
 
     it('resolves getUser to the user of a member given', () => {
