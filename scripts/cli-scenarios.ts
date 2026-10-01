@@ -756,6 +756,21 @@ const scenarios: Scenario[] = [
     ],
     expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN], never: ['MeoCord config not found'] },
   },
+  // One failure, one report: the reason, with what to do about it
+  ...([
+    ['a built bot', ['node', 'dist/main.js']],
+    ['start --prod', undefined],
+  ] as const).map(([what, command]): Scenario => ({
+    name: `${what} reports a compiled config that fails to load once`,
+    tier: 'fast',
+    // Listed so the config the scenario breaks is put back afterwards
+    files: { 'dist/meocord.config.mjs': null },
+    before: [['build', '--prod']],
+    thenEdits: { 'dist/meocord.config.mjs': () => 'export default {{{\n' },
+    env: { DISCORD_TOKEN: 'not-a-real-token' },
+    ...(command ? { command: [...command] } : { argv: ['start', '--prod'] }),
+    expect: { code: 1, says: ['failed to load', 'Fix meocord.config.ts'], counts: { 'Unexpected token': 1 } },
+  })),
   {
     name: 'start --prod without a token says where the token comes from',
     tier: 'fast',
