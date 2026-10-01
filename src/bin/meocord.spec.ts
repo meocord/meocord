@@ -23,9 +23,9 @@ vi.mock('node:fs', async importOriginal => {
   return { ...actual, default: { ...actual }, existsSync: vi.fn().mockReturnValue(true), watch: vi.fn(actual.watch) }
 })
 
-vi.mock('@src/util/meocord-source-config.util.js', async importOriginal => {
-  const actual = await importOriginal<typeof import('@src/util/meocord-source-config.util.js')>()
-  return { ...actual, loadMeoCordCliConfig: vi.fn(actual.loadMeoCordCliConfig) }
+vi.mock('@src/util/meocord-config-loader.util.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('@src/util/meocord-config-loader.util.js')>()
+  return { ...actual, loadMeoCordConfig: vi.fn(actual.loadMeoCordConfig) }
 })
 
 import { spawn } from 'node:child_process'
@@ -36,7 +36,7 @@ import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { namePathProblem, nextStepFor } from '@src/bin/generator.js'
 import { ControllerType } from '@src/enum/controller.enum.js'
 import { RUNTIME_OVERRIDE_ENV } from '@src/util/runtime.util.js'
-import { loadMeoCordCliConfig } from '@src/util/meocord-source-config.util.js'
+import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 
 /** Stands in for the spawned application; `.on` is chained straight off `spawn`. */
 const createChild = () => ({
@@ -130,7 +130,7 @@ describe('spawning the application', () => {
 
     it('passes node no source-map flag when the config sets sourceMappedStacks: false', async () => {
       process.env[RUNTIME_OVERRIDE_ENV] = '/usr/bin/node'
-      vi.mocked(loadMeoCordCliConfig).mockReturnValueOnce({ discordToken: 't', sourceMappedStacks: false })
+      vi.mocked(loadMeoCordConfig).mockReturnValueOnce({ discordToken: 't', sourceMappedStacks: false })
 
       await new MeoCordCLI().startProd()
 
@@ -582,7 +582,7 @@ describe('spawning the application', () => {
 
       function restartOnce(shutdownTimeout?: number) {
         vi.useFakeTimers()
-        vi.mocked(loadMeoCordCliConfig).mockReturnValue(shutdownTimeout === undefined ? undefined : ({ shutdownTimeout } as never))
+        vi.mocked(loadMeoCordConfig).mockReturnValue(shutdownTimeout === undefined ? undefined : ({ shutdownTimeout } as never))
         const first = createChild()
         spawnMock.mockReturnValueOnce(first as never)
         const cli = new MeoCordCLI() as unknown as { restartApp: () => void; logger: { warn: ReturnType<typeof vi.fn> } }

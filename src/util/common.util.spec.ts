@@ -5,7 +5,6 @@ const {
   mockExistsSync,
   mockReadFileSync,
   mockWriteFileSync,
-  mockLoadMeoCordConfig,
   mockReadSourceConfig,
   mockWait,
   mockLoadCompiledConfig,
@@ -15,7 +14,6 @@ const {
   mockExistsSync: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockWriteFileSync: vi.fn(),
-  mockLoadMeoCordConfig: vi.fn(),
   mockWait: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockLoadCompiledConfig: vi.fn(),
   mockCompiledProblem: vi.fn(),
@@ -40,7 +38,6 @@ vi.mock('chalk', () => ({
 }))
 
 vi.mock('@src/util/meocord-source-config.util.js', () => ({
-  loadMeoCordCliConfig: mockLoadMeoCordConfig,
   readMeoCordSourceConfig: mockReadSourceConfig,
 }))
 
@@ -146,6 +143,19 @@ describe('validateRunConfig', () => {
     expect(mockReadSourceConfig).not.toHaveBeenCalled()
   })
 
+  // The token check that follows reads what this returns, so it checks the config the bot runs with
+  it('returns the compiled config the bot will run with, and the source only when none was compiled', async () => {
+    mockLoadCompiledConfig.mockReturnValue({ discordToken: 'compiled' })
+    expect(await validateRunConfig()).toEqual({ discordToken: 'compiled' })
+    expect(mockReadSourceConfig).not.toHaveBeenCalled()
+
+    mockLoadCompiledConfig.mockReturnValue(undefined)
+    mockCompiledProblem.mockReturnValue({ path: 'dist/meocord.config.mjs', missing: true })
+    mockExistsSync.mockReturnValue(true)
+    mockReadSourceConfig.mockReturnValue({ config: { discordToken: 'source' } })
+    expect(await validateRunConfig()).toEqual({ discordToken: 'source' })
+  })
+
   it('says the config is missing, not that it exports nothing, when there is none at all', async () => {
     mockLoadCompiledConfig.mockReturnValue(undefined)
     mockExistsSync.mockReturnValue(false)
@@ -178,7 +188,6 @@ describe('validateRunConfig', () => {
 describe('compileAndValidateConfig', () => {
   beforeEach(() => {
     mockExistsSync.mockReset()
-    mockLoadMeoCordConfig.mockReset()
     mockReadSourceConfig.mockReset()
     mockWait.mockClear()
   })
@@ -276,18 +285,16 @@ describe('compileAndValidateConfig', () => {
 // Connecting to the gateway is the point at which a token is actually required.
 describe('validateDiscordToken', () => {
   beforeEach(() => {
-    mockLoadMeoCordConfig.mockReset()
     mockWait.mockClear()
   })
 
   it('calls process.exit(1) when the token is missing', async () => {
-    mockLoadMeoCordConfig.mockReturnValue({ appName: 'TestApp' })
     mockWait.mockResolvedValue(undefined)
 
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await validateDiscordToken()
+    await validateDiscordToken({ discordToken: '' })
 
     expect(exitSpy).toHaveBeenCalledWith(1)
 
@@ -296,12 +303,10 @@ describe('validateDiscordToken', () => {
   })
 
   it('does not call process.exit when a token is configured', async () => {
-    mockLoadMeoCordConfig.mockReturnValue({ discordToken: 'valid-token' })
-
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await validateDiscordToken()
+    await validateDiscordToken({ discordToken: 'valid-token' })
 
     expect(exitSpy).not.toHaveBeenCalled()
 

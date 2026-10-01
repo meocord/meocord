@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from 'fs'
 import { createJiti } from 'jiti'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { parseJsonc } from '@src/util/json.util.js'
-import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 
 /**
  * Loads `meocord.config.ts` from source on every call, so a build always uses the current config
@@ -54,12 +53,4 @@ export function readMeoCordSourceConfig(): { config: MeoCordConfig | undefined }
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) }
   }
-}
-
-/**
- * The configuration as the CLI sees it: the compiled config when a build has produced one, and the
- * source otherwise -- `meocord start` checks the token before anything has been built.
- */
-export function loadMeoCordCliConfig(): MeoCordConfig | undefined {
-  return loadMeoCordConfig() ?? loadMeoCordSourceConfig()
 }
