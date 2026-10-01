@@ -5,7 +5,7 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
 }))
 
 import { stripVTControlCharacters } from 'node:util'
-import chalk from 'chalk'
+import chalk, { chalkStderr } from 'chalk'
 import { ChatInputCommandInteraction, Client, GatewayIntentBits } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { resetLogLevel } from '@src/common/log-level.js'
@@ -352,14 +352,17 @@ describe('Logger levels', () => {
 
 describe("Logger's colours", () => {
   let level: typeof chalk.level
+  let stderrLevel: typeof chalkStderr.level
   beforeEach(() => {
     level = chalk.level
+    stderrLevel = chalkStderr.level
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.stubEnv('MEOCORD_LOG_LEVEL', 'log')
     resetLogLevel()
   })
   afterEach(() => {
     chalk.level = level
+    chalkStderr.level = stderrLevel
     vi.unstubAllEnvs()
     vi.restoreAllMocks()
     resetLogLevel()
@@ -380,5 +383,28 @@ describe("Logger's colours", () => {
 
     expect(printed()).not.toBe(stripVTControlCharacters(printed()))
     expect(vi.mocked(console.log).mock.calls[0].at(-1)).not.toBe(stripVTControlCharacters(String(vi.mocked(console.log).mock.calls[0].at(-1))))
+  })
+
+  // `2>>file` from a terminal: stdout shows colour and stderr, a file, takes none
+  it.each([
+    ['log', 'log', true],
+    ['warn', 'warn', false],
+    ['error', 'error', false],
+  ] as const)('colours a %s line by the stream console.%s writes to', (method, consoleMethod, coloured) => {
+    chalk.level = 1
+    chalkStderr.level = 0
+    const written = vi.spyOn(console, consoleMethod).mockImplementation(() => {})
+
+    new Logger('Streams')[method]('text', { value: 1 })
+
+    const line = written.mock.calls[0].map(String).join(' ')
+    expect(line !== stripVTControlCharacters(line)).toBe(coloured)
+  })
+
+  it('prints a small object on one line, as console.log does', () => {
+    chalk.level = 0
+    new Logger().log({ id: 1, name: 'ana' })
+
+    expect(vi.mocked(console.log).mock.calls[0].at(-1)).toBe("{ id: 1, name: 'ana' }")
   })
 })

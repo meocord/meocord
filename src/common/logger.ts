@@ -4,7 +4,7 @@ import utc from 'dayjs/plugin/utc.js'
 import timezone from 'dayjs/plugin/timezone.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
-import chalk from 'chalk'
+import chalk, { chalkStderr, type ChalkInstance } from 'chalk'
 import { LOG_LEVEL_ENV, LOG_LEVEL_RANK, logThreshold, takeRejectedLogLevel } from '@src/common/log-level.js'
 
 dayjs.extend(utc)
@@ -15,6 +15,23 @@ dayjs.extend(timezone)
  * a discord.js structure, which reaches its client and every cache, stops at a few hundred lines.
  */
 const OBJECT_DEPTH = 4
+
+/** The colour of each tag, and of a string printed under it. */
+const TAG_COLOURS = {
+  LOG: 'green',
+  INFO: 'cyan',
+  VERBOSE: 'gray',
+  WARN: 'yellow',
+  ERROR: 'red',
+  DEBUG: 'magenta',
+} as const satisfies Record<string, keyof ChalkInstance>
+const tagColours: Partial<Record<string, (typeof TAG_COLOURS)[keyof typeof TAG_COLOURS]>> = TAG_COLOURS
+
+/**
+ * The chalk of the stream a level prints to, whose colour support decides the line's: `console.warn` and
+ * `console.error` write to stderr, the others to stdout, and either may be a terminal while the other is a file.
+ */
+const chalkFor = (logLevel: string): ChalkInstance => (logLevel === 'warn' || logLevel === 'error' ? chalkStderr : chalk)
 
 /** What a value registered with {@link hideInLogs} prints as. */
 export const REDACTED = '[redacted]'
@@ -61,8 +78,9 @@ const redact = (text: string): string => {
  * prints it, an object four levels deep: its non-enumerable properties stay unprinted, and an error prints its stack,
  * its own properties and its `cause`. The bot's credentials print as
  * `[redacted]` wherever they appear in a line. A line prints when its level is at or above the threshold: `debug`,
- * then `log` (with `info` and `verbose`, tagged `[INFO]` and `[VERBOSE]`), `warn`, `error`. Colour follows chalk:
- * none where the output is no terminal, such as a file or a log collector, unless `FORCE_COLOR` asks for it.
+ * then `log` (with `info` and `verbose`, tagged `[INFO]` and `[VERBOSE]`), `warn`, `error`. Warnings and errors print
+ * to stderr and the rest to stdout, each in colour only where its stream is a terminal, so none goes to a file or a log
+ * collector, unless `FORCE_COLOR` asks for it.
  *
  * @example
  * ```ts
@@ -80,15 +98,6 @@ const redact = (text: string): string => {
  * @see {@link MeoCordConfig}
  */
 export class Logger {
-  private readonly colorMap: Record<string, (msg: string) => string> = {
-    LOG: chalk.green,
-    INFO: chalk.cyan,
-    VERBOSE: chalk.gray,
-    WARN: chalk.yellow,
-    ERROR: chalk.red,
-    DEBUG: chalk.magenta,
-  }
-
   /** @param context - What the lines are about, shown on each, such as a class's name. */
   constructor(private context?: string) {}
 
@@ -137,12 +146,12 @@ export class Logger {
     if (Logger.shows('log')) this.logWithContext('log', args, 'VERBOSE')
   }
 
-  private formatMessage(message: unknown, logType: string): string {
-    if (typeof message === 'string') return (this.colorMap[logType] || (msg => msg))(message)
+  private formatMessage(message: unknown, paint: ChalkInstance, colour: (text: string) => string): string {
+    if (typeof message === 'string') return colour(message)
     // Anything else as console.log inspects it, so no value, a Symbol included, makes the log call throw. Without
     // non-enumerable properties, which discord.js uses to keep its internals out of logs.
-    // In colour only where chalk finds a terminal that shows it, or FORCE_COLOR asks for it, as the text around it is
-    return inspect(message, { depth: OBJECT_DEPTH, colors: chalk.level > 0, compact: false })
+    // In colour only where the line's stream shows it, or FORCE_COLOR asks for it, as the text around it is
+    return inspect(message, { depth: OBJECT_DEPTH, colors: paint.level > 0 })
   }
 
   private logWithContext(logLevel: string, messages: any[], tag = logLevel.toUpperCase()): void {
@@ -151,14 +160,15 @@ export class Logger {
     // The built bot's own config only: elsewhere dist holds a previous build's, and loading it runs its dotenv import
     const config = isBuiltApplication() ? loadMeoCordConfig() : undefined
     hideInLogs(config?.discordToken)
-    const logType = tag
-    const applyColor = this.colorMap[logType] || (msg => msg)
-    const formattedMessages = messages.map(message => this.formatMessage(message, logType))
+    const paint = chalkFor(logLevel)
+    const colourName = tagColours[tag]
+    const applyColor = (text: string) => (colourName ? paint[colourName](text) : text)
+    const formattedMessages = messages.map(message => this.formatMessage(message, paint, applyColor))
 
-    const coloredAppName = config?.appName ? applyColor(chalk.bold(`[${config.appName}]`)) : undefined
-    const timestamp = chalk.bold(dayjs().format('dddd, MMMM D, YYYY HH:mm:ss [UTC]Z'))
-    const coloredLogLevel = applyColor(chalk.bold(`[${logType}]`))
-    const coloredContext = this.context ? chalk.yellow.bold(`[${this.context}]`) : ''
+    const coloredAppName = config?.appName ? applyColor(paint.bold(`[${config.appName}]`)) : undefined
+    const timestamp = paint.bold(dayjs().format('dddd, MMMM D, YYYY HH:mm:ss [UTC]Z'))
+    const coloredLogLevel = applyColor(paint.bold(`[${tag}]`))
+    const coloredContext = this.context ? paint.yellow.bold(`[${this.context}]`) : ''
 
     const logTexts = [coloredAppName, timestamp, coloredLogLevel, coloredContext, ...formattedMessages].filter(
       (log): log is string => !!log,
