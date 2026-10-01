@@ -51,7 +51,8 @@ export function compiledConfigMessage(): string {
     // One full stop, whether or not the reason ends with one
     const reason = (problem.error instanceof Error ? problem.error.message : String(problem.error)).replace(/\.$/, '')
     const missing = missingPackage(problem.error)
-    const fix = missing ? `Install ${missing} in the project` : 'Fix meocord.config.ts'
+    const neededBy = missing?.importer ? `, which ${missing.importer} imports,` : ''
+    const fix = missing ? `Install ${missing.name}${neededBy} in the project` : 'Fix meocord.config.ts'
     return `MeoCord config at ${problem.path} failed to load: ${reason}. ${fix}, then run \`meocord build\`.`
   }
   const where = problem?.path ?? 'meocord.config.mjs'
@@ -60,16 +61,23 @@ export function compiledConfigMessage(): string {
 
 /**
  * The package a module-not-found error names, when it is a package rather than a file: `dotenv` for `dotenv/config`,
- * `@scope/name` for `@scope/name/sub`. Undefined for any other error, and for a relative or absolute path.
+ * `@scope/name` for `@scope/name/sub`, with the installed package that imports it, if one does. Undefined for any other
+ * error, for a relative or absolute path, and for a `#` subpath import, which the project maps itself.
  */
-function missingPackage(error: unknown): string | undefined {
+function missingPackage(error: unknown): { name: string; importer?: string } | undefined {
   const code = (error as { code?: unknown } | null)?.code
   if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return undefined
-  const specifier = /Cannot find (?:package|module) '([^']+)'/.exec((error as Error).message)?.[1]
-  if (!specifier || /^(?:\.|\/|[A-Za-z]:|file:)/.test(specifier)) return undefined
-  const parts = specifier.split('/')
-  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
+  const message = (error as Error).message
+  const specifier = /Cannot find (?:package|module) '([^']+)'/.exec(message)?.[1]
+  if (!specifier || /^(?:\.|\/|#|[A-Za-z]:|file:)/.test(specifier)) return undefined
+  // Node and Bun name the importer as "imported from <file>" for an ES module, first in the require stack for CommonJS
+  const importer = /imported from (.+)$/m.exec(message)?.[1] ?? /Require stack:\n- (.+)$/m.exec(message)?.[1]
+  const installed = importer?.split(/[\\/]node_modules[\\/]/).slice(1).pop()
+  return { name: packageOf(specifier), importer: installed && packageOf(installed.replaceAll('\\', '/')) }
 }
+
+/** The package a specifier or a path inside node_modules starts with: `@scope/name` or `name`. */
+const packageOf = (specifier: string): string => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/')
 
 /**
  * `require` of an ES module, which Node supports cleanly from 22.13 and bun always has.

@@ -109,6 +109,33 @@ describe('loadMeoCordConfig', () => {
     )
   })
 
+  // Node and Bun both name the module that imports a missing package, here one installed in the project
+  it('names the installed package that imports a missing one', async () => {
+    const needs = path.join(project, 'node_modules', '@meocord-probe', 'needs')
+    mkdirSync(needs, { recursive: true })
+    writeFileSync(path.join(needs, 'package.json'), JSON.stringify({ name: '@meocord-probe/needs', type: 'module', main: 'index.js' }))
+    writeFileSync(path.join(needs, 'index.js'), `import 'meocord-missing-dependency'\nexport default 1\n`)
+    writeCompiledConfig(`import '@meocord-probe/needs'\nexport default {}\n`)
+    const failed = await freshLoader()
+
+    expect(failed.loadMeoCordConfig()).toBeUndefined()
+    expect(failed.compiledConfigMessage()).toMatch(
+      /\. Install meocord-missing-dependency, which @meocord-probe\/needs imports, in the project, then run `meocord build`\.$/,
+    )
+  })
+
+  // A "#" specifier is the project's own import map, which Bun reports as a package it cannot find
+  it('keeps the fix-the-config wording for a subpath import, which is no package to install', async () => {
+    writeCompiledConfig(
+      `const error = new Error("Cannot find package '#internal' imported from " + import.meta.filename)\n` +
+        `error.code = 'ERR_MODULE_NOT_FOUND'\nthrow error\n`,
+    )
+    const failed = await freshLoader()
+
+    expect(failed.loadMeoCordConfig()).toBeUndefined()
+    expect(failed.compiledConfigMessage()).toMatch(/Fix meocord\.config\.ts, then run `meocord build`\.$/)
+  })
+
   it('keeps the fix-the-config wording for a file of its own the compiled config cannot find', async () => {
     writeCompiledConfig(`import './missing-local.mjs'\nexport default {}\n`)
     const failed = await freshLoader()
