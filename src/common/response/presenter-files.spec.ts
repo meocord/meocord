@@ -405,22 +405,33 @@ describe('a messageError that fails', () => {
     const module = MeoCordTestingModule.create({ app: App, controllers: [DiceController] }).compile()
     const usage = createMockMessage({ content: '!roll many' })
     const broken = createMockMessage({ content: '!broken' })
-    await module.dispatch(usage)
+    await module.dispatch(usage).catch(() => undefined)
     await module.dispatch(broken).catch(() => undefined)
     return JSON.parse(JSON.stringify([usage.reply.mock.calls, broken.author.send.mock.calls]).replace(/<#\d+>/g, '<#channel>'))
   }
 
   it.each([
-    ['throws', ThrowingApp, 'ThrowingPresenter'],
-    ['rejects', RejectingApp, 'RejectingPresenter'],
-  ])("answers in MeoCord's plain text when it %s, warning with the presenter's name", async (_how, App, name) => {
-    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    ['throws', ThrowingApp],
+    ['rejects', RejectingApp],
+  ])("answers in MeoCord's plain text when it %s, and reports the failure as the call's fault", async (_how, App) => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
 
     const answered = await answers(App)
 
     expect(answered).toEqual(await answers(PlainApp))
     expect(answered.flat(2).length).toBe(2)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${name}.messageError`), expect.objectContaining({ message: 'canvas broke' }))
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('Could not write the usage reply'), expect.objectContaining({ message: 'canvas broke' }))
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('Could not write the direct message'), expect.objectContaining({ message: 'canvas broke' }))
+  })
+
+  // A bot's own tests catch a broken messageError, as they do a broken error()
+  it('rejects the dispatch with the failure, once the plain text is sent', async () => {
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    const module = MeoCordTestingModule.create({ app: ThrowingApp, controllers: [DiceController] }).compile()
+    const message = createMockMessage({ content: '!roll many' })
+
+    await expect(module.dispatch(message)).rejects.toThrow('canvas broke')
+    expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Usage: !roll <sides>') }))
   })
 })
 
@@ -459,17 +470,18 @@ describe('a messageError view MeoCord cannot render', () => {
   }
 
   it.each([
+    // One for each call site that reports the failure: the usage reply, and a UserError's reply
     ['a colour that is no colour', { text: 'hi', color: 'notacolor' }, '!roll many'],
     ['an empty text, which an embed cannot hold', { text: '' }, '!refuse'],
-  ])("answers in MeoCord's plain text for %s, warning with the presenter's name", async (_case, view, content) => {
-    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+  ])("answers in MeoCord's plain text for %s, and reports the failure", async (_case, view, content) => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
     drawn = view as ResponseView
 
     const answered = await replyTo(UnrenderableApp, content)
 
     expect(answered).toEqual(await replyTo(PlainTextApp, content))
     expect(answered.flat(2).length).toBe(1)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('UnrenderablePresenter.messageError'), expect.anything())
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('Could not write the'), expect.anything())
   })
 })
 
@@ -480,8 +492,8 @@ describe("an interaction presenter's view that fails", () => {
     ['throws', () => {
       throw new Error('canvas broke')
     }],
+    // A view MeoCord cannot render, which the render check before sending catches, as it would an empty text
     ['returns a colour that is no colour', () => ({ text: 'hi', color: 'notacolor' }) as unknown as ResponseView],
-    ['returns an empty text, which an embed cannot hold', () => ({ text: '' })],
   ])("answers an error with MeoCord's own view when it %s, and reports the fault", async (_case, fail) => {
     const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
     const interaction = command(failing(fail))
