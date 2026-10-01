@@ -5,15 +5,22 @@ import { injectedTokens } from '@src/core/guard-runner.js'
 type LifecycleClass = new (...args: any[]) => any
 
 /**
+ * The runtime's global constructors, such as the `Object` an interface-typed parameter records, or `String` and
+ * `Promise`. Read from data properties only, since a global getter, such as Node's `localStorage`, can warn when read.
+ */
+const BUILT_INS: ReadonlySet<unknown> = new Set(
+  Object.getOwnPropertyNames(globalThis).flatMap(name => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)
+    return descriptor && 'value' in descriptor && typeof descriptor.value === 'function' ? [descriptor.value] : []
+  }),
+)
+
+/**
  * Whether a token a class injects is one of the app's own classes: not the Discord client, bound as a
- * value, and not a built-in constructor such as the `Object` an interface-typed parameter records.
+ * value, and not one of the runtime's global constructors.
  */
 export function isAppClassToken(token: unknown): token is LifecycleClass {
-  return (
-    typeof token === 'function' &&
-    token !== Client &&
-    !Function.prototype.toString.call(token).includes('[native code]')
-  )
+  return typeof token === 'function' && token !== Client && !BUILT_INS.has(token)
 }
 
 /**
