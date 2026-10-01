@@ -9,7 +9,7 @@ import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { themeForInteraction, useTheme } from '@src/core/theme-scope.js'
 import { errorText } from '@src/common/translate-error.js'
 import { interactionLocale, messageLocale, renderText, translatorOfClient } from '@src/common/meocord-text.js'
-import { type MessageCommandOptions, type ResponseView } from '@src/interface/index.js'
+import { type MessageCommandOptions } from '@src/interface/index.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
 import {
   attachmentsOf,
@@ -160,33 +160,35 @@ const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ?
 /**
  * `text`, answering `error` for `message`: plain text, after the call's `emojis.warning` when `withEmoji`, unless the
  * app's presenter has `messageError`, which draws it instead: an embed, coloured as an interaction's view is, with that
- * emoji when the view has none of its own, and the view's files when Discord takes them. A `messageError` that throws
- * or rejects is warned about, and the plain text is sent, so the author is still told.
+ * emoji when the view has none of its own, and the view's files when Discord takes them. Should drawing or rendering
+ * that view fail, `messageError` throwing or rejecting or its view being one an embed cannot hold, it is warned about,
+ * and the plain text is sent, so the author is still told.
  */
 async function presentedReply(message: Message, error: unknown, text: string, withEmoji: boolean | undefined, logger: Logger): Promise<PresentedReply> {
   const presenter = presenterFor(message.client)
   const plain = { body: { content: replyText(text, withEmoji) } }
-  if (!presenter.messageError) return plain
-  const theme = await themeForInteraction(message)
-  const translator = translatorOfClient(message.client)
-  const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
-  const tone = isUserOutcome(error, message) ? 'warning' : 'danger'
-  let drawn: ResponseView
+  const { messageError } = presenter
+  if (!messageError) return plain
   try {
-    drawn = await presenter.messageError({ message, locale, mode: 'embed', theme }, { message: text, error, tone })
+    const theme = await themeForInteraction(message)
+    const translator = translatorOfClient(message.client)
+    const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
+    const tone = isUserOutcome(error, message) ? 'warning' : 'danger'
+    const drawn = await messageError.call(presenter, { message, locale, mode: 'embed', theme }, { message: text, error, tone })
+    let view = drawn.color === undefined ? { ...drawn, color: theme.colors.primary } : drawn
+    if (withEmoji && view.emoji === undefined) view = { ...view, emoji: theme.emojis.warning }
+    const warn = (problem: string) =>
+      logger.warn(`The view for message ${quoteForLog(String(message.content))} is sent without its files: ${problem}.`)
+    view = withSendableFiles(view, { sizeLimit: DEFAULT_ATTACHMENT_SIZE_LIMIT }, warn)
+    const files = attachmentsOf(view)
+    const embeds = [renderEmbed(view)]
+    if (files.length === 0) return { body: { embeds } }
+    return { body: { embeds, files }, withoutFiles: { embeds: [renderEmbed(withoutFiles(view))] }, warn }
   } catch (failure) {
     const name = presenter.constructor !== Object ? presenter.constructor.name : 'The presenter'
     logger.warn(`${name}.messageError could not draw the reply to message ${quoteForLog(String(message.content))}; MeoCord's own is sent:`, failure)
     return plain
   }
-  let view = drawn.color === undefined ? { ...drawn, color: theme.colors.primary } : drawn
-  if (withEmoji && view.emoji === undefined) view = { ...view, emoji: theme.emojis.warning }
-  const warn = (problem: string) =>
-    logger.warn(`The view for message ${quoteForLog(String(message.content))} is sent without its files: ${problem}.`)
-  view = withSendableFiles(view, { sizeLimit: DEFAULT_ATTACHMENT_SIZE_LIMIT }, warn)
-  const files = attachmentsOf(view)
-  if (files.length === 0) return { body: { embeds: [renderEmbed(view)] } }
-  return { body: { embeds: [renderEmbed(view)], files }, withoutFiles: { embeds: [renderEmbed(withoutFiles(view))] }, warn }
 }
 
 /**
