@@ -114,6 +114,14 @@ export const COOLDOWN_POLICY = Symbol('meocord.cooldownPolicy')
 
 const DEFAULT_POLICY: CooldownPolicy = { failure: 'deny', timeoutMs: DEFAULT_COOLDOWN_STORE_TIMEOUT_MS }
 
+/** The cooldown policy an app's `@MeoCord` options set, with the defaults for what they leave out. */
+export function cooldownPolicyFrom(options: { cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }): CooldownPolicy {
+  return {
+    failure: options.cooldownStoreFailure ?? DEFAULT_POLICY.failure,
+    timeoutMs: options.cooldownStoreTimeoutMs ?? DEFAULT_POLICY.timeoutMs,
+  }
+}
+
 /** The app's cooldown policy, else refusing calls after a second without an answer. */
 export function cooldownPolicyOf(container: Container): CooldownPolicy {
   return container.isBound(COOLDOWN_POLICY) ? container.get<CooldownPolicy>(COOLDOWN_POLICY) : DEFAULT_POLICY
