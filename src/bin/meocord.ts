@@ -380,11 +380,15 @@ copies or substantial portions of the Software.
         break
       case 'not-committed':
         s.stop(`Git repository initialized, but the first commit failed: ${commit.reason}`)
-        p.log.warn('The files are staged. Fix what git said, such as setting user.name and user.email, then run:\n  git commit -m "Initial commit"')
+        p.log.warn(
+          `Fix what git said, such as setting user.name and user.email, then run:\n  cd ${kebabCaseAppName} && git add -A && git commit -m "Initial commit"`,
+        )
         break
       case 'no-repository':
         s.stop(`Skipped the Git repository: ${commit.reason}`)
-        p.log.warn('The app is ready without one. To add it later, run git init, git add -A and git commit in its directory.')
+        p.log.warn(
+          `The app is ready without one. To add it later, run:\n  cd ${kebabCaseAppName} && git init && git add -A && git commit -m "Initial commit"`,
+        )
         break
     }
 
