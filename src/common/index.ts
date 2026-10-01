@@ -34,6 +34,7 @@ export type {
   CatalogDefinition,
   CatalogShape,
   LocaleCatalog,
+  LocalizationKey,
   MessageKey,
   MessageParams,
   PluralCategory,

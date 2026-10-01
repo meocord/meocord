@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
-import { createTranslator, defineCatalog, translateError, type Translator } from '@src/common/index.js'
+import { createTranslator, defineCatalog, type LocalizationKey, translateError, type Translator } from '@src/common/index.js'
 import { type CatalogIssues, type LocaleIssues, type Placeholders } from '@src/common/translator.js'
 import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
 
@@ -57,6 +57,10 @@ describe('params', () => {
 })
 
 describe('localizations', () => {
+  it('takes the keys LocalizationKey names: single strings with no params', () => {
+    expectTypeOf<LocalizationKey<typeof enUS>>().toEqualTypeOf<'ban.description' | 'ping'>()
+  })
+
   it('takes plain messages only, and returns one per locale', () => {
     expectTypeOf(t.localizations('ban.description')).toEqualTypeOf<Partial<Record<Locale, string>>>()
     // @ts-expect-error names and descriptions have no plural forms
