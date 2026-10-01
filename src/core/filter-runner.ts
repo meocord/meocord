@@ -74,7 +74,8 @@ export function matchFilter(levels: readonly (readonly FilterEntry[])[], error: 
     for (const entry of level) {
       // Every filter reaching here was checked for @Catch at startup, so its types are always recorded
       const types = Reflect.getOwnMetadata(CATCH_TYPES, filterClass(entry)) as (abstract new (...args: any[]) => unknown)[]
-      if (types.length === 0 || types.some(type => error instanceof type)) return entry
+      // Only classes match: anything else given to @Catch, warned of as it applied, matches no error
+      if (types.length === 0 || types.some(type => typeof type === 'function' && error instanceof type)) return entry
     }
   }
   return undefined
