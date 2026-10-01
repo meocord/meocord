@@ -1,4 +1,4 @@
-import { cpSync, existsSync, readdirSync, readFileSync } from 'fs'
+import { cpSync, existsSync, readdirSync, readFileSync, realpathSync } from 'fs'
 import path from 'path'
 import { type BuildPlatform, currentPlatform } from '@src/util/platform.util.js'
 
@@ -114,8 +114,10 @@ function readDependencies(dir: string): { dependencies: string[]; optional: stri
  */
 export function installedPackages(names: readonly string[], root: string): { name: string; dir: string; native: boolean }[] {
   return names.flatMap(name => {
-    const dir = path.join(root, 'node_modules', name)
-    if (!existsSync(path.join(dir, 'package.json'))) return []
+    const linked = path.join(root, 'node_modules', name)
+    if (!existsSync(path.join(linked, 'package.json'))) return []
+    // Where it really is: pnpm links it from its store, beside the dependencies it was installed with
+    const dir = realpathSync(linked)
     return [{ name, dir, native: nativeCarrier(dir, name, root) !== undefined }]
   })
 }
@@ -263,7 +265,9 @@ function isOtherPlatformPackage(source: string, platform: BuildPlatform): boolea
 /**
  * Copies packages and their runtime dependencies into `<outDir>/node_modules`, where a bundle finds
  * them with nothing installed beside it. Skips `@types` packages and any whose `os`, `cpu` or `libc`
- * exclude `platform`, since bun installs both libc builds on Linux. Returns the names copied.
+ * exclude `platform`, since bun installs both libc builds on Linux. A dependency needed in two
+ * versions, as pnpm installs them side by side, keeps the first at the top and nests each other
+ * under the package that needs it, which Node's resolution reaches first. Returns the names copied.
  */
 export function copyPackagesInto(
   packages: Map<string, string>,
@@ -271,25 +275,44 @@ export function copyPackagesInto(
   outDir: string,
   platform: BuildPlatform = currentPlatform(),
 ): string[] {
+  const topDir = path.join(outDir, 'node_modules')
+  // Each name at the top of dist/node_modules, with the directory it was copied from
+  const atTop = new Map<string, string>()
+  const written = new Set<string>()
   const copied = new Set<string>()
 
-  const copy = (name: string, dir: string) => {
-    if (copied.has(name) || name.startsWith('@types/')) return
+  const copy = (name: string, dir: string, into: string) => {
+    const target = path.join(into, name)
+    if (written.has(target)) return
+    written.add(target)
     copied.add(name)
-    const target = path.join(outDir, 'node_modules', name)
     // A package's own nested node_modules comes along with it, so only hoisted dependencies
     // need finding separately. The nested ones get the same platform check on the way.
     cpSync(dir, target, { recursive: true, dereference: true, filter: source => source === dir || !isOtherPlatformPackage(source, platform) })
 
     const { dependencies, optional } = readDependencies(dir)
     for (const dependency of [...dependencies, ...optional]) {
-      if (existsSync(path.join(dir, 'node_modules', dependency, 'package.json'))) continue
-      const dependencyDir = resolveDependencyDir(dependency, dir, root)
-      if (dependencyDir && isBuiltFor(dependencyDir, platform)) copy(dependency, dependencyDir)
+      if (dependency.startsWith('@types/') || existsSync(path.join(dir, 'node_modules', dependency, 'package.json'))) continue
+      const found = resolveDependencyDir(dependency, dir, root)
+      if (!found || !isBuiltFor(found, platform)) continue
+      place(dependency, realpathSync(found), path.join(target, 'node_modules'))
     }
   }
 
-  for (const [name, dir] of packages) copy(name, dir)
+  // At the top when the name is free or holds this same copy; else beside the package that needs this version
+  const place = (name: string, dir: string, besideParent: string) => {
+    const top = atTop.get(name)
+    if (top === undefined) {
+      atTop.set(name, dir)
+      copy(name, dir, topDir)
+    } else if (top !== dir) {
+      copy(name, dir, besideParent)
+    }
+  }
+
+  for (const [name, dir] of packages) {
+    if (!name.startsWith('@types/')) place(name, realpathSync(dir), topDir)
+  }
   return [...copied]
 }
 
