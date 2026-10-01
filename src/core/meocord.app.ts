@@ -7,6 +7,7 @@ import {
 } from 'discord.js'
 import { type Container } from 'inversify'
 import { Logger } from '@src/common/index.js'
+import { hideInLogs } from '@src/common/logger.js'
 import {
   getMessageHandlers,
   getReactionHandlers,
@@ -130,6 +131,8 @@ export class MeoCordApp implements MeoCordApplication {
     private readonly messageOptions: MessageCommandOptions = {},
     warnUnanswered = false,
   ) {
+    // First, so nothing logged from here on, before login or after, prints it
+    hideInLogs(discordToken)
     this.lifecycleUnits = lifecycleUnits ?? classUnits(container, lifecycleClasses)
     this.bot = this.discordClient
     // Built now, so a pattern that cannot be read or two that match the same messages or customIds stop the bot as it
