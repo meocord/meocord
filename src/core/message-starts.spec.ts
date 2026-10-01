@@ -97,3 +97,40 @@ describe('a prefix function', () => {
     expect(ran).toEqual(['!roll 6', 'roll 8'])
   })
 })
+
+// Where the app's function gives a handler's own prefix too, which runs can't depend on the order controllers are listed
+describe("a handler's own prefix beside the app's prefix function", () => {
+  const ran: string[] = []
+
+  @Controller()
+  class Own {
+    @MessageHandler('ping', { prefix: '!' })
+    ping() {
+      ran.push('own prefix')
+    }
+  }
+
+  @Controller()
+  class Shared {
+    @MessageHandler('ping')
+    ping() {
+      ran.push("app's prefix")
+    }
+  }
+
+  const appListing = (controllers: (new () => object)[]) => {
+    @MeoCord({ controllers, clientOptions: { intents: [] }, messages: { prefix: () => '!' } })
+    class App {}
+    return App
+  }
+
+  it.each([
+    ['listed first', [Own, Shared]],
+    ['listed last', [Shared, Own]],
+  ])('runs the handler whose own prefix it is, %s', async (_order, controllers) => {
+    ran.length = 0
+    await MeoCordTestingModule.fromApp(appListing(controllers)).compile().dispatch(createMockMessage({ content: '!ping', guild: createMockGuild() }))
+
+    expect(ran).toEqual(['own prefix'])
+  })
+})

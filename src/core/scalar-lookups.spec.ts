@@ -27,7 +27,7 @@ const refusal = (promise: Promise<unknown>) =>
   )
 
 describe('words the scalar types read', () => {
-  it('reads an inherited name as no boolean and no length of time', async () => {
+  it('reads an inherited name as no boolean', async () => {
     const route = routeOf('set {on:bool} {after:duration}')
     const message = createMockMessage({ content: 'x' })
 
@@ -72,6 +72,24 @@ describe('words the scalar types read', () => {
     await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'toggle/on' }))
 
     expect(got).toEqual([true])
+  })
+
+  // A segment type is kept by the param's own name, so one named like an inherited key keeps its type too
+  it('keeps the type of a customId param named __proto__', async () => {
+    const got: unknown[] = []
+    @Controller()
+    class Proto {
+      @Command('c/{__proto__:int}', CommandType.BUTTON)
+      press(_interaction: ButtonInteraction, params: object) {
+        got.push(Object.getOwnPropertyDescriptor(params, '__proto__')?.value)
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Proto] }).compile()
+
+    await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'c/x' })).catch(() => undefined)
+    await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'c/5' }))
+
+    expect(got).toEqual([5])
   })
 })
 

@@ -157,6 +157,12 @@ function compareShapes(a: PatternToken[], b: PatternToken[]): number {
   return 0
 }
 
+/**
+ * Where two routes of equal rank and shape part: one with its own start (its prefixes, none, or a mention alone) comes
+ * before one that takes the app's, so a start an app's prefix function also gives runs the handler that named it.
+ */
+const takesAppStart = (route: MessageRoute) => route.prefix === undefined && !route.mentionOnly
+
 /** A mention of the bot, as a start of a message beside the prefixes. */
 const MENTION_START = Symbol('mention')
 /** The prefixes an app's prefix function returns, known only once a message arrives. */
@@ -254,7 +260,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
     }
   }
 
-  routes.sort((a, b) => b.specificity - a.specificity || compareShapes(a.tokens, b.tokens))
+  routes.sort((a, b) => b.specificity - a.specificity || compareShapes(a.tokens, b.tokens) || Number(takesAppStart(a)) - Number(takesAppStart(b)))
 
   for (let i = 0; i < routes.length; i++) {
     for (let j = i + 1; j < routes.length; j++) {
