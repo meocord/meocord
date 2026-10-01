@@ -61,9 +61,89 @@ export function prepareInterceptor(container: Container, entry: InterceptorEntry
   bindShared(container, isInterceptorWithParams(entry) ? entry.provide : entry)
 }
 
+/** One run of the rest of a call that an interceptor started with `next.handle()`. */
+interface StartedRun {
+  /** Settles, never rejecting, once the run has. */
+  settled: Promise<void>
+  /** What the run rejected with, once it has. */
+  failure?: { error: unknown }
+  /** Chains from the run's promise that pass its rejection on and end there, so nothing handles it. */
+  open: number
+}
+
+/**
+ * The promise `next.handle()` returns. Each chain from it is counted: one made without a rejection
+ * handler passes the run's rejection on, and while it is the end of its chain, nothing handles that
+ * rejection. Such a chain never surfaces it as unhandled, since the call fails with it instead.
+ */
+class Continuation extends Promise<unknown> {
+  private run?: StartedRun
+  private passesRejection = false
+  private branched = false
+
+  /** Starts `rest` as a run whose promise is tracked. */
+  static start(rest: () => Promise<unknown>): { run: StartedRun; promise: Continuation } {
+    const inner = rest()
+    const run: StartedRun = { settled: undefined as never, open: 0 }
+    run.settled = inner.then(
+      () => undefined,
+      (error: unknown) => void (run.failure = { error }),
+    )
+    const promise = new Continuation((resolve, reject) => inner.then(resolve, reject))
+    return { run, promise: promise.track(run, true) }
+  }
+
+  override then<A = unknown, B = never>(
+    onFulfilled?: ((value: unknown) => A | PromiseLike<A>) | null,
+    onRejected?: ((reason: any) => B | PromiseLike<B>) | null,
+  ): Promise<A | B> {
+    const next = super.then(onFulfilled, onRejected) as Promise<A | B>
+    return this.branch(next, typeof onRejected !== 'function')
+  }
+
+  // Native finally would call then with a rejection handler, which counts as handling what it passes on
+  override finally(onFinally?: (() => void) | null): Promise<unknown> {
+    const next = super.then(
+      async value => {
+        await onFinally?.()
+        return value
+      },
+      async (reason: unknown) => {
+        await onFinally?.()
+        throw reason
+      },
+    )
+    return this.branch(next, true)
+  }
+
+  private branch<T>(next: Promise<T>, passesRejection: boolean): Promise<T> {
+    if (this.run && next instanceof Continuation) {
+      if (this.passesRejection && !this.branched) this.run.open--
+      this.branched = true
+      next.track(this.run, this.passesRejection && passesRejection)
+    }
+    return next
+  }
+
+  private track(run: StartedRun, passesRejection: boolean): this {
+    this.run = run
+    this.passesRejection = passesRejection
+    if (passesRejection) {
+      run.open++
+      // The run's own rejection is the call's to report; any other, from a callback in the chain, stays unhandled
+      Promise.prototype.then.call(this, undefined, (reason: unknown) => {
+        if (reason !== run.failure?.error) throw reason
+      })
+    }
+    return this
+  }
+}
+
 /**
  * Runs `handler` inside `interceptors`, the first outermost. Each receives the call's context with its
- * own params, and continues with `next.handle()`. `entering` is told of each interceptor as it is called.
+ * own params, and continues with `next.handle()`. A level ends once its interceptor has settled and every
+ * run it started has, so the call ends when the handler does even if the interceptor did not wait; a run's
+ * rejection the interceptor left unhandled fails the call. `entering` is told of each interceptor as it is called.
  */
 export async function runInterceptors(
   interceptors: readonly InterceptorEntry[],
@@ -85,8 +165,29 @@ export async function runInterceptors(
         `Interceptor ${cls.name} applied to ${context.getHandlerName()} does not have a valid intercept method.`,
       )
     }
+
+    const started: StartedRun[] = []
+    let ended = false
+    // A run started once the interceptor has settled is its own, outside the call
+    const handle = () => {
+      if (ended) return run(index + 1)
+      const { run: startedRun, promise } = Continuation.start(() => run(index + 1))
+      started.push(startedRun)
+      return promise
+    }
     entering?.(cls)
-    return interceptor.intercept(context.withParams(params), { handle: () => run(index + 1) })
+    let outcome: { value: unknown } | { error: unknown }
+    try {
+      outcome = { value: await interceptor.intercept(context.withParams(params), { handle }) }
+    } catch (error) {
+      outcome = { error }
+    }
+    ended = true
+    await Promise.all(started.map(({ settled }) => settled))
+    if ('error' in outcome) throw outcome.error
+    const dropped = started.find(({ failure, open }) => failure && open > 0)?.failure
+    if (dropped) throw dropped.error
+    return outcome.value
   }
   return run(0)
 }
