@@ -509,7 +509,7 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'relayStopSignals').mockImplementation((_app, stopping) => (stop = stopping))
         vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
         vi.spyOn(cli, 'createBundler').mockResolvedValue({
-          rsbuild: { onAfterBuild: (callback: () => void) => (afterBuild = callback), build: async () => ({ close: async () => {} }) },
+          rsbuild: { onAfterBuild: (callback: (params: object) => void) => (afterBuild = () => callback({})), build: async () => ({ close: async () => {} }) },
         })
         await cli.startDev()
         afterBuild()
@@ -528,6 +528,47 @@ describe('spawning the application', () => {
         await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0))
         expect(spawnMock).not.toHaveBeenCalled()
       })
+    })
+
+    // One save can make two builds of the same output; the second may finish just after the replacement started
+    it('leaves a bot running that was launched from the build that finished, and restarts it for a new one', async () => {
+      spawnMock.mockImplementation(() => createChild() as never)
+      let build: (hash: string) => void = () => {}
+      const cli = new MeoCordCLI() as unknown as {
+        startDev: () => Promise<void>
+        clearScreen: () => void
+        relayStopSignals: () => void
+        compileConfig: () => Promise<void>
+        createBundler: () => Promise<unknown>
+      }
+      vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
+      vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
+      vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
+      vi.spyOn(cli, 'createBundler').mockResolvedValue({
+        rsbuild: {
+          onAfterBuild: (callback: (params: object) => void) => (build = hash => callback({ stats: { hash } })),
+          build: async () => ({ close: async () => {} }),
+        },
+      })
+      await cli.startDev()
+      const exitOf = (child: ReturnType<typeof createChild>) => {
+        child.exitCode = 0
+        const listener = child.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
+        listener()
+      }
+
+      build('first')
+      const first = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild>
+      build('saved')
+      exitOf(first)
+      const replacement = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild>
+      expect(replacement).not.toBe(first)
+
+      build('saved')
+      expect(replacement.kill).not.toHaveBeenCalled()
+
+      build('saved again')
+      expect(replacement.kill).toHaveBeenCalled()
     })
 
     describe('when the running application does not exit', () => {
@@ -678,21 +719,39 @@ describe('spawning the application', () => {
         expect(spawnMock).not.toHaveBeenCalled()
       })
 
-      it('stops the bot it started and exits 1 when it cannot watch the project, which would leave the bot unwatched', async () => {
+      // A bot that holds on to its stop signal, as one that ignores SIGTERM does, must not outlive the session
+      it('stops the bot it started through its own stop, and exits 1 once it has, when it cannot watch the project', async () => {
+        vi.useFakeTimers()
         vi.mocked(watch).mockImplementationOnce(() => {
           throw new Error('ENOSPC: System limit for number of file watchers reached')
         })
         const cli = devCli({
           bundler: async () => ({
-            rsbuild: { onAfterBuild: (callback: () => void) => callback(), build: async () => ({ close: async () => {} }) },
+            rsbuild: { onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
           }),
         })
+        const child = createChild() as ReturnType<typeof createChild> & { connected: boolean; send: ReturnType<typeof vi.fn> }
+        child.connected = true
+        child.send = vi.fn()
+        spawnMock.mockReturnValueOnce(child as never)
 
-        await cli.startDev()
+        const started = cli.startDev()
+        await vi.waitFor(() => expect(child.send).toHaveBeenCalledWith({ meocord: 'stop' }))
+        expect(child.kill).not.toHaveBeenCalled()
+        expect(exitSpy).not.toHaveBeenCalled()
 
-        const child = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild>
-        expect(child.kill).toHaveBeenCalled()
+        // Still running past its shutdownTimeout and the grace period, so it is killed
+        await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS + FORCE_STOP_GRACE_MS)
+        expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+        expect(exitSpy).not.toHaveBeenCalled()
+
+        const onExit = child.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void
+        child.exitCode = 137
+        onExit()
+        await started
+
         expect(exitSpy).toHaveBeenCalledWith(1)
+        vi.useRealTimers()
       })
     })
 
@@ -715,7 +774,7 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
         const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
         const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
-          rsbuild: { onAfterBuild: (callback: () => void) => callback(), build: async () => ({ close: closeBuild }) },
+          rsbuild: { onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: closeBuild }) },
         }))
         await cli.startDev()
         const errors = vi.mocked((cli as unknown as { logger: { error: (text: string) => void } }).logger.error)

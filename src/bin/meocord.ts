@@ -623,6 +623,12 @@ copies or substantial portions of the Software.
   /** The running application, while a watch session owns one, including while it exits to be replaced. */
   private appProcess: ChildProcess | null = null
 
+  /** The hash of the last build watch mode finished, which a bot launched now runs. */
+  private latestBuild?: string
+
+  /** The hash of the build the running bot was launched from, unless a reload has since made that out of date. */
+  private launchedFrom?: string
+
   /** Whether the running application is exiting to be replaced; a build that finishes meanwhile joins that restart. */
   private restarting = false
 
@@ -639,40 +645,54 @@ copies or substantial portions of the Software.
    * hold the same gateway session, and claiming it before the first lets go produces a
    * login conflict rather than a reload. Builds that finish while it exits start nothing
    * more: the replacement runs `dist/main.js` as it stands at launch, the latest build.
+   *
+   * @param build - The hash of the build asking for it; one the running bot was launched from leaves it running.
    */
-  private restartApp(): void {
+  private restartApp(build?: string): void {
     if (this.stopping || this.restarting) return
     const previous = this.appProcess
+    // One save can make two builds of the same output, the second finishing once the bot was launched from the first
+    if (build !== undefined && build === this.launchedFrom && stillRunning(previous)) return
 
     if (!stillRunning(previous)) {
       this.launchDevApp()
       return
     }
 
-    // The application gives up on its onShutdown hooks after shutdownTimeout; one still running after that and a
-    // grace period would hold the restart forever, so it is killed
-    const shutdownTimeout = loadMeoCordCliConfig()?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
-    const overdue = setTimeout(() => {
-      if (!stillRunning(previous)) return
-      this.logger.warn(
-        `The application did not exit within ${shutdownTimeout + FORCE_STOP_GRACE_MS} ms of being asked to stop, ` +
-          `its shutdownTimeout of ${shutdownTimeout} ms and ${FORCE_STOP_GRACE_MS} ms more; killing it to start the new build.`,
-      )
-      previous.kill('SIGKILL')
-    }, shutdownTimeout + FORCE_STOP_GRACE_MS)
-    overdue.unref()
-
     this.restarting = true
     previous.removeAllListeners('exit')
-    previous.once('exit', () => {
-      clearTimeout(overdue)
+    this.stopApp(previous, 'to start the new build', () => {
       this.restarting = false
       this.appProcess = null
       if (!this.stopping) this.launchDevApp()
     })
-    // Over its channel rather than as a signal: on Windows kill() ends a process outright, skipping its onShutdown hooks
-    if (previous.connected) previous.send({ meocord: 'stop' } satisfies DevRunnerCommand)
-    else previous.kill()
+  }
+
+  /**
+   * Stops a running application as SIGTERM would, through its own shutdown, and calls `exited` once it has. The
+   * request goes over its channel rather than as a signal: on Windows kill() ends a process outright, skipping its
+   * onShutdown hooks. The application gives up on those hooks after shutdownTimeout; one still running after that and
+   * a grace period would never exit, so it is killed.
+   *
+   * @param then - What the stop is for, as the warning about killing it says.
+   */
+  private stopApp(app: ChildProcess, then: string, exited: () => void): void {
+    const shutdownTimeout = loadMeoCordCliConfig()?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
+    const overdue = setTimeout(() => {
+      if (!stillRunning(app)) return
+      this.logger.warn(
+        `The application did not exit within ${shutdownTimeout + FORCE_STOP_GRACE_MS} ms of being asked to stop, ` +
+          `its shutdownTimeout of ${shutdownTimeout} ms and ${FORCE_STOP_GRACE_MS} ms more; killing it ${then}.`,
+      )
+      app.kill('SIGKILL')
+    }, shutdownTimeout + FORCE_STOP_GRACE_MS)
+    overdue.unref()
+    app.once('exit', () => {
+      clearTimeout(overdue)
+      exited()
+    })
+    if (app.connected) app.send({ meocord: 'stop' } satisfies DevRunnerCommand)
+    else app.kill()
   }
 
   /**
@@ -683,6 +703,7 @@ copies or substantial portions of the Software.
   private launchDevApp(): void {
     const child = this.spawnApp({ devRunner: true })
     this.appProcess = child
+    this.launchedFrom = this.latestBuild
     let loginFailed = false
     child.on('message', message => {
       if (isDevRunnerMessage(message)) loginFailed = message.meocord === 'login-failed'
@@ -733,8 +754,9 @@ copies or substantial portions of the Software.
         // Runs after every rebuild, which is where the application is restarted. A failed
         // rebuild reports its own errors and does not reach here, so the process already
         // running is left alone rather than being replaced by a broken build.
-        rsbuild.onAfterBuild(() => {
-          this.restartApp()
+        rsbuild.onAfterBuild(({ stats }) => {
+          this.latestBuild = stats?.hash ?? undefined
+          this.restartApp(this.latestBuild)
           isRunning = true
         })
 
@@ -769,6 +791,8 @@ copies or substantial portions of the Software.
           // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
           if (files.has('meocord.config.ts') && !(await this.compileConfig({ exitOnFailure: false }))) return
           isRunning = false
+          // What the bot was launched from is no longer what it runs: the new build restarts it, whatever its output
+          this.launchedFrom = undefined
           try {
             await watch()
           } catch (error) {
@@ -807,9 +831,11 @@ copies or substantial portions of the Software.
       )
     } catch (error: any) {
       this.logger.error(`Failed to start: ${error.message}`)
-      // The session ends with 1, as a failed build does, and stops a bot it started, which would outlive it
+      // The session ends with 1, as a failed build does, once a bot it started has stopped as a restart stops it:
+      // ended any other way, a bot that holds on to its stop signal would outlive the session
       this.stopping = true
-      this.appProcess?.kill()
+      const app = this.appProcess
+      if (stillRunning(app)) await new Promise<void>(resolve => this.stopApp(app, 'to end watch mode', resolve))
       this.endDevSession(1)
     }
   }
