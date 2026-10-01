@@ -9,3 +9,5 @@ When the config really is missing, the message names the file it looked for and 
 `.env` is still read from the working directory, through `dotenv` in your `meocord.config.ts`. If you start the bot from elsewhere, set its environment there or point `dotenv` at the file.
 
 The check that refuses a build made for another platform also reads its record beside the bundle. It now applies when a process manager's wrapper starts the bot.
+
+Rebuild to pick these up.
