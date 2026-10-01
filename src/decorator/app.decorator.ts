@@ -90,7 +90,8 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  *
  * @param options.controllers - Controllers to register.
  * @param options.clientOptions - Options for the discord.js `Client`.
- * @param options.activities - Activities the bot rotates through, if any.
+ * @param options.activities - Activities the bot rotates through: one is shown once the bot is ready, and another
+ *   every 10 seconds. Without them MeoCord leaves the bot's presence as the app sets it.
  * @param options.services - Services to register that no controller depends on.
  * @param options.providers - Values classes inject by token with `@Inject`: `{ provide, useValue }`,
  *   `{ provide, useClass }`, or `{ provide, useFactory, inject? }`, whose factory may return a promise,
