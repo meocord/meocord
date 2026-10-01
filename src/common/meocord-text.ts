@@ -1,5 +1,15 @@
 import { type Locale } from 'discord.js'
-import { type CatalogShape, CATALOGS, type FoundMessage, languageOf, LOCALE_CHAIN, lookup, pluralForm, type Translator } from '@src/common/translator.js'
+import {
+  type CatalogShape,
+  CATALOGS,
+  fillPlaceholders,
+  type FoundMessage,
+  languageOf,
+  LOCALE_CHAIN,
+  lookup,
+  pluralForm,
+  type Translator,
+} from '@src/common/translator.js'
 import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 import { type MessageUsageIssue } from '@src/common/errors.js'
 
@@ -72,7 +82,7 @@ export function renderText(translator: Translator<any> | undefined, locale: Text
   const found = findText(translator, locale, text.key)
   if (!found) return text.fallback ?? text.key
   const params = text.params ?? {}
-  return pluralForm(found, params.count).replace(/\{(\w+)}/g, (whole, name: string) => {
+  return fillPlaceholders(pluralForm(found, params.count), (name, whole) => {
     if (!Object.hasOwn(params, name)) return whole
     const value = params[name]
     if (typeof value !== 'object') return String(value)

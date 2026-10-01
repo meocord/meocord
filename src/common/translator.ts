@@ -1,6 +1,7 @@
 import { type Guild, type Interaction, Locale } from 'discord.js'
 import { type MeoCordMessages } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { Logger } from '@src/common/logger.js'
 
 /**
  * The plural categories `Intl.PluralRules` selects between.
@@ -61,6 +62,11 @@ export type StringMessageKey<C> = {
   [K in keyof C & string]: C[K] extends string ? K : IsPlural<C[K]> extends true ? never : `${K}.${StringMessageKey<C[K]>}`
 }[keyof C & string]
 
+/** The plain message keys whose message takes no `{params}`, which a name or description shows as written. */
+type PlainMessageKey<C> = {
+  [K in StringMessageKey<C>]: [Placeholders<MessageAt<C, K>>] extends [never] ? K : never
+}[StringMessageKey<C>]
+
 /** The message at a key. */
 export type MessageAt<C, K extends string> = K extends `${infer Head}.${infer Rest}`
   ? Head extends keyof C
@@ -94,12 +100,15 @@ type IsWord<S extends string> =
       : false
 
 /**
- * The `{param}` names of a message, read as translating reads them with `/\{(\w+)}/g`: word characters between
- * braces. Where the braces hold anything else, reading resumes after the `{`, so `{{user}}` takes `user`. Each `{` is
- * one step of tail recursion, with the names found so far in `Found`, so a message may hold about 1,000 of them.
+ * The `{param}` names of a message, read from the left as translating reads them: `{{` is a brace written as text, and
+ * `{` then word characters then `}` is a param. Where the braces hold anything else, reading resumes after the `{`.
+ * A `}}` never holds a param's `}`, so it changes no name. Each `{` is one step of tail recursion, with the names found
+ * so far in `Found`, so a message may hold about 1,000 of them.
  */
 export type Placeholders<S, Found = never> = S extends `${string}{${infer After}`
-  ? Placeholders<[ParamAt<After>] extends [never] ? After : After extends `${string}}${infer Rest}` ? Rest : After, Found | ParamAt<After>>
+  ? After extends `{${infer Rest}`
+    ? Placeholders<Rest, Found>
+    : Placeholders<[ParamAt<After>] extends [never] ? After : After extends `${string}}${infer Rest}` ? Rest : After, Found | ParamAt<After>>
   : Found
 
 /** The param a `{` opens, from the text after it: the name when word characters close there. */
@@ -109,8 +118,9 @@ type ParamAt<After extends string> = After extends `${infer Name}}${string}` ? (
  * The params a catalog message takes: one per `{name}` placeholder, whose name is ASCII letters, digits or `_`, and
  * `count` for a plural message.
  *
- * Other text in braces, such as `{ and }`, is the message's own. A translator's `t(key, params)` is checked against
- * it, so a placeholder left out or misspelt fails to compile. Use it to type params you build before translating.
+ * Other text in braces, such as `{ and }`, is the message's own, and `{{` and `}}` are one brace each, so `{{id}}`
+ * shows `{id}` and takes no param. A translator's `t(key, params)` is checked against it, so a placeholder left out or
+ * misspelt fails to compile. Use it to type params you build before translating.
  *
  * @group Types
  * @see {@link createTranslator}
@@ -298,6 +308,8 @@ export type TranslatorOptions<
  * @remarks
  * A locale is resolved to the catalog that serves it: the exact locale, then another of the same language (`es-419` to
  * `es-ES`, `en-GB` to `en-US`), then the default. A message missing from that catalog is looked up the same way.
+ * A key with no message in any catalog, such as one naming a group, is returned as it is; in development, a warning
+ * names it once.
  *
  * @typeParam C - The default catalog. Every locale's keys are checked against it, and so are the `{params}` of
  *   each message whose text the compiler can read; see {@link createTranslator}.
@@ -338,12 +350,15 @@ export abstract class Translator<C = CatalogShape> {
   /**
    * A message in every locale other than the default whose own catalog has it, for a builder's
    * `setNameLocalizations` or `setDescriptionLocalizations`. Locales without it are left out, so
-   * Discord falls back to the default name for them.
+   * Discord falls back to the default name for them, and so is a translation with a `{param}`, which
+   * `expectCompleteCatalog` reports.
    *
-   * @param key - A plain message key; names and descriptions have no plural forms.
+   * @param key - A plain message key without `{params}`: Discord shows a name or description as written, and has no
+   *   plural forms for it.
    * @returns The message keyed by locale.
+   * @throws When the default catalog's message takes params, as one from a JSON file can.
    */
-  abstract localizations(key: StringMessageKey<C>): Partial<Record<Locale, string>>
+  abstract localizations(key: PlainMessageKey<C>): Partial<Record<Locale, string>>
 
   /**
    * Translates for the user of an interaction, in the language their Discord client uses.
@@ -420,20 +435,37 @@ export function pluralForm({ message, locale }: FoundMessage, count: unknown): s
   return message[rules.select(Number(count)) as PluralCategory] ?? message.other
 }
 
-/** A `{param}`: word characters between braces, the reading `Placeholders` follows at compile time. */
-const PLACEHOLDER = /\{(\w+)}/g
+/** A brace written as text, `{{` or `}}`, or a `{param}` of word characters: the reading `Placeholders` follows. */
+const PLACEHOLDER = /\{\{|}}|\{(\w+)}/g
 
 /** The `{param}` names of a message, in order, as translating fills them. */
 export function placeholderNames(message: string): string[] {
-  return [...message.matchAll(PLACEHOLDER)].map(([, name]) => name)
+  return [...message.matchAll(PLACEHOLDER)].flatMap(([, name]) => (name === undefined ? [] : [name]))
+}
+
+/** A message with each `{param}` replaced by what `fill` gives for its name, and each `{{` or `}}` as one brace. */
+export function fillPlaceholders(message: string, fill: (name: string, placeholder: string) => string): string {
+  return message.replace(PLACEHOLDER, (whole, name: string | undefined) => (name === undefined ? whole[0] : fill(name, whole)))
 }
 
 function interpolate(message: string, params: Record<string, unknown>): string {
-  return message.replace(PLACEHOLDER, (whole, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : whole))
+  return fillPlaceholders(message, (name, whole) => (Object.hasOwn(params, name) ? String(params[name]) : whole))
+}
+
+/** Whether a dotted key leads to an object in a catalog: a group of messages, which has no text of its own. */
+function isGroup(catalog: CatalogShape | undefined, key: string): boolean {
+  let current: unknown = catalog
+  for (const part of key.split('.')) {
+    if (typeof current !== 'object' || current === null || !Object.hasOwn(current, part)) return false
+    current = (current as Record<string, unknown>)[part]
+  }
+  return typeof current === 'object' && current !== null
 }
 
 class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   readonly locales: readonly Locale[]
+  private readonly logger = new Logger('Translator')
+  private readonly warned = new Set<string>()
 
   constructor(
     readonly defaultLocale: Locale,
@@ -466,7 +498,19 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
       const message = lookup(this.catalogs[locale], key)
       if (message !== undefined) return interpolate(pluralForm({ message, locale }, params.count), params)
     }
+    this.warnUnknown(key)
     return key
+  }
+
+  /** Warns once per key, in development, that a key with no message is shown in its place. */
+  private warnUnknown(key: string): void {
+    if (process.env.NODE_ENV !== 'development' || this.warned.has(key)) return
+    this.warned.add(key)
+    this.logger.warn(
+      isGroup(this.catalogs[this.defaultLocale], key)
+        ? `"${key}" names a group of messages, not one, so the key is shown in its place.`
+        : `No catalog has a message with the key "${key}", so the key is shown in its place.`,
+    )
   }
 
   private translateTo(locale: string | undefined): Translate<C> {
@@ -477,12 +521,25 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     return this.translate(this.defaultLocale, key, params[0] as Record<string, unknown> | undefined)
   }
 
-  localizations(key: StringMessageKey<C>): Partial<Record<Locale, string>> {
+  localizations(key: PlainMessageKey<C>): Partial<Record<Locale, string>> {
+    const original = lookup(this.catalogs[this.defaultLocale], key)
+    if (original === undefined) this.warnUnknown(key)
+    const params = typeof original === 'string' ? placeholderNames(original) : []
+    if (params.length > 0) {
+      const taken = [...new Set(params)].map(name => `{${name}}`).join(', ')
+      throw refuse(
+        new Error(`localizations("${key}"): the message takes ${taken}, and a name or description is shown as written. Use a message without params.`),
+      )
+    }
+
     const localized: Partial<Record<Locale, string>> = {}
     for (const locale of this.locales) {
       if (locale === this.defaultLocale) continue
       const message = lookup(this.catalogs[locale], key)
-      if (typeof message === 'string') localized[locale] = message
+      // A translation with a {param} is left out: Discord would show it as written
+      if (typeof message === 'string' && placeholderNames(message).length === 0) {
+        localized[locale] = fillPlaceholders(message, (_name, whole) => whole)
+      }
     }
     return localized
   }
@@ -518,6 +575,9 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
  * The compiler reads a message's params only from its text, which a catalog made with `defineCatalog`, written with
  * `as const` or written inline keeps. A catalog from a plain variable or a JSON file types each message as `string`, so
  * its params are checked by `expectCompleteCatalog` from `meocord/testing` instead, when a test runs.
+ *
+ * A brace a message shows as text is written twice: `'Buttons use ticket/{{id}}'` shows `ticket/{id}` and takes no
+ * param.
  *
  * @param options.default - The locale whose catalog is the reference and the last fallback.
  * @param options.locales - A catalog per discord.js `Locale`, including the default's.

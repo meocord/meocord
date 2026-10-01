@@ -62,6 +62,13 @@ describe('localizations', () => {
     // @ts-expect-error names and descriptions have no plural forms
     t.localizations('warnings')
   })
+
+  it('rejects a message with params, which a name or description shows as written', () => {
+    // @ts-expect-error `ban.done` takes {user} and {days}
+    t.localizations('ban.done')
+    const braces = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ route: 'Opens ticket/{{id}}' }) } })
+    braces.localizations('route')
+  })
 })
 
 describe('locales', () => {
@@ -98,6 +105,13 @@ describe('placeholders', () => {
 
   it('reads a {param} as translating does: word characters between braces, and nothing else', () => {
     expectTypeOf<Mismatched>().toEqualTypeOf<never>()
+  })
+
+  it('takes no param for a {{word}}, which shows as {word}', () => {
+    const braces = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ route: 'Buttons use ticket/{{id}}' }) } })
+    braces.default('route')
+    // @ts-expect-error {{id}} is text, not a param
+    braces.default('route', { id: '1' })
   })
 
   it("takes no params for a message whose braces hold no param", () => {
