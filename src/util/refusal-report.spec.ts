@@ -1,5 +1,5 @@
 import { markExplained } from '@src/common/explained-error.js'
-import { refuse, reportRefusals } from '@src/util/refusal.util.js'
+import { handOffRefusal, refuse, reportRefusals } from '@src/util/refusal.util.js'
 
 describe('reportRefusals', () => {
   const monitors = () => process.listeners('uncaughtExceptionMonitor')
@@ -30,6 +30,18 @@ describe('reportRefusals', () => {
     // Thrown from this spec, which the report names as where in the source it came from
     expect(log).toHaveBeenCalledWith('SampleController.handle: Invalid pattern "a-{id}"\n    in src/util/refusal-report.spec.ts')
     expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  // A shard hands its refusal to its manager, and ends itself once the manager has it
+  it('leaves a refusal handed off to someone else, neither reporting it nor exiting', () => {
+    const { log, exit, uncaught } = watch()
+    const error = refuse(new Error('Stats: two classes have this name'))
+    handOffRefusal(error)
+
+    uncaught(error)
+
+    expect(log).not.toHaveBeenCalled()
+    expect(exit).not.toHaveBeenCalled()
   })
 
   it('exits 1 without reporting a refusal MeoCord has already explained', () => {
