@@ -281,6 +281,15 @@ describe('createMockInteraction', () => {
       await replied.reply('first')
       await expect(replied.showModal({ customId: 'm', title: 'T', components: [] })).rejects.toThrow()
     })
+
+    it("leaves a command no reply to edit, fetch or delete, as Discord answers an original response that doesn't exist", async () => {
+      const interaction = createMockInteraction(ChatInputCommandInteraction)
+      await interaction.showModal({ customId: 'm', title: 'T', components: [] })
+
+      await expect(interaction.editReply('x')).rejects.toMatchObject({ code: 10008 })
+      await expect(interaction.fetchReply()).rejects.toMatchObject({ code: 10008 })
+      await expect(interaction.deleteReply()).rejects.toMatchObject({ code: 10008 })
+    })
   })
 
   describe('deferUpdate on a modal submission', () => {
