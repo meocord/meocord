@@ -253,7 +253,7 @@ async function tellPrivately(
     const text =
       error instanceof CooldownError
         ? { key: 'meocord.dm.cooldown', params: { ...place, wait: cooldownText(error.retryAt) } }
-        : { key: 'meocord.dm.error', params: place }
+        : { key: 'meocord.dm.error', params: { ...place, reason: errorText(error, translator, locale) } }
     return presentedReply(message, error, renderText(translator, locale, text), withEmoji, logger)
   })
   if (reply === undefined) return

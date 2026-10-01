@@ -654,7 +654,8 @@ export interface MessageCommandOptions {
    * Tells the author of a message command, in a direct message, when it fails with an error no filter handled,
    * naming the command, the channel and the server. The error is logged as without it, and nothing is said in the
    * channel: a message cannot be answered privately there. A command sent in a direct message is answered in it.
-   * The text is `meocord.dm.error`, in the server's language. A member whose direct messages are closed is not told.
+   * The text is `meocord.dm.error`, around what the fallback answers the error with, such as the cooldown store's
+   * `meocord.cooldown.storeDown`, in the server's language. A member whose direct messages are closed is not told.
    * Only patterned handlers are answered, not a listener for every message. A command refused because the cooldown
    * store failed is told once per outage per author.
    * @defaultValue `false`
