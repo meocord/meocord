@@ -148,7 +148,8 @@ describe('sharding', () => {
   })
 
   describe('entry modes', () => {
-    it('returns the shard manager for process sharding, before checking the platform or binding anything', async () => {
+    // A build for another platform stops before the manager registers commands or spawns a shard that would fail
+    it('returns the shard manager for process sharding once the platform is checked, binding nothing', async () => {
       const loaded = await load()
       config.current = { discordToken: 'token', sharding: { mode: 'process' } }
       const constructed = vi.fn()
@@ -163,7 +164,7 @@ describe('sharding', () => {
       const app = loaded.MeoCordFactory.create(appClass(loaded, { services: [Eager] }))
 
       expect(app).toBeInstanceOf(loaded.ShardManager)
-      expect(platformChecked.count).toBe(0)
+      expect(platformChecked.count).toBe(1)
       expect(constructed).not.toHaveBeenCalled()
     })
 
@@ -443,6 +444,23 @@ describe('sharding', () => {
 
       expect(client.destroy).toHaveBeenCalledTimes(1)
       expect(exit).not.toHaveBeenCalledWith(1)
+    })
+
+    // stop() means the same in every process: the bot, every shard of it, stops
+    it('asks the manager to stop every shard when its app is stopped', async () => {
+      const loaded = await load()
+      const sent: unknown[] = []
+      Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+        sent.push(message)
+        callback()
+        return true
+      })
+      const { app, client } = await startApp(loaded)
+
+      await app.stop()
+
+      expect(sent).toEqual([{ meocord: 'stop' }])
+      expect(client.destroy).toHaveBeenCalledTimes(1)
     })
 
     it('shuts down when the manager goes away', async () => {

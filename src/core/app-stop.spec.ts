@@ -17,7 +17,6 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 
 import { Controller, MeoCord, Service } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { shutdownAndExit } from '@src/core/meocord.app.js'
 
 const shutdowns: string[] = []
 
@@ -36,13 +35,12 @@ class Scheduler {
 class App {}
 
 /** Logs in at once, or holds the login open until `release` is called, as a slow gateway does. */
-function login(mode: 'at once' | 'held' | 'fails') {
+function login(mode: 'at once' | 'held') {
   let release!: () => void
   const held = new Promise<string>(resolve => (release = () => resolve('token')))
   const clients: Client[] = []
   vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client) {
     clients.push(this)
-    if (mode === 'fails') return Promise.reject(new Error('gateway unreachable (stand-in)'))
     return mode === 'held' ? held : Promise.resolve('token')
   })
   const destroy = vi.spyOn(Client.prototype, 'destroy').mockResolvedValue(undefined)
@@ -82,6 +80,24 @@ describe('app.stop()', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
+  // The process then exits as a signal's shutdown would, 1 for a client that failed to close
+  it.each([
+    [undefined, 1],
+    [0, 1],
+    [2, 2],
+  ])('sets an exit code of %s to %s when the client fails to close', async (before, after) => {
+    const { clients, destroy } = login('at once')
+    destroy.mockRejectedValue(new Error('socket stuck'))
+    const app = MeoCordFactory.create(App)
+    await app.start()
+    await ready(clients[0])
+    process.exitCode = before
+
+    await expect(app.stop()).resolves.toBeUndefined()
+
+    expect(process.exitCode).toBe(after)
+  })
+
   it('stops once, however many times it is called', async () => {
     const { clients, destroy } = login('at once')
     const app = MeoCordFactory.create(App)
@@ -115,17 +131,6 @@ describe('app.stop()', () => {
     await app.stop()
 
     await expect(app.start()).rejects.toThrow('This app was stopped; use MeoCordFactory.create to make a new one.')
-  })
-
-  it('makes a signal after a failed login exit with the code the failed login set', async () => {
-    login('fails')
-    process.exitCode = undefined
-    const app = MeoCordFactory.create(App)
-    await app.start().catch(() => undefined)
-
-    await shutdownAndExit()
-
-    expect(exit).toHaveBeenCalledWith(1)
   })
 
   it("ends a start whose providers are still being made, so it never logs in", async () => {

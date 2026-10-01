@@ -3,6 +3,8 @@ import type { CooldownBatchVerdict, CooldownEntry, RecordedCall } from '@src/com
 /** A message between a shard manager and its shards; discord.js's own messages never carry `meocord`. */
 export type ShardMessage =
   | { meocord: 'shutdown' }
+  /** A shard's `stop()`, for the manager to stop every shard, as its own `stop()` does. */
+  | { meocord: 'stop' }
   | { meocord: 'fatal'; code: string; message: string }
   /** A shard's call, for the manager to count against every cooldown the handler has, or only check with `peek`. */
   | { meocord: 'cooldown'; id: string; entries: CooldownEntry[]; peek?: true }

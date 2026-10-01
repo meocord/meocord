@@ -12,7 +12,6 @@ import {
   getMessageHandlers,
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
-import { sample } from 'lodash-es'
 
 
 import { ReactionHandlerAction } from '@src/enum/controller.enum.js'
@@ -46,7 +45,7 @@ import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import { isShardProcess, managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
-import { releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import { claimAmbientAppTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerCommands } from '@src/core/command-registration.js'
 import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
@@ -125,6 +124,8 @@ export class MeoCordApp implements MeoCordApplication {
   })
   private readonly bot: Client
   private activityInterval: ReturnType<typeof setInterval> | null = null
+  /** Where the activities' rotation is: the index of the next one shown. */
+  private nextActivity = 0
 
   constructor(
     private readonly controllerClasses: (new (...args: any[]) => any)[],
@@ -210,7 +211,7 @@ export class MeoCordApp implements MeoCordApplication {
   private storeReady?: PromiseWithResolvers<void>
 
   /**
-   * Rotates the bot's activity.
+   * Shows the next of the app's activities, in the order listed, starting again after the last.
    *
    * Guarded separately from {@link runListener}: this runs on a timer rather than an
    * event, and a throw from a timer callback is an uncaught exception no listener
@@ -218,7 +219,8 @@ export class MeoCordApp implements MeoCordApplication {
    */
   private updateActivity(): void {
     try {
-      this.bot.user?.setActivity(sample(this.activities))
+      const activities = this.activities ?? []
+      this.bot.user?.setActivity(activities[this.nextActivity++ % activities.length])
     } catch (error) {
       this.logger.error('Could not update the bot activity:', error)
     }
@@ -276,10 +278,11 @@ export class MeoCordApp implements MeoCordApplication {
   /**
    * Stops the bot without ending the process: runs the `onShutdown` hooks under the configured `shutdownTimeout`, then
    * closes the client. A stop while the bot logs in ends the login, and that `start()` rejects. A call after the first
-   * waits for it, and a stopped app does not start again.
+   * waits for it, and a stopped app does not start again. In a shard of process sharding, it asks the manager to stop
+   * every shard, as the manager's own `stop()` does, so the bot stops whichever process calls it.
    *
    * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close the client is
-   *   logged.
+   *   logged, and sets `process.exitCode` to 1 unless another code is already set, as a signal's shutdown exits.
    *
    * @example
    * ```ts
@@ -287,7 +290,9 @@ export class MeoCordApp implements MeoCordApplication {
    * ```
    */
   async stop(): Promise<void> {
-    await this.close()
+    if (isShardProcess()) await tellManager({ meocord: 'stop' })
+    // As a signal's shutdown exits 1 for a client that failed to close, a code another failure set aside
+    if (!(await this.close()) && !process.exitCode) process.exitCode = 1
   }
 
   /** The `start()` under way, which a concurrent call waits for. */
@@ -306,6 +311,9 @@ export class MeoCordApp implements MeoCordApplication {
     installSignalHandlers()
     // A shard whose manager is already gone has no one to answer to, and nothing would stop it later
     if (isShardProcess() && managerGone()) void shutdownAndExit()
+    // A bot runs one app, whose theme code outside any call reads, its providers' factories included; claimed for
+    // each start, as a failed one gives it up
+    claimAmbientAppTheme(this.container)
     if (!this.prepared) {
       await this.prepare()
       this.prepared = true

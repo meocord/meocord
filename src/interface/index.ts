@@ -111,10 +111,12 @@ export interface MeoCordApplication {
 
   /**
    * Stops the bot without ending the process: runs the `onShutdown` hooks under the configured `shutdownTimeout`
-   * and closes the client, or with process sharding, asks every shard to shut down and waits for it. A stop while
-   * the bot starts ends that start, a call after the first waits for it, and a stopped app does not start again.
+   * and closes the client, or with process sharding, asks every shard to shut down and waits for it. Called in a shard,
+   * it asks the manager to stop every shard. A stop while the bot starts ends that start, a call after the first waits
+   * for it, and a stopped app does not start again.
    *
-   * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged.
+   * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged, and sets
+   *   `process.exitCode` to 1 unless another code is already set.
    */
   stop(): Promise<void>
 

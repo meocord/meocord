@@ -23,6 +23,7 @@ import { type Container } from 'inversify'
 import { appPresenterOf } from '@src/core/handler-pipeline.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
+import { DEV_RUNNER_ENV } from '@src/util/dev-runner.util.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { createMockInteraction } from '@src/testing/index.js'
 
@@ -148,16 +149,29 @@ describe('start()', () => {
     expect(listenerCounts(seen.clients[0])).toEqual([1, 1, 1, 1, 1])
   })
 
-  it('clears the exit code a failed login set to 0 when a retry logs in, which every runtime keeps', async () => {
+  // `meocord start --dev` reads the failed login from the first app, and the recovery from whichever app comes online
+  it("has a new app that comes online after another app's failed login clear the exit code and tell the dev runner", async () => {
     loginSucceedsOn(2)
     process.exitCode = undefined
-    app = MeoCordFactory.create(App)
+    const told: unknown[] = []
+    vi.stubEnv(DEV_RUNNER_ENV, '1')
+    Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+      told.push(message)
+      callback()
+      return true
+    })
+    try {
+      await MeoCordFactory.create(App).start().catch(() => undefined)
+      expect(process.exitCode).toBe(1)
+      app = MeoCordFactory.create(App)
+      await app.start()
 
-    await app.start().catch(() => undefined)
-    expect(process.exitCode).toBe(1)
-    await app.start()
-
-    expect(process.exitCode).toBe(0)
+      expect(process.exitCode).toBe(0)
+      expect(told).toEqual([{ meocord: 'login-failed' }, { meocord: 'online' }])
+    } finally {
+      Reflect.deleteProperty(process, 'send')
+      vi.unstubAllEnvs()
+    }
   })
 
   it('leaves a client discord.js destroyed on the failed login usable after the retry, and says the retry is deprecated, once', async () => {
