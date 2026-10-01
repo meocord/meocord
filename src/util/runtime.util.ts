@@ -72,7 +72,7 @@ export function buildAppCommand(
  * Split on both separators rather than through path.basename, which only knows the separator
  * of the platform it runs on.
  */
-function isBun(runtime: string): boolean {
+export function isBun(runtime: string): boolean {
   return /^bun(\.exe)?$/i.test(runtime.split(/[\\/]/).pop() ?? '')
 }
 

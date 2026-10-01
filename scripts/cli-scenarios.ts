@@ -1489,6 +1489,33 @@ const scenarios: Scenario[] = [
       timeoutMs: 60_000,
       expect: { code: 0, says: ['Ready with GREETING=first GONE=here', 'Ready with GREETING=second GONE=undefined'] },
     },
+    // .env.local wins over .env. Bun reads it itself; a bot on node is given it by the CLI, which watches it either way
+    ...([
+      ['', {}],
+      [', with the bot on node', { MEOCORD_RUNTIME: 'node' }],
+    ] as const)
+      .filter(([bot]) => runtime === 'bun' || bot === '')
+      .map(
+      ([bot, env]): Scenario => ({
+        name: `start --dev on ${runtime}${bot} restarts the bot with .env.local as it is now when it is saved`,
+        tier: runtime === 'node' && bot === '' ? 'fast' : 'slow',
+        platforms: ['linux', 'darwin'],
+        runtime,
+        env,
+        files: {
+          '.env': `${INVALID_TOKEN_ENV}GREETING=from-env\nGONE=here\n`,
+          '.env.local': 'GREETING=first\n',
+          'src/app.ts': readyApp,
+          'src/ready.service.ts': envService,
+        },
+        discord: { readyDelayMs: 0 },
+        argv: ['start', '--dev'],
+        edits: [{ after: 'Ready with GREETING=first', files: { '.env.local': () => 'GREETING=second\n' } }],
+        signal: { name: 'SIGINT', after: 'Ready with GREETING=second' },
+        timeoutMs: 60_000,
+        expect: { code: 0, says: ['Ready with GREETING=first GONE=here', 'Ready with GREETING=second GONE=here'] },
+      }),
+    ),
     // A failed build emits a bundle that throws its errors; the bot keeps running the last good one, which the mended
     // file builds again, so nothing restarts
     ...(['src/ready.service.ts', 'src/main.ts'] as const).map(
