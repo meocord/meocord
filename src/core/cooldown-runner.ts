@@ -266,10 +266,13 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
   throw refusal
 }
 
+/** How finely a wait's end is told apart from the next, in milliseconds. */
+const NOTICE_BUCKET_MS = 100
+
 /**
  * Whether the caller a cooldown refused is yet to be told so during this wait: a one-use cooldown in the same
- * store, keyed on the refusing cooldown's own key and on the second the wait ends, which every retry in it
- * shares. The first refusal of a wait claims it; every retry in that wait is refused it, and the next wait
+ * store, keyed on the refusing cooldown's own key and on the tenth of a second the wait ends, which every retry
+ * in it shares. The first refusal of a wait claims it; every retry in that wait is refused it, and the next wait
  * claims its own. A refusal `@Cooldown` did not make, or a store that fails to answer, claims nothing.
  */
 export async function claimCooldownNotice(container: Container, refusal: CooldownError): Promise<boolean> {
@@ -277,9 +280,11 @@ export async function claimCooldownNotice(container: Container, refusal: Cooldow
   if (refused === undefined) return false
   // The cooldown's own window, which outlasts the wait and, unlike the wait left, stays the same for every retry
   const limit = { uses: 1, windowMs: refused.windowMs }
-  // A retry's end of the wait can land a moment either side of a second, so a notice takes that one and the one before
-  const endsAt = Math.floor((Date.now() + refusal.retryAfterMs) / 1000)
-  const notices = [endsAt, endsAt - 1].map(second => ({ key: `${refused.key}:notice:${second}`, limit }))
+  // A store answers how long is left, not when, so each retry works out the end of the wait with its own clock and
+  // a moment's delay. A notice takes that tenth of a second and the one before, so a retry landing either side of
+  // one still finds it taken, while a wait that ends a moment after the last has its own.
+  const endsAt = Math.floor((Date.now() + refusal.retryAfterMs) / NOTICE_BUCKET_MS)
+  const notices = [endsAt, endsAt - 1].map(bucket => ({ key: `${refused.key}:notice:${bucket}`, limit }))
   try {
     return (await askWithin(cooldownStoreOf(container), notices, cooldownPolicyOf(container).timeoutMs, false)).allowed
   } catch (error) {
