@@ -327,6 +327,28 @@ function pnpmProject(
 
 const versionIn = (dir: string) => (JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')) as { version: string }).version
 
+/** Where Node, requiring `name` from the package at `from`, finds it in `out`, looking no further up. */
+function resolvedIn(out: string, from: string, name: string): string | undefined {
+  for (let dir = from; dir.startsWith(out); dir = path.dirname(dir)) {
+    const candidate = path.join(dir, 'node_modules', name)
+    if (path.basename(dir) !== 'node_modules' && existsSync(path.join(candidate, 'package.json'))) return candidate
+  }
+  return undefined
+}
+
+/** The versions Node loads, following `names` from the top of `out`: each one required by the one before. */
+function versionsAlong(out: string, ...names: string[]): string[] {
+  const versions: string[] = []
+  let from = out
+  for (const name of names) {
+    const found = resolvedIn(out, from, name)
+    if (!found) return [...versions, `${name} not found`]
+    versions.push(`${name}@${versionIn(found)}`)
+    from = found
+  }
+  return versions
+}
+
 describe('a project pnpm installed', () => {
   // pnpm links an external from its store; its dependencies are beside it there, not in the project's node_modules
   it("packs a listed package's dependencies, which sit beside it in pnpm's store", () => {
@@ -395,6 +417,64 @@ describe('a project pnpm installed', () => {
       return versionIn(existsSync(nested) ? nested : path.join(out, 'node_modules', 'ms'))
     }
     expect([resolved('first'), resolved('second')]).toEqual(['2.0.0', '2.1.3'])
+  })
+
+  // A copy nested under a package sits between its nested dependencies and the top, so the top's version alone
+  // doesn't say what they load
+  it('gives a nested dependency its own version when its parent holds another one nested', () => {
+    pnpmProject(
+      [
+        { name: 'app-lib', version: '1.0.0', dependencies: { x: '1.0.0', y: '1.0.0' } },
+        { name: 'x', version: '1.0.0', dependencies: { y: '2.0.0' } },
+        { name: 'x', version: '2.0.0' },
+        { name: 'y', version: '1.0.0' },
+        { name: 'y', version: '2.0.0' },
+      ],
+      ['app-lib@1.0.0', 'x@2.0.0', 'y@2.0.0'],
+    )
+    const out = path.join(root, 'dist')
+
+    copyPackagesInto(new Map(installedPackages(['app-lib', 'x', 'y'], root).map(({ name, dir }) => [name, dir])), root, out)
+
+    expect(versionsAlong(out, 'app-lib', 'x', 'y')).toEqual(['app-lib@1.0.0', 'x@1.0.0', 'y@2.0.0'])
+    expect(versionsAlong(out, 'app-lib', 'y')).toEqual(['app-lib@1.0.0', 'y@1.0.0'])
+  })
+
+  // Each nests under the other only until the version Node finds is the one it needs
+  it('packs two dependencies that need each other, in versions other than the top', () => {
+    pnpmProject(
+      [
+        { name: 'plugin', version: '1.0.0', dependencies: { a: '1.0.0' } },
+        { name: 'a', version: '1.0.0', dependencies: { b: '1.0.0' } },
+        { name: 'b', version: '1.0.0', dependencies: { a: '1.0.0' } },
+        { name: 'a', version: '2.0.0' },
+        { name: 'b', version: '2.0.0' },
+      ],
+      ['plugin@1.0.0', 'a@2.0.0', 'b@2.0.0'],
+    )
+    const out = path.join(root, 'dist')
+
+    copyPackagesInto(new Map(installedPackages(['plugin', 'a', 'b'], root).map(({ name, dir }) => [name, dir])), root, out)
+
+    expect(versionsAlong(out, 'plugin', 'a', 'b', 'a', 'b')).toEqual(['plugin@1.0.0', 'a@1.0.0', 'b@1.0.0', 'a@1.0.0', 'b@1.0.0'])
+  })
+
+  // The bundle imports it from the project, where pnpm's link stands; its platform package is beside the real one
+  it('keeps out of the bundle a native package it imports, whose binary ships in a platform package', () => {
+    pnpmProject(
+      [
+        { name: '@node-rs/xxhash', version: '1.0.0', optional: { '@node-rs/xxhash-test-platform': '1.0.0' } },
+        { name: '@node-rs/xxhash-test-platform', version: '1.0.0', binary: 'xxhash.node' },
+      ],
+      ['@node-rs/xxhash@1.0.0'],
+    )
+    const { externals, found } = createNativeExternals(root)
+    const results: (string | undefined)[] = []
+
+    externals({ request: '@node-rs/xxhash', context: path.join(root, 'src') }, (_error, result) => results.push(result))
+
+    expect(results).toEqual(['@node-rs/xxhash'])
+    expect(found.get('@node-rs/xxhash')?.carrier).toBe('@node-rs/xxhash-test-platform')
   })
 })
 
@@ -496,9 +576,27 @@ describe('copyPackagesInto', () => {
 
     const copied = copyPackagesInto(new Map([['canvas-lib', dir]]), root, out)
 
-    expect(copied).toEqual(['canvas-lib'])
+    expect(copied.sort()).toEqual(['canvas-lib', 'semver'])
     expect(existsSync(path.join(out, 'node_modules', 'canvas-lib', 'node_modules', 'semver', 'package.json'))).toBe(true)
     expect(existsSync(path.join(out, 'node_modules', 'semver'))).toBe(false)
+  })
+
+  // npm nests a package under its parent when another version holds the root; what it needs from the root comes too
+  it("packs the hoisted dependencies of a package nested under another, beside its parent's", () => {
+    const write = (dir: string, name: string, version: string, dependencies: Record<string, string> = {}) => {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version, dependencies }))
+    }
+    const modules = path.join(root, 'node_modules')
+    write(path.join(modules, 'canvas-lib'), 'canvas-lib', '1.0.0', { semver: '1.0.0' })
+    write(path.join(modules, 'canvas-lib', 'node_modules', 'semver'), 'semver', '1.0.0', { 'lru-cache': '1.0.0' })
+    write(path.join(modules, 'semver'), 'semver', '2.0.0')
+    write(path.join(modules, 'lru-cache'), 'lru-cache', '1.0.0')
+    const out = path.join(root, 'dist')
+
+    copyPackagesInto(new Map([['canvas-lib', path.join(modules, 'canvas-lib')]]), root, out)
+
+    expect(versionsAlong(out, 'canvas-lib', 'semver', 'lru-cache')).toEqual(['canvas-lib@1.0.0', 'semver@1.0.0', 'lru-cache@1.0.0'])
   })
 
   // Some packages list their own types as runtime dependencies; they never run.
