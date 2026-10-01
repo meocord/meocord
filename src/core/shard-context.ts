@@ -63,6 +63,46 @@ export type ShardCallResult<T> =
   | { shardIds: number[]; ok: true; value: T }
   | { shardIds: number[]; ok: false; error: string }
 
+/** What JSON leaves out of an object, and writes as `null` in a list. */
+type JsonDropped = undefined | void | symbol | ((...args: any[]) => unknown)
+
+/** A list's item as JSON writes it: `null` for one it leaves out. */
+type JsonItem<T> = T extends JsonDropped ? null : Jsonified<T>
+
+/** An object as JSON writes it: its string keys, without those JSON leaves out, a key that may be `undefined` optional. */
+type JsonObject<T> = {
+  [K in keyof T as K extends string | number ? ([T[K]] extends [JsonDropped] ? never : undefined extends T[K] ? never : K) : never]: Jsonified<T[K]>
+} & {
+  [K in keyof T as K extends string | number ? ([T[K]] extends [JsonDropped] ? never : undefined extends T[K] ? K : never) : never]?: Jsonified<
+    Exclude<T[K], undefined>
+  >
+}
+
+/**
+ * A value as it arrives after a trip through JSON: what `toJSON` returns, so a `Date` as a string; a `Map` or a `Set`
+ * as an empty object; a function, a symbol or `undefined` left out of an object, `null` in a list, and `undefined` on
+ * its own. A `BigInt` cannot be written, so it is `never`.
+ *
+ * @typeParam T - The value before it is sent.
+ * @group Types
+ * @see {@link ShardContext.call}
+ */
+export type Jsonified<T> = unknown extends T
+  ? unknown
+  : T extends { toJSON(...args: any[]): infer R }
+    ? Jsonified<R>
+    : T extends string | number | boolean | null
+      ? T
+      : T extends bigint
+        ? never
+        : T extends JsonDropped
+          ? undefined
+          : T extends ReadonlyMap<unknown, unknown> | ReadonlySet<unknown>
+            ? Record<string, never>
+            : T extends readonly unknown[]
+              ? { -readonly [I in keyof T]: JsonItem<T[I]> }
+              : { [K in keyof JsonObject<T>]: JsonObject<T>[K] }
+
 type MethodName<T> = {
   [K in keyof T]: T[K] extends (...args: any[]) => unknown ? K : never
 }[keyof T] &
@@ -166,22 +206,23 @@ export class ShardContext {
    * `BigInt`, fails the call. A process that throws, lacks the service, or does not answer within 10 seconds
    * gives an error result instead of failing the others.
    *
-   * @param service - The service or controller class; each process resolves its own instance.
+   * @param service - The controller, the service, or a class a provider stands in for; each process resolves its own
+   *   instance.
    * @param method - The method to call.
    * @param args - The method's arguments.
-   * @returns One result per process.
+   * @returns One result per process, each value as JSON gives it back: see {@link Jsonified}.
    */
   async call<T, M extends MethodName<T>>(
     service: abstract new (...args: any[]) => T,
     method: M,
     ...args: MethodArgs<T, M>
-  ): Promise<ShardCallResult<MethodResult<T, M>>[]> {
+  ): Promise<ShardCallResult<Jsonified<MethodResult<T, M>>>[]> {
     const shard = this.client?.shard
     if (!shard) {
       try {
         // As JSON, as between processes, so one process and a test see what a process-sharded bot does
         const value = await withTimeout(this.runHere(service, method, asJson(args)), SHARD_CALL_TIMEOUT_MS, service.name)
-        return [{ shardIds: this.ids, ok: true, value: asJson(value) as MethodResult<T, M> }]
+        return [{ shardIds: this.ids, ok: true, value: asJson(value) as Jsonified<MethodResult<T, M>> }]
       } catch (error) {
         return [{ shardIds: this.ids, ok: false, error: describe(error) }]
       }
@@ -199,7 +240,7 @@ export class ShardContext {
             SHARD_CALL_TIMEOUT_MS,
             `Shard ${id}`,
           )
-          return { shardIds: [id], ok: true as const, value: value as MethodResult<T, M> }
+          return { shardIds: [id], ok: true as const, value: value as Jsonified<MethodResult<T, M>> }
         } catch (error) {
           return { shardIds: [id], ok: false as const, error: describe(error) }
         }

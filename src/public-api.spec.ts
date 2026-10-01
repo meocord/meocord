@@ -114,6 +114,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'HandlerEntry',
     'HandlerFilter',
     'HandlerKind',
+    'Jsonified',
     'MeoCordApplication',
     'MessageHandlerEntry',
     'ModalHandlerEntry',
