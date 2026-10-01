@@ -106,6 +106,28 @@ describe('RedisCooldownStore', () => {
     ])
   })
 
+  // A give-back is cleanup: when it fails, the call is still refused, not failed as though the store were down
+  it('on Redis Cluster, still refuses a call when giving back the keys counted before the refusal fails', async () => {
+    const replies = [
+      [1, 0, -1],
+      [0, 2_000, 0, 1_700_000_002_000],
+    ]
+    const evaluate = createMockFn<RedisEval>((script, keys) =>
+      !script.includes('ZADD')
+        ? Promise.reject(new Error('connection reset'))
+        : keys.length > 1
+          ? Promise.reject(new Error("CROSSSLOT Keys in request don't hash to the same slot"))
+          : Promise.resolve(replies.shift()),
+    )
+
+    const verdict = await new RedisCooldownStore(evaluate).consumeMany([
+      { key: 'a', limit },
+      { key: 'b', limit },
+    ])
+
+    expect(verdict).toEqual({ allowed: false, retryAfterMs: 2_000, blocked: 1, retryTimestamp: 1_700_000_002_000 })
+  })
+
   // A call counted after the timeout is given back, on a cluster too
   it('on Redis Cluster, gives back every key a call counted when its verdict is released', async () => {
     const evaluate = createMockFn<RedisEval>((script, keys) =>

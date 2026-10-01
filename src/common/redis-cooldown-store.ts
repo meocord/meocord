@@ -8,6 +8,9 @@ import {
   longestRefusal,
   withRelease,
 } from '@src/common/cooldown-store.js'
+import { Logger } from '@src/common/logger.js'
+
+const logger = new Logger('RedisCooldownStore')
 
 /**
  * Runs a Lua script on the server, as a client's `EVAL` does.
@@ -250,7 +253,12 @@ export class RedisCooldownStore extends CooldownStore {
     for (const [index, entry] of entries.entries()) {
       const verdict = await this.consumeMany([entry])
       if (!verdict.allowed) {
-        await releaseAll()
+        // The refusal stands either way: a give-back that fails leaves those keys counted, as one script never would
+        await Promise.all(
+          releases.map(release =>
+            release().catch((failure: unknown) => logger.debug(`Could not give back a use a refused call counted: ${String(failure)}`)),
+          ),
+        )
         return { ...verdict, blocked: index }
       }
       if (verdict.release) releases.push(verdict.release)
