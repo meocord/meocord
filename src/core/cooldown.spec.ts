@@ -260,7 +260,9 @@ describe('@Cooldown', () => {
   })
 
   it('refuses options it cannot count, where it applies', () => {
-    expect(onHandler(Cooldown({ seconds: 0 }))).toThrow('positive number of seconds')
+    for (const seconds of [0, -1, Number.NaN, Infinity, 0.0009, 1e300]) {
+      expect(onHandler(Cooldown({ seconds }))).toThrow(`@Cooldown needs a number of seconds from 0.001 to 9007199254740, not ${seconds}.`)
+    }
     expect(onHandler(Cooldown({ seconds: 5, uses: 1.5 }))).toThrow('whole number of uses')
     expect(onHandler(Cooldown({ seconds: 5, per: 'server' as never }))).toThrow("not 'server'")
     expect(onHandler(Cooldown({ seconds: 5, by: 'uid' as never }))).toThrow('@Cooldown takes by as a function of the call')
@@ -305,6 +307,27 @@ describe('@Cooldown', () => {
 
     await expect(stubbed.invoke(DailyController, 'daily', slash())).rejects.toMatchObject({ retryAfterMs: 2_500 })
     expect(consume).toHaveBeenCalledWith('DailyController.daily#0:user:user:ada', { uses: 1, windowMs: 10_000 })
+  })
+})
+
+describe('a cooldown window', () => {
+  it('reaches the store as a whole number of milliseconds, whatever the seconds', async () => {
+    @Controller()
+    class FractionController {
+      @Command('fraction', CommandType.SLASH)
+      @Cooldown({ seconds: 16.1 })
+      @Cooldown({ seconds: 0.0015 })
+      async fraction(_interaction: ChatInputCommandInteraction) {}
+    }
+    const consumeMany = vi.fn(async (_entries: readonly { key: string; limit: CooldownLimit }[]) => ({ allowed: true, retryAfterMs: 0 }))
+    const stubbed = MeoCordTestingModule.create({
+      controllers: [FractionController],
+      providers: [{ provide: CooldownStore, useValue: { consumeMany } }],
+    }).compile()
+
+    await stubbed.invoke(FractionController, 'fraction', slash())
+
+    expect(consumeMany.mock.calls[0][0].map(({ limit }) => limit.windowMs)).toEqual([16_100, 2])
   })
 })
 

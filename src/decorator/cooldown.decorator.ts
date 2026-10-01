@@ -78,7 +78,7 @@ export function Cooldown<P extends object = Record<string, unknown>>(
 ): CooldownByDecorator<P>
 export function Cooldown(options: CooldownOptions<any>): ClassDecorator & MethodDecorator {
   const { seconds, uses = 1, per = 'user', by } = options
-  const cooldown: StoredCooldown = { ...options, uses, per }
+  const cooldown: StoredCooldown = { ...options, uses, per, windowMs: Math.round(seconds * 1000) }
 
   return function (target: object, propertyKey?: string | symbol) {
     // Checked where it applies, so the refusal names the handler or controller
@@ -95,9 +95,12 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
   } as ClassDecorator & MethodDecorator
 }
 
+/** The longest window, in seconds: every store keeps it as an exact whole number of milliseconds. */
+const MAX_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1000)
+
 /** Why a cooldown's options cannot be counted, or undefined when they can. */
 function cooldownProblem(seconds: number, uses: number, per: string, by: unknown): string | undefined {
-  if (!(seconds > 0)) return `@Cooldown needs a positive number of seconds, not ${seconds}.`
+  if (!(seconds >= 0.001 && seconds <= MAX_SECONDS)) return `@Cooldown needs a number of seconds from 0.001 to ${MAX_SECONDS}, not ${seconds}.`
   if (!Number.isInteger(uses) || uses < 1) return `@Cooldown needs a whole number of uses of at least 1, not ${uses}.`
   if (!['user', 'guild', 'channel', 'global'].includes(per)) {
     return `@Cooldown counts per 'user', 'guild', 'channel' or 'global', not '${per}'.`
