@@ -1,7 +1,8 @@
 import { vi } from 'vitest'
 import { type Client } from 'discord.js'
 import { Controller, Service } from '@src/decorator/index.js'
-import { SHARD_CALL_TIMEOUT_MS, ShardContext } from '@src/core/shard-context.js'
+import { SHARD_CALL_TIMEOUT_MS, shardCallHandler, ShardContext } from '@src/core/shard-context.js'
+import { Container } from 'inversify'
 import { MeoCordTestingModule } from '@src/testing/index.js'
 
 @Service()
@@ -64,6 +65,23 @@ describe('ShardContext', () => {
           value: { received: ['[object String]', '[object Object]', '[object Null]'], map: {}, at: '1970-01-01T00:00:00.000Z' },
         },
       ])
+    })
+
+    // JSON drops a value it cannot write, as discord.js's reply between processes does
+    it('gives a result JSON cannot write, such as a function or a Symbol, as undefined', async () => {
+      @Controller()
+      class Odd {
+        fn() {
+          return () => 1
+        }
+        symbol() {
+          return Symbol('odd')
+        }
+      }
+      const shards = MeoCordTestingModule.create({ controllers: [Odd] }).compile().get(ShardContext)
+
+      expect(await shards.call(Odd, 'fn')).toEqual([{ shardIds: [0], ok: true, value: undefined }])
+      expect(await shards.call(Odd, 'symbol')).toEqual([{ shardIds: [0], ok: true, value: undefined }])
     })
 
     it('reaches a class a provider stands in for', async () => {
@@ -164,6 +182,23 @@ describe('ShardContext', () => {
       const context = new ShardContext(client, async () => undefined)
 
       expect([context.ids, context.count]).toEqual([[0], 3])
+    })
+  })
+
+  describe('a call from another shard', () => {
+    // Encoded where it ran, so a value JSON cannot carry fails at once, as in one process, rather than never answering
+    it('fails at once on a result JSON cannot carry, such as a BigInt', async () => {
+      @Service()
+      class Ledger {
+        total() {
+          return 10n
+        }
+      }
+      const container = new Container()
+      container.bind(Ledger).toSelf()
+      const runHere = shardCallHandler(container, () => [Ledger], 'this app')
+
+      await expect(runHere('Ledger', 'total', [])).rejects.toThrow('BigInt')
     })
   })
 

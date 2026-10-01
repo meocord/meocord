@@ -33,13 +33,20 @@ export function shardCallHandler(container: Container, classes: () => readonly C
     }
     const instance = container.get(matching[0]) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[method] !== 'function') throw new Error(`${name}.${method} is not a method.`)
-    return instance[method](...args)
+    const result = await instance[method](...args)
+    // From another shard, the answer goes back as JSON: encoded here, a value JSON cannot carry fails the call at once
+    // rather than leaving discord.js nothing to send, and the caller waiting out its timeout
+    return typeof service === 'string' ? asJson(result) : result
   }
 }
 
-/** A value as JSON carries it between processes: dates become strings, maps empty objects, `undefined` in a list `null`. */
+/**
+ * A value as JSON carries it between processes: dates become strings, maps empty objects, `undefined` in a list
+ * `null`, and a value JSON cannot write, such as a function, `undefined`. A BigInt throws, as JSON does.
+ */
 function asJson<T>(value: T): T {
-  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
+  const json = JSON.stringify(value) as string | undefined
+  return (json === undefined ? undefined : JSON.parse(json)) as T
 }
 
 /** How long `ShardContext.call` waits for a shard to answer. */
@@ -157,8 +164,9 @@ export class ShardContext {
    *
    * With process sharding that is one result per shard; with one process, a single result listing every
    * shard. The arguments and the result pass as JSON in every mode, one process and tests included, so a
-   * `Date` arrives as a string and a `Map` as `{}` wherever it runs. A process that throws, lacks the
-   * service, or does not answer within 10 seconds gives an error result instead of failing the others.
+   * `Date` arrives as a string and a `Map` as `{}` wherever it runs, and a value JSON cannot carry, such as a
+   * `BigInt`, fails the call. A process that throws, lacks the service, or does not answer within 10 seconds
+   * gives an error result instead of failing the others.
    *
    * @param service - The service or controller class; each process resolves its own instance.
    * @param method - The method to call.
