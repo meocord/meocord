@@ -9,6 +9,14 @@ import { decoratedName, refuse } from '@src/util/refusal.util.js'
  * Use it to give a set of stages a name of your own, such as a guard and a cooldown every staff command takes,
  * so each controller or handler applies it with one decorator.
  *
+ * @remarks
+ * The decorators apply as they would stacked in the order written: `applyDecorators(A, B)` is `@A @B`, so `B` applies
+ * first and `A` last, and guards run in the order listed. A method or class a decorator returns in place of the one it
+ * was given, as a wrapping decorator does, is what the next decorator, and TypeScript, receive.
+ *
+ * @param decorators - The decorators, in the order they would be written stacked.
+ * @returns One decorator for a class or a method.
+ *
  * @example
  * ```ts
  * export const StaffOnly = () => applyDecorators(UseGuard(StaffGuard), Cooldown({ seconds: 5 }))
@@ -24,14 +32,16 @@ import { decoratedName, refuse } from '@src/util/refusal.util.js'
  */
 export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator)[]): ClassDecorator & MethodDecorator {
   return function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor): any {
-    for (const decorator of decorators) {
-      if (propertyKey !== undefined && descriptor !== undefined) {
-        ;(decorator as MethodDecorator)(target, propertyKey, descriptor)
-      } else {
-        ;(decorator as ClassDecorator)(target)
-      }
+    // Last first, as TypeScript applies decorators stacked, each given what the one before it returned
+    const ordered = [...decorators].reverse()
+    if (propertyKey !== undefined && descriptor !== undefined) {
+      let current = descriptor
+      for (const decorator of ordered) current = ((decorator as MethodDecorator)(target, propertyKey, current) as PropertyDescriptor | void) ?? current
+      return current
     }
-    return descriptor
+    let current = target
+    for (const decorator of ordered) current = (decorator as ClassDecorator)(current) ?? current
+    return current
   } as any
 }
 
