@@ -19,7 +19,9 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * What `@MeoCord` takes: the app's controllers, services and client options, and what applies to every handler.
  *
  * Use it to name the options outside the decorator, such as a base shared by two app classes. Each stage list is
- * checked against the classes it holds as `@MeoCord` checks it.
+ * checked against the classes it holds as `@MeoCord` checks it. A base typed as plain `MeoCordOptions` takes any
+ * `params` on a `{ provide, params }` entry; give the entries as its type argument, `MeoCordOptions<[…]>`, or write
+ * them inline in `@MeoCord`, to have their params checked too.
  *
  * @remarks
  * These are the app's own options, read when the app is created. What the process needs before the app class is
