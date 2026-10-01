@@ -149,10 +149,8 @@ export function testCooldownStore(
       expect(refused.retryAfterMs).toBeLessThanOrEqual(long.windowMs)
     })
 
-    // The default consumeMany counts in order, as custom stores always have, so these hold for a store
-    // that overrides it: a store that does not passes them without them being checked
-    test('records nothing when one cooldown of a batch refuses it, for a store that overrides consumeMany', async store => {
-      if (!overridesConsumeMany(store)) return
+    // The default consumeMany counts in order and stops at the first refusal, so the entries before it count
+    test('records nothing when one cooldown of a batch refuses it, or with the default consumeMany, counts those before it', async store => {
       const limit = { uses: 1, windowMs: 2_000 }
       await store.consume(key('taken'), limit)
 
@@ -162,11 +160,11 @@ export function testCooldownStore(
       ])
       expect(refused.allowed).toBe(false)
       expect(refused.blocked).toBe(1)
-      expect((await store.consume(key('free'), limit)).allowed).toBe(true)
+      expect((await store.consume(key('free'), limit)).allowed).toBe(overridesConsumeMany(store))
     })
 
-    test('lets exactly one of several concurrent batches take the last use of each, for a store that overrides consumeMany', async store => {
-      if (!overridesConsumeMany(store)) return
+    // The default consumeMany takes each key with consume, so only the batch that took the first goes on to the rest
+    test('lets exactly one of several concurrent batches take the last use of each', async store => {
       const limit = { uses: 1, windowMs: 2_000 }
       const batch = [
         { key: key('concurrent-a'), limit },
@@ -177,10 +175,8 @@ export function testCooldownStore(
       expect(verdicts.filter(verdict => verdict.allowed).length).toBe(1)
     })
 
-    // The default peekMany allows every call, leaving the check to consumeMany, so these hold for a store
-    // that overrides it
-    test('peeks without recording: allowed below the limit, however often, for a store that overrides peekMany', async store => {
-      if (!overridesPeekMany(store)) return
+    // The default peekMany allows every call and records nothing, leaving the check to consumeMany
+    test('peeks without recording: allowed below the limit, however often', async store => {
       const limit = { uses: 2, windowMs: 2_000 }
       const entry = { key: key('peek-free'), limit }
       for (let peek = 0; peek < 5; peek++) expect(await store.peekMany([entry])).toEqual({ allowed: true, retryAfterMs: 0 })
@@ -189,14 +185,18 @@ export function testCooldownStore(
       expect((await store.consume(entry.key, limit)).allowed).toBe(true)
     })
 
-    test('peeks a refusal with the wait consume gives, and still records nothing, for a store that overrides peekMany', async store => {
-      if (!overridesPeekMany(store)) return
+    test('peeks a refusal with the wait consume gives, or allows it with the default peekMany, and records nothing', async store => {
       const limit = { uses: 1, windowMs: 2_000 }
       const entry = { key: key('peek-taken'), limit }
       await store.consume(entry.key, limit)
       const consumed = await store.consume(entry.key, limit)
 
       const peeked = await store.peekMany([entry])
+      if (!overridesPeekMany(store)) {
+        expect(peeked).toEqual({ allowed: true, retryAfterMs: 0 })
+        expect((await store.consume(entry.key, limit)).allowed).toBe(false)
+        return
+      }
       expect(peeked.allowed).toBe(false)
       expect(peeked.blocked).toBe(0)
       // Asked after consume, so its wait is at most consume's, and at most a little less
@@ -207,8 +207,7 @@ export function testCooldownStore(
       expect(await store.peekMany([entry])).toEqual({ allowed: true, retryAfterMs: 0 })
     })
 
-    test('peeks a batch as consumeMany would, naming the longest wait, for a store that overrides peekMany', async store => {
-      if (!overridesPeekMany(store)) return
+    test('peeks a batch as consumeMany would, naming the longest wait, or allows it with the default peekMany', async store => {
       const short = { uses: 1, windowMs: 1_000 }
       const long = { uses: 1, windowMs: 2_000 }
       const batch = [
@@ -220,6 +219,11 @@ export function testCooldownStore(
       await store.consume(batch[2].key, long)
 
       const peeked = await store.peekMany(batch)
+      if (!overridesPeekMany(store)) {
+        expect(peeked).toEqual({ allowed: true, retryAfterMs: 0 })
+        expect((await store.consume(batch[0].key, short)).allowed).toBe(true)
+        return
+      }
       expect(peeked.allowed).toBe(false)
       expect(peeked.blocked).toBe(2)
       expect(peeked.retryAfterMs).toBeGreaterThan(short.windowMs)
