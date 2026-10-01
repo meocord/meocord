@@ -13,15 +13,76 @@ import { responseOf } from '@src/common/response/response-state.js'
 import { createDiscordError, createMockInteraction, createMockMessage, getResponse } from '@src/testing/index.js'
 
 describe('getResponse', () => {
-  it('reports an interaction respond() never saw from what discord.js shows on it', async () => {
+  it('reports the answers a handler made with discord.js directly, in order, with what each sent', async () => {
     const replied = createMockInteraction(ChatInputCommandInteraction)
-    await replied.reply('raw')
+    await replied.reply({ content: 'raw', withResponse: true })
+    await replied.followUp('more')
     const deferred = createMockInteraction(ButtonInteraction)
     await deferred.deferUpdate()
+    await deferred.editReply({ content: 'done' })
 
-    expect(getResponse(replied)).toEqual({ state: 'replied', sent: true, calls: [] })
-    expect(getResponse(deferred)).toEqual({ state: 'deferred', sent: false, calls: [] })
+    expect(getResponse(replied)).toEqual({
+      state: 'replied',
+      sent: true,
+      calls: [
+        { method: 'reply', payload: { content: 'raw' } },
+        { method: 'followUp', payload: 'more' },
+      ],
+    })
+    expect(getResponse(deferred)).toEqual({
+      state: 'replied',
+      sent: true,
+      calls: [
+        { method: 'deferUpdate', payload: undefined },
+        { method: 'editReply', payload: { content: 'done' } },
+      ],
+    })
     expect(getResponse(createMockInteraction(ChatInputCommandInteraction))).toEqual({ state: 'unanswered', sent: false, calls: [] })
+  })
+
+  it('reports answers made directly and through respond() together, each once, in the order made', async () => {
+    const interaction = createMockInteraction(ChatInputCommandInteraction)
+    await interaction.deferReply()
+
+    await respond(interaction).send('answer')
+    await interaction.followUp('after')
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['deferReply', 'editReply', 'followUp'])
+  })
+
+  it('keeps a direct answer Discord refused, with its error, and counts nothing as sent', async () => {
+    const interaction = createMockInteraction(ChatInputCommandInteraction)
+    interaction.reply.mockRejectedValueOnce(createDiscordError(10062))
+
+    await expect(interaction.reply('late')).rejects.toMatchObject({ code: 10062 })
+
+    expect(getResponse(interaction)).toEqual({
+      state: 'unanswered',
+      sent: false,
+      calls: [{ method: 'reply', payload: 'late', error: expect.objectContaining({ code: 10062 }) }],
+    })
+  })
+
+  // Recording a rejection must not handle it: on a bot, a direct answer nobody awaits that Discord refuses is unhandled
+  it('leaves a refused direct answer nobody awaits unhandled, as on a bot, and still records its error', async () => {
+    const interaction = createMockInteraction(ChatInputCommandInteraction)
+    interaction.reply.mockRejectedValueOnce(createDiscordError(10062))
+    // The test runner's own listeners would fail the run on it, so they step aside for this one rejection
+    const runners = process.listeners('unhandledRejection')
+    process.removeAllListeners('unhandledRejection')
+    try {
+      const unhandled = new Promise<unknown>(resolve => process.once('unhandledRejection', resolve))
+
+      void interaction.reply('late')
+
+      // Handled, it would never be reported: the race then settles on 'handled'
+      const settled = await Promise.race([unhandled, new Promise(resolve => setTimeout(() => resolve('handled'), 500))])
+      expect(settled).toMatchObject({ code: 10062 })
+      expect(getResponse(interaction).calls).toEqual([{ method: 'reply', payload: 'late', error: expect.objectContaining({ code: 10062 }) }])
+    } finally {
+      process.removeAllListeners('unhandledRejection')
+      for (const listener of runners) process.on('unhandledRejection', listener)
+    }
   })
 
   describe('a call Discord refuses', () => {
