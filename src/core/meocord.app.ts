@@ -78,7 +78,8 @@ export async function shutdownAndExit(): Promise<void> {
   }
 
   const closed = await Promise.all([...runningApps].map(close => close()))
-  process.exit(closed.every(Boolean) ? 0 : 1)
+  // A clean stop keeps a code already set, such as the 1 a failed login set, so a supervisor still sees it
+  process.exit(closed.every(Boolean) ? Number(process.exitCode ?? 0) || 0 : 1)
 }
 
 /** What `start()` rejects with when shutdown begins before the bot came online, which shutdown has logged. */
@@ -167,7 +168,11 @@ export class MeoCordApp implements MeoCordApplication {
   /** The resolved instances whose hooks ran at ready, so shutdown calls the same ones; `undefined` before ready. */
   private lifecycleEntries?: LifecycleEntry[]
 
-  private readonly close = () => this.closeClient()
+  /** Closes the app once, however many stops and signals ask: whether the client was destroyed cleanly. */
+  private readonly close = (): Promise<boolean> => (this.stopped ??= this.closeClient())
+
+  /** The stop under way or done, which a later stop waits for. */
+  private stopped?: Promise<boolean>
 
   /** Ends a `start()` whose login is still in flight when shutdown begins; unset outside the login. */
   private abortLogin?: () => void
@@ -233,9 +238,26 @@ export class MeoCordApp implements MeoCordApplication {
    */
   async start(): Promise<void> {
     if (isRegisterOnly()) return this.registerOnly()
+    if (this.stopped) throw new Error('This app was stopped; use MeoCordFactory.create to make a new one.')
     if (this.online) return
     this.starting ??= this.startOnce().finally(() => (this.starting = undefined))
     return this.starting
+  }
+
+  /**
+   * Stops the bot without ending the process: runs the `onShutdown` hooks under the configured `shutdownTimeout`, then
+   * closes the client. A stop while the bot logs in ends the login, and that `start()` rejects. A call after the first
+   * waits for it, and a stopped app does not start again.
+   *
+   * @returns A promise that resolves once the bot is stopped. A failure to close the client is logged.
+   *
+   * @example
+   * ```ts
+   * await app.stop()
+   * ```
+   */
+  async stop(): Promise<void> {
+    await this.close()
   }
 
   /** The `start()` under way, which a concurrent call waits for. */

@@ -560,7 +560,7 @@ describe('lifecycle hooks', () => {
       expect(exit).toHaveBeenCalledWith(0)
     })
 
-    it('leaves an app whose login failed out of shutdown', async () => {
+    it('leaves an app whose login failed out of shutdown, and exits with the code the failed login set', async () => {
       const loaded = await load()
       vi.spyOn(loaded.discord.Client.prototype, 'login').mockRejectedValue(new Error('invalid token'))
       const destroy = vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
@@ -577,7 +577,8 @@ describe('lifecycle hooks', () => {
       }
 
       expect(destroy).not.toHaveBeenCalled()
-      expect(exit).toHaveBeenCalledWith(0)
+      // A supervisor reads a clean exit as a clean stop, though the bot never came online
+      expect(exit).toHaveBeenCalledWith(1)
     })
 
     it('exits 1 when the client fails to close', async () => {

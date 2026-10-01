@@ -303,7 +303,7 @@ describe('ShardManager', () => {
 
     const started = manager.start()
     await vi.waitFor(() => expect(shards).toHaveLength(1))
-    const stopped = manager.stop()
+    const stopped = manager.stopAndExit()
     shards[0].die(0)
     paused()
     await started
@@ -316,7 +316,7 @@ describe('ShardManager', () => {
   it('exits 0 at once when stopped before any shard was spawned', async () => {
     const { manager, exit } = setup({ shards: 2 })
 
-    await manager.stop()
+    await manager.stopAndExit()
 
     expect(exit).toHaveBeenCalledWith(0)
   })
@@ -344,11 +344,24 @@ describe('ShardManager', () => {
   })
 
   describe('stopping', () => {
+    it('stops every shard through its hooks with stop(), without ending the process, and once however often called', async () => {
+      const { manager, shards, exit } = setup({ shards: 2 })
+      await manager.start()
+
+      const stopped = Promise.all([manager.stop(), manager.stop()])
+      expect(shards.map(shard => shard.sent)).toEqual([[{ meocord: 'shutdown' }], [{ meocord: 'shutdown' }]])
+      shards.forEach(shard => shard.die(0))
+      await stopped
+
+      expect(exit).not.toHaveBeenCalled()
+      await expect(manager.start()).rejects.toThrow('This app was stopped; use MeoCordFactory.create to make a new one.')
+    })
+
     it('asks every shard to shut down, waits for them, and exits 0', async () => {
       const { manager, shards, exit } = setup({ shards: 2 })
       await manager.start()
 
-      const stopped = manager.stop()
+      const stopped = manager.stopAndExit()
       expect(shards.map(shard => shard.sent)).toEqual([[{ meocord: 'shutdown' }], [{ meocord: 'shutdown' }]])
       shards.forEach(shard => shard.die(0))
       await stopped
@@ -361,7 +374,7 @@ describe('ShardManager', () => {
       const { manager, shards, exit } = setup({ shards: 2, shutdownTimeout: 1_000 })
       await manager.start()
 
-      const stopped = manager.stop()
+      const stopped = manager.stopAndExit()
       shards[0].die(0)
       await vi.advanceTimersByTimeAsync(1_000 + SHUTDOWN_MARGIN_MS)
       await stopped
@@ -374,9 +387,9 @@ describe('ShardManager', () => {
       const { manager, shards, exit, clock } = setup({ shards: 2 })
       await manager.start()
 
-      void manager.stop()
+      void manager.stopAndExit()
       clock.now += REPEAT_SIGNAL_WINDOW_MS
-      await manager.stop()
+      await manager.stopAndExit()
 
       expect(shards.every(shard => shard.process === null)).toBe(true)
       expect(exit).toHaveBeenCalledWith(1)
@@ -387,9 +400,9 @@ describe('ShardManager', () => {
       const { manager, shards, exit, clock } = setup({ shards: 2 })
       await manager.start()
 
-      const stopped = manager.stop()
+      const stopped = manager.stopAndExit()
       clock.now += REPEAT_SIGNAL_WINDOW_MS - 1
-      await manager.stop()
+      await manager.stopAndExit()
 
       expect(shards.map(shard => shard.sent)).toEqual([[{ meocord: 'shutdown' }], [{ meocord: 'shutdown' }]])
       expect(exit).not.toHaveBeenCalled()
@@ -403,7 +416,7 @@ describe('ShardManager', () => {
       const { manager, shards } = setup({ shards: 1 })
       await manager.start()
 
-      void manager.stop()
+      void manager.stopAndExit()
       shards[0].die(0)
       await vi.advanceTimersByTimeAsync(RESPAWN_CAP_MS)
 
@@ -486,7 +499,7 @@ describe('ShardManager', () => {
       const { manager, shards, exit } = setup({ shards: 1 })
       await manager.start()
 
-      const stopped = manager.stop()
+      const stopped = manager.stopAndExit()
       shards[0].die(0)
       await stopped
 
