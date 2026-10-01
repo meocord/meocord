@@ -473,7 +473,6 @@ copies or substantial portions of the Software.
   /** Builds the application in the given mode. */
   async build(mode: 'production' | 'development') {
     try {
-      this.clearConsole()
       this.logger.info(`Building ${mode} version...`)
 
       const { rsbuild, meocordConfig, natives } = await this.createBundler(mode)
@@ -543,6 +542,8 @@ copies or substantial portions of the Software.
             // Runs beside the application build in the same dist; cleaning would delete it.
             cleanDistPath: false,
           },
+          // Its table would name the staging folder; the line after the build says where the config went
+          performance: { ...base.performance, printFileSize: false },
         },
       })
 
@@ -716,7 +717,7 @@ copies or substantial portions of the Software.
    */
   async startDev() {
     try {
-      this.clearConsole()
+      this.clearScreen()
       this.logger.log('Starting watch mode...')
       await this.compileConfig()
       let isRunning = false
@@ -806,10 +807,9 @@ copies or substantial portions of the Software.
         process.exit(1)
       }
 
-      this.clearConsole()
       this.logger.log('Starting...')
 
-      const start = this.spawnApp().on('spawn', this.clearConsole)
+      const start = this.spawnApp()
 
       start.on('exit', code => {
         process.exit(code ?? 0)
@@ -836,10 +836,11 @@ copies or substantial portions of the Software.
   }
 
   /**
-   * Clears the console on all platforms.
+   * Clears the screen as watch mode starts, in a terminal only: a log file, CI or a process manager gets no escape
+   * codes. The scrollback stays, so the output of earlier commands, such as a failing test run, can still be read.
    */
-  private clearConsole() {
-    process.stdout.write('\u001b[3J\u001b[2J\u001b[H')
+  private clearScreen() {
+    if (process.stdout.isTTY) process.stdout.write('\u001b[2J\u001b[H')
   }
 }
 

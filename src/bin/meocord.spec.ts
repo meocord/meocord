@@ -291,6 +291,68 @@ describe('spawning the application', () => {
 
   // Watching and production reach the bundle through the same command, so a runtime
   // that works in development cannot silently differ from the one that ships.
+  describe('the terminal', () => {
+    const ESC = '\u001b['
+    const escapes = () =>
+      vi
+        .mocked(process.stdout.write)
+        .mock.calls.map(([chunk]) => String(chunk))
+        .filter(chunk => chunk.includes(ESC))
+    const isTTY = process.stdout.isTTY
+    afterEach(() => {
+      process.stdout.isTTY = isTTY
+    })
+
+    /** startDev, as far as its first build, with the bundler and the config compile stood in for. */
+    const startDev = async () => {
+      vi.mocked(watch).mockReturnValueOnce({ close: vi.fn() } as never)
+      const cli = new MeoCordCLI() as unknown as {
+        startDev: () => Promise<void>
+        relayStopSignals: () => void
+        compileConfig: () => Promise<void>
+        createBundler: () => Promise<unknown>
+      }
+      vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
+      vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
+      vi.spyOn(cli, 'createBundler').mockResolvedValue({
+        rsbuild: { onAfterBuild: () => {}, build: async () => ({ close: async () => {} }) },
+      })
+      await cli.startDev()
+    }
+
+    // In a log, a CI run or a process manager, an escape code is noise, and some viewers clear on it
+    it('writes no escape code as a production start begins, in a terminal or not', async () => {
+      process.stdout.isTTY = true
+      await new MeoCordCLI().startProd()
+
+      expect(escapes()).toEqual([])
+    })
+
+    it("writes no escape code as a build begins, so the output before it stays on screen", async () => {
+      process.stdout.isTTY = true
+      const cli = new MeoCordCLI() as unknown as { build: (mode: string) => Promise<void>; createBundler: () => Promise<unknown> }
+      vi.spyOn(cli, 'createBundler').mockRejectedValue(new Error('stopped here'))
+
+      await cli.build('production')
+
+      expect(escapes()).toEqual([])
+    })
+
+    it('clears the screen as watch mode starts in a terminal, and keeps the scrollback', async () => {
+      process.stdout.isTTY = true
+      await startDev()
+
+      expect(escapes()).toEqual(['\u001b[2J\u001b[H'])
+    })
+
+    it('writes no escape code as watch mode starts with its output piped', async () => {
+      process.stdout.isTTY = false
+      await startDev()
+
+      expect(escapes()).toEqual([])
+    })
+  })
+
   describe('dev watcher', () => {
     const watcher = () => new MeoCordCLI() as unknown as { restartApp: () => void; appProcess: unknown }
 
@@ -413,12 +475,12 @@ describe('spawning the application', () => {
         let stop = () => {}
         const cli = new MeoCordCLI() as unknown as {
           startDev: () => Promise<void>
-          clearConsole: () => void
+          clearScreen: () => void
           relayStopSignals: (app: () => unknown, stopping: () => void) => void
           compileConfig: () => Promise<void>
           createBundler: () => Promise<unknown>
         }
-        vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
+        vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
         vi.spyOn(cli, 'relayStopSignals').mockImplementation((_app, stopping) => (stop = stopping))
         vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
         vi.spyOn(cli, 'createBundler').mockResolvedValue({
@@ -562,12 +624,12 @@ describe('spawning the application', () => {
         let afterBuild = () => {}
         const cli = new MeoCordCLI() as unknown as {
           startDev: () => Promise<void>
-          clearConsole: () => void
+          clearScreen: () => void
           relayStopSignals: () => void
           compileConfig: () => Promise<void>
           createBundler: () => Promise<unknown>
         }
-        vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
+        vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
         vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
         vi.spyOn(cli, 'createBundler').mockResolvedValue({
@@ -595,12 +657,12 @@ describe('spawning the application', () => {
         const closeBuild = vi.fn(async () => {})
         const cli = new MeoCordCLI() as unknown as {
           startDev: () => Promise<void>
-          clearConsole: () => void
+          clearScreen: () => void
           relayStopSignals: () => void
           compileConfig: (options?: { exitOnFailure?: boolean }) => Promise<boolean>
           createBundler: () => Promise<unknown>
         }
-        vi.spyOn(cli, 'clearConsole').mockImplementation(() => {})
+        vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
         const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
         const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
