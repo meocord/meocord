@@ -1,9 +1,9 @@
 import { ApplicationCommandOptionType, ApplicationCommandType } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
-import { getCommandMap } from '@src/decorator/controller.decorator.js'
+import { getAutocompleteHandlers, getCommandMap } from '@src/decorator/controller.decorator.js'
 import { registrationKey, serialise } from '@src/core/command-registration.js'
 import { CommandType } from '@src/enum/index.js'
-import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
+import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { refuse } from '@src/util/refusal.util.js'
 
@@ -108,6 +108,7 @@ type Body = ReturnType<typeof serialise>
 interface CommandOption {
   type?: unknown
   name?: unknown
+  autocomplete?: unknown
   options?: CommandOption[]
 }
 
@@ -124,24 +125,45 @@ function subcommandPaths(body: Body): string[] {
   return paths
 }
 
+/** Whether an option holds other options: a subcommand or a group of them. */
+const nests = (option: CommandOption) =>
+  option.type === ApplicationCommandOptionType.Subcommand || option.type === ApplicationCommandOptionType.SubcommandGroup
+
+/**
+ * The options an autocomplete at a path can be for: a subcommand's own, or at the command itself every option of the
+ * command, its subcommands' included, since each autocomplete of the command falls back to its name.
+ */
+function optionsAt(body: Body, rest: readonly string[]): CommandOption[] {
+  const all = (options: readonly CommandOption[]): CommandOption[] =>
+    options.flatMap(option => (nests(option) ? all(option.options ?? []) : [option]))
+  const top = (body.options ?? []) as CommandOption[]
+  if (rest.length === 0) return all(top)
+  let scope: CommandOption | undefined = { options: top }
+  for (const part of rest) scope = scope?.options?.find(option => option.name === part)
+  return (scope?.options ?? []).filter(option => !nests(option))
+}
+
 const quoted = (names: string[]) =>
   names.length < 2 ? names.map(name => `"${name}"`).join('') : `${names.slice(0, -1).map(name => `"${name}"`).join(', ')} and "${names.at(-1)}"`
 
 /**
  * Warns, in one message, about every name-routed handler Discord never sends an interaction to: a subcommand path
  * the builder of its command does not register, a customId pattern given as a command name, a builder that
- * registers another name than its `@Command`'s, and a command no builder registers at all.
+ * registers another name than its `@Command`'s, and a command no builder registers at all. An `@Autocomplete`
+ * handler is checked the same way, and for an option the builder does not register with autocomplete on.
  *
  * @param options - `missingBuilders: false` leaves out the commands no builder registers, as the testing
  *   module does, where a handler with no builder is how a fixture is written.
  */
 export function warnUnregisteredCommands(controllerClasses: readonly ControllerClass[], { missingBuilders = true } = {}): void {
   const declared: (Declared & { name: string })[] = []
+  const completions: { controllerClass: ControllerClass; meta: AutocompleteMeta }[] = []
   const built = new Map<CommandMeta, Body>()
   // Each registered command by type and name, with its JSON; `undefined` for one whose builder cannot be serialised
   const registered = new Map<string, Body | undefined>()
 
   for (const controllerClass of new Set(controllerClasses)) {
+    for (const meta of getAutocompleteHandlers(controllerClass.prototype)) completions.push({ controllerClass, meta })
     for (const [name, metas] of Object.entries(getCommandMap(controllerClass.prototype) ?? {})) {
       for (const meta of metas) {
         if (isCustomIdRouted(meta.type)) continue
@@ -163,6 +185,10 @@ export function warnUnregisteredCommands(controllerClasses: readonly ControllerC
   for (const here of declared) {
     const problem = unregistered(here.name, here.meta, built.get(here.meta), registered, missingBuilders)
     if (problem) problems.push(`  ${where(here)}: ${problem}`)
+  }
+  for (const { controllerClass, meta } of completions) {
+    const problem = unasked(meta, registered, missingBuilders)
+    if (problem) problems.push(`  ${controllerClass.name}.${meta.methodName}: ${problem}`)
   }
   if (problems.length === 0) return
 
@@ -205,10 +231,53 @@ function unregistered(
 
   const json = registered.get(key)
   if (rest.length === 0 || !json) return undefined
+  return pathProblem(name, command, json)
+}
+
+/** Why a slash command's subcommand path is not one its builder registers, or `undefined` when it is. */
+function pathProblem(path: string, command: string, json: Body): string | undefined {
   const paths = subcommandPaths(json)
-  if (paths.includes(name)) return undefined
+  if (paths.includes(path)) return undefined
   return (
-    `"${name}" is not a subcommand of the ${describe(meta.type, command)}, whose builder registers ` +
+    `"${path}" is not a subcommand of the ${describe(CommandType.SLASH, command)}, whose builder registers ` +
     `${paths.length ? quoted(paths) : 'no subcommands'}. Correct the path.`
   )
+}
+
+/** What keeps Discord from asking an `@Autocomplete` handler to complete, or `undefined` when a builder asks it. */
+function unasked(
+  { commandPath, optionName }: AutocompleteMeta,
+  registered: ReadonlyMap<string, Body | undefined>,
+  missingBuilders: boolean,
+): string | undefined {
+  const [command, ...rest] = commandPath.split(' ')
+  const key = `${ApplicationCommandType.ChatInput}:${command}`
+  if (!registered.has(key)) {
+    return missingBuilders
+      ? `no builder registers the ${describe(CommandType.SLASH, command)}. Correct the name, or declare the command with a builder.`
+      : undefined
+  }
+  const json = registered.get(key)
+  if (!json) return undefined
+  const path = rest.length ? pathProblem(commandPath, command, json) : undefined
+  if (path) return path
+
+  const options = optionsAt(json, rest)
+  const completed = [...new Set(options.filter(option => option.autocomplete === true).map(option => String(option.name)))]
+  if (optionName === undefined) {
+    if (completed.length) return undefined
+    return (
+      `"${commandPath}" has no option with autocomplete on, so Discord never asks it to complete one. Turn it on for ` +
+      `an option in the builder with setAutocomplete(true).`
+    )
+  }
+  if (completed.includes(optionName)) return undefined
+  if (options.some(option => option.name === optionName)) {
+    return (
+      `the option "${optionName}" of "${commandPath}" does not have autocomplete on, so Discord never asks to complete ` +
+      `it. Turn it on in the builder with setAutocomplete(true).`
+    )
+  }
+  const others = completed.length ? `; its options with autocomplete are ${quoted(completed)}` : ', nor any option with autocomplete on'
+  return `"${commandPath}" has no option "${optionName}"${others}. Correct the option name.`
 }
