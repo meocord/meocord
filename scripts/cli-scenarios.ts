@@ -243,6 +243,9 @@ export class ReadyService implements OnReady, OnShutdown {
 }
 `
 
+/** A line that makes the template config's rsbuild hook throw, in place of its first statement. */
+const HOOK_THROWS = "throw new Error('hook broke')"
+
 /** What a config looks like halfway through an edit: it no longer parses. */
 const HALF_WRITTEN = '\nexport const halfWritten = {\n'
 
@@ -1252,6 +1255,26 @@ const scenarios: Scenario[] = [
       },
     },
     {
+      name: `start --dev on ${runtime} keeps the bot and watching through a rebuild whose rsbuild hook throws, and rebuilds once it does not`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [
+        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => current.replace('config.tools ??= {}', HOOK_THROWS) } },
+        { after: 'Rebuilding failed', files: { 'meocord.config.ts': current => current.replace(HOOK_THROWS, 'config.tools ??= {}') } },
+      ],
+      signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        counts: { 'Rebuilding failed: hook broke': 1, 'Ready hook ran': 2, 'Bot has shut down': 2 },
+        never: ['Unhandled', 'Failed to start'],
+      },
+    },
+    {
       name: `start --prod on ${runtime} stops at once on Ctrl+C while the bot logs in`,
       tier: runtime === 'node' ? 'fast' : 'slow',
       platforms: ['linux', 'darwin'],
@@ -1486,7 +1509,7 @@ const scenarios: Scenario[] = [
   {
     name: 'start --dev exits 1 when its first build cannot start, as build does',
     tier: 'fast',
-    files: { '.env': INVALID_TOKEN_ENV, 'meocord.config.ts': validConfig.replace('config.tools ??= {}', "throw new Error('hook broke')") },
+    files: { '.env': INVALID_TOKEN_ENV, 'meocord.config.ts': validConfig.replace('config.tools ??= {}', HOOK_THROWS) },
     argv: ['start', '--dev'],
     timeoutMs: 60_000,
     expect: { code: 1, says: ['Failed to start: hook broke'] },

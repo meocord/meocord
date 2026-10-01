@@ -723,6 +723,8 @@ copies or substantial portions of the Software.
       let isRunning = false
       let watching: { close: () => Promise<void> } | undefined
 
+      // The new bundler is made before the running build is closed, so a config whose rsbuild hook throws leaves that
+      // build watching the sources, and the bot it started running
       const watch = async () => {
         const { rsbuild } = await this.createBundler('development')
 
@@ -734,6 +736,7 @@ copies or substantial portions of the Software.
           isRunning = true
         })
 
+        await watching?.close()
         watching = await rsbuild.build({ watch: true })
       }
       await watch()
@@ -764,8 +767,16 @@ copies or substantial portions of the Software.
           // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
           if (files.has('meocord.config.ts') && !(await this.compileConfig({ exitOnFailure: false }))) return
           isRunning = false
-          await watching?.close()
-          await watch()
+          try {
+            await watch()
+          } catch (error) {
+            // As with a failed login: the bot keeps running, and saving the file again tries again
+            isRunning = true
+            this.logger.error(
+              `Rebuilding failed: ${error instanceof Error ? error.message : String(error)}. The bot keeps running its last ` +
+                'build; save the file again to retry.',
+            )
+          }
         }, 300)
       })
 
