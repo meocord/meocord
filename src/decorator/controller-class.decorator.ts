@@ -12,8 +12,9 @@ import { warnInheritedRoutes } from '@src/decorator/controller.decorator.js'
  *
  * @remarks
  * A controller's class-level guards, interceptors, filters and cooldowns apply to every handler it declares or
- * inherits, and to every handler of a class that extends it: a handler runs its own class's first, then each
- * base's, then the method's. `inheritStages: false` keeps the handlers a subclass declares to its own stages.
+ * inherits, and to every handler of a class that extends it. A base wraps what extends it: guards and interceptors
+ * run the top base's first, then each subclass's, then the method's, and filters are tried the other way, the
+ * method's first. `inheritStages: false` keeps the handlers a subclass declares to its own stages.
  *
  * @param options - Whether the handlers it declares take the stages of the classes it extends.
  *

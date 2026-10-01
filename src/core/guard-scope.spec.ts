@@ -106,11 +106,11 @@ describe('class-level @UseGuard on inherited handlers', () => {
     log.length = 0
   })
 
-  it('guards an inherited handler under dispatch, subclass guards first', async () => {
+  it('guards an inherited handler under dispatch, base guards first', async () => {
     const { client } = await startApp(ChildController)
 
     await client.emit('interactionCreate', slash('ping'))
-    expect(log).toEqual(['child', 'base class', 'base method', 'ping'])
+    expect(log).toEqual(['base class', 'child', 'base method', 'ping'])
   })
 
   it('guards inherited component and message handlers', async () => {
@@ -122,14 +122,14 @@ describe('class-level @UseGuard on inherited handlers', () => {
     Object.assign(message.author, { bot: false })
     await client.emit('messageCreate', message)
 
-    expect(log).toEqual(['child', 'base class', 'open:7', 'child', 'base class', 'hello'])
+    expect(log).toEqual(['base class', 'child', 'open:7', 'base class', 'child', 'hello'])
   })
 
-  it('stops an inherited handler when the subclass guard denies', async () => {
+  it('stops an inherited handler when the subclass guard denies, after the base guards', async () => {
     const { client } = await startApp(DenyingChildController)
 
     await client.emit('interactionCreate', slash('ping'))
-    expect(log).toEqual(['deny'])
+    expect(log).toEqual(['base class', 'deny'])
   })
 
   it('applies every level of a deeper hierarchy, outermost class first', async () => {
@@ -138,7 +138,7 @@ describe('class-level @UseGuard on inherited handlers', () => {
     await client.emit('interactionCreate', slash('own'))
     await client.emit('interactionCreate', slash('ping'))
 
-    expect(log).toEqual(['grandchild', 'child', 'base class', 'own', 'grandchild', 'child', 'base class', 'base method', 'ping'])
+    expect(log).toEqual(['base class', 'child', 'grandchild', 'own', 'base class', 'child', 'grandchild', 'base method', 'ping'])
   })
 
   it('runs the same guards, once each, on a direct call and under invoke', async () => {
@@ -147,7 +147,7 @@ describe('class-level @UseGuard on inherited handlers', () => {
     await module.get(ChildController).ping(slash('ping'))
     await module.invoke(ChildController, 'ping', slash('ping'))
 
-    const run = ['child', 'base class', 'base method', 'ping']
+    const run = ['base class', 'child', 'base method', 'ping']
     expect(log).toEqual([...run, ...run])
   })
 
@@ -159,12 +159,12 @@ describe('class-level @UseGuard on inherited handlers', () => {
   })
 
   it('reports the guards in the order they run', () => {
-    expect(inspectHandler(ChildController, 'ping').guards).toEqual([ChildGuard, BaseClassGuard, BaseMethodGuard])
+    expect(inspectHandler(ChildController, 'ping').guards).toEqual([BaseClassGuard, ChildGuard, BaseMethodGuard])
     expect(inspectHandler(BaseController, 'ping').guards).toEqual([BaseClassGuard, BaseMethodGuard])
     expect(Reflect.getMetadata(MetadataKey.Guards, GrandchildController.prototype, 'open')).toEqual([
-      GrandchildGuard,
-      ChildGuard,
       BaseClassGuard,
+      ChildGuard,
+      GrandchildGuard,
     ])
   })
 })
@@ -315,12 +315,12 @@ describe('class-level @UseGuard on autocomplete handlers', () => {
     expect(log).toEqual(['type:autocomplete', 'complete'])
   })
 
-  it('covers inherited autocomplete handlers, subclass guards first', async () => {
+  it('covers inherited autocomplete handlers, base guards first', async () => {
     const { client } = await startApp(ChildSearchController)
 
     await client.emit('interactionCreate', autocomplete())
-    expect(log).toEqual(['child', 'type:autocomplete', 'complete'])
-    expect(inspectHandler(ChildSearchController, 'complete').guards).toEqual([ChildGuard, TypeGuard])
+    expect(log).toEqual(['type:autocomplete', 'child', 'complete'])
+    expect(inspectHandler(ChildSearchController, 'complete').guards).toEqual([TypeGuard, ChildGuard])
   })
 
   it('closes the menu with an empty list when a guard denies', async () => {
@@ -329,7 +329,7 @@ describe('class-level @UseGuard on autocomplete handlers', () => {
 
     await client.emit('interactionCreate', interaction)
 
-    expect(log).toEqual(['deny'])
+    expect(log).toEqual(['type:autocomplete', 'deny'])
     expect(interaction.respond).toHaveBeenCalledWith([])
   })
 

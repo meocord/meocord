@@ -29,8 +29,8 @@ export const CLASS_INTERCEPTORS = Symbol('class_interceptors')
 export const METHOD_INTERCEPTORS = Symbol('method_interceptors')
 
 /**
- * The interceptors around a handler: class interceptors from the controller up to the class declaring
- * the handler, subclass first, then the method's.
+ * The interceptors around a handler: each class's, base first, down to the controller it is dispatched on, then the
+ * method's.
  */
 export const handlerInterceptors = perHandler((prototype: object, methodName: string): readonly InterceptorEntry[] => {
   const source = sourcePrototype(prototype, methodName)

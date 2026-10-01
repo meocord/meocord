@@ -122,8 +122,8 @@ function handlerTheme(themes: AppThemes, prototype: object, methodName: string):
   let theme = byMethod.get(methodName)
   if (theme) return theme
   theme = themes.app
-  // Outermost first, so reversed: a subclass's layer goes over its base class's
-  for (const cls of [...stageClasses(prototype, methodName)].reverse()) {
+  // Base first, so a subclass's layer goes over its base class's
+  for (const cls of stageClasses(prototype, methodName)) {
     theme = mergeTheme(theme, Reflect.getOwnMetadata(CLASS_THEME, cls) as ThemeOverride | undefined)
   }
   const source = sourcePrototype(prototype, methodName)
