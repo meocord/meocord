@@ -204,7 +204,7 @@ describe('a store that answers after the timeout', () => {
     await new Promise(resolve => setTimeout(resolve, 80))
 
     // The late answer recorded the call exactly once: a limit of one refuses, and a limit of two allows one more
-    const key = 'DailyController.daily#1:user:user:1'
+    const key = 'DailyController.daily#5/60000:user:user:1'
     expect((await memory.consumeMany([{ key, limit: { uses: 1, windowMs: 60_000 } }])).allowed).toBe(false)
     expect((await memory.consumeMany([{ key, limit: { uses: 2, windowMs: 60_000 } }])).allowed).toBe(true)
     expect(module.get(DailyController).runs).toBe(1)
@@ -219,7 +219,7 @@ describe('a store given as a value with only consume()', () => {
 
     await module.invoke(DailyController, 'daily', call())
 
-    expect(consume.mock.calls.map(([key]) => key)).toEqual(['DailyController.daily#0:user:user:1', 'DailyController.daily#1:user:user:1'])
+    expect(consume.mock.calls.map(([key]) => key)).toEqual(['DailyController.daily#1/3000:user:user:1', 'DailyController.daily#5/60000:user:user:1'])
   })
 })
 

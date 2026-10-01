@@ -62,11 +62,34 @@ export const handlerCooldowns = perHandler((prototype: object, methodName: strin
   const source = sourcePrototype(prototype, methodName)
   if (!source) return []
   return [
-    // Base first, as guards run; a cooldown's key holds its place in this list, so the order stays put
+    // Base first, as guards run
     ...stageClasses(prototype, methodName).flatMap(cls => (Reflect.getOwnMetadata(CLASS_COOLDOWNS, cls) as StoredCooldown[]) ?? []),
     ...((Reflect.getOwnMetadata(METHOD_COOLDOWNS, source, methodName) as StoredCooldown[]) ?? []),
   ]
 })
+
+/** Each cooldown's part of its store key, by the list {@link handlerCooldowns} gives, which is the same for a handler. */
+const limitIds = new WeakMap<readonly StoredCooldown[], readonly string[]>()
+
+/**
+ * Each cooldown's part of its store key: its limit, so a deploy that adds, removes or reorders a cooldown leaves
+ * the others' counts where they are, with a count only to tell apart cooldowns that are otherwise the same.
+ */
+function limitIdsOf(cooldowns: readonly StoredCooldown[]): readonly string[] {
+  let ids = limitIds.get(cooldowns)
+  if (!ids) {
+    const seen = new Map<string, number>()
+    ids = cooldowns.map(({ uses, windowMs, per, by }) => {
+      const id = `${uses}/${windowMs}`
+      const same = `${per}:${id}:${by ? 'by' : ''}`
+      const count = (seen.get(same) ?? 0) + 1
+      seen.set(same, count)
+      return count === 1 ? id : `${id}~${count}`
+    })
+    limitIds.set(cooldowns, ids)
+  }
+  return ids
+}
 
 /** The cooldowns declared on a method itself. */
 export function methodCooldowns(prototype: object, methodName: string): StoredCooldown[] {
@@ -280,6 +303,7 @@ async function keyed(
   if (peek) peeked.set(context, { bypassed, storeFailed: false })
 
   const counted: Counted[] = []
+  const ids = limitIdsOf(cooldowns)
   for (const [index, { windowMs, uses, per, bypass, by }] of cooldowns.entries()) {
     if (peek && by) continue
     if (earlier?.storeFailed && !by) continue
@@ -291,7 +315,7 @@ async function keyed(
     const value = by ? await by(context, params) : undefined
     // Encoded, so a value holding a colon cannot count under another value's key
     const suffix = value === undefined ? '' : `:by:${encodeURIComponent(String(value))}`
-    counted.push({ key: `${controller.name}.${methodName}#${index}:${per}:${scopeId(per, first)}${suffix}`, windowMs, uses, per })
+    counted.push({ key: `${controller.name}.${methodName}#${ids[index]}:${per}:${scopeId(per, first)}${suffix}`, windowMs, uses, per })
   }
   return counted
 }

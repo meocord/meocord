@@ -271,7 +271,7 @@ export class RedisCooldownStore extends CooldownStore {
 const limitsOf = (entries: readonly CooldownEntry[]): string[] =>
   entries.flatMap(({ limit: { uses, windowMs } }) => [String(uses), String(windowMs)])
 
-/** A key with its handler part, `Controller.method`, as a Redis Cluster hash tag: `{Controller.method}#0:user:1`. */
+/** A key with its handler part, `Controller.method`, as a Redis Cluster hash tag: `{Controller.method}#1/60000:user:user:1`. */
 function handlerTagged(key: string): string {
   const end = key.indexOf('#')
   return end === -1 ? `{${key}}` : `{${key.slice(0, end)}}${key.slice(end)}`

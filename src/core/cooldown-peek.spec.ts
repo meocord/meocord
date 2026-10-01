@@ -118,7 +118,7 @@ describe('peekCooldowns', () => {
     await app(store)('buy').peek()
 
     expect(peekMany).toHaveBeenCalledTimes(1)
-    expect(peekMany.mock.calls[0][0].map(({ key }) => key)).toEqual(['Shop.buy#0:user:user:1', 'Shop.buy#1:global:global'])
+    expect(peekMany.mock.calls[0][0].map(({ key }) => key)).toEqual(['Shop.buy#2/60000:user:user:1', 'Shop.buy#5/3600000:global:global'])
   })
 
   it('leaves cooldowns with by to consume, since their key needs the resolved params', async () => {
@@ -128,7 +128,7 @@ describe('peekCooldowns', () => {
     await call.peek()
     await call.consume({ item: 'sword' })
 
-    expect(store.asked).toEqual(['consume Shop.item#0'])
+    expect(store.asked).toEqual(['consume Shop.item#1/60000'])
   })
 
   it('asks a bypass once per call, for the peek and the consume both', async () => {
@@ -143,7 +143,7 @@ describe('peekCooldowns', () => {
     await bypassed.consume()
 
     expect(owner).toHaveBeenCalledTimes(2)
-    expect(store.asked).toEqual(['peek', 'consume Shop.owned#0'])
+    expect(store.asked).toEqual(['peek', 'consume Shop.owned#1/60000'])
   })
 
   it("refuses with CooldownStoreError when the store fails under 'deny', logging the outage once", async () => {
@@ -182,7 +182,7 @@ describe('peekCooldowns', () => {
     store.failingPeeks = true
     // The peek fails, the store answers the consume: the item's one sale an hour still holds
     expect(await sell()).toBe('CooldownError')
-    expect(store.asked.at(-1)).toBe('consume Shop.sell#1')
+    expect(store.asked.at(-1)).toBe('consume Shop.sell#1/3600000')
 
     store.failing = 'reject'
     // Down for the consume too: 'allow' lets it run uncounted
