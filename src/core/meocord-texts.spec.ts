@@ -1,4 +1,8 @@
 import { vi } from 'vitest'
+import { writeSync } from 'node:fs'
+
+// Written to the process's stdout directly, so a passing test's timings reach the CI log too
+const e36 = (line: string) => writeSync(1, `[E36] ${line}\n`)
 import { ButtonInteraction, ChatInputCommandInteraction, Client, type APIEmbed, type Guild } from 'discord.js'
 import { Command, Controller, Cooldown, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
@@ -78,7 +82,11 @@ async function startApp(i18n: Translator<any> | undefined): Promise<Client> {
   })
   @MeoCord({ controllers: [Commands], messages, i18n, clientOptions: { intents: [] } })
   class App {}
-  await MeoCordFactory.create(App).start()
+  const t0 = performance.now()
+  const created = MeoCordFactory.create(App)
+  const t1 = performance.now()
+  await created.start()
+  e36(`create ${(t1 - t0).toFixed(0)}ms start ${(performance.now() - t1).toFixed(0)}ms`)
   Object.defineProperty(clients[0], 'user', { value: { id: '111', setActivity: () => {} }, configurable: true })
   return clients[0]
 }
@@ -96,7 +104,9 @@ async function repliesTo(client: Client, contents: string[], guild: Guild | null
     Object.assign(message.author, { bot: false, id: 'user-1' })
     // The gateway gives a message the bot's own client
     Object.defineProperty(message, 'client', { value: client })
+    const r0 = performance.now()
     await Promise.all(client.rawListeners('messageCreate').map(listener => (listener as (m: unknown) => unknown)(message)))
+    e36(`reply "${content}" ${(performance.now() - r0).toFixed(0)}ms`)
     for (const [reply] of vi.mocked(message.reply).mock.calls) replies.push((reply as { content: string }).content)
   }
   return replies
@@ -108,6 +118,14 @@ describe("MeoCord's own texts", () => {
   afterEach(() => vi.restoreAllMocks())
 
   it("answers a message in its server's language, each line the catalog lacks in English", async () => {
+    const begun = performance.now()
+    e36(`first test begins ${begun.toFixed(0)}ms into the worker`)
+    // The first use of ICU in this process: collation, then a list format for the locale the replies use
+    const i0 = performance.now()
+    'b'.localeCompare('a')
+    const i1 = performance.now()
+    new Intl.ListFormat('id', { type: 'disjunction' }).format(['asc', 'desc'])
+    e36(`first localeCompare ${(i1 - i0).toFixed(0)}ms, first ListFormat('id') ${(performance.now() - i1).toFixed(0)}ms`)
     const client = await startApp(t)
 
     expect(await repliesTo(client, REFUSED, serverIn('id'))).toEqual([
@@ -116,6 +134,7 @@ describe("MeoCord's own texts", () => {
       'Cara pakai: !sort <order>\norder: "up" bukan salah satu dari asc atau desc',
       'Cara pakai: !paint <accent>\naccent: "red" bukan warna hex yang sah',
     ])
+    e36(`first test took ${(performance.now() - begun).toFixed(0)}ms`)
   })
 
   it("answers a direct message, and a server whose language has no catalog, in the translator's default", async () => {
