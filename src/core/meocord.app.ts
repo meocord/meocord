@@ -65,6 +65,7 @@ type LifecycleClass = new (...args: any[]) => any
 const runningApps = new Set<() => Promise<boolean>>()
 const stopRequest = stopRequests()
 let signalHandlersInstalled = false
+let shuttingDown: Promise<void> | undefined
 
 /**
  * Shuts every started app down and exits: `onShutdown` hooks under the configured `shutdownTimeout`,
@@ -80,10 +81,17 @@ export async function shutdownAndExit(): Promise<void> {
     process.exit(1)
     return
   }
+  return shutDown()
+}
 
-  const closed = await Promise.all([...runningApps].map(close => close()))
-  // A clean stop keeps a code already set, such as the 1 a failed login set, so a supervisor still sees it
-  process.exit(closed.every(Boolean) ? Number(process.exitCode ?? 0) || 0 : 1)
+/** The one shutdown of the process, however many ask for it: a stop request joins one already under way. */
+function shutDown(): Promise<void> {
+  shuttingDown ??= (async () => {
+    const closed = await Promise.all([...runningApps].map(close => close()))
+    // A clean stop keeps a code already set, such as the 1 a failed login set, so a supervisor still sees it
+    process.exit(closed.every(Boolean) ? Number(process.exitCode ?? 0) || 0 : 1)
+  })()
+  return shuttingDown
 }
 
 /** What `start()` rejects with when shutdown begins before the bot came online, which shutdown has logged. */
@@ -99,8 +107,9 @@ function installSignalHandlers(): void {
   signalHandlersInstalled = true
   process.on('SIGINT', () => void shutdownAndExit())
   process.on('SIGTERM', () => void shutdownAndExit())
-  // How `meocord start --dev` stops the application to restart it, a signal being no graceful stop on Windows
-  onDevRunnerStop(() => void shutdownAndExit())
+  // How `meocord start --dev` stops the application to restart it, a signal being no graceful stop on Windows. It is
+  // not the user's stop request: their first Ctrl+C during it joins this shutdown, and only a repeat forces exit 1.
+  onDevRunnerStop(() => void shutDown())
 
   // A shard stops when its manager asks, or when the manager is gone and cannot ask
   if (isShardProcess()) {
