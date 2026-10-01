@@ -400,7 +400,7 @@ describe('message route ranking', () => {
       @MessageHandler('status')
       status() {}
     }
-    expect(() => buildMessageRoutes([Own, App], { mention: 'only' })).toThrow(/match the same messages, so only one of them could ever run/)
+    expect(() => buildMessageRoutes([Own, App], { mention: 'only' })).toThrow(/match the same messages, so only one of them could ever answer those/)
     // Under the app's prefix, both start with it in a DM, unless the one without mention: 'only' works in servers only
     expect(() => buildMessageRoutes([Own, App], { prefix: '!' })).toThrow(/match the same messages/)
     @Controller()

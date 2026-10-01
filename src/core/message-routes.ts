@@ -157,24 +157,37 @@ function compareShapes(a: PatternToken[], b: PatternToken[]): number {
   return 0
 }
 
-/** Whether two routes accept exactly the same messages. */
-function sameMessages(a: MessageRoute, b: MessageRoute, appMentionOnly: boolean): boolean {
-  // How a route starts in a server or a DM: a mention alone starts it in a server under mention: 'only'
-  const startsIn = (route: MessageRoute, place: 'guild' | 'dm') =>
-    place === 'guild' && (route.mentionOnly || (route.prefix === undefined && appMentionOnly))
-      ? 'mention'
-      : route.prefix === undefined
-        ? 'app'
-        : route.prefix === false
-          ? 'none'
-          : JSON.stringify([...route.prefix].sort())
-  const runsIn = (route: MessageRoute, place: 'guild' | 'dm') => route.scope === 'any' || route.scope === place
-  const startAlike = (['guild', 'dm'] as const).some(
-    place => runsIn(a, place) && runsIn(b, place) && startsIn(a, place) === startsIn(b, place),
-  )
-  if (!startAlike || a.tokens.length !== b.tokens.length) return false
+/** A mention of the bot, as a start of a message beside the prefixes. */
+const MENTION_START = Symbol('mention')
+/** The prefixes an app's prefix function returns, known only once a message arrives. */
+const APP_FUNCTION_START = Symbol('app prefix function')
+
+/**
+ * The starts a route takes in a server or a DM: its own prefixes or the app's, `''` for the message as it is, and a
+ * mention of the bot where one starts it. An app's prefix function stands as one start of its own, which only another
+ * route using it shares.
+ */
+function startsOf(route: MessageRoute, place: 'guild' | 'dm', options: MessageCommandOptions): Set<string | symbol> {
+  if (place === 'guild' && (route.mentionOnly || (route.prefix === undefined && options.mention === 'only'))) return new Set([MENTION_START])
+  if (route.prefix === false) return new Set([''])
+  const mention = options.mention ? [MENTION_START] : []
+  if (route.prefix !== undefined) return new Set([...route.prefix, ...mention])
+  if (typeof options.prefix === 'function') return new Set([APP_FUNCTION_START, ...mention])
+  return new Set([...prefixList(options.prefix), ...mention])
+}
+
+/** Whether two routes accept some of the same messages: a start they share, and words that match alike. */
+function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandOptions): boolean {
   // A case-insensitive word matches every message the case-sensitive one does
   const exact = a.caseSensitive && b.caseSensitive
+  const key = (start: string | symbol) => (typeof start === 'string' && !exact ? start.toLowerCase() : start)
+  const runsIn = (route: MessageRoute, place: 'guild' | 'dm') => route.scope === 'any' || route.scope === place
+  const startAlike = (['guild', 'dm'] as const).some(place => {
+    if (!runsIn(a, place) || !runsIn(b, place)) return false
+    const theirs = new Set([...startsOf(b, place, options)].map(key))
+    return [...startsOf(a, place, options)].some(start => theirs.has(key(start)))
+  })
+  if (!startAlike || a.tokens.length !== b.tokens.length) return false
   return a.tokens.every((token, i) => {
     const other = b.tokens[i]
     if ('literal' in token) {
@@ -246,7 +259,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
   for (let i = 0; i < routes.length; i++) {
     for (let j = i + 1; j < routes.length; j++) {
       const [a, b] = [routes[i], routes[j]]
-      if (!sameMessages(a, b, options.mention === 'only')) continue
+      if (!sameMessages(a, b, options)) continue
       // One handler under two spellings, such as 'hello' and 'Hello', is one route, its pattern's over an alias's
       if (a.controllerClass === b.controllerClass && a.method === b.method) {
         if (a.aliasOf && !b.aliasOf) routes[i] = b
@@ -255,7 +268,7 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
       }
       throw refuse(new Error(
         `${a.controllerClass.name}.${a.method}: ${describeRoute(a)} and ${describeRoute(b)} in ${b.controllerClass.name}.${b.method} ` +
-          `match the same messages, so only one of them could ever run. Change one pattern, or give one its own prefix.`,
+          `match the same messages, so only one of them could ever answer those. Change one pattern, or give one its own prefix.`,
       ))
     }
   }
@@ -321,6 +334,15 @@ function appPrefixes(options: MessageCommandOptions, prefix: MessagePrefix | und
   return options.mention === 'only' && inGuild !== false ? [] : prefixList(prefix)
 }
 
+/**
+ * The prefixes a prefix function gives for a message. Finding none, an empty list or nothing at all, means no prefix
+ * starts a command there: only an explicit `''` takes the message as it is.
+ */
+function functionPrefixes(options: MessageCommandOptions, found: MessagePrefix | null | undefined, inGuild: boolean | undefined): readonly string[] {
+  if (found === undefined || found === null || (Array.isArray(found) && found.length === 0)) return []
+  return appPrefixes(options, found, inGuild)
+}
+
 /** Whether a route uses the app's prefixes, so they have to be known before it can match. */
 export function usesAppPrefix(routes: readonly MessageRoute[]): boolean {
   return routes.some(route => route.prefix === undefined)
@@ -346,9 +368,10 @@ export async function messageStartsFor(
  * and a mention of the bot when `mention` is on.
  */
 export async function messageStarts(options: MessageCommandOptions, message: Message, botId: string | undefined): Promise<MessageStarts> {
-  const prefix = typeof options.prefix === 'function' ? await options.prefix(message) : options.prefix
   const inGuild = message.guildId !== null && message.guildId !== undefined
-  return { prefixes: appPrefixes(options, prefix, inGuild), mention: options.mention ? botId : undefined, bot: botId, inGuild }
+  const prefixes =
+    typeof options.prefix === 'function' ? functionPrefixes(options, await options.prefix(message), inGuild) : appPrefixes(options, options.prefix, inGuild)
+  return { prefixes, mention: options.mention ? botId : undefined, bot: botId, inGuild }
 }
 
 /**
@@ -367,7 +390,8 @@ export function staticMessageStarts(
   // what it starts in a server
   const inGuild = dm ? false : undefined
   return {
-    prefixes: appPrefixes(options, prefix ?? (options.prefix as MessagePrefix | undefined), inGuild),
+    prefixes:
+      typeof options.prefix === 'function' ? functionPrefixes(options, prefix, inGuild) : appPrefixes(options, prefix ?? options.prefix, inGuild),
     mention: options.mention ? botId : undefined,
     bot: botId,
     ...(dm && { inGuild: false }),
