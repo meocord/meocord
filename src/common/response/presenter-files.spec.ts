@@ -13,8 +13,10 @@ import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { respond, responseOf } from '@src/common/response/response-state.js'
 import { setPresenter } from '@src/common/response/presenter.js'
-import { type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
-import { createMockInteraction, createMockMessage } from '@src/testing/index.js'
+import { type MessageResponseContext, type PresentedError, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
+import { Controller, Cooldown, MeoCord, MessageHandler, Service } from '@src/decorator/index.js'
+import { UserError } from '@src/common/errors.js'
+import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 const { Ephemeral, IsComponentsV2 } = MessageFlags
 
@@ -180,5 +182,145 @@ describe("Discord's attachment limits", () => {
 
     expect(names(sent(interaction.reply))).toEqual([])
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('big.png'))
+  })
+})
+
+const contexts: MessageResponseContext[] = []
+
+@Service()
+class DrawingPresenter implements ResponsePresenter {
+  loading() {
+    return { text: 'Drawing…' }
+  }
+
+  error(_context: unknown, { message }: PresentedError) {
+    return { text: message }
+  }
+
+  async messageError(context: MessageResponseContext, { message }: PresentedError) {
+    contexts.push(context)
+    await new Promise(resolve => setTimeout(resolve, 5))
+    return { text: message, files: [card()] }
+  }
+}
+
+/** A presenter for interactions alone, whose views carry files: without messageError, message replies stay text. */
+@Service()
+class InteractionPresenter implements ResponsePresenter {
+  loading() {
+    return { text: 'Drawing…', files: [card()] }
+  }
+
+  error(_context: unknown, { message }: PresentedError) {
+    return { text: message, files: [card()] }
+  }
+}
+
+@Controller()
+class DiceController {
+  @MessageHandler('roll {sides:int}')
+  roll(_message: Message, _params: { sides: number }) {
+    return undefined
+  }
+
+  @MessageHandler('broken')
+  broken() {
+    throw new Error('boom')
+  }
+
+  @MessageHandler('refuse')
+  refuse() {
+    throw new UserError('Not today.')
+  }
+
+  @MessageHandler('daily')
+  @Cooldown({ seconds: 60 })
+  daily() {
+    return undefined
+  }
+}
+
+const MESSAGES = { prefix: '!', dmOnError: true, dmOnCooldown: true, replyEmoji: true }
+
+@MeoCord({ controllers: [DiceController], presenter: DrawingPresenter, messages: MESSAGES, clientOptions: { intents: [] } })
+class DiceApp {}
+
+@MeoCord({ controllers: [DiceController], presenter: InteractionPresenter, messages: MESSAGES, clientOptions: { intents: [] } })
+class InteractionPresenterApp {}
+
+@MeoCord({ controllers: [DiceController], messages: MESSAGES, clientOptions: { intents: [] } })
+class PlainApp {}
+
+describe("a message command's errors, in the presenter's messageError view", () => {
+  const module = MeoCordTestingModule.create({ app: DiceApp, controllers: [DiceController] }).compile()
+  beforeEach(() => (contexts.length = 0))
+
+  it('answer a usage error with the drawn view, telling the presenter the message', async () => {
+    const message = createMockMessage({ content: '!roll many' })
+
+    await module.dispatch(message)
+
+    const payload = message.reply.mock.calls[0]?.[0] as Payload & { allowedMentions?: unknown }
+    // replyEmoji gives the view the theme's warning emoji, which this presenter's view leaves out
+    expect(payload.embeds?.[0]).toMatchObject({ description: expect.stringMatching(/^⚠️ .*is not a valid whole number/s), image: { url: 'attachment://card.png' } })
+    expect(names(payload)).toEqual(['card.png'])
+    expect(payload.allowedMentions).toEqual({ repliedUser: false, parse: [] })
+    expect(contexts[0]).toMatchObject({ message, mode: 'embed', locale: 'en-US' })
+  })
+
+  it("answer a UserError with the drawn view", async () => {
+    const message = createMockMessage({ content: '!refuse' })
+
+    await module.dispatch(message)
+
+    const payload = message.reply.mock.calls[0]?.[0] as Payload
+    expect(payload.embeds?.[0]).toMatchObject({ description: '⚠️ Not today.' })
+    expect(names(payload)).toEqual(['card.png'])
+  })
+
+  it("send dmOnError's direct message in the drawn view", async () => {
+    const message = createMockMessage({ content: '!broken' })
+
+    await module.dispatch(message).catch(() => undefined)
+
+    const payload = message.author.send.mock.calls[0]?.[0] as Payload & { allowedMentions?: unknown }
+    expect(payload.embeds?.[0]?.description).toContain('!broken')
+    expect(names(payload)).toEqual(['card.png'])
+    expect(payload.allowedMentions).toEqual({ parse: [] })
+  })
+
+  it("send dmOnCooldown's direct message in the drawn view", async () => {
+    const author = createMockUser()
+    await module.dispatch(createMockMessage({ content: '!daily', author }))
+    const again = createMockMessage({ content: '!daily', author })
+
+    await module.dispatch(again).catch(() => undefined)
+
+    const payload = again.author.send.mock.calls[0]?.[0] as Payload
+    expect(payload.embeds?.[0]?.description).toContain('!daily')
+    expect(names(payload)).toEqual(['card.png'])
+  })
+})
+
+describe('a presenter without messageError', () => {
+  /** What the bot sends for each message, the replies and direct messages, under an app. */
+  async function answers(App: new () => unknown) {
+    const module = MeoCordTestingModule.create({ app: App, controllers: [DiceController] }).compile()
+    const author = createMockUser()
+    const sent: unknown[] = []
+    for (const content of ['!roll many', '!refuse', '!broken', '!daily', '!daily']) {
+      const message = createMockMessage({ content, author })
+      await module.dispatch(message).catch(() => undefined)
+      sent.push(message.reply.mock.calls, message.author.send.mock.calls)
+    }
+    // Each mock message has a channel of its own, which the direct messages name
+    return JSON.parse(JSON.stringify(sent).replace(/<#\d+>/g, '<#channel>'))
+  }
+
+  it("leaves a message command's replies and direct messages exactly as they are without a presenter", async () => {
+    const plain = await answers(PlainApp)
+
+    expect(await answers(InteractionPresenterApp)).toEqual(plain)
+    expect(plain.flat(2).length).toBeGreaterThan(0)
   })
 })

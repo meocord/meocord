@@ -114,8 +114,9 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  *   a failure, in milliseconds, at most `2147483647`. Defaults to `1000`.
  * @param options.i18n - The translator `createTranslator` made, injected as `Translator` wherever a class
  *   asks for one.
- * @param options.presenter - The `ResponsePresenter` that styles loading and error views, resolved once
- *   from the container. Without one, MeoCord's own styling is used.
+ * @param options.presenter - The `ResponsePresenter` that styles loading and error views, and, with its
+ *   `messageError`, a message command's error replies, resolved once from the container. Without one, MeoCord's own
+ *   styling is used.
  * @param options.messages - How message commands start and match across the app: the `prefix`, a mention of the
  *   bot, `mention: 'only'`, the app's own param `types`, how usage replies look, and the built-in `help`; see {@link MessageCommandOptions}.
  * @param options.observers - `@Observer` classes told about every dispatched call once it has settled,

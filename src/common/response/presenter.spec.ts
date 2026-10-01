@@ -99,7 +99,6 @@ describe('renderContainer and renderEmbed', () => {
   })
 })
 
-
 describe("a view's image and thumbnail", () => {
   const files = [
     { name: 'card.png', data: Buffer.from('p') },

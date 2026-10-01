@@ -499,7 +499,8 @@ export class TestingModule {
       }
     }
     const presenter = appPresenterOf(this.container)
-    const client = first instanceof BaseInteraction ? first.client : undefined
+    // A message command's errors are drawn by the app's presenter too, as an interaction's are
+    const client = first instanceof BaseInteraction || first instanceof Message ? first.client : undefined
     if (presenter && client) setPresenter(client, presenter)
     this.registerClient(first)
     const { ran, error } = await runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks })
@@ -607,6 +608,8 @@ export class TestingModule {
       if (presenter) setPresenter(input.client, presenter)
       await dispatcher.interaction(input as Interaction, record)
     } else if (input instanceof Message) {
+      const presenter = appPresenterOf(this.container)
+      if (presenter) setPresenter(input.client, presenter)
       await dispatcher.message(input, record)
     } else {
       throw new TypeError('dispatch takes an interaction, a message, or a reaction with { user }.')

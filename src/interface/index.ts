@@ -347,6 +347,27 @@ export interface ResponseContext {
 }
 
 /**
+ * What a presenter knows about the message command it renders an error reply for, in
+ * {@link ResponsePresenter.messageError}.
+ *
+ * @group Responses
+ * @category Presenters
+ */
+export interface MessageResponseContext {
+  /** The message being answered. */
+  message: Message
+
+  /** The locale the reply is in: the server's preferred locale, or the translator's default in a DM. */
+  locale: string
+
+  /** How the view is rendered: a reply to a message is a new message, drawn as an embed. */
+  mode: 'embed'
+
+  /** The theme of the call being answered, to style the view from: the same one `useTheme()` returns in it. */
+  theme: DeepReadonly<MeoCordTheme>
+}
+
+/**
  * An error a presenter styles: the words a filter chose, and the error itself.
  *
  * @group Responses
@@ -367,10 +388,12 @@ export interface PresentedError {
 }
 
 /**
- * Styles MeoCord's own answers: the loading view `@Defer` shows, and the error view `respond().error()` shows.
+ * Styles MeoCord's own answers: the loading view `@Defer` shows, the error view `respond().error()` shows, and, with
+ * `messageError`, the error replies and direct messages the built-in fallback sends a message command's author.
  *
  * Implement it to give those views your bot's look, and register it with `@MeoCord({ presenter })`. It decides how
- * they look, not what they say: filters and the built-in fallback choose the words.
+ * they look, not what they say: filters and the built-in fallback choose the words. A view may carry `files`, such as
+ * an image drawn with a canvas library, which MeoCord attaches and shows, and each method may draw asynchronously.
  *
  * @remarks
  * It is resolved once from the container, so it can inject services such as a `Translator`.
@@ -385,6 +408,23 @@ export interface PresentedError {
  *
  *   error({ theme }: ResponseContext, { message, tone }: PresentedError) {
  *     return { title: 'Something went wrong', text: message, color: theme.colors[tone] }
+ *   }
+ * }
+ * ```
+ *
+ * @example
+ * An error drawn as an image, which MeoCord attaches and shows as the embed's image:
+ * ```ts
+ * @Service()
+ * export class CardPresenter implements ResponsePresenter {
+ *   constructor(private readonly cards: CardRenderer) {}
+ *
+ *   loading() {
+ *     return { text: 'Working on it…' }
+ *   }
+ *
+ *   async error(_context: ResponseContext, { message }: PresentedError) {
+ *     return { text: message, files: [{ name: 'error.png', data: await this.cards.draw('Oops!', message) }] }
  *   }
  * }
  * ```
@@ -404,6 +444,16 @@ export interface ResponsePresenter {
    * first, privately, and the view then replaces the acknowledgement.
    */
   error(context: ResponseContext, error: PresentedError): ResponseView | Promise<ResponseView>
+
+  /**
+   * The view a message command's error reply is drawn as: its usage, a guard's or validation's reason, a `UserError`'s
+   * message, and the direct messages `dmOnError` and `dmOnCooldown` send. Without this method they are plain text. The
+   * view is sent as an embed, with its files.
+   *
+   * @param context - The message being answered, its locale and theme.
+   * @param error - The words the fallback chose, the error, and its tone.
+   */
+  messageError?(context: MessageResponseContext, error: PresentedError): ResponseView | Promise<ResponseView>
 
   /**
    * The reply to the built-in `help` message command, from what it found; without this method MeoCord writes it in

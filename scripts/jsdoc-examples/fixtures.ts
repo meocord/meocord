@@ -71,3 +71,11 @@ export class TrimPipe implements PipeInterface<string, string> {
     return value.trim()
   }
 }
+
+/** Draws a card image of a title and a text, as a canvas library such as meo-canvas would. */
+@Service()
+export class CardRenderer {
+  async draw(title: string, text: string): Promise<Buffer> {
+    return Buffer.from(`${title}\n${text}`)
+  }
+}
