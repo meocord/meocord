@@ -224,6 +224,21 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
   : { 'The default catalog has lost its message types: wrap the catalog in defineCatalog(...) or add `as const`': never }
 
 /**
+ * What {@link defineCatalog} takes: a catalog, checked as it is written.
+ *
+ * Its `meocord` group, the texts MeoCord writes itself, holds only those texts, each a text where MeoCord's is one and a
+ * group where MeoCord's is one, with no `{param}` MeoCord's English text lacks. A mistake shows as an error naming the
+ * text, beside MeoCord's English. The rest of the catalog is the application's own, checked against it by
+ * {@link createTranslator}.
+ *
+ * @typeParam T - The catalog.
+ *
+ * @group Utilities
+ * @category Localisation
+ */
+export type CatalogDefinition<T> = T & MeoCordReport<CatalogIssues<T>>
+
+/**
  * Declares a message catalog, keeping each message's text as its type so the params it takes can be checked.
  *
  * The default locale's catalog needs it, or `as const`; other locales do not.
@@ -243,9 +258,36 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
  * @group Utilities
  * @category Localisation
  */
-export function defineCatalog<const T extends CatalogShape>(catalog: T & MeoCordReport<CatalogIssues<T>>): T {
+export function defineCatalog<const T extends CatalogShape>(catalog: CatalogDefinition<T>): T {
   return catalog
 }
+
+/**
+ * What {@link createTranslator} takes: the default locale, and a catalog per locale.
+ *
+ * It is checked as it is written. Every key of `locales` is a locale Discord sends, every catalog holds only messages the
+ * default one has, using no `{param}` the default's lacks, and the default catalog keeps its messages' text, so their
+ * params are read from it. Each catalog's `meocord` group is checked as {@link CatalogDefinition} checks it. A mistake shows as an
+ * error naming the locale or the message.
+ *
+ * @typeParam Locales - The catalogs, by locale.
+ * @typeParam Default - The locale whose catalog is the reference and the last fallback.
+ *
+ * @group Utilities
+ * @category Localisation
+ */
+export type TranslatorOptions<
+  Locales extends Readonly<Record<string, CatalogShape>>,
+  Default extends keyof Locales & `${Locale}`,
+> = {
+  /** The locale whose catalog is the reference and the last fallback. */
+  default: Default
+  /** A catalog per discord.js `Locale`, including the default's. */
+  locales: Locales &
+    DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> }
+} & LiteralCatalog<Locales[Default]> &
+  MeoCordReport<{ [L in keyof Locales]: CatalogIssues<Locales[L]> }[keyof Locales]> &
+  MeoCordReport<{ [L in Exclude<keyof Locales, Default>]: LocaleIssues<Locales[L], Locales[Default], L & string> }[Exclude<keyof Locales, Default>]>
 
 /**
  * Translates messages from one catalog per locale, typed by the default one.
@@ -504,15 +546,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
 export function createTranslator<
   const Locales extends Readonly<Record<string, CatalogShape>>,
   const Default extends keyof Locales & `${Locale}`,
->(
-  options: {
-    default: Default
-    locales: Locales &
-      DiscordLocaleKeys<Locales> & { readonly [L in Exclude<keyof Locales, Default>]: WithinDefault<Locales[L], Locales[Default]> }
-  } & LiteralCatalog<Locales[Default]> &
-    MeoCordReport<{ [L in keyof Locales]: CatalogIssues<Locales[L]> }[keyof Locales]> &
-    MeoCordReport<{ [L in Exclude<keyof Locales, Default>]: LocaleIssues<Locales[L], Locales[Default], L & string> }[Exclude<keyof Locales, Default>]>,
-): Translator<Locales[Default]> {
+>(options: TranslatorOptions<Locales, Default>): Translator<Locales[Default]> {
   const { default: defaultLocale, locales } = options
   for (const locale of Object.keys(locales)) {
     if (!DISCORD_LOCALES.has(locale)) {

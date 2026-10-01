@@ -124,6 +124,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'DeferOptions',
   ],
   'meocord/common': [
+    'CatalogDefinition',
     'CatalogShape',
     'CooldownBatchVerdict',
     'CooldownEntry',
@@ -159,6 +160,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'RouteValues',
     'StringMessageKey',
     'Translate',
+    'TranslatorOptions',
     'UserErrorOptions',
     'ValidationIssue',
   ],
