@@ -51,7 +51,7 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
-import { ShardContext } from '@src/core/shard-context.js'
+import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
 import { createMockClient } from './mock-interaction.js'
@@ -886,12 +886,10 @@ export class TestingModuleBuilder {
     container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app), translator))
     // A testing module runs as one process, so a cross-shard call runs once, here
     container.bind(ShardContext).toConstantValue(
-      new ShardContext(undefined, async (service, method, args) => {
-        const cls = appClasses.find(candidate => (typeof service === 'function' ? candidate === service : candidate.name === service))
-        const name = typeof service === 'function' ? service.name : service
-        if (!cls) throw new Error(`${name} is not a controller or class provider of this testing module.`)
-        return (container.get(cls) as Record<string, (...args: unknown[]) => unknown>)[method](...args)
-      }),
+      new ShardContext(
+        undefined,
+        shardCallHandler(container, () => [...appClasses, ...[...providers.keys()].filter(isAppClassToken)], 'this testing module'),
+      ),
     )
 
     // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them

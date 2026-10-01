@@ -47,6 +47,44 @@ describe('ShardContext', () => {
       expect(await shards.call(StatsService, 'guildCount')).toEqual([{ shardIds: [0], ok: true, value: 7 }])
     })
 
+    // A process-sharded bot passes them as JSON, so one process and a test see what production sees
+    it('passes the arguments and the result through JSON, as a call between processes does', async () => {
+      @Controller()
+      class Echo {
+        echo(...args: unknown[]) {
+          return { received: args.map(arg => Object.prototype.toString.call(arg)), map: new Map([['a', 1]]), at: new Date(0) }
+        }
+      }
+      const shards = MeoCordTestingModule.create({ controllers: [Echo] }).compile().get(ShardContext)
+
+      expect(await shards.call(Echo, 'echo', new Date(0), new Map([[1, 2]]), undefined)).toEqual([
+        {
+          shardIds: [0],
+          ok: true,
+          value: { received: ['[object String]', '[object Object]', '[object Null]'], map: {}, at: '1970-01-01T00:00:00.000Z' },
+        },
+      ])
+    })
+
+    it('reaches a class a provider stands in for', async () => {
+      class Payments {
+        charge() {
+          return 'none'
+        }
+      }
+      @Service()
+      class StripePayments extends Payments {
+        charge() {
+          return 'stripe'
+        }
+      }
+      const shards = MeoCordTestingModule.create({ controllers: [], providers: [{ provide: Payments, useClass: StripePayments }] })
+        .compile()
+        .get(ShardContext)
+
+      expect(await shards.call(Payments, 'charge')).toEqual([{ shardIds: [0], ok: true, value: 'stripe' }])
+    })
+
     it('turns a throwing method into an error result', async () => {
       expect(await shardsOf().call(StatsService, 'fail')).toEqual([
         { shardIds: [0], ok: false, error: 'stats unavailable' },
@@ -150,8 +188,30 @@ describe('ShardContext', () => {
       ])
       expect(client.shard!.broadcastEval).toHaveBeenCalledWith(expect.any(Function), {
         shard: 2,
-        context: { service: 'StatsService', method: 'guildCount', args: [] },
+        context: { id: expect.any(String), service: 'StatsService', method: 'guildCount', args: [] },
       })
+    })
+
+    // discord.js matches a shard's answer to its call by the script it sent, and shares one in flight among identical ones
+    it('sends every call a script of its own, so identical calls neither merge nor take the answer to another call', async () => {
+      const scripts: string[] = []
+      const client = {
+        shard: {
+          ids: [0],
+          count: 1,
+          broadcastEval: (fn: unknown, { context }: { context: unknown }) => {
+            scripts.push(`(${String(fn)})(this, ${JSON.stringify(context)})`)
+            return Promise.resolve(1)
+          },
+        },
+        options: {},
+      } as unknown as Client
+      const shards = new ShardContext(client, async () => 0)
+
+      await Promise.all([shards.call(StatsService, 'guildCount'), shards.call(StatsService, 'guildCount')])
+      await shards.call(StatsService, 'guildCount')
+
+      expect(new Set(scripts).size).toBe(3)
     })
 
     it('gives an error for a shard that does not answer in time, without holding up the others', async () => {

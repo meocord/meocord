@@ -36,7 +36,7 @@ import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
 import { assertDistinctCommands, warnUnregisteredCommands } from '@src/core/command-conflicts.js'
-import { SHARD_CALL_KEY, type ShardCallHandler, ShardContext } from '@src/core/shard-context.js'
+import { SHARD_CALL_KEY, type ShardCallHandler, shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import {
   clientOptionsWithSharding,
   isShardProcess,
@@ -277,26 +277,19 @@ export class MeoCordFactory {
     }))
 
     // ShardContext.call reaches a service in another shard by its class name
-    const byName = new Map<string, new (...args: any[]) => unknown>()
+    const names = new Set<string>()
     for (const cls of appClasses) {
-      if (byName.has(cls.name) && meocordConfig.sharding?.mode === 'process') {
+      if (names.has(cls.name) && meocordConfig.sharding?.mode === 'process') {
         throw refuse(new Error(
           `${cls.name}: two classes have this name; with process sharding, ShardContext.call finds a service in ` +
             `another shard by its name, so give each controller and service a distinct name.`,
         ))
       }
-      byName.set(cls.name, cls)
+      names.add(cls.name)
     }
-    const runHere: ShardCallHandler = async (service, method, args) => {
-      // A call made here names its class; only one from another shard needs finding by name
-      const cls = typeof service === 'function' ? appClasses.find(appClass => appClass === service) : byName.get(service)
-      const name = typeof service === 'function' ? service.name : service
-      if (!cls) throw new Error(`${name} is not a controller or service of this app.`)
-      const instance = container.get(cls) as Record<string, (...args: unknown[]) => unknown>
-      if (typeof instance[method] !== 'function') throw new Error(`${name}.${method} is not a method.`)
-      return instance[method](...args)
-    }
-    Reflect.set(discordClient, SHARD_CALL_KEY, runHere)
+    // The app's classes, and the classes its providers stand in for
+    const callable = [...appClasses, ...[...providers.keys()].filter(isAppClassToken)]
+    Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
 
     // Stamp each class with the container so @UseGuard can resolve guards on a direct call
     for (const cls of appClasses) {

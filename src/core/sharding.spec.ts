@@ -589,6 +589,41 @@ describe('sharding', () => {
     expect(await shards!.call(Stats, 'count')).toEqual([{ shardIds: [0], ok: true, value: 42 }])
   })
 
+  it('reaches a class a provider stands in for, by the class here and by its name from another shard', async () => {
+    const loaded = await load()
+    const { inject } = await import('inversify')
+    let shards: InstanceType<typeof loaded.ShardContext> | undefined
+    class Payments {
+      charge() {
+        return 'none'
+      }
+    }
+    @loaded.Service()
+    class StripePayments extends Payments {
+      charge() {
+        return 'stripe'
+      }
+    }
+    @loaded.Service()
+    class Billing {
+      constructor(@inject(loaded.ShardContext) context: InstanceType<typeof loaded.ShardContext>) {
+        shards = context
+      }
+    }
+    const clients: Client[] = []
+    vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
+      clients.push(this)
+      return Promise.resolve('token')
+    })
+    @loaded.MeoCord({ controllers: [], services: [Billing], providers: [{ provide: Payments, useClass: StripePayments }], clientOptions: { intents: [] } })
+    class App {}
+    await loaded.MeoCordFactory.create(App).start()
+
+    expect(await shards!.call(Payments, 'charge')).toEqual([{ shardIds: [0], ok: true, value: 'stripe' }])
+    const runHere = Reflect.get(clients[0], loaded.SHARD_CALL_KEY) as (service: string, method: string, args: unknown[]) => Promise<unknown>
+    expect(await runHere('Payments', 'charge', [])).toBe('stripe')
+  })
+
   it('calls the very class it is given in one process, even when another class shares its name', async () => {
     const loaded = await load()
     let shards: InstanceType<typeof loaded.ShardContext> | undefined
