@@ -54,15 +54,13 @@ export const CLASS_COOLDOWNS = Symbol('class_cooldowns')
 /** Private metadata: a method's `@Cooldown`s, in declaration order. */
 export const METHOD_COOLDOWNS = Symbol('method_cooldowns')
 
-/** The cooldowns on a handler: the controller's, from the class declaring it down, then the method's. */
+/** The cooldowns on a handler: each class's, base first, then the method's. */
 export const handlerCooldowns = perHandler((prototype: object, methodName: string): readonly StoredCooldown[] => {
   const source = sourcePrototype(prototype, methodName)
   if (!source) return []
   return [
-    // The innermost class first, as filters are tried
-    ...[...stageClasses(prototype, methodName)]
-      .reverse()
-      .flatMap(cls => (Reflect.getOwnMetadata(CLASS_COOLDOWNS, cls) as StoredCooldown[]) ?? []),
+    // Base first, as guards run; a cooldown's key holds its place in this list, so the order stays put
+    ...stageClasses(prototype, methodName).flatMap(cls => (Reflect.getOwnMetadata(CLASS_COOLDOWNS, cls) as StoredCooldown[]) ?? []),
     ...((Reflect.getOwnMetadata(METHOD_COOLDOWNS, source, methodName) as StoredCooldown[]) ?? []),
   ]
 })

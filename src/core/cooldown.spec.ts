@@ -422,7 +422,7 @@ describe('@Cooldown, rule by rule', () => {
     expect(methodCooldowns(DailyController.prototype, 'missing')).toEqual([])
   })
 
-  it('applies the class cooldowns of every class in the chain, innermost first, however deep the handler is declared', () => {
+  it('applies the class cooldowns of every class in the chain, base first, however deep the handler is declared', () => {
     @Cooldown({ seconds: 1 })
     class Root {
       rooted() {}

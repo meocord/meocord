@@ -195,14 +195,15 @@ describe('exception filters', () => {
     expect(log).toEqual(['with params:params:params:p'])
   })
 
-  it('try the class declaring an inherited handler before the subclass', async () => {
+  // Innermost first: a subclass's filter catches before the base's, as for its own handlers
+  it("try the subclass's filters before those of the class declaring an inherited handler", async () => {
     await compile([ChildProfileController]).invoke(ChildProfileController, 'lookup', slash('lookup'))
-    expect(log).toEqual(['class:no lookup:lookup'])
+    expect(log).toEqual(['child:no lookup:lookup'])
     expect(inspectHandler(ChildProfileController, 'lookup').filters).toEqual([
       MethodNotFoundFilter,
+      ChildFilter,
       ClassNotFoundFilter,
       ClassRateFilter,
-      ChildFilter,
     ])
   })
 

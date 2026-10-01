@@ -177,24 +177,26 @@ describe('the order of class stages across levels', () => {
 
   const module = MeoCordTestingModule.create({ controllers: [Leaf] }).compile()
 
-  it("runs a handler's class stages subclass first, through every base, then the method's", async () => {
+  // A base wraps everything that extends it, as global stages wrap controllers
+  it("runs a handler's class stages base first, through every subclass, then the method's", async () => {
     await module.invoke(Leaf, 'own', click('leaf/1'))
-    expect(ran).toEqual(['LeafGuard', 'MiddleGuard', 'RootGuard', 'MethodGuard', 'LeafTag', 'MiddleTag', 'RootTag', 'own'])
+    expect(ran).toEqual(['RootGuard', 'MiddleGuard', 'LeafGuard', 'MethodGuard', 'RootTag', 'MiddleTag', 'LeafTag', 'own'])
   })
 
   it('gives a handler declared on a base the same chain, as it had', async () => {
     await module.invoke(Leaf, 'inherited', click('root/1'))
-    expect(ran).toEqual(['LeafGuard', 'MiddleGuard', 'RootGuard', 'LeafTag', 'MiddleTag', 'RootTag', 'inherited'])
+    expect(ran).toEqual(['RootGuard', 'MiddleGuard', 'LeafGuard', 'RootTag', 'MiddleTag', 'LeafTag', 'inherited'])
   })
 
-  it("tries class filters innermost first, a base's before its subclass's, as for an inherited handler", async () => {
-    expect(inspectHandler(Leaf, 'fails').filters).toEqual([RootReport, LeafReport])
-    expect(inspectHandler(Leaf, 'inherited').filters).toEqual([RootReport, LeafReport])
+  // So a catch-all on a base never shadows a subclass's own, more specific filter
+  it("tries class filters innermost first, a subclass's before its base's, for its own and inherited handlers", async () => {
+    expect(inspectHandler(Leaf, 'fails').filters).toEqual([LeafReport, RootReport])
+    expect(inspectHandler(Leaf, 'inherited').filters).toEqual([LeafReport, RootReport])
   })
 
   it('lists the resolved chain in inspectHandler', () => {
-    expect(inspectHandler(Leaf, 'own').guards).toEqual([LeafGuard, MiddleGuard, RootGuard, MethodGuard])
-    expect(inspectHandler(Leaf, 'own').interceptors).toEqual([LeafTag, MiddleTag, RootTag])
+    expect(inspectHandler(Leaf, 'own').guards).toEqual([RootGuard, MiddleGuard, LeafGuard, MethodGuard])
+    expect(inspectHandler(Leaf, 'own').interceptors).toEqual([RootTag, MiddleTag, LeafTag])
   })
 })
 
@@ -243,7 +245,7 @@ describe('@Controller({ inheritStages: false })', () => {
 
   it('leaves inherited handlers their base stages', async () => {
     await module.invoke(Standalone, 'inherited', click('base/1'))
-    expect(ran).toEqual(['OwnGuard', 'BaseGuard', 'inherited'])
+    expect(ran).toEqual(['BaseGuard', 'OwnGuard', 'inherited'])
   })
 
   it('stops a further subclass at the class that opted out', async () => {

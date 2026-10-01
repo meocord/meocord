@@ -231,11 +231,11 @@ describe('interceptors', () => {
     expect(log).toEqual(['complete'])
   })
 
-  it('apply a subclass class interceptor to inherited handlers, subclass first', async () => {
+  it("apply a subclass class interceptor to inherited handlers, inside the base class's", async () => {
     await compile(ChildProfileController).invoke(ChildProfileController, 'cached', slash('cached'))
     await compile(GuardedChildProfileController).invoke(GuardedChildProfileController, 'cached', slash('cached'))
 
-    const run = ['global:before', 'child:before', 'class:before', 'skip', 'class:after', 'child:after', 'global:after']
+    const run = ['global:before', 'class:before', 'child:before', 'skip', 'child:after', 'class:after', 'global:after']
     expect(log).toEqual([...run, 'guard', ...run])
   })
 
@@ -258,8 +258,8 @@ describe('interceptors', () => {
       MethodInterceptor,
     ])
     expect(inspectHandler(GuardedChildProfileController, 'params').interceptors).toEqual([
-      ChildInterceptor,
       ClassInterceptor,
+      ChildInterceptor,
       { provide: ParamsInterceptor, params: { label: 'a' } },
     ])
   })

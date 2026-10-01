@@ -358,16 +358,16 @@ export const METHOD_GUARDS = Symbol('method_guards')
 export type StageClass = abstract new (...args: any[]) => unknown
 
 /**
- * The classes whose class-level stages apply to a handler, outermost first: the class it is dispatched
- * on, then each class it extends, through the one that declares the handler and on to the top of the
- * chain, stopping after a class with `@Controller({ inheritStages: false })` at or above the
- * declaring class. Guards and interceptors run in this order; filters are tried, and cooldowns
+ * The classes whose class-level stages apply to a handler, outermost first: the top of the chain, then each class
+ * that extends it, down to the class the handler is dispatched on, the chain cut above a class with
+ * `@Controller({ inheritStages: false })` at or above the declaring class. A base so wraps everything that extends it,
+ * as global stages wrap controllers. Guards and interceptors run in this order; filters are tried, and cooldowns
  * counted, in reverse, from the innermost class out.
  */
 export const stageClasses = perHandler(
   (prototype: object, methodName: string): readonly StageClass[] => {
     const source = sourcePrototype(prototype, methodName)
-    return source ? classChain(prototype, source) : []
+    return source ? classChain(prototype, source).reverse() : []
   },
 )
 
