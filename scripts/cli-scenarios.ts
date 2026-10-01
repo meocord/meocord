@@ -246,6 +246,27 @@ export class ReadyService implements OnReady, OnShutdown {
 /** A line that makes the template config's rsbuild hook throw, in place of its first statement. */
 const HOOK_THROWS = "throw new Error('hook broke')"
 
+/**
+ * `readyService` with an onShutdown hook, which once ready answers SIGTERM by ignoring it: a restart that signals the
+ * application, as kill() does, then waits for it, while one through the dev runner's own stop runs its hooks.
+ */
+const signalDeafService = `import { Service } from 'meocord/decorator'
+import { type OnReady, type OnShutdown } from 'meocord/interface'
+
+@Service()
+export class ReadyService implements OnReady, OnShutdown {
+  onReady() {
+    process.removeAllListeners('SIGTERM')
+    process.on('SIGTERM', () => console.log('Ignored SIGTERM'))
+    console.log('Ready hook ran')
+  }
+
+  onShutdown() {
+    console.log('Shutdown hook ran')
+  }
+}
+`
+
 /** What a config looks like halfway through an edit: it no longer parses. */
 const HALF_WRITTEN = '\nexport const halfWritten = {\n'
 
@@ -1216,6 +1237,23 @@ const scenarios: Scenario[] = [
         code: 0,
         counts: { 'Starting bot': 2, 'Ready hook ran': 2, 'Slow shutdown began': 2, 'Bot has shut down': 2 },
         never: ['Started while another bot was stopping'],
+      },
+    },
+    {
+      name: `start --dev on ${runtime} restarts the bot through its own stop, running its onShutdown hooks, with no signal`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': signalDeafService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [{ after: 'Ready hook ran', files: { 'src/ready.service.ts': touched } }],
+      signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        counts: { 'Ready hook ran': 2, 'Shutdown hook ran': 2 },
+        never: ['Ignored SIGTERM', 'did not exit within'],
       },
     },
     {

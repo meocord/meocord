@@ -416,6 +416,31 @@ describe('spawning the application', () => {
       expect(spawnMock).toHaveBeenCalledTimes(1)
     })
 
+    // A signal is no graceful stop on Windows, where kill() ends the process outright and its onShutdown hooks never run
+    it('asks the running application to stop over its channel, on every platform, rather than signalling it', () => {
+      const cli = watcher()
+      cli.restartApp()
+      const first = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild> & { connected: boolean; send: ReturnType<typeof vi.fn> }
+      first.connected = true
+      first.send = vi.fn()
+
+      cli.restartApp()
+
+      expect(first.send).toHaveBeenCalledWith({ meocord: 'stop' })
+      expect(first.kill).not.toHaveBeenCalled()
+    })
+
+    it('signals an application whose channel is closed, as nothing else reaches it', () => {
+      const cli = watcher()
+      cli.restartApp()
+      const first = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild> & { connected: boolean }
+      first.connected = false
+
+      cli.restartApp()
+
+      expect(first.kill).toHaveBeenCalledWith()
+    })
+
     describe('when builds finish while the previous application is still exiting', () => {
       type Child = ReturnType<typeof createChild>
       const onExit = (child: Child) => child.once.mock.calls.findLast(([event]) => event === 'exit')?.[1] as () => void

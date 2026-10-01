@@ -37,7 +37,7 @@ import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
-import { tellDevRunner } from '@src/util/dev-runner.util.js'
+import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
@@ -98,6 +98,8 @@ function installSignalHandlers(): void {
   signalHandlersInstalled = true
   process.on('SIGINT', () => void shutdownAndExit())
   process.on('SIGTERM', () => void shutdownAndExit())
+  // How `meocord start --dev` stops the application to restart it, a signal being no graceful stop on Windows
+  onDevRunnerStop(() => void shutdownAndExit())
 
   // A shard stops when its manager asks, or when the manager is gone and cannot ask
   if (isShardProcess()) {

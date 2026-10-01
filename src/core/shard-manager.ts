@@ -12,7 +12,7 @@ import { bundleEntry } from '@src/util/bundle-entry.util.js'
 import { FORCE_REGISTER_ENV } from '@src/util/registration-mode.util.js'
 import { isShardMessage, REFUSED_CODE, type ShardMessage } from '@src/core/shard-messages.js'
 import { isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
-import { tellDevRunner, underDevRunner } from '@src/util/dev-runner.util.js'
+import { onDevRunnerStop, tellDevRunner, underDevRunner } from '@src/util/dev-runner.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 
 
@@ -89,6 +89,7 @@ export class ShardManager implements MeoCordApplication {
 
     process.on('SIGINT', () => void this.stopAndExit())
     process.on('SIGTERM', () => void this.stopAndExit())
+    onDevRunnerStop(() => void this.stopAndExit())
 
     let total: number
     try {
