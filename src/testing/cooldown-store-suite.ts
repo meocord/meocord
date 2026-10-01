@@ -40,7 +40,9 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  * The cases cover what a shared store most often gets wrong: a sliding window rather than fixed buckets,
  * `retryAfterMs` from the oldest call still in the window, calls in the same millisecond kept apart, and concurrent
  * calls at the limit where exactly one may pass. They use real time, with windows short enough that the suite takes
- * a few seconds, and each case counts under keys of its own.
+ * a few seconds, and each case counts under keys of its own. Each window is a whole number of milliseconds; a
+ * `@Cooldown` whose `seconds` has more than three decimals, such as `1.0005`, gives a store a `windowMs` of `1000.5`,
+ * which no case checks.
  *
  * @param name - What the store is called in the report.
  * @param factory - Makes the store to check, once per case.
