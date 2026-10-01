@@ -21,17 +21,15 @@ type ClassToken = abstract new (...args: any[]) => unknown
 /**
  * Runs a {@link ShardContext.call} in this process, on a controller, a service or a class a provider stands in for: the
  * class itself for a call made here, its name for one from another shard. `classes` is read on each call, so it can be
- * filled after this is made. A name two of them share is refused, since another shard cannot say which it means.
+ * filled after this is made. Only process sharding sends a name, and the app refuses to start with two of these
+ * classes under one name there, so a name finds one class.
  */
 export function shardCallHandler(container: Container, classes: () => readonly ClassToken[], owner: string): ShardCallHandler {
   return async (service, method, args) => {
     const name = typeof service === 'function' ? service.name : service
-    const matching = [...new Set(classes())].filter(cls => (typeof service === 'function' ? cls === service : cls.name === service))
-    if (matching.length === 0) throw new Error(`${name} is not a controller, service or provided class of ${owner}.`)
-    if (matching.length > 1) {
-      throw new Error(`${name}: two classes of ${owner} have this name, so a call from another shard cannot say which. Give them distinct names.`)
-    }
-    const instance = container.get(matching[0]) as Record<string, (...args: unknown[]) => unknown>
+    const target = classes().find(cls => (typeof service === 'function' ? cls === service : cls.name === service))
+    if (!target) throw new Error(`${name} is not a controller, service or provided class of ${owner}.`)
+    const instance = container.get(target) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[method] !== 'function') throw new Error(`${name}.${method} is not a method.`)
     const result = await instance[method](...args)
     // From another shard, the answer goes back as JSON: encoded here, a value JSON cannot carry fails the call at once

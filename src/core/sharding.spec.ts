@@ -52,10 +52,14 @@ async function load() {
 }
 type Loaded = Awaited<ReturnType<typeof load>>
 
-function appClass(loaded: Loaded, options: { controllers?: any[]; services?: any[]; intents?: number[]; cooldownStore?: any } = {}) {
+function appClass(
+  loaded: Loaded,
+  options: { controllers?: any[]; services?: any[]; providers?: any[]; intents?: number[]; cooldownStore?: any } = {},
+) {
   @loaded.MeoCord({
     controllers: options.controllers ?? [],
     services: options.services,
+    providers: options.providers,
     cooldownStore: options.cooldownStore,
     clientOptions: { intents: options.intents ?? [] },
   })
@@ -215,6 +219,23 @@ describe('sharding', () => {
 
       expect(() => loaded.MeoCordFactory.create(appClass(loaded, { services: [first, second] }))).toThrow(
         'Stats: two classes have this name',
+      )
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+    })
+
+    // call() reaches a class a provider stands in for by its name too, so its name is checked with the others
+    it('refuses a provided class that shares a name with a service, naming the three kinds', async () => {
+      const loaded = await load()
+      vi.stubEnv('SHARDING_MANAGER', 'true')
+      config.current = { discordToken: 'token', sharding: { mode: 'process' } }
+      const [service, provided] = [0, 1].map(() => {
+        @loaded.Service()
+        class Stats {}
+        return Stats
+      })
+
+      expect(() => loaded.MeoCordFactory.create(appClass(loaded, { services: [service], providers: [{ provide: provided, useValue: {} }] }))).toThrow(
+        'Stats: two classes have this name; with process sharding, ShardContext.call finds a class in another shard by its name, so give each controller, service and provided class a distinct name.',
       )
       await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
     })
