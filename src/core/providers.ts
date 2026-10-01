@@ -1,6 +1,6 @@
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { ExecutionContext } from '@src/common/execution-context.js'
-import { injectedTokens, singletonContextError, untypedParameter } from '@src/core/guard-runner.js'
+import { injectedTokens, untypedParameter } from '@src/core/guard-runner.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import {
@@ -61,6 +61,13 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
     if ('useClass' in entry && typeof entry.useClass !== 'function') {
       throw refuse(new Error(`${where}: the provider for ${name} has a useClass that is not a class.`))
     }
+    if ('useClass' in entry && injectedTokens(entry.useClass as AnyClass).includes(ExecutionContext)) {
+      throw refuse(new Error(
+        `${where}: the provider for ${name} uses ${tokenName(entry.useClass)}, which injects ExecutionContext, but it is ` +
+          "made once and shared, so it would keep the first call's context for every later call. Inject " +
+          'ExecutionContext only into guards.',
+      ))
+    }
     if ('useFactory' in entry) {
       if (typeof entry.useFactory !== 'function') {
         throw refuse(new Error(`${where}: the provider for ${name} has a useFactory that is not a function.`))
@@ -93,7 +100,6 @@ export function bindProvider(container: Container, provider: Provider, bindClass
   }
   if (isClassProvider(provider)) {
     const cls = provider.useClass
-    if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
     makeInjectable(cls)
     container.bind(token).to(cls).inSingletonScope()
     for (const dependency of injectedTokens(cls)) if (isAppClassToken(dependency)) bindClass(dependency)
@@ -203,9 +209,31 @@ export function assertTypedParameters(classes: readonly AnyClass[]): void {
   }
 }
 
+/** For each container, the tokens MeoCord binds itself, each to the app's class it stands for, if any. */
+const ownTokens = new WeakMap<Container, Map<unknown, unknown>>()
+
+/**
+ * Records `token` as one MeoCord binds itself, such as `CooldownStore`: never a unit of the app's own, though a class
+ * may inject it. With `standsFor`, the app's class it resolves to, a unit that injects it depends on that class.
+ */
+export function bindsOwnToken(container: Container, token: unknown, standsFor?: unknown): void {
+  let own = ownTokens.get(container)
+  if (!own) ownTokens.set(container, (own = new Map()))
+  own.set(token, standsFor)
+}
+
+/** A dependency as the graph sees it: the app's class an own token stands for, nothing for another own token. */
+function graphTokens(container: Container, dependency: unknown): unknown[] {
+  const own = ownTokens.get(container)
+  if (!own?.has(dependency)) return [dependency]
+  const standsFor = own.get(dependency)
+  return standsFor === undefined ? [] : [standsFor]
+}
+
 /**
  * What must exist before `token`: a factory's `inject`, a provided or bound class's constructor
- * dependencies, nothing for a value. Only the app's classes and provided tokens count.
+ * dependencies, nothing for a value. Only the app's classes and provided tokens count; a token MeoCord binds itself
+ * counts as the app's class it stands for, if any.
  */
 export function tokenDependencies(container: Container, providers: ProviderMap, token: unknown): unknown[] {
   const provider = providers.get(token)
@@ -218,9 +246,9 @@ export function tokenDependencies(container: Container, providers: ProviderMap, 
     : isAppClassToken(token)
       ? injectedTokens(token)
       : []
-  return dependencies.filter(
-    dependency => (providers.has(dependency) || isAppClassToken(dependency)) && container.isBound(dependency as ServiceIdentifier),
-  )
+  return dependencies
+    .flatMap(dependency => graphTokens(container, dependency))
+    .filter(dependency => (providers.has(dependency) || isAppClassToken(dependency)) && container.isBound(dependency as ServiceIdentifier))
 }
 
 /**

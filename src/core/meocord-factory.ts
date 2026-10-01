@@ -23,6 +23,7 @@ import {
   assertTypedParameters,
   reachableClasses,
   bindProvider,
+  bindsOwnToken,
   isClassProvider,
   providerMap,
   type ProviderMap,
@@ -216,7 +217,10 @@ export class MeoCordFactory {
     // Bind the Discord client as a constant value
     const discordClient = new Client(clientOptionsWithSharding(this.effectiveConfig(meocordConfig), options.clientOptions))
     container.bind(Client).toConstantValue(discordClient)
-    if (options.i18n) container.bind(Translator).toConstantValue(options.i18n)
+    if (options.i18n) {
+      container.bind(Translator).toConstantValue(options.i18n)
+      bindsOwnToken(container, Translator)
+    }
 
     // Bound before the app's classes, so a class that injects it gets this instance; filled once they are bound
     const appClasses: (new (...args: any[]) => unknown)[] = []
@@ -228,6 +232,8 @@ export class MeoCordFactory {
           (Reflect.get(discordClient, SHARD_CALL_KEY) as ShardCallHandler)(service, method, args),
         ),
       )
+    bindsOwnToken(container, HandlerRegistry)
+    bindsOwnToken(container, ShardContext)
 
     container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(options))
     // A store of the app's own is resolved like a service, so it can inject its client
@@ -237,6 +243,8 @@ export class MeoCordFactory {
     } else {
       container.bind(CooldownStore).toConstantValue(new MemoryCooldownStore())
     }
+    // A class that injects the token depends on the app's store, the one unit whose hooks run
+    bindsOwnToken(container, CooldownStore, options.cooldownStore)
 
     // After MeoCord's own tokens, which a provider may not replace, and before the app's classes, so
     // a class token that is provided is not also bound as itself

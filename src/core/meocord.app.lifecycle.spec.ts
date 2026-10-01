@@ -43,7 +43,8 @@ async function load() {
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
   const decorators: typeof DecoratorModule = await import('@src/decorator/index.js')
   const { inject } = await import('inversify')
-  const { CooldownStore, MemoryCooldownStore } = await import('@src/common/index.js')
+  // From its own module, which the factory imports too: the mocked index can hand back an earlier load's classes
+  const { CooldownStore, MemoryCooldownStore } = await import('@src/common/cooldown-store.js')
   const { CommandType } = await import('@src/enum/index.js')
   const { createMockInteraction, getResponse } = await import('@src/testing/index.js')
   return { discord, inject, CooldownStore, MemoryCooldownStore, CommandType, createMockInteraction, getResponse, ...app, ...factory, ...decorators }
@@ -1147,6 +1148,53 @@ describe('lifecycle hooks', () => {
       expect(logged.warn.flat().join(' ')).not.toContain('did not finish')
       finish.resolve()
       await handled
+    })
+
+    // Injected by its token, the store is the one unit, whose hooks run once, last, after the calls under way
+    it('runs its hooks once when a service injects CooldownStore, and shuts it down after the calls under way', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const finish = Promise.withResolvers<void>()
+      const running = Promise.withResolvers<void>()
+
+      @loaded.Service()
+      class Bonuses implements OnReady, OnShutdown {
+        constructor(@loaded.inject(loaded.CooldownStore) readonly store: unknown) {}
+        onReady() {
+          events.push('service ready')
+        }
+        onShutdown() {
+          events.push('service shutdown')
+        }
+      }
+
+      const AppStore = storeWith(loaded, events)
+      const { app, client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events, finish.promise, running)],
+        services: [Bonuses],
+        cooldownStore: AppStore,
+      })
+      const container = Reflect.get(app, 'container') as { get(token: unknown): unknown }
+      await becomeReady(client)
+      const handled = call(client, slash(loaded))
+      await running.promise
+      const stopped = loaded.shutdownAndExit()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      finish.resolve()
+      await Promise.all([handled, stopped])
+
+      expect((container.get(Bonuses) as Bonuses).store).toBeInstanceOf(AppStore)
+
+      expect(events).toEqual([
+        'store ready begins',
+        'store ready',
+        'service ready',
+        'store asked',
+        'call runs',
+        'call done',
+        'service shutdown',
+        'store shutdown',
+      ])
     })
 
     // An answer that comes after its call stopped waiting still writes to the store, so the store closes after it

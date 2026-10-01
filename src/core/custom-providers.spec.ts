@@ -36,7 +36,7 @@ async function load() {
 type Loaded = Awaited<ReturnType<typeof load>>
 
 /** Builds an app from the factory with a client that logs in without a network. */
-function create(loaded: Loaded, options: { controllers?: any[]; services?: any[]; providers?: Provider[] }) {
+function create(loaded: Loaded, options: { controllers?: any[]; services?: any[]; providers?: Provider[]; cooldownStore?: any }) {
   const logins: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
     logins.push(this)
@@ -47,6 +47,7 @@ function create(loaded: Loaded, options: { controllers?: any[]; services?: any[]
     controllers: options.controllers ?? [],
     services: options.services,
     providers: options.providers,
+    cooldownStore: options.cooldownStore,
     clientOptions: { intents: [] },
   })
   class App {}
@@ -388,6 +389,36 @@ describe('@MeoCord({ providers })', () => {
         providers: [{ provide: 'accounts', useFactory: (ledger: unknown) => ({ ledger }), inject: [Ledger] }],
       }),
     ).toThrow("'accounts' → Ledger → 'accounts':")
+  })
+
+  // Refused where it is declared, naming the token and where, as the same mistake in a factory's inject is
+  it('refuses a useClass provider whose class injects ExecutionContext, naming where and the token', async () => {
+    const loaded = await load()
+    @loaded.Service()
+    class Audit {
+      constructor(@loaded.Inject(loaded.ExecutionContext) readonly context: unknown) {}
+    }
+
+    expect(() => create(loaded, { providers: [{ provide: 'audit', useClass: Audit }] })).toThrow(
+      "App: @MeoCord({ providers }): the provider for 'audit' uses Audit, which injects ExecutionContext, but it is made " +
+        "once and shared, so it would keep the first call's context for every later call. Inject ExecutionContext only into guards.",
+    )
+  })
+
+  // The token stands for the app's store, so a cycle through it is named, rather than failing as one is made
+  it('names a cycle through the CooldownStore token by the store it stands for', async () => {
+    const loaded = await load()
+    @loaded.Service()
+    class Helper {
+      constructor(@loaded.Inject(loaded.CooldownStore) readonly store: unknown) {}
+    }
+    class CycleStore extends loaded.MemoryCooldownStore {
+      constructor(@loaded.Inject(Helper) readonly helper: Helper) {
+        super()
+      }
+    }
+
+    expect(() => create(loaded, { services: [Helper], cooldownStore: CycleStore })).toThrow('Helper → CycleStore → Helper:')
   })
 
   it('refuses a provider without exactly one way to provide, one given twice, and one for a token MeoCord binds', async () => {
