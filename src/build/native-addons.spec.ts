@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import {
@@ -44,7 +44,8 @@ function install(
 const moduleIn = (...segments: string[]) => path.join(root, 'node_modules', ...segments, 'index.js')
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'meocord-native-'))
+  // Resolved, since a package's directory is its real path, and macOS links its temp folder
+  root = realpathSync(mkdtempSync(path.join(tmpdir(), 'meocord-native-')))
 })
 
 afterEach(() => {
@@ -291,6 +292,91 @@ describe('installedPackages', () => {
 
     expect(existsSync(path.join(out, 'node_modules', 'supports-color', 'package.json'))).toBe(true)
     expect(existsSync(path.join(out, 'node_modules', 'has-flag', 'package.json'))).toBe(true)
+  })
+})
+
+/**
+ * A project as pnpm installs it: each package in its own store folder, beside links to the dependencies it was installed
+ * with, and only the direct dependencies linked from the project's node_modules.
+ */
+function pnpmProject(
+  packages: { name: string; version: string; dependencies?: Record<string, string>; optional?: Record<string, string>; binary?: string }[],
+  direct: string[],
+) {
+  const store = (name: string, version: string) => path.join(root, 'node_modules', '.pnpm', `${name}@${version}`, 'node_modules')
+  const link = (target: string, at: string) => {
+    mkdirSync(path.dirname(at), { recursive: true })
+    symlinkSync(target, at, 'junction')
+  }
+  for (const { name, version, dependencies = {}, optional = {}, binary } of packages) {
+    const dir = path.join(store(name, version), name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version, dependencies, optionalDependencies: optional }))
+    writeFileSync(path.join(dir, 'index.js'), 'export {}')
+    if (binary) writeFileSync(path.join(dir, binary), 'not really a binary')
+    for (const [dependency, dependencyVersion] of Object.entries({ ...dependencies, ...optional })) {
+      link(path.join(store(dependency, dependencyVersion), dependency), path.join(store(name, version), dependency))
+    }
+  }
+  for (const spec of direct) {
+    const at = spec.lastIndexOf('@')
+    const [name, version] = [spec.slice(0, at), spec.slice(at + 1)]
+    link(path.join(store(name, version), name), path.join(root, 'node_modules', name))
+  }
+}
+
+const versionIn = (dir: string) => (JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')) as { version: string }).version
+
+describe('a project pnpm installed', () => {
+  // pnpm links an external from its store; its dependencies are beside it there, not in the project's node_modules
+  it("packs a listed package's dependencies, which sit beside it in pnpm's store", () => {
+    pnpmProject([{ name: 'wrapper', version: '1.0.0', dependencies: { ms: '2.1.3' } }, { name: 'ms', version: '2.1.3' }], ['wrapper@1.0.0'])
+    const out = path.join(root, 'dist')
+
+    copyPackagesInto(new Map(installedPackages(['wrapper'], root).map(({ name, dir }) => [name, dir])), root, out)
+
+    expect(versionIn(path.join(out, 'node_modules', 'ms'))).toBe('2.1.3')
+  })
+
+  // napi-rs publishes the binary as a per-platform optional dependency, which pnpm also keeps beside the package
+  it("finds a native package's platform binary, beside it in pnpm's store, and packs it", () => {
+    pnpmProject(
+      [
+        { name: '@node-rs/xxhash', version: '1.0.0', optional: { '@node-rs/xxhash-test-platform': '1.0.0' } },
+        { name: '@node-rs/xxhash-test-platform', version: '1.0.0', binary: 'xxhash.node' },
+      ],
+      ['@node-rs/xxhash@1.0.0'],
+    )
+    const out = path.join(root, 'dist')
+
+    const found = installedPackages(['@node-rs/xxhash'], root)
+    copyPackagesInto(new Map(found.map(({ name, dir }) => [name, dir])), root, out)
+
+    expect(found.map(({ native }) => native)).toEqual([true])
+    expect(existsSync(path.join(out, 'node_modules', '@node-rs', 'xxhash-test-platform', 'xxhash.node'))).toBe(true)
+  })
+
+  // Two packages that need different versions of one dependency each get their own, as pnpm installed them
+  it('gives each package the version of a shared dependency it was installed with', () => {
+    pnpmProject(
+      [
+        { name: 'first', version: '1.0.0', dependencies: { ms: '2.0.0' } },
+        { name: 'second', version: '1.0.0', dependencies: { ms: '2.1.3' } },
+        { name: 'ms', version: '2.0.0' },
+        { name: 'ms', version: '2.1.3' },
+      ],
+      ['first@1.0.0', 'second@1.0.0'],
+    )
+    const out = path.join(root, 'dist')
+
+    copyPackagesInto(new Map(installedPackages(['first', 'second'], root).map(({ name, dir }) => [name, dir])), root, out)
+
+    // Node looks in a package's own node_modules before the top
+    const resolved = (from: string) => {
+      const nested = path.join(out, 'node_modules', from, 'node_modules', 'ms')
+      return versionIn(existsSync(nested) ? nested : path.join(out, 'node_modules', 'ms'))
+    }
+    expect([resolved('first'), resolved('second')]).toEqual(['2.0.0', '2.1.3'])
   })
 })
 
