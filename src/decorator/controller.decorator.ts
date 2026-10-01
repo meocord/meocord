@@ -45,6 +45,8 @@ const COMMAND_METADATA_KEY = Symbol('commands')
 const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
 const REACTION_HANDLER_METADATA_KEY = Symbol('reaction_handlers')
 const AUTOCOMPLETE_METADATA_KEY = Symbol('autocomplete_handlers')
+/** The routes a class's own `@Command` and `@MessageHandler` decorators declare, by method, beside those it inherits. */
+const DECLARED_ROUTES_KEY = Symbol('declared_routes')
 
 const logger = new Logger('Command')
 
@@ -54,6 +56,40 @@ const logger = new Logger('Command')
  */
 export function ownHandlerList<T>(key: symbol, target: object): T[] {
   return Reflect.getOwnMetadata(key, target) ?? [...(Reflect.getMetadata(key, target) ?? [])]
+}
+
+/** Records a route a class's own decorator declares for a method, which {@link warnInheritedRoutes} reads. */
+function declareRoute(target: object, method: string, route: string): void {
+  const declared: { method: string; route: string }[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target) ?? []
+  declared.push({ method, route })
+  Reflect.defineMetadata(DECLARED_ROUTES_KEY, declared, target)
+}
+
+/**
+ * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, which
+ * the next major version (5.0) drops. `@Controller` calls it, after every method decorator of the class has run.
+ */
+export function warnInheritedRoutes(target: abstract new (...args: any[]) => unknown): void {
+  const declared: { method: string; route: string }[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target.prototype) ?? []
+  const base = Object.getPrototypeOf(target.prototype) as object | null
+  if (declared.length === 0 || !base) return
+  const inherited = [
+    ...Object.entries(getCommandMap(base) ?? {}).flatMap(([route, metas]) => metas.map(meta => ({ method: meta.methodName, route }))),
+    ...getMessageHandlers(base).map(handler => ({ method: handler.method, route: handler.pattern ?? '' })),
+  ]
+  for (const method of new Set(declared.map(entry => entry.method))) {
+    const own = declared.filter(entry => entry.method === method).map(entry => entry.route)
+    const kept = [...new Set(inherited.filter(entry => entry.method === method && !own.includes(entry.route)).map(entry => entry.route))]
+    if (kept.length === 0) continue
+    const where = `${target.name}.${method}`
+    const quote = (routes: string[]) => routes.map(route => `"${route}"`).join(', ')
+    warnDeprecatedBehaviour(
+      logger,
+      `An inherited route that a re-declared handler keeps (${where} answers ${quote(kept)} as well as ${quote(own)})`,
+      'is dropped',
+      `a decorator for each route ${where} should answer`,
+    )
+  }
 }
 
 /** The class's own command map, started from a copy of the inherited one, for the same reason. */
@@ -167,7 +203,8 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
  * and `{--name}` a flag. Only the most specific matching pattern runs, across every controller. A message that
  * names the command but does not fit its pattern gets the command's usage in reply, as a
  * {@link MessageUsageError}. The params the handler declares are checked against the pattern when the code
- * compiles.
+ * compiles. A subclass that declares an inherited handler on
+ * another pattern still answers the inherited one, and logs a warning: in 5.0 the subclass's own patterns replace it.
  *
  * @param pattern - The words to match, such as `'roll {sides:int} {note...?}'`. An empty pattern runs for every
  *   message, as `@MessageHandler()` does, and logs a warning: it is deprecated, and refused in 5.0.
@@ -204,6 +241,7 @@ export function MessageHandler(pattern?: string, options: MessageHandlerOptions 
     }
     handlers.push({ pattern: pattern || undefined, method: propertyKey.toString(), options })
     Reflect.defineMetadata(MESSAGE_HANDLER_METADATA_KEY, handlers, target)
+    declareRoute(target, propertyKey.toString(), pattern || '')
   }
 }
 
@@ -520,7 +558,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives. Two component
  * handlers of one type whose patterns match the same ids stop the bot at startup. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
- * kind, the bot checks it as it starts.
+ * kind, the bot checks it as it starts. A subclass that declares an inherited handler on another name or pattern
+ * still answers the inherited one, and logs a warning: in 5.0 the subclass's own declarations replace it.
  *
  * @param name - The command's name or subcommand path, or a component's customId pattern or route.
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
@@ -681,6 +720,7 @@ export function Command<
     })
 
     Reflect.defineMetadata(COMMAND_METADATA_KEY, commands, target)
+    declareRoute(target, propertyKey, commandName)
   }
 }
 
