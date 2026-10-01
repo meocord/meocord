@@ -85,8 +85,24 @@ interface StartedRun {
   failure?: { error: unknown }
   /** Chains from the run's promise that pass its rejection on and end there, so nothing handles it. */
   open: number
-  /** Whether code of the app's took the run's rejection in a chain from it, as `.catch()` does. */
+  /** Whether code of the app's disposed of the run's rejection in a chain from it, as `.catch(log)` does. */
   caught?: boolean
+  /** Handlers of the app's still settling for the run's rejection, which count once they fulfil. */
+  disposing: Promise<void>[]
+}
+
+/**
+ * `onRejected`, counting the run's rejection as caught once it returns for it, or what it returns fulfils. One that
+ * throws or rejects passes the error on, as a rethrow or a wrap in an error of the app's does, so it is not caught.
+ */
+function disposing<B>(run: StartedRun, onRejected: (reason: any) => B | PromiseLike<B>): (reason: any) => B | PromiseLike<B> {
+  return reason => {
+    const result = onRejected(reason)
+    if (reason !== run.failure?.error) return result
+    if (typeof (result as PromiseLike<B> | undefined)?.then !== 'function') run.caught = true
+    else run.disposing.push(Promise.resolve(result).then(() => void (run.caught = true), () => undefined))
+    return result
+  }
 }
 
 /**
@@ -102,7 +118,7 @@ class Continuation extends Promise<unknown> {
   /** Starts `rest` as a run whose promise is tracked. */
   static start(rest: () => Promise<unknown>): { run: StartedRun; promise: Continuation } {
     const inner = rest()
-    const run: StartedRun = { settled: undefined as never, done: false, open: 0 }
+    const run: StartedRun = { settled: undefined as never, done: false, open: 0, disposing: [] }
     run.settled = inner.then(
       () => void (run.done = true),
       (error: unknown) => void ((run.failure = { error }), (run.done = true)),
@@ -115,8 +131,8 @@ class Continuation extends Promise<unknown> {
     onFulfilled?: ((value: unknown) => A | PromiseLike<A>) | null,
     onRejected?: ((reason: any) => B | PromiseLike<B>) | null,
   ): Promise<A | B> {
-    const next = super.then(onFulfilled, onRejected) as Promise<A | B>
-    if (this.run && handlesRejection(onRejected)) this.run.caught = true
+    const own = this.run && handlesRejection(onRejected) ? disposing(this.run, onRejected!) : onRejected
+    const next = super.then(onFulfilled, own) as Promise<A | B>
     return this.branch(next, typeof onRejected !== 'function')
   }
 
@@ -207,7 +223,11 @@ export async function runInterceptors(
     // A run it took on, as a timeout racing it does, and that fails once the call has ended reaches nobody: said here
     for (const taken of started) {
       if (taken.done || taken.open > 0) continue
-      void taken.settled.then(() => {
+      // Once the handlers chained from it have had their turn, and those the app's code returned a promise from settled
+      void taken.settled
+        .then(() => new Promise(resolve => setTimeout(resolve, 0)))
+        .then(() => Promise.all(taken.disposing))
+        .then(() => {
         if (!taken.failure || taken.caught) return
         logger.warn(
           `${cls.name} returned before ${context.getController().name}.${context.getHandlerName()} finished, which then threw; ` +
