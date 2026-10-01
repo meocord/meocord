@@ -122,6 +122,7 @@ const TYPE_NAMES: Record<string, string[]> = {
   ],
   'meocord/decorator': [
     'DeferOptions',
+    'MeoCordOptions',
   ],
   'meocord/common': [
     'CatalogDefinition',
@@ -247,6 +248,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'Token',
     'UserThemeTarget',
     'ValidateOptions',
+    'ValidatePipes',
     'ValueProvider',
   ],
   'meocord/enum': [],

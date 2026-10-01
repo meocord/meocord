@@ -1,4 +1,6 @@
 import { type ExecutionContextType } from '@src/common/execution-context.js'
+import { type PipeInterface } from './index.js'
+import { type InferSchemaOutput, type StandardSchemaV1 } from './standard-schema.interface.js'
 
 /**
  * What `@Guard` takes: the context types the guard runs for.
@@ -49,10 +51,36 @@ export interface ObserverOptions {
   types?: readonly ExecutionContextType[]
 }
 
+/** A pipe `@Validate` runs on one key: a pipe class, or `{ provide, params? }`. */
+type ValidatePipeEntry = (new (...args: any[]) => PipeInterface) | { provide: new (...args: any[]) => PipeInterface; params?: Record<string, any> }
+
+/**
+ * The pipes `@Validate` takes for a schema: some of the schema's output keys, each with one pipe or several applied in
+ * order.
+ *
+ * Use it to type a decorator of your own that wraps `@Validate`, so the pipes it passes on are checked against the
+ * schema as `@Validate` checks them.
+ *
+ * @typeParam S - The Standard Schema the pipes are for.
+ *
+ * @example
+ * ```ts
+ * const Checked = <S extends StandardSchemaV1, const P extends ValidatePipes<S> = Record<never, never>>(
+ *   schema: S,
+ *   options?: ValidateOptions<P>,
+ * ) => Validate(schema, options)
+ * ```
+ *
+ * @group Types
+ * @see {@link ValidateOptions}
+ */
+export type ValidatePipes<S extends StandardSchemaV1> = { [K in keyof InferSchemaOutput<S>]?: ValidatePipeEntry | readonly ValidatePipeEntry[] }
+
 /**
  * What `@Validate` takes beside its schema: pipes for single values of the schema's output.
  *
- * @typeParam Pipes - The pipes by key, which `@Validate` checks against the schema's output.
+ * @typeParam Pipes - The pipes by key, which `@Validate` checks against the schema's output; a wrapper of its own
+ *   types them as {@link ValidatePipes} of its schema.
  * @group Types
  * @see {@link Validate}
  */

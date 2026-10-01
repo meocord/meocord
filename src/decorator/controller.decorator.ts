@@ -32,13 +32,13 @@ import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { describeValue, withArticle } from '@src/util/value.util.js'
 
 /** What a handler was given in place of its interaction: another interaction's class, or what the value is. */
 function givenInstead(value: unknown): string {
   const name = typeof value === 'object' && value !== null ? value.constructor?.name : undefined
-  if (name && name !== 'Object') return `, not a ${name}`
-  const what = value === null || value === undefined ? String(value) : typeof value === 'object' ? 'an object' : `a ${typeof value}`
-  return `; it was given ${what}`
+  if (name && name !== 'Object') return `, not ${withArticle(name)}`
+  return `; it was given ${describeValue(value)}`
 }
 
 const COMMAND_METADATA_KEY = Symbol('commands')
@@ -650,10 +650,11 @@ export function Command<
     }
 
     // Wrap original method for interaction type validation
+    const declaredAs = typeof builderOrType === 'function' ? builderOrType.name : `CommandType.${builderOrType}`
     _descriptor.value = function (interaction, params) {
       if (!matchesCommandType(commandType, interaction)) {
         throw new Error(
-          `${target.constructor.name}.${propertyKey}: @Command('${commandName}', CommandType.${commandType}) takes a ` +
+          `${target.constructor.name}.${propertyKey}: @Command('${commandName}', ${declaredAs}) takes ` +
             `${interactionClassName(commandType)}${givenInstead(interaction)}.`,
         )
       }

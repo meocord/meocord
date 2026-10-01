@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { type ValidateOptions } from '@src/interface/stage-options.interface.js'
+import { type ValidateOptions, type ValidatePipes } from '@src/interface/stage-options.interface.js'
 import { type PipeInterface } from '@src/interface/index.js'
 import { type InferSchemaOutput, type PIPED_BRAND, type StandardSchemaV1 } from '@src/interface/standard-schema.interface.js'
 import { METHOD_PIPES, METHOD_VALIDATION, type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.js'
@@ -17,14 +17,11 @@ export type NoInput = typeof _noInput
 /** A handler's second parameter, or `NoInput` when it takes fewer than two. */
 export type ParamsOf<M extends Handler> = Parameters<M> extends [unknown, ...infer Rest] ? (Rest extends [] ? NoInput : Parameters<M>[1]) : NoInput
 
+type PipeEntryOf = (new (...args: any[]) => PipeInterface) | { provide: new (...args: any[]) => PipeInterface; params?: Record<string, any> }
+
 type PipeClassOf<E> = E extends { provide: infer C } ? C : E
 type PipeOutput<E> = PipeClassOf<E> extends new (...args: any[]) => PipeInterface<any, infer O> ? Awaited<O> : never
 type LastPipeOutput<E> = E extends readonly [...unknown[], infer Last] ? PipeOutput<Last> : PipeOutput<E>
-
-type PipeEntryOf = (new (...args: any[]) => PipeInterface) | { provide: new (...args: any[]) => PipeInterface; params?: Record<string, any> }
-
-/** Pipes for some of a schema's output keys, each one pipe or several applied in order. */
-type SchemaPipes<S extends StandardSchemaV1> = { [K in keyof InferSchemaOutput<S>]?: PipeEntryOf | readonly PipeEntryOf[] }
 
 /** What the handler receives: the schema's output, with each piped key replaced by its last pipe's output. */
 export type ValidatedInput<S extends StandardSchemaV1, Pipes = Record<never, never>> = Omit<InferSchemaOutput<S>, keyof Pipes> & {
@@ -76,7 +73,7 @@ type AcceptsInput<P, Input> = [P] extends [NoInput]
  * @see {@link ValidationError}
  * @see {@link https://meocord.dev/docs/4.1/validation | Validation and pipes}
  */
-export function Validate<S extends StandardSchemaV1, const Pipes extends SchemaPipes<S> = Record<never, never>>(
+export function Validate<S extends StandardSchemaV1, const Pipes extends ValidatePipes<S> = Record<never, never>>(
   schema: S,
   options: ValidateOptions<Pipes> = {},
 ) {

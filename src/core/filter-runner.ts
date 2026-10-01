@@ -5,6 +5,7 @@ import { type ExecutionContext } from '@src/common/execution-context.js'
 import { perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
 import { bindShared } from '@src/core/interceptor-runner.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { isConstructor } from '@src/util/value.util.js'
 
 export type FilterClass = new (...args: any[]) => ExceptionFilter
 
@@ -75,7 +76,7 @@ export function matchFilter(levels: readonly (readonly FilterEntry[])[], error: 
       // Every filter reaching here was checked for @Catch at startup, so its types are always recorded
       const types = Reflect.getOwnMetadata(CATCH_TYPES, filterClass(entry)) as (abstract new (...args: any[]) => unknown)[]
       // Only classes match: anything else given to @Catch, warned of as it applied, matches no error
-      if (types.length === 0 || types.some(type => typeof type === 'function' && error instanceof type)) return entry
+      if (types.length === 0 || types.some(type => isConstructor(type) && error instanceof type)) return entry
     }
   }
   return undefined
