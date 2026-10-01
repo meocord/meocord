@@ -59,9 +59,9 @@ function loadCompiledConfig(): MeoCordConfig | undefined {
     const loaded = load(compiledPath) as { default?: MeoCordConfig } & MeoCordConfig
     return loaded.default ?? loaded
   } catch (error) {
+    // Kept, not printed: MeoCordFactory.create reports it once, and every CLI path that falls back to
+    // meocord.config.ts goes on to start the bot, which does
     problem = { path: compiledPath, missing: false, error }
-    // The factory refuses with this too, but the CLI falls back to meocord.config.ts and would otherwise say nothing
-    console.error(`[MeoCord] Failed to load ${compiledPath}: ${error instanceof Error ? error.message : error}`)
     return undefined
   }
 }

@@ -44,13 +44,15 @@ describe('loadMeoCordConfig', () => {
     expect(loadMeoCordConfig()).toBeUndefined()
   })
 
-  it('reports a compiled config that fails to load, and returns undefined', async () => {
+  // MeoCordFactory.create reports it, once; the loader runs earlier, for the logger, and stays quiet
+  it('keeps why a compiled config failed to load, prints nothing, and returns undefined', async () => {
     writeCompiledConfig(`throw new Error('broken config')\n`)
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const { loadMeoCordConfig } = await freshLoader()
+    const { compiledConfigProblem, loadMeoCordConfig } = await freshLoader()
 
     expect(loadMeoCordConfig()).toBeUndefined()
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('broken config'))
+    expect(compiledConfigProblem()).toMatchObject({ missing: false, error: expect.objectContaining({ message: 'broken config' }) })
+    expect(error).not.toHaveBeenCalled()
   })
 
   it('loads once and returns the cached result after', async () => {
