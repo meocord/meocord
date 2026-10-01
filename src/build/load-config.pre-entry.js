@@ -6,6 +6,10 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { installStackRemapper } from './stack-remap.js'
+import { listenForDevRunnerStop } from '../util/dev-runner.util.js'
+
+// First, so a restart `meocord start --dev` asks for while the bundle still loads is heard
+listenForDevRunnerStop()
 
 // Bundled into the application's entry, so this is the built bundle's own path. A shard manager spawns
 // it: process.argv[1] may be a process manager's wrapper instead.

@@ -407,6 +407,36 @@ describe('lifecycle hooks', () => {
       }
     })
 
+    // How meocord start --dev restarts the app on every platform: on Windows a signal ends it without its hooks
+    it('runs on a stop from meocord start --dev', async () => {
+      let devRunnerStop: (() => void) | undefined
+      vi.doMock('@src/util/dev-runner.util.js', async importOriginal => ({
+        ...(await importOriginal<object>()),
+        onDevRunnerStop: (stop: () => void) => (devRunnerStop = stop),
+      }))
+      try {
+        const loaded = await load()
+        let stopped = false
+
+        @loaded.Service()
+        class Scheduler implements OnShutdown {
+          onShutdown() {
+            stopped = true
+          }
+        }
+
+        const { client } = await startApp(loaded, { controllers: [], services: [Scheduler] })
+        await becomeReady(client)
+
+        devRunnerStop?.()
+
+        await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+        expect(stopped).toBe(true)
+      } finally {
+        vi.doUnmock('@src/util/dev-runner.util.js')
+      }
+    })
+
     it('logs a hook that throws and still exits 0', async () => {
       const loaded = await load()
 

@@ -17,6 +17,13 @@ vi.mock('@src/common/index.js', async importOriginal => ({
   },
 }))
 
+// The stops a manager registers for meocord start --dev, called here as its channel would call them
+const { devRunnerStops } = vi.hoisted(() => ({ devRunnerStops: [] as (() => void)[] }))
+vi.mock('@src/util/dev-runner.util.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  onDevRunnerStop: (stop: () => void) => void devRunnerStops.push(stop),
+}))
+
 const {
   RESPAWN_BASE_MS,
   RESPAWN_CAP_MS,
@@ -459,6 +466,16 @@ describe('ShardManager', () => {
       await manager.start()
 
       process.emit('SIGINT')
+
+      expect(shards[0].sent).toEqual([{ meocord: 'shutdown' }])
+    })
+
+    // How meocord start --dev restarts a sharded bot on every platform: on Windows a signal ends the manager outright
+    it('stops on a stop from meocord start --dev', async () => {
+      const { manager, shards } = setup({ shards: 1 })
+      await manager.start()
+
+      devRunnerStops.at(-1)?.()
 
       expect(shards[0].sent).toEqual([{ meocord: 'shutdown' }])
     })

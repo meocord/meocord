@@ -20,7 +20,7 @@ import { resolveOwnVersion } from '@src/util/package-version.util.js'
 import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
-import { DEV_RUNNER_ENV, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
+import { DEV_RUNNER_ENV, type DevRunnerCommand, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
 import packageJson from '../../package.json' with { type: 'json' }
 import { fileURLToPath } from 'url'
 import {
@@ -670,7 +670,9 @@ copies or substantial portions of the Software.
       this.appProcess = null
       if (!this.stopping) this.launchDevApp()
     })
-    previous.kill()
+    // Over its channel rather than as a signal: on Windows kill() ends a process outright, skipping its onShutdown hooks
+    if (previous.connected) previous.send({ meocord: 'stop' } satisfies DevRunnerCommand)
+    else previous.kill()
   }
 
   /**

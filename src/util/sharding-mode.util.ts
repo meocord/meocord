@@ -1,17 +1,13 @@
 import { type ClientOptions } from 'discord.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { isShardProcess } from '@src/util/shard-process.util.js'
 
-/** Set by discord.js in every process its ShardingManager spawns. */
-export const SHARDING_MANAGER_ENV = 'SHARDING_MANAGER'
+// Beside the dev runner's channel, which the bundle's pre-entry loads, so without this module's imports
+export { isShardProcess, SHARDING_MANAGER_ENV } from '@src/util/shard-process.util.js'
 
 /** What this process is, as far as sharding goes. */
 export type ShardingRole = 'manager' | 'shard' | 'single'
-
-/** Whether this process was spawned as a shard by a sharding manager. */
-export function isShardProcess(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[SHARDING_MANAGER_ENV] !== undefined
-}
 
 /** Whether a shard's manager is gone: the IPC channel it asks a shard to stop through is closed. */
 export function managerGone(proc: Pick<NodeJS.Process, 'connected'> = process): boolean {
