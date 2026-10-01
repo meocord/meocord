@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { type ValidateOptions } from '@src/interface/stage-options.interface.js'
 import { type PipeInterface } from '@src/interface/index.js'
-import { type InferSchemaOutput, type IsPiped, type StandardSchemaV1 } from '@src/interface/standard-schema.interface.js'
+import { type InferSchemaOutput, type StandardSchemaV1, type Unpiped } from '@src/interface/standard-schema.interface.js'
 import { METHOD_PIPES, METHOD_VALIDATION, type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
@@ -30,9 +30,6 @@ type SchemaPipes<S extends StandardSchemaV1> = { [K in keyof InferSchemaOutput<S
 export type ValidatedInput<S extends StandardSchemaV1, Pipes = Record<never, never>> = Omit<InferSchemaOutput<S>, keyof Pipes> & {
   [K in keyof Pipes]: LastPipeOutput<Pipes[K]>
 }
-
-/** The handler's params, with the keys marked `Piped` left to their pipes. */
-type Unpiped<P> = { [K in keyof P]: IsPiped<P[K]> extends true ? unknown : P[K] }
 
 /** Allows the descriptor when the validated input fits the handler's params; otherwise names the problem. */
 type AcceptsInput<P, Input> = [P] extends [NoInput]

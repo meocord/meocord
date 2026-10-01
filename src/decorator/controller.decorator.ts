@@ -16,7 +16,7 @@ import {
 } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CheckedParams, type MessageHandlerOptions, type ReactionEvent, type ReactionHandlerSettings } from '@src/interface/index.js'
-import { type IsPiped } from '@src/interface/standard-schema.interface.js'
+import { type IsPiped, type Unpiped } from '@src/interface/standard-schema.interface.js'
 import {
   type AutocompleteMeta,
   type BuildableCommandType,
@@ -165,12 +165,15 @@ type ParamsAccept<P, Pattern extends string> = NonNullable<P> extends Record<str
   ? ParamsFit<NonNullable<P>, CheckedParams<Pattern, NonNullable<P>>>
   : { "The handler's params are an object of the pattern's params": P }
 
-/** Unknown when the declared params take what the pattern gives, else the keys that do not, with what they get. */
-type ParamsFit<P, Given> = [Given] extends [P]
+/**
+ * Unknown when the declared params take what the pattern gives, a key marked `Piped<T>` being left to its pipe, else
+ * the keys that do not, with what they get.
+ */
+type ParamsFit<P, Given> = [Given] extends [Unpiped<P>]
   ? unknown
   : {
-      "The handler's params do not fit the pattern": {
-        [K in keyof Given & keyof P as [Given[K]] extends [P[K]] ? never : K]: Given[K]
+      "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>": {
+        [K in keyof Given & keyof P as IsPiped<P[K]> extends true ? never : [Given[K]] extends [P[K]] ? never : K]: Given[K]
       }
     }
 
@@ -540,7 +543,7 @@ type ChoicesAccept<N, T, P> = string extends keyof P
       } extends infer Mismatch
     ? [keyof Mismatch] extends [never]
       ? unknown
-      : { "The handler's params give a select menu's choices a type their values do not fit; mark one a pipe produces Piped<T>": Mismatch }
+      : { "The handler's params give a select menu's choices a type their values do not fit; a key a pipe produces is marked Piped<T>": Mismatch }
     : unknown
 
 /** A pattern's typed params, each with the value its segment gives; an untyped param builds from any `RouteValue`. */
@@ -565,7 +568,7 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
         } extends infer Mismatch
       ? [keyof Mismatch] extends [never]
         ? unknown
-        : { "The handler's params give a typed customId param a type its value does not fit; mark one a pipe produces Piped<T>": Mismatch }
+        : { "The handler's params give a typed customId param a type its value does not fit; a key a pipe produces is marked Piped<T>": Mismatch }
       : unknown
   : unknown
 

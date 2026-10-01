@@ -6,7 +6,7 @@ const PROBE = path.join(ROOT, 'src', 'decorator', '__diagnostics-probe__.ts')
 
 // Each handler is refused, and an editor shows the first lines of why: the designed message has to be among them
 const probe = `
-import { type ButtonInteraction, type Message } from 'discord.js'
+import { type ButtonInteraction, type Message, type StringSelectMenuInteraction } from 'discord.js'
 import { Command, MessageHandler } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 
@@ -22,6 +22,9 @@ export class Probe {
 
   @Command('stats/{id}', CommandType.BUTTON)
   unknownKey(_interaction: ButtonInteraction, _params: { uid: string }) {}
+
+  @Command('pick', CommandType.SELECT_MENU)
+  wrongChoice(_interaction: StringSelectMenuInteraction, _params: { values: number[] }) {}
 }
 `
 
@@ -52,9 +55,10 @@ describe("a handler whose params do not fit its pattern's", () => {
   }, 60_000)
 
   it.each([
-    ['unknownParam', "The handler's params do not fit the pattern", 2],
-    ['wrongType', "The handler's params do not fit the pattern", 2],
-    ['wrongSegment', "The handler's params give a typed customId param a type its value does not fit", 3],
+    ['unknownParam', "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>", 2],
+    ['wrongType', "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>", 2],
+    ['wrongSegment', "The handler's params give a typed customId param a type its value does not fit; a key a pipe produces is marked Piped<T>", 3],
+    ['wrongChoice', "The handler's params give a select menu's choices a type their values do not fit; a key a pipe produces is marked Piped<T>", 3],
     ['unknownKey', "The handler's params name keys its pattern does not capture", 3],
   ])('%s is refused, naming why within its first lines', (method, message, within) => {
     const lines = found[method]
