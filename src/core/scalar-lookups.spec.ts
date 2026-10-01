@@ -1,5 +1,6 @@
 import { ButtonInteraction, type Message } from 'discord.js'
 import { MessageUsageError } from '@src/common/errors.js'
+import { route } from '@src/common/route.js'
 import { Command, Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type MessageParamType } from '@src/interface/index.js'
@@ -96,5 +97,13 @@ describe('param type names', () => {
         return Segments
       }, name).toThrow(/Invalid pattern/)
     }
+  })
+})
+
+describe('route() params with an inherited name', () => {
+  it('builds a customId from the value given, and needs one when none is', () => {
+    expect(route('a/{constructor}').build({ constructor: 'x' } as never)).toBe('a/x')
+    expect(route('t/{toString:bool}').build({ toString: true } as never)).toBe('t/true')
+    expect(() => route('a/{constructor}').build({} as never)).toThrow(/needs a value for \{constructor\}/)
   })
 })
