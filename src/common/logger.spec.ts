@@ -5,6 +5,7 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
 }))
 
 import { stripVTControlCharacters } from 'node:util'
+import chalk from 'chalk'
 import { ChatInputCommandInteraction, Client, GatewayIntentBits } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { resetLogLevel } from '@src/common/log-level.js'
@@ -171,9 +172,10 @@ describe('Logger levels', () => {
     logger.warn('w')
     logger.error('e')
   }
+  // The rank each line printed at: info and verbose print at the log rank, under tags of their own
   const levelsShown = () =>
     printed()
-      .map(line => /\[(DEBUG|LOG|WARN|ERROR)\]/.exec(line)?.[1])
+      .map(line => /\[(DEBUG|LOG|INFO|VERBOSE|WARN|ERROR)\]/.exec(line)?.[1]?.replace(/^(INFO|VERBOSE)$/, 'LOG'))
       .join(',')
 
   beforeEach(() => {
@@ -190,6 +192,17 @@ describe('Logger levels', () => {
     vi.restoreAllMocks()
     Reflect.deleteProperty(globalThis, BUNDLE_ENTRY_KEY)
     resetLogLevel()
+  })
+
+  it('tags a line from info() [INFO] and one from verbose() [VERBOSE], each printed at the log rank', () => {
+    const logger = new Logger()
+    logger.info('i')
+    logger.verbose('v')
+
+    expect(vi.mocked(console.log).mock.calls.map(call => /\[(INFO|VERBOSE|LOG)\]/.exec(stripVTControlCharacters(call.map(String).join(' ')))?.[1])).toEqual([
+      'INFO',
+      'VERBOSE',
+    ])
   })
 
   // Loading dist/meocord.config.mjs runs its dotenv import: a test or the CLI would get .env mid-run
@@ -336,3 +349,36 @@ describe('Logger levels', () => {
   })
 })
 
+
+describe("Logger's colours", () => {
+  let level: typeof chalk.level
+  beforeEach(() => {
+    level = chalk.level
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.stubEnv('MEOCORD_LOG_LEVEL', 'log')
+    resetLogLevel()
+  })
+  afterEach(() => {
+    chalk.level = level
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+    resetLogLevel()
+  })
+  const printed = () => vi.mocked(console.log).mock.calls.flat().map(String).join(' ')
+
+  // chalk turns colour off where the output is no terminal, such as a file or a log collector, and FORCE_COLOR on
+  it('writes no colour codes where chalk finds no colour support, an object included', () => {
+    chalk.level = 0
+    new Logger('Plain').log('text', { nested: { value: 1 } }, 42)
+
+    expect(printed()).toBe(stripVTControlCharacters(printed()))
+  })
+
+  it('colours an object, as the text around it, where chalk finds colour support', () => {
+    chalk.level = 1
+    new Logger('Coloured').log({ value: 1 })
+
+    expect(printed()).not.toBe(stripVTControlCharacters(printed()))
+    expect(vi.mocked(console.log).mock.calls[0].at(-1)).not.toBe(stripVTControlCharacters(String(vi.mocked(console.log).mock.calls[0].at(-1))))
+  })
+})
