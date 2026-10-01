@@ -16,7 +16,7 @@ import { setPresenter } from '@src/common/response/presenter.js'
 import { type MessageResponseContext, type PresentedError, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
 import { Controller, Cooldown, MeoCord, MessageHandler, Service } from '@src/decorator/index.js'
 import { UserError } from '@src/common/errors.js'
-import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
+import { createDiscordError, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 const { Ephemeral, IsComponentsV2 } = MessageFlags
 
@@ -299,6 +299,52 @@ describe("a message command's errors, in the presenter's messageError view", () 
     const payload = again.author.send.mock.calls[0]?.[0] as Payload
     expect(payload.embeds?.[0]?.description).toContain('!daily')
     expect(names(payload)).toEqual(['card.png'])
+  })
+})
+
+describe('a send Discord refuses as too large', () => {
+  // A path or a stream has no size to check before sending, and a limit can be lower than the interaction says
+  const TOO_LARGE = 40005
+
+  it("answers a command with the view again, without its files", async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const interaction = command(presenting(() => [card()]))
+    interaction.reply.mockRejectedValueOnce(createDiscordError(TOO_LARGE))
+
+    await respond(interaction).error(new Error('x'), { message: 'Broken.' })
+
+    const [first, again] = [sent(interaction.reply, 0), sent(interaction.reply, 1)]
+    expect(names(first)).toEqual(['card.png'])
+    expect(names(again)).toEqual([])
+    expect(again.embeds?.[0]).toMatchObject({ description: 'Broken.' })
+    expect(again.embeds?.[0]).not.toHaveProperty('image')
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('too large'))
+  })
+
+  it('locks a message with the loading view again, without its files', async () => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const interaction = button(presenting(() => [card()]))
+    interaction.editReply.mockRejectedValueOnce(createDiscordError(TOO_LARGE))
+
+    await respond(interaction).lock()
+
+    expect(names(sent(interaction.editReply, 0))).toEqual(['card.png'])
+    expect(names(sent(interaction.editReply, 1))).toEqual([])
+  })
+
+  it("answers a message command with the drawn view again, without its files", async () => {
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const module = MeoCordTestingModule.create({ app: DiceApp, controllers: [DiceController] }).compile()
+    const message = createMockMessage({ content: '!refuse' })
+    message.reply.mockRejectedValueOnce(createDiscordError(TOO_LARGE))
+
+    await module.dispatch(message)
+
+    const [first, again] = [message.reply.mock.calls[0]?.[0] as Payload, message.reply.mock.calls[1]?.[0] as Payload]
+    expect(names(first)).toEqual(['card.png'])
+    expect(names(again)).toEqual([])
+    expect(again.embeds?.[0]).toMatchObject({ description: '⚠️ Not today.' })
+    expect(again.embeds?.[0]).not.toHaveProperty('image')
   })
 })
 

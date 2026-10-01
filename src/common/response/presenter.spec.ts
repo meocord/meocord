@@ -4,7 +4,7 @@ import { CommandType } from '@src/enum/index.js'
 import { type PresentedError, type ResponsePresenter } from '@src/interface/index.js'
 import { Theme } from '@src/common/theme.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
-import { defaultPresenter, renderContainer, renderEmbed, RENDERED_CONTAINER_ID } from '@src/common/response/presenter.js'
+import { defaultPresenter, renderContainer, renderEmbed, RENDERED_CONTAINER_ID, withoutFiles } from '@src/common/response/presenter.js'
 import { respond } from '@src/common/response/response-state.js'
 import { createMockInteraction, MeoCordTestingModule } from '@src/testing/index.js'
 
@@ -133,5 +133,25 @@ describe("a view's image and thumbnail", () => {
         items: [{ media: { url: 'https://example.com/b.png' } }, { media: { url: 'attachment://badge.png' } }],
       },
     ])
+  })
+})
+
+describe("a view's files its components show", () => {
+  it('are told apart by their whole URL, so a longer name that starts the same shows nothing of the view', () => {
+    const container = renderContainer({
+      text: 't',
+      files: [{ name: 'a.png', data: Buffer.from('p') }],
+      components: [{ type: ComponentType.File, file: { url: 'attachment://a.png.bak' } }],
+    })
+
+    expect(container.components).toContainEqual({ type: ComponentType.MediaGallery, items: [{ media: { url: 'attachment://a.png' } }] })
+  })
+})
+
+describe('a view sent without its files', () => {
+  it('loses the image and thumbnail that named them, keeping one given as a URL', () => {
+    const view = { text: 't', files: [{ name: 'card.png', data: Buffer.from('p') }], image: 'card.png', thumbnail: 'https://example.com/t.png' }
+
+    expect(withoutFiles(view)).toEqual({ text: 't', thumbnail: 'https://example.com/t.png' })
   })
 })

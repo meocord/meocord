@@ -65,8 +65,20 @@ function textOf(view: ResponseView): string {
 /** Discord's limit of attachments on one message. */
 export const ATTACHMENT_LIMIT = 10
 
-/** Discord's default size limit of each uploaded file, for an interaction that does not give its own. */
+/**
+ * Discord's default size limit of each uploaded file, for a send without an interaction's `attachmentSizeLimit`:
+ * "The default limit is `20 MiB` for all users", in discord-api-docs' Uploading Files (developers/reference.mdx).
+ */
 export const DEFAULT_ATTACHMENT_SIZE_LIMIT = 20 * 1024 * 1024
+
+/** Discord's refusal of a request larger than it takes. */
+const ENTITY_TOO_LARGE = 40005
+
+/** Whether Discord refused a send as too large: its error 40005, or an HTTP 413 without one. */
+export function isTooLarge(error: unknown): boolean {
+  const { code, status } = (error ?? {}) as { code?: unknown; status?: unknown }
+  return code === ENTITY_TOO_LARGE || status === 413
+}
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i
 
@@ -118,23 +130,42 @@ export function withSendableFiles(
   const problem = filesProblem(view, limits)
   if (!problem) return view
   warn(problem)
-  const { files: _files, ...rest } = view
-  return rest
+  return withoutFiles(view)
 }
+
+/** The view without its files, and without an image or a thumbnail that named one of them. */
+export function withoutFiles(view: ResponseView): ResponseView {
+  const { files = [], image, thumbnail, ...rest } = view
+  const names = new Set(files.map(nameOf))
+  return {
+    ...rest,
+    ...(image !== undefined && !names.has(image) && { image }),
+    ...(thumbnail !== undefined && !names.has(thumbnail) && { thumbnail }),
+  }
+}
+
+/** The warning's reason when Discord refuses a send of a view's files as too large. */
+export const REFUSED_AS_TOO_LARGE = 'Discord refused them as too large'
 
 /** Where an image the view names is: one of its files by `attachment://`, or the URL it gives. */
 function urlOf(view: ResponseView, image: string): string {
   return (view.files ?? []).some(file => nameOf(file) === image) ? `attachment://${image}` : image
 }
 
+/** Every `attachment://` URL in a value, such as the JSON of a view's components. */
+function attachmentUrls(value: unknown, urls = new Set<string>()): Set<string> {
+  if (typeof value === 'string') {
+    if (value.startsWith('attachment://')) urls.add(value)
+  } else if (Array.isArray(value)) for (const item of value) attachmentUrls(item, urls)
+  else if (value && typeof value === 'object') for (const item of Object.values(value)) attachmentUrls(item, urls)
+  return urls
+}
+
 /** The view's files its own components, image and thumbnail do not already show, which MeoCord shows for it. */
 function unshownFiles(view: ResponseView): ResponseFile[] {
-  const shown = JSON.stringify((view.components ?? []).map(component => ('toJSON' in component ? component.toJSON() : component)))
-  const named = [view.image, view.thumbnail].filter((image): image is string => image !== undefined).map(image => urlOf(view, image))
-  return (view.files ?? []).filter(file => {
-    const url = `attachment://${nameOf(file)}`
-    return !shown.includes(url) && !named.includes(url)
-  })
+  const shown = attachmentUrls((view.components ?? []).map(component => ('toJSON' in component ? component.toJSON() : component)))
+  for (const image of [view.image, view.thumbnail]) if (image !== undefined) shown.add(urlOf(view, image))
+  return (view.files ?? []).filter(file => !shown.has(`attachment://${nameOf(file)}`))
 }
 
 /** A view as an embed: its image, or else its first image file not its thumbnail, as the embed's image. */
