@@ -256,15 +256,18 @@ jobs:
             const [version, latest] = process.argv.slice(1)
             const parts = v => v.split(".").map(Number)
             const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false }
-            const problem = !/^\d+\.\d+\.\d+$/.test(latest)
+            const plain = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+            const problem = !plain.test(latest)
               ? `npm returned "${latest}" for latest, which is not a release version; refusing to publish without it`
               : version.includes("-")
                 ? `${version} is a prerelease; release/4.0 publishes 4.0 patches to latest`
-                : !version.startsWith("4.0.")
-                  ? `${version} is not a 4.0 version; release/4.0 publishes the 4.0 line only`
-                  : below(parts(version), parts(latest))
-                    ? `${version} is below ${latest}, which npm tags latest; publishing it would move latest backwards`
-                    : ""
+                : !plain.test(version)
+                  ? `${version} is not a plain release version (major.minor.patch, no leading zeros or build metadata)`
+                  : !version.startsWith("4.0.")
+                    ? `${version} is not a 4.0 version; release/4.0 publishes the 4.0 line only`
+                    : below(parts(version), parts(latest))
+                      ? `${version} is below ${latest}, which npm tags latest; publishing it would move latest backwards`
+                      : ""
             if (problem) { console.error(`::error title=Not a 4.0 release::${problem}`); process.exit(1) }
             console.log(`${version} may be released from release/4.0 (npm latest is ${latest}).`)
           ' "$version" "$latest"
@@ -279,6 +282,10 @@ jobs:
       # other. Without it, the workflow's token is used and the runs wait for approval.
       - name: Open the release pull request, or publish
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        env:
+          # npm publish runs the package's own lifecycle scripts (prepare is husky); the build is done, so none runs
+          # beside the publishing identity
+          npm_config_ignore_scripts: 'true'
         with:
           github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           version-script: bun run release:version
