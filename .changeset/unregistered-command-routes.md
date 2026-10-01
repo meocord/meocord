@@ -9,6 +9,6 @@ A command handler that Discord never sends an interaction to now gets a warning 
 - a builder that registers another name than its `@Command`'s, such as `setName('ping')` under `@Command('pong', PingBuilder)`;
 - a slash, context menu or entry point command that no builder registers at all.
 
-The bot still starts. In 5.0, these refuse to start.
+The bot still starts. In the next major version (5.0), these refuse to start. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#a-command-handler-discord-never-sends-logs-a-warning).
 
 `MeoCordTestingModule.compile()` gives the same warning, apart from the last case: a handler with a `CommandType` and no builder is how a test fixture is written.
