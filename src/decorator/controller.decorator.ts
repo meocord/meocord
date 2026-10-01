@@ -430,8 +430,8 @@ export function createRegexFromPattern(pattern: string): {
 
   // Literal text is the signal: a pattern spelling out more of the id describes it
   // more exactly than one leaving it to a parameter. Fewer parameters breaks a tie
-  // between equal-length patterns, so the ranking is total and never falls back to
-  // declaration order.
+  // between equal-length patterns; the order the controllers and handlers are listed
+  // in settles what is left, and the startup warning names the pair.
   const specificity = routeSpecificity({
     literals: literalLength,
     params: params.length,
@@ -569,7 +569,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * customId pattern, `{name}` captures one `/`-separated segment into the handler's params. When the code compiles,
  * the keys the handler's params require are checked against the pattern or route, a typed segment's value against
  * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives. Two component
- * handlers of one type whose patterns match the same ids stop the bot at startup. A context menu handler receives the kind its
+ * handlers of one type whose patterns match exactly the same ids stop the bot at startup; patterns that only overlap
+ * are warned about, naming the one that runs: the more specific, or between equally specific ones, the one listed first. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
  * kind, the bot checks it as it starts. A subclass that declares an inherited handler on another name or pattern
  * still answers the inherited one, and logs a warning: in 5.0 the subclass's own declarations replace it.

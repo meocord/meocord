@@ -59,7 +59,21 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
       }
     }
   }
+  // A stable sort, so equally specific patterns keep the order their controllers and handlers are listed in
   return routes.sort((a, b) => (b.meta.specificity ?? 0) - (a.meta.specificity ?? 0))
+}
+
+/**
+ * Whether `a` spells out the first segment where it and `b` differ as literal text while `b` leaves it to a
+ * parameter, the tie-break between equally specific patterns in the next major version (5.0).
+ */
+export function literalFirst(a: string, b: string): boolean {
+  const [left, right] = [a.split('/'), b.split('/')]
+  for (let i = 0; i < Math.min(left.length, right.length); i++) {
+    const leftLiteral = !left[i].includes('{')
+    if (leftLiteral !== !right[i].includes('{')) return leftLiteral
+  }
+  return false
 }
 
 /** A component type as an error names it: `button`, `modal submit`, `string select menu`. */

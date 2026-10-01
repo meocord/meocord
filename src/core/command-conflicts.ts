@@ -281,3 +281,33 @@ function unasked(
   const others = completed.length ? `; its options with autocomplete are ${quoted(completed)}` : ', nor any option with autocomplete on'
   return `"${commandPath}" has no option "${optionName}"${others}. Correct the option name.`
 }
+
+/**
+ * Warns about `@Autocomplete` handlers that complete what another already does: the same option of the same command
+ * path, or every option of the same path. Dispatch runs the first, in the order the controllers are listed, so the
+ * others never run.
+ */
+export function warnDuplicateAutocompletes(controllerClasses: readonly ControllerClass[]): void {
+  const first = new Map<string, string>()
+  const problems: string[] = []
+  for (const controllerClass of new Set(controllerClasses)) {
+    for (const { commandPath, optionName, methodName } of getAutocompleteHandlers(controllerClass.prototype)) {
+      const key = `${commandPath}\0${optionName ?? ''}`
+      const here = `${controllerClass.name}.${methodName}`
+      const earlier = first.get(key)
+      if (earlier === undefined) {
+        first.set(key, here)
+        continue
+      }
+      const what = optionName === undefined ? `every option of "${commandPath}"` : `the option "${optionName}" of "${commandPath}"`
+      problems.push(`  ${here}: ${earlier} also completes ${what}, and runs first. Keep one, or give this one a path or option of its own.`)
+    }
+  }
+  if (problems.length === 0) return
+
+  const one = problems.length === 1
+  logger.warn(
+    `${problems.length} @Autocomplete ${one ? 'handler never runs' : 'handlers never run'}, since another completes the ` +
+      `same first:\n${problems.join('\n')}\nThe next major version (5.0) refuses to start with these.`,
+  )
+}
