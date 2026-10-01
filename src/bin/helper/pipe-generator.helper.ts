@@ -4,7 +4,7 @@ import {
   assertFilesAbsent,
   buildTemplate,
   createDirectoryIfNotExists,
-  generateFile,
+  writeFiles,
   validateAndFormatName,
 } from '@src/util/generator-cli.util.js'
 
@@ -19,7 +19,7 @@ export class PipeGeneratorHelper {
    * Generates a pipe and its spec. The name may contain slashes for nested directories.
    * @throws Exits the process when the name is missing or invalid.
    */
-  generatePipe(pipeName?: string): void {
+  generatePipe(pipeName?: string): string[] {
     if (!pipeName) {
       this.logger.error('Pipe name is required.')
       process.exit(1)
@@ -37,7 +37,9 @@ export class PipeGeneratorHelper {
     const specTemplate = buildTemplate(className, 'pipe.spec.template', { kebabCaseName })
 
     createDirectoryIfNotExists(pipeDir)
-    generateFile(pipeFile, pipeTemplate)
-    generateFile(specFile, specTemplate)
+    return writeFiles([
+      [pipeFile, pipeTemplate],
+      [specFile, specTemplate],
+    ])
   }
 }

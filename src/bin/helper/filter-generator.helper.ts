@@ -4,7 +4,7 @@ import {
   assertFilesAbsent,
   buildTemplate,
   createDirectoryIfNotExists,
-  generateFile,
+  writeFiles,
   validateAndFormatName,
 } from '@src/util/generator-cli.util.js'
 
@@ -19,7 +19,7 @@ export class FilterGeneratorHelper {
    * Generates an exception filter and its spec. The name may contain slashes for nested directories.
    * @throws Exits the process when the name is missing or invalid.
    */
-  generateFilter(filterName?: string): void {
+  generateFilter(filterName?: string): string[] {
     if (!filterName) {
       this.logger.error('Filter name is required.')
       process.exit(1)
@@ -37,7 +37,9 @@ export class FilterGeneratorHelper {
     const specTemplate = buildTemplate(className, 'filter.spec.template', { kebabCaseName })
 
     createDirectoryIfNotExists(filterDir)
-    generateFile(filterFile, filterTemplate)
-    generateFile(specFile, specTemplate)
+    return writeFiles([
+      [filterFile, filterTemplate],
+      [specFile, specTemplate],
+    ])
   }
 }
