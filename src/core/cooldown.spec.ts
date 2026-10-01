@@ -306,7 +306,7 @@ describe('@Cooldown', () => {
     }).compile()
 
     await expect(stubbed.invoke(DailyController, 'daily', slash())).rejects.toMatchObject({ retryAfterMs: 2_500 })
-    expect(consume).toHaveBeenCalledWith('DailyController.daily#1/10000:user:user:ada', { uses: 1, windowMs: 10_000 })
+    expect(consume).toHaveBeenCalledWith('DailyController.daily#10000:user:user:ada', { uses: 1, windowMs: 10_000 })
   })
 })
 
@@ -346,6 +346,36 @@ describe('a cooldown key', () => {
     await expect(run(release2)).rejects.toMatchObject({ retryAfterMs: 86_390_000 })
   })
 
+  it.each([
+    // One claim under 1 a day, then a release allowing 2: the claim counts, so one more runs, not two
+    ['raised', { uses: 1, seconds: 86_400 }, 1, { uses: 2, seconds: 86_400 }, ['ran', 'refused']],
+    // Four claims under 5 an hour, then a release allowing 3: those four count, so none runs
+    ['lowered', { uses: 5, seconds: 3_600 }, 4, { uses: 3, seconds: 3_600 }, ['refused', 'refused']],
+  ] as const)('keeps the calls counted so far when a later release %s its uses', async (_how, before, calls, after, outcomes) => {
+    const store = new MemoryCooldownStore()
+    const releaseWith = (limit: { uses: number; seconds: number }) => {
+      @Controller()
+      class Rewards {
+        @Command('claim', CommandType.SLASH)
+        @Cooldown(limit)
+        async claim(_interaction: ChatInputCommandInteraction) {}
+      }
+      return Rewards
+    }
+    const [release1, release2] = [releaseWith(before), releaseWith(after)]
+    const module = (controller: typeof release1) =>
+      MeoCordTestingModule.create({ controllers: [controller], providers: [{ provide: CooldownStore, useValue: store }] }).compile()
+
+    for (let call = 0; call < calls; call++) await module(release1).invoke(release1, 'claim', slash())
+    const upgraded = module(release2)
+    const results: string[] = []
+    for (let call = 0; call < 2; call++) {
+      results.push(await upgraded.invoke(release2, 'claim', slash()).then(() => 'ran', () => 'refused'))
+    }
+
+    expect(results).toEqual(outcomes)
+  })
+
   it('tells apart two cooldowns with the same limit', async () => {
     @Controller()
     class Twice {
@@ -360,7 +390,7 @@ describe('a cooldown key', () => {
       .compile()
       .invoke(Twice, 'twice', slash())
 
-    expect(consumeMany.mock.calls[0][0].map(({ key }) => key)).toEqual(['Twice.twice#2/60000:user:user:ada', 'Twice.twice#2/60000~2:user:user:ada'])
+    expect(consumeMany.mock.calls[0][0].map(({ key }) => key)).toEqual(['Twice.twice#60000/2:user:user:ada', 'Twice.twice#60000/2~2:user:user:ada'])
   })
 })
 
@@ -560,7 +590,7 @@ describe('@Cooldown, rule by rule', () => {
     await scoped.invoke(Scoped, 'everyone', slash())
     await scoped.invoke(Scoped, 'who', anonymous)
 
-    expect(keys).toEqual(['Scoped.server#1/5000:guild:guild:g1', 'Scoped.everyone#1/5000:global:global', 'Scoped.who#1/5000:user:user:unknown'])
+    expect(keys).toEqual(['Scoped.server#5000:guild:guild:g1', 'Scoped.everyone#5000:global:global', 'Scoped.who#5000:user:user:unknown'])
   })
 
   it("counts each message author separately by default", async () => {

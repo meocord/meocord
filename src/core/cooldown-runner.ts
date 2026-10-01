@@ -25,7 +25,8 @@ export interface CooldownOptions<P = Record<string, unknown>> {
    */
   seconds: number
   /**
-   * Calls allowed within the window.
+   * Calls allowed within the window. A deploy that changes it keeps the calls counted so far, held to the new
+   * number; one that changes `seconds` starts the count again.
    *
    * @defaultValue `1`
    */
@@ -72,16 +73,21 @@ export const handlerCooldowns = perHandler((prototype: object, methodName: strin
 const limitIds = new WeakMap<readonly StoredCooldown[], readonly string[]>()
 
 /**
- * Each cooldown's part of its store key: its limit, so a deploy that adds, removes or reorders a cooldown leaves
- * the others' counts where they are, with a count only to tell apart cooldowns that are otherwise the same.
+ * Each cooldown's part of its store key: its window, which the store's history of calls is kept over. `uses` is only
+ * the threshold that history is held to, so a deploy that changes it keeps the calls counted so far, and one that
+ * adds, removes or reorders cooldowns leaves the others' counts where they are. `uses` is added only to tell apart
+ * cooldowns that share a window, scope and `by`, and a count only to tell apart ones that are otherwise the same.
  */
 function limitIdsOf(cooldowns: readonly StoredCooldown[]): readonly string[] {
   let ids = limitIds.get(cooldowns)
   if (!ids) {
+    const sharing = (cooldown: StoredCooldown) => `${cooldown.per}:${cooldown.windowMs}:${cooldown.by ? 'by' : ''}`
+    const groups = new Map<string, number>()
+    for (const cooldown of cooldowns) groups.set(sharing(cooldown), (groups.get(sharing(cooldown)) ?? 0) + 1)
     const seen = new Map<string, number>()
-    ids = cooldowns.map(({ uses, windowMs, per, by }) => {
-      const id = `${uses}/${windowMs}`
-      const same = `${per}:${id}:${by ? 'by' : ''}`
+    ids = cooldowns.map(cooldown => {
+      const id = groups.get(sharing(cooldown))! > 1 ? `${cooldown.windowMs}/${cooldown.uses}` : `${cooldown.windowMs}`
+      const same = `${sharing(cooldown)}:${cooldown.uses}`
       const count = (seen.get(same) ?? 0) + 1
       seen.set(same, count)
       return count === 1 ? id : `${id}~${count}`
