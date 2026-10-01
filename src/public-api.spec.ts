@@ -135,6 +135,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'Injected',
     'InstallContext',
     'LocaleCatalog',
+    'LocalizationKey',
     'MessageKey',
     'MessageParams',
     'MessageUsageIssue',

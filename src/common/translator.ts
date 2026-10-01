@@ -54,16 +54,22 @@ export type MessageKey<C> = {
 }[keyof C & string]
 
 /**
- * The keys whose message is a plain string, as command names and descriptions need.
+ * The keys whose message is a single string rather than plural forms, with or without `{params}`.
  *
  * @group Types
+ * @see {@link LocalizationKey}
  */
 export type StringMessageKey<C> = {
   [K in keyof C & string]: C[K] extends string ? K : IsPlural<C[K]> extends true ? never : `${K}.${StringMessageKey<C[K]>}`
 }[keyof C & string]
 
-/** The plain message keys whose message takes no `{params}`, which a name or description shows as written. */
-type PlainMessageKey<C> = {
+/**
+ * The keys {@link Translator.localizations} takes: a single string with no `{params}`, since Discord shows a command's
+ * name or description as written, with no plural forms.
+ *
+ * @group Types
+ */
+export type LocalizationKey<C> = {
   [K in StringMessageKey<C>]: [Placeholders<MessageAt<C, K>>] extends [never] ? K : never
 }[StringMessageKey<C>]
 
@@ -243,8 +249,7 @@ type LiteralCatalog<C> = [WidenedLeaves<C>] extends [never]
  *
  * @typeParam T - The catalog.
  *
- * @group Utilities
- * @category Localisation
+ * @group Types
  */
 export type CatalogDefinition<T> = T & MeoCordReport<CatalogIssues<T>>
 
@@ -283,8 +288,7 @@ export function defineCatalog<const T extends CatalogShape>(catalog: CatalogDefi
  * @typeParam Locales - The catalogs, by locale.
  * @typeParam Default - The locale whose catalog is the reference and the last fallback.
  *
- * @group Utilities
- * @category Localisation
+ * @group Types
  */
 export type TranslatorOptions<
   Locales extends Readonly<Record<string, CatalogShape>>,
@@ -358,7 +362,7 @@ export abstract class Translator<C = CatalogShape> {
    * @returns The message keyed by locale.
    * @throws When the default catalog's message takes params, as one from a JSON file can.
    */
-  abstract localizations(key: PlainMessageKey<C>): Partial<Record<Locale, string>>
+  abstract localizations(key: LocalizationKey<C>): Partial<Record<Locale, string>>
 
   /**
    * Translates for the user of an interaction, in the language their Discord client uses.
@@ -521,7 +525,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     return this.translate(this.defaultLocale, key, params[0] as Record<string, unknown> | undefined)
   }
 
-  localizations(key: PlainMessageKey<C>): Partial<Record<Locale, string>> {
+  localizations(key: LocalizationKey<C>): Partial<Record<Locale, string>> {
     const original = lookup(this.catalogs[this.defaultLocale], key)
     if (original === undefined) this.warnUnknown(key)
     const params = typeof original === 'string' ? placeholderNames(original) : []
