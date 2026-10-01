@@ -134,13 +134,15 @@ export class MeoCordFactory {
   }
 
   /**
-   * Creates the application for an app class, reading `dist/meocord.config.mjs` for its token and config.
+   * Creates the application for an app class, reading its token and config from the compiled config beside the bundle,
+   * `meocord.config.mjs`, wherever the bot is started from.
    *
    * With process sharding it returns the manager that runs one process per shard; otherwise the bot itself.
    *
    * @param target - The class `@MeoCord` decorates.
    * @returns The application, which `start()` logs in.
-   * @throws Error when the class has no `@MeoCord`, when the built config is missing, when a provider cannot
+   * @throws Error when the class has no `@MeoCord`, when the compiled config is missing beside the bundle or fails to
+   *   load, naming the file and the reason, with what to do about it, when a provider cannot
    *   be bound, such as one for a token MeoCord binds itself, when two handlers take one command, or two builder
    *   classes build one, naming both, and for any other mistake it refuses as the app loads, such as two component
    *   patterns that match the same customIds. In a built application it is logged first, as one line, so
