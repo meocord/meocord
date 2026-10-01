@@ -20,6 +20,7 @@ import {
   BaseInteraction,
   BaseManager,
   ChannelManager,
+  ChannelSelectMenuInteraction,
   Client,
   ClientUser,
   Collection,
@@ -37,11 +38,14 @@ import {
   GuildManager,
   InteractionType,
   Locale,
+  MentionableSelectMenuInteraction,
   Message,
   MessageFlagsBitField,
   MessageMentions,
   Role,
   RoleManager,
+  RoleSelectMenuInteraction,
+  StringSelectMenuInteraction,
   type TextBasedChannel,
   TextChannel,
   ThreadChannel,
@@ -49,6 +53,7 @@ import {
   ThreadMemberManager,
   User,
   UserManager,
+  UserSelectMenuInteraction,
   type CacheType,
   type CommandInteractionOption,
   DMChannel,
@@ -378,6 +383,15 @@ const CLASS_TYPE_FIELDS: Record<string, { type?: number; commandType?: number; c
   AutocompleteInteraction: { type: InteractionType.ApplicationCommandAutocomplete },
 }
 
+/** The collections each select menu's constructor builds beside its `values`, one per kind of choice it resolves. */
+const SELECT_MENU_CHOICES: [abstract new (...args: any[]) => unknown, readonly string[]][] = [
+  [StringSelectMenuInteraction, []],
+  [UserSelectMenuInteraction, ['users', 'members']],
+  [RoleSelectMenuInteraction, ['roles']],
+  [ChannelSelectMenuInteraction, ['channels']],
+  [MentionableSelectMenuInteraction, ['users', 'members', 'roles']],
+]
+
 // All known pure type-guard methods on BaseInteraction and its subclasses.
 // These are wired as a mock fn wrapping the real prototype logic so they return
 // correct values by default and can still be overridden per test.
@@ -529,12 +543,13 @@ const MOCK_BOT_ID = '1300000000000000000'
  * permissions (`null` in a DM). A user is a person, `bot: false`, and a member has the server's @everyone role and the
  * roles {@link createMockMember} gave it; with a `guildId` but no `guild`, a server the bot isn't in, that @everyone role
  * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel. Its
- * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel.
- * Other data Discord always sends reads as
+ * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel. A
+ * select menu has picked nothing unless given: its `values` are empty, and so are the collections of what it picks,
+ * `users` and `members`, `roles` or `channels`. Other data Discord always sends reads as
  * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
  * or `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and
- * {@link getResponse} reports what `respond()` sent. Every method is a mock function, and one that returns a promise in
- * discord.js resolves.
+ * {@link getResponse} reports every answer the interaction got. Every method is a mock function, and one that returns a
+ * promise in discord.js resolves.
  *
  * @param Class - The discord.js class to mock.
  * @param props - Values for properties the class declares `readonly`; see {@link MockProps}.
@@ -796,6 +811,13 @@ export function createMockInteraction<T extends object>(
       const preferred = (own('guild') as { preferredLocale?: unknown } | null | undefined)?.preferredLocale
       instance.guildLocale = own('guildId') ? (typeof preferred === 'string' ? preferred : Locale.EnglishUS) : null
     }
+  }
+
+  // A select menu's choices, as discord.js builds them from what Discord sends: none picked unless the test gives some
+  const choices = SELECT_MENU_CHOICES.find(([Menu]) => Menu.prototype.isPrototypeOf(instance))?.[1]
+  if (choices) {
+    if (!Object.prototype.hasOwnProperty.call(instance, 'values')) instance.values = []
+    for (const kind of choices) if (!Object.prototype.hasOwnProperty.call(instance, kind)) instance[kind] = new Collection()
   }
 
   return stubDeep(instance, stubs) as DeepMocked<T>

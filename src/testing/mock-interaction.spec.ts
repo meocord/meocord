@@ -1684,3 +1684,30 @@ describe('methods that return a promise in discord.js', () => {
     await expect(client.users.send('1', 'hi')).rejects.toThrow('Cannot send messages to this user')
   })
 })
+
+describe("a mock select menu's choices", () => {
+  // discord.js builds `values` and a collection per kind of choice from what Discord sends, empty when none was picked
+  it.each([
+    ['StringSelectMenuInteraction', StringSelectMenuInteraction, []],
+    ['UserSelectMenuInteraction', UserSelectMenuInteraction, ['users', 'members']],
+    ['RoleSelectMenuInteraction', RoleSelectMenuInteraction, ['roles']],
+    ['ChannelSelectMenuInteraction', ChannelSelectMenuInteraction, ['channels']],
+    ['MentionableSelectMenuInteraction', MentionableSelectMenuInteraction, ['users', 'members', 'roles']],
+  ] as const)('are no values, and an empty collection of each kind it picks, for a %s', (_name, Class, kinds) => {
+    const interaction = createMockInteraction(Class as never, { customId: 'pick' }) as unknown as Record<string, unknown>
+
+    expect(interaction.values).toEqual([])
+    for (const kind of kinds) {
+      expect(interaction[kind]).toBeInstanceOf(Collection)
+      expect((interaction[kind] as Collection<string, unknown>).map(item => item)).toEqual([])
+    }
+  })
+
+  it('keeps the values and collections a test gives', () => {
+    const user = createMockUser()
+    const users = new Collection([[user.id, user]])
+    const interaction = createMockInteraction(UserSelectMenuInteraction, { customId: 'pick', values: [user.id], users })
+
+    expect([interaction.values, interaction.users, interaction.members.size]).toEqual([[user.id], users, 0])
+  })
+})
