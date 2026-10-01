@@ -70,8 +70,8 @@ const create = (controllers: (new () => unknown)[]) => {
   MeoCordFactory.create(App)
 }
 
-/** The lines of the warning about commands Discord never sends, or `undefined` when there was none. */
-const unregisteredWarning = () => warned.find(line => line.includes('Discord never sends'))
+/** The warning about command handlers that never run, or `undefined` when there was none. */
+const unregisteredWarning = () => warned.find(line => /^\d+ command handlers? never runs?:/.test(line))
 
 describe('handlers of commands no builder registers', () => {
   it('are named in one warning at create(), each with what is wrong and what to do', () => {
@@ -105,7 +105,7 @@ describe('handlers of commands no builder registers', () => {
     expect(() => create([Settings])).not.toThrow()
 
     expect(unregisteredWarning()).toBe(
-      '7 command handlers handle what Discord never sends, so they never run:\n' +
+      '7 command handlers never run:\n' +
         '  Settings.misspeltCommand: no builder registers the slash command "setings". Correct the name, or declare the command with a builder.\n' +
         '  Settings.misspeltSubcommand: "settings notfy" is not a subcommand of the slash command "settings", whose builder registers ' +
         '"settings view", "settings notify" and "settings alerts email". Correct the path.\n' +
@@ -176,6 +176,31 @@ describe('handlers of commands no builder registers', () => {
     expect(unregisteredWarning() !== undefined).toBe(warns)
   })
 
+  // Registration reports why its JSON fails, and what it would register is unknown
+  it('leaves alone the handlers under the name of a builder whose command cannot be serialised', () => {
+    @CommandBuilder(CommandType.SLASH)
+    class NoDescriptionBuilder {
+      build(name: string) {
+        return new SlashCommandBuilder().setName(name)
+      }
+    }
+    @Controller()
+    class Broken {
+      @Command('broken', NoDescriptionBuilder)
+      broken() {}
+
+      @Command('broken view', CommandType.SLASH)
+      view() {}
+
+      @Autocomplete('broken', 'query')
+      query() {}
+    }
+
+    expect(() => create([Broken])).not.toThrow()
+
+    expect(unregisteredWarning()).toBeUndefined()
+  })
+
   it('names, in the testing module, what is always a mistake, and leaves a fixture handler with no builder alone', () => {
     @Controller()
     class Settings {
@@ -195,7 +220,7 @@ describe('handlers of commands no builder registers', () => {
     MeoCordTestingModule.create({ controllers: [Settings] }).compile()
 
     expect(unregisteredWarning()).toBe(
-      '1 command handler handles what Discord never sends, so it never runs:\n' +
+      '1 command handler never runs:\n' +
         '  Settings.misspeltSubcommand: "settings notfy" is not a subcommand of the slash command "settings", whose builder registers ' +
         '"settings view", "settings notify" and "settings alerts email". Correct the path.\n' +
         'The next major version (5.0) refuses to start with these.',
@@ -277,7 +302,7 @@ describe('autocomplete handlers Discord never asks', () => {
     create([Commands, Completions])
 
     expect(unregisteredWarning()).toBe(
-      '6 command handlers handle what Discord never sends, so they never run:\n' +
+      '6 command handlers never run:\n' +
         '  Completions.misspeltCommand: no builder registers the slash command "serch". Correct the name, or declare the command with a builder.\n' +
         '  Completions.misspeltSubcommand: "channels notfy" is not a subcommand of the slash command "channels", whose builder registers ' +
         '"channels view", "channels notify" and "channels alerts email". Correct the path.\n' +
@@ -330,7 +355,7 @@ describe('autocomplete handlers Discord never asks', () => {
     MeoCordTestingModule.create({ controllers: [Commands, Completions] }).compile()
 
     expect(unregisteredWarning()).toBe(
-      '1 command handler handles what Discord never sends, so it never runs:\n' +
+      '1 command handler never runs:\n' +
         '  Completions.misspeltOption: "search" has no option "qeury"; its options with autocomplete are "query". Correct the option name.\n' +
         'The next major version (5.0) refuses to start with these.',
     )
@@ -368,9 +393,8 @@ describe('two @Autocomplete handlers of one option', () => {
     @Autocomplete('fruit')
     alsoAnyOption() {}
   }
-  const duplicated = () => warned.find(line => line.includes('completes the same'))
   const expected =
-    '2 @Autocomplete handlers never run, since another completes the same first:\n' +
+    '2 command handlers never run:\n' +
     '  Second.two: First.one also completes the option "name" of "fruit", and runs first. Keep one, or give this one a ' +
     'path or option of its own.\n' +
     '  Second.alsoAnyOption: First.anyOption also completes every option of "fruit", and runs first. Keep one, or give ' +
@@ -380,12 +404,50 @@ describe('two @Autocomplete handlers of one option', () => {
   it('are named at create(), the one dispatch runs first and the one it never runs', () => {
     create([Fruit, First, Second])
 
-    expect(duplicated()).toBe(expected)
+    expect(unregisteredWarning()).toBe(expected)
   })
 
   it('are named in the testing module too', () => {
     MeoCordTestingModule.create({ controllers: [Fruit, First, Second] }).compile()
 
-    expect(duplicated()).toBe(expected)
+    expect(unregisteredWarning()).toBe(expected)
+  })
+
+  // Discord asks neither, so neither runs first: each is named for the option, not one for the other
+  it('are named only for the option, when Discord never asks to complete it', () => {
+    @CommandBuilder(CommandType.SLASH)
+    class PlainFruitBuilder {
+      build(name: string) {
+        return new SlashCommandBuilder()
+          .setName(name)
+          .setDescription('Fruit')
+          .addStringOption(option => option.setName('name').setDescription('Name'))
+      }
+    }
+    @Controller()
+    class PlainFruit {
+      @Command('fruit', PlainFruitBuilder)
+      fruit() {}
+    }
+    @Controller()
+    class FirstName {
+      @Autocomplete('fruit', 'name')
+      one() {}
+    }
+    @Controller()
+    class SecondName {
+      @Autocomplete('fruit', 'name')
+      two() {}
+    }
+
+    create([PlainFruit, FirstName, SecondName])
+
+    const notOn =
+      'the option "name" of "fruit" does not have autocomplete on, so Discord never asks to complete it. Turn it on ' +
+      'in the builder with setAutocomplete(true).'
+    expect(warned.filter(line => line.includes('never run'))).toEqual([
+      `2 command handlers never run:\n  FirstName.one: ${notOn}\n  SecondName.two: ${notOn}\n` +
+        'The next major version (5.0) refuses to start with these.',
+    ])
   })
 })

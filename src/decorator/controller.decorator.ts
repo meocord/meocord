@@ -617,7 +617,9 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives; a key a pipe
  * produces is declared `Piped<T>`, and left to the pipe. Two component
  * handlers of one type whose patterns match exactly the same ids stop the bot at startup; patterns that only overlap
- * are warned about, naming the one that runs: the more specific, or between equally specific ones, the one listed first. A context menu handler receives the kind its
+ * are warned about, naming the one that runs: the more specific, or between equally specific ones, the one listed first.
+ * In the next major version (5.0), the one that spells out the first segment where two equally specific patterns
+ * differ runs instead, and the warning names the pairs that changes. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
  * kind, the bot checks it as it starts. A subclass that re-declares an inherited handler on the same name or pattern
  * takes its own builder and options; on another it still answers the inherited one too, which the bot warns about
@@ -829,7 +831,9 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @remarks
  * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs
  * its class and global guards and its filters, but no interceptors; a guard must not answer, and returning
- * `false` closes the menu with an empty list. A subclass that re-declares an inherited handler on another command
+ * `false` closes the menu with an empty list. The bot warns as it starts about a handler Discord never asks, such as
+ * one for an option registered without autocomplete, and about one that completes what an earlier handler already
+ * does, since only the first runs; the next major version (5.0) refuses to start with either. A subclass that re-declares an inherited handler on another command
  * path or option still completes the inherited one too, which the bot warns about as it starts. In the next major
  * version (5.0) the subclass's own declarations replace the inherited ones.
  *

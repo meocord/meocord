@@ -35,7 +35,12 @@ import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
-import { assertDistinctCommands, warnDuplicateAutocompletes, warnInheritedRoutes, warnUnregisteredCommands } from '@src/core/command-conflicts.js'
+import {
+  assertDistinctCommands,
+  warnInheritedRoutes,
+  warnOverlappingPatterns,
+  warnUnregisteredCommands,
+} from '@src/core/command-conflicts.js'
 import { SHARD_CALL_KEY, type ShardCallHandler, shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import {
   clientOptionsWithSharding,
@@ -173,8 +178,8 @@ export class MeoCordFactory {
     // A shard's manager runs the same checks, so a sharded bot warns once
     if (!isShardProcess()) {
       warnUnregisteredCommands(options.controllers)
-      warnDuplicateAutocompletes(options.controllers)
       warnInheritedRoutes(options.controllers)
+      warnOverlappingPatterns(options.controllers)
     }
 
     // `meocord register` reads the commands from the controllers' prototypes and sends them over REST,
