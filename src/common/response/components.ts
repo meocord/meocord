@@ -67,13 +67,16 @@ export function withoutRenderedViews(components: readonly Json[]): Json[] {
   return components.filter(node => !(node.type === ComponentType.Container && node.id === RENDERED_CONTAINER_ID))
 }
 
+/** Keys in code-unit order: a locale's collation could rank two different keys equal, and would load ICU to do it. */
+const byCodeUnit = ([a]: [string, unknown], [b]: [string, unknown]) => (a < b ? -1 : a > b ? 1 : 0)
+
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
         .filter(([, entry]) => entry !== undefined)
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(byCodeUnit)
         .map(([key, entry]) => [key, canonical(entry)]),
     )
   }
