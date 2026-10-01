@@ -26,11 +26,11 @@
   "bin": "./dist/esm/bin/meocord.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/l7aromeo/meocord.git"
+    "url": "git+https://github.com/meocord/meocord.git"
   },
-  "homepage": "https://github.com/l7aromeo/meocord#readme",
+  "homepage": "https://meocord.dev",
   "bugs": {
-    "url": "https://github.com/l7aromeo/meocord/issues"
+    "url": "https://github.com/meocord/meocord/issues"
   },
   "license": "MIT",
   "exports": {
