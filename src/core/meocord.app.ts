@@ -156,7 +156,7 @@ export class MeoCordApp implements MeoCordApplication {
     })
     this.dispatcher.getComponentRoutes()
     // Read through the config's own check: a bot started without the CLI loads its config unchecked
-    this.shutdownTimeout = shutdownTimeoutOf(shutdownTimeout)
+    this.shutdownTimeout = shutdownTimeoutOf(shutdownTimeout, message => this.logger.warn(message))
   }
 
   /** Everything whose lifecycle hooks run, classes and provided values, in dependency order. */

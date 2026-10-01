@@ -62,6 +62,8 @@ export class ShardManager implements MeoCordApplication {
   private readonly exit: (code: number) => void
   private readonly sleep: (ms: number) => Promise<void>
   private readonly stopRequest: ReturnType<typeof stopRequests>
+  /** How long each shard has to shut down, before the manager's margin: read, and warned about, once. */
+  private readonly shutdownTimeout: number
 
   constructor(private readonly options: ShardManagerOptions) {
     // The manager holds the credential for its shards and logs their failures, without an app of its own to register it
@@ -69,6 +71,7 @@ export class ShardManager implements MeoCordApplication {
     this.exit = options.exit ?? (code => process.exit(code))
     this.sleep = options.sleep ?? sleep
     this.stopRequest = stopRequests(options.now)
+    this.shutdownTimeout = shutdownTimeoutOf(options.config.shutdownTimeout, message => this.logger.warn(message))
   }
 
   /**
@@ -269,7 +272,7 @@ export class ShardManager implements MeoCordApplication {
       })
     }
 
-    const wait = shutdownTimeoutOf(this.options.config.shutdownTimeout) + SHUTDOWN_MARGIN_MS
+    const wait = this.shutdownTimeout + SHUTDOWN_MARGIN_MS
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<'timeout'>(resolve => {
       timer = setTimeout(() => resolve('timeout'), wait)

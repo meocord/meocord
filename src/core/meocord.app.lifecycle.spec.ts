@@ -532,6 +532,31 @@ describe('lifecycle hooks', () => {
       expect(exit).toHaveBeenCalledWith(0)
     })
 
+    // `node dist/main.js` loads the config without the CLI's check, so the bot reads it through the same check
+    it('waits the default for a shutdownTimeout the check refuses, and says so', async () => {
+      const loaded = await load()
+      config.shutdownTimeout = 2 ** 31
+
+      @loaded.Service()
+      class Stuck implements OnShutdown {
+        onShutdown() {
+          return new Promise<void>(() => {})
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [], services: [Stuck] })
+      await becomeReady(client)
+      vi.useFakeTimers()
+      const done = loaded.shutdownAndExit()
+      await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS)
+      await done
+
+      expect(logged.warn.flat()).toEqual([
+        'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147478647 (got 2147483648); shutdown waits the default 10000 ms.',
+        `onShutdown hooks did not finish within ${DEFAULT_SHUTDOWN_TIMEOUT_MS} ms; shutting down anyway.`,
+      ])
+    })
+
     it('on a signal mid-ready, shuts down only classes whose onReady finished, and starts no more', async () => {
       const loaded = await load()
       const stopped: string[] = []
