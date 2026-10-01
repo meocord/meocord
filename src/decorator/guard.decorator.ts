@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { type GuardOptions } from '@src/interface/stage-options.interface.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { MetadataKey } from '@src/enum/index.js'
 import {
@@ -18,7 +19,6 @@ import {
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
-import { type ExecutionContextType } from '@src/common/execution-context.js'
 
 /** The guards a class-level `@UseGuard` applies to one method, in the order they run. */
 const CLASS_GUARDS = Symbol('class_guards')
@@ -131,16 +131,7 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
  * @see {@link https://meocord.dev/docs/4.1/guards | Guards}
  */
 export function Guard(
-  options: {
-    /**
-     * The context types the guard runs for, as `ExecutionContext.getType()` reports them; it is skipped for
-     * any other call. A subclass inherits them unless it declares its own. A global guard also runs before
-     * `@On` handlers, so one that reads an interaction declares `['interaction']`.
-     *
-     * @defaultValue every type
-     */
-    types?: readonly ExecutionContextType[]
-  } = {},
+  options: GuardOptions = {},
 ) {
   return function (target: any) {
     makeInjectable(target)

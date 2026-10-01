@@ -35,6 +35,9 @@ export type BuildableCommandType = CommandType.SLASH | CommandType.CONTEXT_MENU 
  * `description` is added back on top of the discord-api-types body: that type omits it
  * from every non-chat-input command, but the API accepts one for entry point commands
  * — Discord's own default activity command ships with it set.
+ *
+ * @group Types
+ * @see {@link CommandBuildResult}
  */
 export type PrimaryEntryPointCommandData = RESTPostAPIPrimaryEntryPointApplicationCommandJSONBody & {
   description?: string

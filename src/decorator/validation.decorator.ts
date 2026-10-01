@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { type ValidateOptions } from '@src/interface/stage-options.interface.js'
 import { type PipeInterface } from '@src/interface/index.js'
 import { type InferSchemaOutput, type PIPED_BRAND, type StandardSchemaV1 } from '@src/interface/standard-schema.interface.js'
 import { METHOD_PIPES, METHOD_VALIDATION, type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.js'
@@ -77,13 +78,7 @@ type AcceptsInput<P, Input> = [P] extends [NoInput]
  */
 export function Validate<S extends StandardSchemaV1, const Pipes extends SchemaPipes<S> = Record<never, never>>(
   schema: S,
-  options: {
-    /**
-     * Pipes for single values of the schema's output, by key: one pipe, or several applied in order. They run
-     * before the key's `@UsePipe` pipes.
-     */
-    pipes?: Pipes
-  } = {},
+  options: ValidateOptions<Pipes> = {},
 ) {
   return function <M extends Handler>(
     target: object,
