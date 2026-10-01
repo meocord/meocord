@@ -356,6 +356,24 @@ describe('a project pnpm installed', () => {
     expect(existsSync(path.join(out, 'node_modules', '@node-rs', 'xxhash-test-platform', 'xxhash.node'))).toBe(true)
   })
 
+  // The bot itself requires a listed package, so a dependency's other version must never take its place at the top
+  it('keeps a listed package at the top when an earlier one depends on another version of it', () => {
+    pnpmProject(
+      [
+        { name: 'first', version: '1.0.0', dependencies: { ms: '2.0.0' } },
+        { name: 'ms', version: '2.0.0' },
+        { name: 'ms', version: '2.1.3' },
+      ],
+      ['first@1.0.0', 'ms@2.1.3'],
+    )
+    const out = path.join(root, 'dist')
+
+    copyPackagesInto(new Map(installedPackages(['first', 'ms'], root).map(({ name, dir }) => [name, dir])), root, out)
+
+    expect(versionIn(path.join(out, 'node_modules', 'ms'))).toBe('2.1.3')
+    expect(versionIn(path.join(out, 'node_modules', 'first', 'node_modules', 'ms'))).toBe('2.0.0')
+  })
+
   // Two packages that need different versions of one dependency each get their own, as pnpm installed them
   it('gives each package the version of a shared dependency it was installed with', () => {
     pnpmProject(
