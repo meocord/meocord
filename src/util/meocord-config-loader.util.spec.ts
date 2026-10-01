@@ -28,6 +28,9 @@ function writeCompiledConfig(source: string) {
   writeFileSync(path.join(project, 'dist', 'meocord.config.mjs'), source)
 }
 
+/** Text as a regular expression matches it, character for character. */
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 describe('loadMeoCordConfig', () => {
   it('loads the default export of dist/meocord.config.mjs', async () => {
     writeCompiledConfig(`export default { appName: 'Compiled', discordToken: 'token' }\n`)
@@ -92,6 +95,26 @@ describe('loadMeoCordConfig', () => {
     expect(failed.compiledConfigMessage()).toBe(
       `MeoCord config at ${compiled} failed to load: dotenv is not installed. Fix meocord.config.ts, then run \`meocord build\`.`,
     )
+  })
+
+  // A package the config imports that is not installed is fixed by installing it, not by editing the config
+  it('names a package the compiled config imports that is not installed, and says to install it', async () => {
+    const compiled = path.join(project, 'dist', 'meocord.config.mjs')
+    writeCompiledConfig(`import '@meocord-missing/probe/config'\nexport default {}\n`)
+    const failed = await freshLoader()
+
+    expect(failed.loadMeoCordConfig()).toBeUndefined()
+    expect(failed.compiledConfigMessage()).toMatch(
+      new RegExp(`^MeoCord config at ${escapeRegExp(compiled)} failed to load: .*@meocord-missing/probe.*\\. Install @meocord-missing/probe in the project, then run \`meocord build\`\\.$`, 's'),
+    )
+  })
+
+  it('keeps the fix-the-config wording for a file of its own the compiled config cannot find', async () => {
+    writeCompiledConfig(`import './missing-local.mjs'\nexport default {}\n`)
+    const failed = await freshLoader()
+
+    expect(failed.loadMeoCordConfig()).toBeUndefined()
+    expect(failed.compiledConfigMessage()).toMatch(/Fix meocord\.config\.ts, then run `meocord build`\.$/)
   })
 
   // The logger and the factory import this module, so a bot bundled with bundleDependencies

@@ -50,10 +50,25 @@ export function compiledConfigMessage(): string {
   if (problem && !problem.missing) {
     // One full stop, whether or not the reason ends with one
     const reason = (problem.error instanceof Error ? problem.error.message : String(problem.error)).replace(/\.$/, '')
-    return `MeoCord config at ${problem.path} failed to load: ${reason}. Fix meocord.config.ts, then run \`meocord build\`.`
+    const missing = missingPackage(problem.error)
+    const fix = missing ? `Install ${missing} in the project` : 'Fix meocord.config.ts'
+    return `MeoCord config at ${problem.path} failed to load: ${reason}. ${fix}, then run \`meocord build\`.`
   }
   const where = problem?.path ?? 'meocord.config.mjs'
   return `MeoCord config not found at ${where} (working directory ${process.cwd()}). Run \`meocord build\`, and start the bot from the dist it writes.`
+}
+
+/**
+ * The package a module-not-found error names, when it is a package rather than a file: `dotenv` for `dotenv/config`,
+ * `@scope/name` for `@scope/name/sub`. Undefined for any other error, and for a relative or absolute path.
+ */
+function missingPackage(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code
+  if (code !== 'ERR_MODULE_NOT_FOUND' && code !== 'MODULE_NOT_FOUND') return undefined
+  const specifier = /Cannot find (?:package|module) '([^']+)'/.exec((error as Error).message)?.[1]
+  if (!specifier || /^(?:\.|\/|[A-Za-z]:|file:)/.test(specifier)) return undefined
+  const parts = specifier.split('/')
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
 }
 
 /**

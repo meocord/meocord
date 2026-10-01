@@ -201,6 +201,18 @@ const stalledApp = `import { MeoCord } from 'meocord/decorator'
 export default class App {}
 `
 
+/** What the env probe app reads, which only the config's `.env` sets. */
+const ENV_PROBE = 'MEOCORD_SCENARIO_ENV_PROBE'
+
+/** An application that prints, as it is imported, a value its config's dotenv import read: the config ran first. */
+const envProbeApp = `import { MeoCord } from 'meocord/decorator'
+
+console.log(\`Read from .env before the app: \${process.env.${ENV_PROBE}}\`)
+
+@MeoCord({ controllers: [], clientOptions: { intents: [] } })
+export default class App {}
+`
+
 /** Where a scenario's local Discord listens; see `Scenario.discord`. */
 const DISCORD_API_ENV = 'MEOCORD_SCENARIO_DISCORD_API'
 
@@ -777,6 +789,20 @@ const scenarios: Scenario[] = [
       `process.chdir(${JSON.stringify(workDir)}); import(${JSON.stringify(pathToFileURL(path.join(appDir, 'dist', 'main.js')).href)})`,
     ],
     expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN], never: ['MeoCord config not found'] },
+  },
+  // The bundle's pre-entry loads the config beside it before the app is imported, wherever the bot is started from
+  {
+    name: 'a built bot started from another directory loads its config, and the .env it reads, before the app',
+    tier: 'fast',
+    // The .env where the bot is started, as dotenv reads it from the working directory
+    files: { 'src/app.ts': envProbeApp, '../.env': `DISCORD_TOKEN=not-a-real-token\n${ENV_PROBE}=from-dotenv\n`, dist: null },
+    before: [['build', '--prod']],
+    command: [
+      'node',
+      '-e',
+      `process.chdir(${JSON.stringify(workDir)}); import(${JSON.stringify(pathToFileURL(path.join(appDir, 'dist', 'main.js')).href)})`,
+    ],
+    expect: { code: 1, says: ['Read from .env before the app: from-dotenv', REFUSED_TOKEN], never: ['MeoCord config not found'] },
   },
   // One failure, one report: the reason, with what to do about it
   // Without a token, start --prod and register stop before the bot: the CLI is what says the config is broken
