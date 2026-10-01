@@ -47,6 +47,10 @@ class Commands {
   @Cooldown({ uses: 1, seconds: 60 })
   roll() {}
 
+  @MessageHandler('draw')
+  @Cooldown({ uses: 3, seconds: 60 })
+  draw() {}
+
   @MessageHandler('secret')
   @UseGuard(Nobody)
   secret() {}
@@ -220,6 +224,24 @@ describe('dmOnCooldown', () => {
     for (let ms = 61_000; ms < 120_000; ms += 1_000) dmedAt.push(...(await sendAt(ms)))
 
     expect(dmedAt).toEqual([1_000, 61_000])
+  })
+
+  // With three uses, the wait after one use comes back can end a second after the wait before it
+  it('DMs again for a wait that ends a moment after the one before', async () => {
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.fromApp(TellingApp).compile()
+    const sendAt = async (ms: number) => {
+      vi.setSystemTime(ms)
+      const message = messageOf('!draw')
+      await module.dispatch(message)
+      return vi.mocked(message.author.send).mock.calls.length > 0 ? [ms] : []
+    }
+
+    const dmedAt: number[] = []
+    // Three uses, then a refusal whose wait ends at 160 s; one use back at 160 s, then a wait that ends at 161 s
+    for (const ms of [100_000, 101_000, 102_000, 103_000, 160_000, 160_500]) dmedAt.push(...(await sendAt(ms)))
+
+    expect(dmedAt).toEqual([103_000, 160_500])
   })
 
   it('keeps each author’s wait to themselves', async () => {
