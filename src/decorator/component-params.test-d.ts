@@ -2,6 +2,7 @@ import { describe, it } from 'vitest'
 import {
   type APIGuildMember,
   type ButtonInteraction,
+  type Message,
   type ChannelSelectMenuInteraction,
   type GuildMember,
   type MentionableSelectMenuInteraction,
@@ -12,7 +13,7 @@ import {
   type UserSelectMenuInteraction,
 } from 'discord.js'
 import { route } from '@src/common/route.js'
-import { Command, Pipe, UsePipe } from '@src/decorator/index.js'
+import { Command, MessageHandler, Pipe, UsePipe } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type PipeInterface, type Piped } from '@src/interface/index.js'
 
@@ -161,6 +162,25 @@ describe('a key a pipe produces', () => {
       }
     }
     void Shop
+  })
+
+  // Pipes run on a message command's params too, so its pattern check leaves a marked key to the pipe as well
+  it("compiles marked Piped<T> for a message command's typed param, and is refused unmarked", () => {
+    class Accounts {
+      @MessageHandler('account {id:int}')
+      @UsePipe('id', ToAccount)
+      show(_message: Message, { id }: { id: Piped<Account> }) {
+        void id
+      }
+
+      // @ts-expect-error an id a pipe produces is marked Piped<Account>
+      @MessageHandler('account {id:int}')
+      @UsePipe('id', ToAccount)
+      open(_message: Message, { id }: { id: Account }) {
+        void id
+      }
+    }
+    void Accounts
   })
 
   it('is refused unmarked, as a choice or a typed param of another type is', () => {
