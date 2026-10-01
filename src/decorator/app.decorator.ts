@@ -119,9 +119,10 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  *   bot, `mention: 'only'`, the app's own param `types`, how usage replies look, and the built-in `help`; see {@link MessageCommandOptions}.
  * @param options.observers - `@Observer` classes told about every dispatched call once it has settled,
  *   with its outcome and duration, in the order listed. The call never waits for them.
- * @param options.warnUnanswered - Warns, once per handler, when a handler finishes without answering
- *   its interaction, or defers it and never follows up, which leaves the user waiting. On in
- *   development (`NODE_ENV` is `development`, as under `meocord start --dev`) and off otherwise.
+ * @param options.warnUnanswered - Warns, once per handler, when a handler, or an interceptor that returns
+ *   without running it, finishes without answering its interaction, or defers it and never follows up,
+ *   which leaves the user waiting. On in development (`NODE_ENV` is `development`, as under
+ *   `meocord start --dev`) and off otherwise.
  * @param options.theme - The app's theme: the roles it changes from MeoCord's defaults, and every role the app
  *   adds. It applies to every handler, beneath each `@UseTheme`; code reads it with `useTheme()`. Each token is
  *   checked here, so a bad one stops the bot before it logs in.

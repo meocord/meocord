@@ -180,9 +180,10 @@ type ParamsFit<P, Given> = [Given] extends [P]
  * types, such as `!roll 20`, give `@MessageHandler` a pattern instead.
  *
  * @remarks
- * It runs after the one patterned handler the message matched, if any, and never for a message from a bot or
- * one with no text. Reading a message's text needs the privileged `MessageContent` intent. Its guards only
- * filter what it takes, so a denial gets no reply.
+ * It runs after the one patterned handler the message matched, if any: a message's handlers run in turn, so a
+ * slow command delays its listeners. It never runs for a message from a bot or one with no text. Reading a
+ * message's text needs the privileged `MessageContent` intent. Its guards only filter what it takes, so a
+ * denial gets no reply.
  *
  * @example
  * ```ts

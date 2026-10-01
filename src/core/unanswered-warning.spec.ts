@@ -52,8 +52,30 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
     }
   }
 
+  // Answers from its cache without running the handler: with nothing to send, it leaves the interaction as it found it
+  @loaded.Interceptor()
+  class Cached {
+    async intercept(context: any, _next: unknown) {
+      if (context.getHandlerName().endsWith('Answers')) await loaded.respond(context.getArgs()[0]).send('cached')
+      return 'cached'
+    }
+  }
+
   @loaded.Controller()
   class Shop {
+    @loaded.Command('cached', loaded.CommandType.SLASH)
+    @loaded.Defer()
+    @loaded.UseInterceptor(Cached)
+    async cached() {}
+
+    @loaded.Command('cachedForgets', loaded.CommandType.SLASH)
+    @loaded.UseInterceptor(Cached)
+    async cachedForgets() {}
+
+    @loaded.Command('cachedAnswers', loaded.CommandType.SLASH)
+    @loaded.UseInterceptor(Cached)
+    async cachedAnswers() {}
+
     @loaded.Command('answers', loaded.CommandType.SLASH)
     async answers(interaction: any) {
       await loaded.respond(interaction).send('ok')
@@ -86,7 +108,7 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
     dispatch(loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName }))
 }
 
-const unanswered = () => warned.filter(message => /^Shop\.\w+ (finished without answering|deferred its interaction)/.test(message))
+const unanswered = () => warned.filter(message => /^Shop\.\w+(:| finished without answering| deferred its interaction)/.test(message))
 
 describe('the warning for an interaction left unanswered', () => {
   const env = process.env.NODE_ENV
@@ -108,6 +130,23 @@ describe('the warning for an interaction left unanswered', () => {
     expect(unanswered()).toEqual([
       expect.stringMatching(/^Shop\.forgets finished without answering its interaction/),
       expect.stringMatching(/^Shop\.defers deferred its interaction and never followed up/),
+    ])
+  })
+
+  it('names the interceptor that returned without running the handler and left the interaction unanswered', async () => {
+    process.env.NODE_ENV = 'development'
+    const run = await startApp(await load())
+
+    for (const command of ['cached', 'cachedForgets', 'cachedAnswers']) await run(command)
+
+    expect(warned.filter(message => message.startsWith('Shop.cached'))).toEqual([
+      'Shop.cached: its interceptor Cached returned without running it, and the interaction it deferred was never ' +
+        'followed up, so the user saw it thinking until Discord gave up. Follow up in Cached with ' +
+        'respond(interaction).send(), or call next.handle(). Shown once per handler; @MeoCord({ warnUnanswered: false }) ' +
+        'turns it off.',
+      'Shop.cachedForgets: its interceptor Cached returned without running it or answering the interaction, so the user ' +
+        'saw "The application did not respond". Answer it in Cached, or call next.handle(). Shown once per handler; ' +
+        '@MeoCord({ warnUnanswered: false }) turns it off.',
     ])
   })
 
