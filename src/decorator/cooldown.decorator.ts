@@ -38,7 +38,8 @@ export interface CooldownByDecorator<P> {
  * Calls are kept in a `CooldownStore`, in memory unless `@MeoCord({ cooldownStore })` names another.
  *
  * @param options - The limit, whose calls count together, and how to exempt or tell calls apart.
- * @throws Error when `seconds` is not positive, as the decorator applies; `CooldownError` to a call over the limit.
+ * @throws Error when `seconds` is not from `0.001` to `4320000000000`, `uses` is not a whole number of at least 1,
+ * `per` is not a scope or `by` is not a function, as the decorator applies; `CooldownError` to a call over the limit.
  *
  * @example
  * ```ts
@@ -95,8 +96,11 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
   } as ClassDecorator & MethodDecorator
 }
 
-/** The longest window, in seconds: every store keeps it as an exact whole number of milliseconds. */
-const MAX_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1000)
+/**
+ * The longest window, in seconds: half the furthest time a `Date` holds, 8.64e15 ms, so the moment a wait ends, now
+ * plus the window, is a real date for a refusal's `retryAt` and the time it shows.
+ */
+const MAX_SECONDS = 4_320_000_000_000
 
 /** Why a cooldown's options cannot be counted, or undefined when they can. */
 function cooldownProblem(seconds: number, uses: number, per: string, by: unknown): string | undefined {

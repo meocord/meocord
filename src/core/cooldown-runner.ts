@@ -20,7 +20,7 @@ export type CooldownKey = string | number
  */
 export interface CooldownOptions<P = Record<string, unknown>> {
   /**
-   * The window's length, in seconds: from `0.001` (a millisecond) to `9007199254740`, counted in whole
+   * The window's length, in seconds: from `0.001` (a millisecond) to `4320000000000`, counted in whole
    * milliseconds, rounded. `@Cooldown` refuses anything else where it applies.
    */
   seconds: number
