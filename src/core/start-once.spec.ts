@@ -22,7 +22,7 @@ import { CommandType } from '@src/enum/index.js'
 import { type Container } from 'inversify'
 import { appPresenterOf } from '@src/core/handler-pipeline.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { MeoCordApp } from '@src/core/meocord.app.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { createMockInteraction } from '@src/testing/index.js'
 
@@ -93,7 +93,7 @@ describe('start()', () => {
     logged.error.length = 0
     logged.warn.length = 0
     // Logged once a process, so each case starts as a fresh process would
-    ;(MeoCordApp as unknown as { warnedRetry: boolean }).warnedRetry = false
+    forgetDeprecationWarnings()
   })
   afterEach(() => {
     process.exitCode = exitCode
