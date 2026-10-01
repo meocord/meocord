@@ -18,8 +18,8 @@ let problem: CompiledConfigProblem | undefined
  * run.
  */
 export function compiledConfigPath(): string {
-  if (isBuiltApplication()) return path.join(path.dirname(bundleEntry()), 'meocord.config.mjs')
-  return path.resolve(process.cwd(), 'dist', 'meocord.config.mjs')
+  const entry = isBuiltApplication() ? bundleEntry() : undefined
+  return entry ? path.join(path.dirname(entry), 'meocord.config.mjs') : path.resolve(process.cwd(), 'dist', 'meocord.config.mjs')
 }
 
 /**
@@ -60,6 +60,7 @@ function loadCompiledConfig(): MeoCordConfig | undefined {
     return loaded.default ?? loaded
   } catch (error) {
     problem = { path: compiledPath, missing: false, error }
+    // The factory refuses with this too, but the CLI falls back to meocord.config.ts and would otherwise say nothing
     console.error(`[MeoCord] Failed to load ${compiledPath}: ${error instanceof Error ? error.message : error}`)
     return undefined
   }

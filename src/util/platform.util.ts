@@ -85,6 +85,7 @@ export function assertBuiltForThisPlatform(distDir = defaultDistDir()): void {
 
 /** The built bundle's directory, or the entry script's outside a built bot. */
 function defaultDistDir(): string | undefined {
-  if (isBuiltApplication()) return path.dirname(bundleEntry())
+  const entry = isBuiltApplication() ? bundleEntry() : undefined
+  if (entry) return path.dirname(entry)
   return process.argv[1] ? path.dirname(process.argv[1]) : undefined
 }

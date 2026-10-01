@@ -105,6 +105,10 @@ export class ShardManager implements MeoCordApplication {
     }
 
     const file = bundleEntry()
+    if (!file) {
+      this.logger.error('Could not find the built bundle to start the shards from. Start the bot with its file, such as `node dist/main.js`.')
+      return this.exit(1)
+    }
     const manager = (this.options.createManager ?? ((path, opts) => new ShardingManager(path, opts)))(file, {
       token,
       totalShards: total,
