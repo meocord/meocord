@@ -285,8 +285,10 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * @remarks
  * A standard emoji is its character, such as `'👍'`. A custom emoji is its id or the `<:name:id>` Discord
  * shows, which match that emoji alone, or its name, which matches every custom emoji of that name. Every
- * matching handler runs, and the reacted-to message is fetched first, so it is complete. Reactions from bots,
- * the bot's own included, are skipped unless `bots: true` is set.
+ * matching handler runs, with the reaction and its message complete: `reaction.message` is the copy the
+ * gateway keeps current, fetched first only when the bot holds it by id alone, and a reaction without its count
+ * is fetched too. For data straight from Discord, such as after a reconnect that missed updates, call
+ * `reaction.message.fetch()`. Reactions from bots, the bot's own included, are skipped unless `bots: true` is set.
  *
  * @param emoji - The emoji to handle: its character, or a custom emoji's id, `<:name:id>` or name.
  * @param settings - Whether bots' reactions reach it too; see {@link ReactionHandlerSettings}.
