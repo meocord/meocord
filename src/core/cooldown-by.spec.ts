@@ -194,12 +194,12 @@ describe('@Cooldown({ by })', () => {
     expect(new Set(keys).size).toBe(2)
   })
 
-  it('counts without the by part when it returns undefined', async () => {
+  it('counts without a value when it returns undefined, under the by part alone', async () => {
     const { module, keys } = recording()
 
     await module.invoke(CheckInController, 'maybe', press('maybe/800000001'))
 
-    expect(keys).toEqual(['CheckInController.maybe#60000:user:user:ada'])
+    expect(keys).toEqual(['CheckInController.maybe#60000:user:user:ada:by'])
   })
 
   it('sends an error thrown by by through the exception filters, and counts none of the cooldowns', async () => {

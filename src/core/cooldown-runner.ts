@@ -26,7 +26,12 @@ export interface CooldownOptions<P = Record<string, unknown>> {
   seconds: number
   /**
    * Calls allowed within the window. A deploy that changes it keeps the calls counted so far, held to the new
-   * number; one that changes `seconds` starts the count again.
+   * number; one that changes `seconds` starts the count again. A handler's cooldowns with the same `seconds`,
+   * `per`, `by` and `bypass` (the same function, or none) count the same calls, so they share one count, held to
+   * the smallest `uses`. The exception is two cooldowns over the same `seconds` and `per`, both with `by` or both
+   * without, whose `by` or `bypass` functions differ (two inline functions differ even when written alike): `uses`
+   * tells them apart, so changing it, or adding or removing another such cooldown, starts their counts again, and
+   * reordering two with the same `uses` swaps their counts.
    *
    * @defaultValue `1`
    */
@@ -69,32 +74,46 @@ export const handlerCooldowns = perHandler((prototype: object, methodName: strin
   ]
 })
 
-/** Each cooldown's part of its store key, by the list {@link handlerCooldowns} gives, which is the same for a handler. */
-const limitIds = new WeakMap<readonly StoredCooldown[], readonly string[]>()
+/** A cooldown as the store counts it: one history of calls, with its part of the store key and its threshold. */
+interface CountedCooldown { cooldown: StoredCooldown; id: string; uses: number }
+
+/** The counted cooldowns of each list {@link handlerCooldowns} gives, which is the same for a handler. */
+const countedCooldowns = new WeakMap<readonly StoredCooldown[], readonly CountedCooldown[]>()
 
 /**
- * Each cooldown's part of its store key: its window, which the store's history of calls is kept over. `uses` is only
- * the threshold that history is held to, so a deploy that changes it keeps the calls counted so far, and one that
- * adds, removes or reorders cooldowns leaves the others' counts where they are. `uses` is added only to tell apart
- * cooldowns that share a window, scope and `by`, and a count only to tell apart ones that are otherwise the same.
+ * The handler's cooldowns as the store counts them, each keyed by its window, which the store's history of calls is
+ * kept over. Cooldowns with the same window, scope, `by` and `bypass` record the same calls, so they share one history
+ * held to the smallest `uses`: a deploy that changes `uses`, or adds, removes or reorders cooldowns, keeps the counts.
+ * `uses`, then their order, tells apart only cooldowns sharing a window and scope whose `by` or `bypass` functions differ.
  */
-function limitIdsOf(cooldowns: readonly StoredCooldown[]): readonly string[] {
-  let ids = limitIds.get(cooldowns)
-  if (!ids) {
-    const sharing = (cooldown: StoredCooldown) => `${cooldown.per}:${cooldown.windowMs}:${cooldown.by ? 'by' : ''}`
+function countedCooldownsOf(cooldowns: readonly StoredCooldown[]): readonly CountedCooldown[] {
+  let counted = countedCooldowns.get(cooldowns)
+  if (!counted) {
+    const histories: { cooldown: StoredCooldown; uses: number }[] = []
+    for (const cooldown of cooldowns) {
+      const same = histories.find(
+        ({ cooldown: other }) =>
+          other.per === cooldown.per && other.windowMs === cooldown.windowMs && other.by === cooldown.by && other.bypass === cooldown.bypass,
+      )
+      if (same) same.uses = Math.min(same.uses, cooldown.uses)
+      else histories.push({ cooldown, uses: cooldown.uses })
+    }
+    // Keys with `by` always end in a by part, so only histories alike in having one can share a key
+    const sharing = ({ cooldown }: { cooldown: StoredCooldown }) => `${cooldown.per}:${cooldown.windowMs}:${cooldown.by ? 'by' : ''}`
     const groups = new Map<string, number>()
-    for (const cooldown of cooldowns) groups.set(sharing(cooldown), (groups.get(sharing(cooldown)) ?? 0) + 1)
+    for (const history of histories) groups.set(sharing(history), (groups.get(sharing(history)) ?? 0) + 1)
     const seen = new Map<string, number>()
-    ids = cooldowns.map(cooldown => {
-      const id = groups.get(sharing(cooldown))! > 1 ? `${cooldown.windowMs}/${cooldown.uses}` : `${cooldown.windowMs}`
-      const same = `${sharing(cooldown)}:${cooldown.uses}`
+    counted = histories.map(history => {
+      const { windowMs } = history.cooldown
+      const id = groups.get(sharing(history))! > 1 ? `${windowMs}/${history.uses}` : `${windowMs}`
+      const same = `${sharing(history)}:${history.uses}`
       const count = (seen.get(same) ?? 0) + 1
       seen.set(same, count)
-      return count === 1 ? id : `${id}~${count}`
+      return { ...history, id: count === 1 ? id : `${id}~${count}` }
     })
-    limitIds.set(cooldowns, ids)
+    countedCooldowns.set(cooldowns, counted)
   }
-  return ids
+  return counted
 }
 
 /** The cooldowns declared on a method itself. */
@@ -318,8 +337,8 @@ async function keyed(
   if (peek) peeked.set(context, { bypassed, storeFailed: false })
 
   const counted: Counted[] = []
-  const ids = limitIdsOf(cooldowns)
-  for (const [index, { windowMs, uses, per, bypass, by }] of cooldowns.entries()) {
+  for (const [index, { cooldown, id, uses }] of countedCooldownsOf(cooldowns).entries()) {
+    const { windowMs, per, bypass, by } = cooldown
     if (peek && by) continue
     if (earlier?.storeFailed && !by) continue
     if (bypass) {
@@ -328,9 +347,10 @@ async function keyed(
     }
 
     const value = by ? await by(context, params) : undefined
-    // Encoded, so a value holding a colon cannot count under another value's key
-    const suffix = value === undefined ? '' : `:by:${encodeURIComponent(String(value))}`
-    counted.push({ key: `${controller.name}.${methodName}#${ids[index]}:${per}:${scopeId(per, first)}${suffix}`, windowMs, uses, per })
+    // Encoded, so a value holding a colon cannot count under another value's key. Without a value, `:by` alone keeps
+    // the call apart from a cooldown with no `by` over the same window.
+    const suffix = !by ? '' : value === undefined ? ':by' : `:by:${encodeURIComponent(String(value))}`
+    counted.push({ key: `${controller.name}.${methodName}#${id}:${per}:${scopeId(per, first)}${suffix}`, windowMs, uses, per })
   }
   return counted
 }

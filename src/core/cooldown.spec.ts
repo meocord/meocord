@@ -4,7 +4,7 @@ import { Command, Controller, Cooldown, MessageHandler, On, Once, Pipe, Reaction
 import { handlerCooldowns, methodCooldowns } from '@src/core/cooldown-runner.js'
 import { CommandType } from '@src/enum/index.js'
 import { type PipeInterface, type StandardSchemaV1 } from '@src/interface/index.js'
-import { CooldownError, cooldownMessage, CooldownStore, type CooldownLimit, MemoryCooldownStore } from '@src/common/index.js'
+import { applyDecorators, CooldownError, cooldownMessage, CooldownStore, type CooldownLimit, MemoryCooldownStore } from '@src/common/index.js'
 import { createChatInputOptions, createMockInteraction, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
 
 /** Applies a method decorator to a handler, as writing it above one does. */
@@ -354,16 +354,26 @@ describe('a cooldown key', () => {
 
   it.each([
     // One claim under 1 a day, then a release allowing 2: the claim counts, so one more runs, not two
-    ['raised', { uses: 1, seconds: 86_400 }, 1, { uses: 2, seconds: 86_400 }, ['ran', 'refused']],
+    ['raises its uses', [{ uses: 1, seconds: 86_400 }], 1, [{ uses: 2, seconds: 86_400 }], ['ran', 'refused']],
     // Four claims under 5 an hour, then a release allowing 3: those four count, so none runs
-    ['lowered', { uses: 5, seconds: 3_600 }, 4, { uses: 3, seconds: 3_600 }, ['refused', 'refused']],
-  ] as const)('keeps the calls counted so far when a later release %s its uses', async (_how, before, calls, after, outcomes) => {
+    ['lowers its uses', [{ uses: 5, seconds: 3_600 }], 4, [{ uses: 3, seconds: 3_600 }], ['refused', 'refused']],
+    // Three claims under 3 and 5 a minute, then a release allowing 4 and 5: those three count, so one more runs
+    [
+      'changes the uses of one of two cooldowns with the same window',
+      [{ uses: 3, seconds: 60 }, { uses: 5, seconds: 60 }],
+      3,
+      [{ uses: 4, seconds: 60 }, { uses: 5, seconds: 60 }],
+      ['ran', 'refused'],
+    ],
+    ['adds a cooldown with the same window', [{ uses: 2, seconds: 60 }], 2, [{ uses: 2, seconds: 60 }, { uses: 5, seconds: 60 }], ['refused', 'refused']],
+    ['removes one of two cooldowns with the same window', [{ uses: 2, seconds: 60 }, { uses: 5, seconds: 60 }], 2, [{ uses: 2, seconds: 60 }], ['refused', 'refused']],
+  ] as const)('keeps the calls counted so far when a later release %s', async (_how, before, calls, after, outcomes) => {
     const store = new MemoryCooldownStore()
-    const releaseWith = (limit: { uses: number; seconds: number }) => {
+    const releaseWith = (limits: readonly { uses: number; seconds: number }[]) => {
       @Controller()
       class Rewards {
         @Command('claim', CommandType.SLASH)
-        @Cooldown(limit)
+        @applyDecorators(...limits.map(limit => Cooldown(limit)))
         async claim(_interaction: ChatInputCommandInteraction) {}
       }
       return Rewards
@@ -382,21 +392,72 @@ describe('a cooldown key', () => {
     expect(results).toEqual(outcomes)
   })
 
-  it('tells apart two cooldowns with the same limit', async () => {
+  it('counts cooldowns with the same window under one key, held to the smaller uses', async () => {
     @Controller()
     class Twice {
       @Command('twice', CommandType.SLASH)
-      @Cooldown({ seconds: 60, uses: 2 })
-      @Cooldown({ seconds: 60, uses: 2 })
+      @Cooldown({ seconds: 60, uses: 5 })
+      @Cooldown({ seconds: 60, uses: 3 })
       async twice(_interaction: ChatInputCommandInteraction) {}
     }
-    const consumeMany = vi.fn(async (_entries: readonly { key: string; limit: CooldownLimit }[]) => ({ allowed: true, retryAfterMs: 0 }))
+    const store = new MemoryCooldownStore()
+    const module = MeoCordTestingModule.create({ controllers: [Twice], providers: [{ provide: CooldownStore, useValue: store }] }).compile()
+    const results: string[] = []
 
-    await MeoCordTestingModule.create({ controllers: [Twice], providers: [{ provide: CooldownStore, useValue: { consumeMany } }] })
-      .compile()
-      .invoke(Twice, 'twice', slash())
+    for (let call = 0; call < 4; call++) results.push(await module.invoke(Twice, 'twice', slash()).then(() => 'ran', () => 'refused'))
 
-    expect(consumeMany.mock.calls[0][0].map(({ key }) => key)).toEqual(['Twice.twice#60000/2:user:user:ada', 'Twice.twice#60000/2~2:user:user:ada'])
+    expect(results).toEqual(['ran', 'ran', 'ran', 'refused'])
+    expect(store.size).toBe(1)
+  })
+
+  // Each records only the calls whose own value it gives; one key would count a call in channel Z under A's `X`
+  it('keeps apart two cooldowns with the same window but different by functions, whose values can be equal', async () => {
+    @Controller()
+    class Rooms {
+      @Command('rooms', CommandType.SLASH)
+      @Cooldown({ seconds: 60, by: context => context.getInteraction()?.channelId ?? undefined })
+      @Cooldown({ seconds: 60, by: context => context.getInteraction()?.guildId ?? undefined })
+      async rooms(_interaction: ChatInputCommandInteraction) {}
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Rooms], providers: [{ provide: CooldownStore, useValue: new MemoryCooldownStore() }] }).compile()
+
+    await module.invoke(Rooms, 'rooms', slash({ channel: 'X', guild: 'Y' }))
+
+    await expect(module.invoke(Rooms, 'rooms', slash({ channel: 'Z', guild: 'X' }))).resolves.toMatchObject({ ran: true })
+  })
+
+  // A bypass decides which calls a cooldown records, so one key would count the calls it exempts, or skip the others'
+  it('keeps apart two cooldowns with the same window but different bypass functions', async () => {
+    @Controller()
+    class Owners {
+      @Command('owners', CommandType.SLASH)
+      @Cooldown({ seconds: 60, uses: 1, bypass: context => context.getInteraction()?.user.id === 'ada' })
+      @Cooldown({ seconds: 60, uses: 2 })
+      async owners(_interaction: ChatInputCommandInteraction) {}
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Owners], providers: [{ provide: CooldownStore, useValue: new MemoryCooldownStore() }] }).compile()
+    const results: string[] = []
+
+    for (let call = 0; call < 3; call++) results.push(await module.invoke(Owners, 'owners', slash()).then(() => 'ran', () => 'refused'))
+
+    expect(results).toEqual(['ran', 'ran', 'refused'])
+  })
+
+  // `by` returning undefined counts the call in the scope alone, apart from a cooldown with no `by`
+  it('keeps a by that returns undefined apart from a cooldown with the same window and no by', async () => {
+    @Controller()
+    class Servers {
+      @Command('servers', CommandType.SLASH)
+      @Cooldown({ seconds: 60, uses: 2 })
+      @Cooldown({ seconds: 60, uses: 1, by: context => context.getInteraction()?.guildId ?? undefined })
+      async servers(_interaction: ChatInputCommandInteraction) {}
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Servers], providers: [{ provide: CooldownStore, useValue: new MemoryCooldownStore() }] }).compile()
+
+    await module.invoke(Servers, 'servers', slash({ guild: 'G' }))
+
+    // In a DM: the first call without a server, which the one-use cooldown has not counted yet
+    await expect(module.invoke(Servers, 'servers', slash({ guild: null }))).resolves.toMatchObject({ ran: true })
   })
 })
 
