@@ -101,11 +101,12 @@ export function bindProvider(container: Container, provider: Provider, bindClass
     if (kept) return kept.value
     // Resolved in dependency order before anything needs it, so each injected value is already made
     const made: unknown = useFactory(...inject.map(dependency => context.get(dependency as ServiceIdentifier)))
-    if (!(made instanceof Promise)) {
+    // Any thenable, not only a native promise: a library's promise, or one from another realm
+    if (typeof (made as { then?: unknown } | null | undefined)?.then !== 'function') {
       kept = { value: made }
       return made
     }
-    const pending = made.then(
+    const pending = Promise.resolve(made).then(
       value => {
         kept = { value }
         return value
