@@ -12,7 +12,7 @@ import {
   withRelease,
 } from '@src/common/cooldown-store.js'
 import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
-import { isShardProcess } from '@src/util/sharding-mode.util.js'
+import { isShardProcess, managerGone } from '@src/util/sharding-mode.util.js'
 
 /**
  * How long a shard holds a call the manager has not answered before failing it, so an unanswered call is
@@ -22,16 +22,30 @@ export const SHARDED_COOLDOWN_ABANDON_MS = 30_000
 
 /** The IPC between a shard and its manager, as a shard's `process` provides it. */
 export interface CooldownChannel {
-  send(message: ShardMessage): void
+  /** Sends `message`, throwing when it cannot, and telling `failed` when its delivery fails later. */
+  send(message: ShardMessage, failed?: (error: Error) => void): void
   onMessage(listener: (message: unknown) => void): void
 }
 
 /** A shard's channel to its manager, or none outside process sharding. */
 function managerChannel(): CooldownChannel | undefined {
-  if (!isShardProcess() || typeof process.send !== 'function') return undefined
+  return isShardProcess() && typeof process.send === 'function' ? channelOver(process) : undefined
+}
+
+/**
+ * The channel over a process's IPC. A send on a closed channel does not throw: without a callback, Node raises an
+ * `'error'` event that ends the process, and Bun drops the message. So a send checks the channel first, and passes a
+ * callback that reports a failed delivery.
+ */
+export function channelOver(proc: Pick<NodeJS.Process, 'connected' | 'send' | 'on'>): CooldownChannel {
   return {
-    send: message => void process.send!(message),
-    onMessage: listener => void process.on('message', listener),
+    send: (message, failed) => {
+      if (managerGone(proc)) throw new Error('The shard manager is gone: its IPC channel has closed.')
+      proc.send!(message, undefined, {}, error => {
+        if (error) failed?.(error)
+      })
+    },
+    onMessage: listener => void proc.on('message', listener),
   }
 }
 
@@ -133,11 +147,12 @@ export class ShardedCooldownStore extends CooldownStore {
         },
         reject: error => (settle(), reject(error)),
       })
+      // The channel has closed, as when the manager is gone, at once or as the message is delivered
+      const failed = (error: unknown) => this.pending.get(id)?.reject(error instanceof Error ? error : new Error(String(error)))
       try {
-        channel.send({ meocord: 'cooldown', id, entries: [...entries], ...(peek ? { peek: true as const } : {}) })
+        channel.send({ meocord: 'cooldown', id, entries: [...entries], ...(peek ? { peek: true as const } : {}) }, failed)
       } catch (error) {
-        // The channel has closed, as when the manager is gone.
-        this.pending.get(id)?.reject(error instanceof Error ? error : new Error(String(error)))
+        failed(error)
       }
     })
   }
