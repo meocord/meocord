@@ -693,8 +693,35 @@ describe('spawning the application', () => {
           rsbuild: { onAfterBuild: (callback: () => void) => callback(), build: async () => ({ close: closeBuild }) },
         }))
         await cli.startDev()
-        return { change: (filename: string) => listener('change', filename), compileConfig, createBundler, closeBuild }
+        const errors = vi.mocked((cli as unknown as { logger: { error: (text: string) => void } }).logger.error)
+        return { change: (filename: string) => listener('change', filename), compileConfig, createBundler, closeBuild, errors }
       }
+
+      // As with a failed login, the session and the bot it runs outlast it, and saving again retries
+      it('keeps the running build and bot when a rebuild cannot start, such as from an rsbuild hook that throws', async () => {
+        const unhandled = vi.fn()
+        process.on('unhandledRejection', unhandled)
+        try {
+          const dev = await startWatching()
+          const running = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild>
+          dev.createBundler.mockRejectedValueOnce(new Error('hook broke'))
+
+          dev.change('meocord.config.ts')
+          await vi.waitFor(() => expect(dev.errors).toHaveBeenCalledWith(expect.stringContaining('Rebuilding failed: hook broke')))
+          await new Promise(resolve => setTimeout(resolve, 50))
+
+          expect(unhandled).not.toHaveBeenCalled()
+          expect(exitSpy).not.toHaveBeenCalled()
+          expect(dev.closeBuild).not.toHaveBeenCalled()
+          expect(running.kill).not.toHaveBeenCalled()
+
+          dev.change('meocord.config.ts')
+          await vi.waitFor(() => expect(dev.createBundler).toHaveBeenCalledTimes(3))
+          expect(dev.closeBuild).toHaveBeenCalledTimes(1)
+        } finally {
+          process.off('unhandledRejection', unhandled)
+        }
+      })
 
       it('rebuilds once from a changed tsconfig.json, however many events one save makes', async () => {
         const dev = await startWatching()
