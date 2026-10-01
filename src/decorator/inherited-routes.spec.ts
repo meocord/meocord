@@ -1,94 +1,175 @@
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
-import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { SlashCommandBuilder } from 'discord.js'
-import { Command, CommandBuilder, Controller, MessageHandler } from '@src/decorator/index.js'
-import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
+import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, ReactionHandler } from '@src/decorator/index.js'
+import { getAutocompleteHandlers, getCommandMap, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { CommandType } from '@src/enum/index.js'
+import { MeoCordTestingModule } from '@src/testing/index.js'
 
-const warnings = () => vi.mocked(Logger.prototype.warn).mock.calls.map(([line]) => String(line))
+const warnings = () =>
+  vi
+    .mocked(Logger.prototype.warn)
+    .mock.calls.map(([line]) => String(line))
+    .filter(line => line.includes('re-declared') || line.includes('@Autocomplete'))
+
+/** Starts a testing module with the controllers, as the bot starts, which runs the startup checks. */
+const start = (...controllers: (new (...args: any[]) => unknown)[]) => MeoCordTestingModule.create({ controllers }).compile()
 
 beforeEach(() => {
-  forgetDeprecationWarnings()
   vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
 })
 afterEach(() => vi.restoreAllMocks())
 
+@CommandBuilder(CommandType.SLASH)
+class PingBuilder {
+  build(name: string) {
+    return new SlashCommandBuilder().setName(name).setDescription('Ping')
+  }
+}
+
+@CommandBuilder(CommandType.SLASH)
+class LoudPingBuilder {
+  build(name: string) {
+    return new SlashCommandBuilder().setName(name).setDescription('PING')
+  }
+}
+
 @Controller()
-class BasePager {
+class Base {
   @Command('page/{n:int}', CommandType.BUTTON)
   page() {}
 
-  @MessageHandler('hi')
-  hi() {}
+  @Command('ping', PingBuilder)
+  ping() {}
+
+  @MessageHandler('roll', { description: 'Rolls a die' })
+  roll() {}
+
+  @ReactionHandler('👍')
+  vote() {}
+
+  @Autocomplete('stats', 'user')
+  complete() {}
 }
 
-describe('a handler a subclass re-declares on another route', () => {
-  it('keeps answering the inherited route, as in 4.0, and says 5.0 drops it, naming both', () => {
+describe('a handler a subclass re-declares on the route it inherits', () => {
+  // Routing keeps the first entry for a route, so an inherited one left in place would keep the base's options
+  it("takes the subclass's options, in the inherited route's place, and leaves the base's own", () => {
     @Controller()
-    class ShopPager extends BasePager {
-      @Command('shop/page/{n:int}', CommandType.BUTTON)
-      page() {}
+    class Leaf extends Base {
+      @Command('ping', LoudPingBuilder)
+      ping() {}
 
-      @MessageHandler('hello')
-      hi() {}
+      @MessageHandler('roll', { description: 'Rolls two dice' })
+      roll() {}
+
+      @ReactionHandler('👍', { bots: true })
+      vote() {}
+
+      @Autocomplete('stats', 'user')
+      complete() {}
     }
 
-    expect(Object.keys(getCommandMap(ShopPager.prototype))).toEqual(['page/{n:int}', 'shop/page/{n:int}'])
-    expect(getMessageHandlers(ShopPager.prototype).map(handler => handler.pattern)).toEqual(['hi', 'hello'])
+    expect(getCommandMap(Leaf.prototype).ping.map(meta => meta.builderClass)).toEqual([LoudPingBuilder])
+    expect(getMessageHandlers(Leaf.prototype).map(handler => [handler.pattern, handler.options.description])).toEqual([['roll', 'Rolls two dice']])
+    expect(getReactionHandlers(Leaf.prototype).map(handler => [handler.emoji, handler.settings.bots])).toEqual([['👍', true]])
+    expect(getAutocompleteHandlers(Leaf.prototype)).toHaveLength(1)
+    expect(getMessageHandlers(Base.prototype).map(handler => handler.options.description)).toEqual(['Rolls a die'])
+    // Each route is declared once, so nothing is a duplicate and nothing is kept from the base
+    start(Leaf)
+    expect(warnings()).toEqual([])
+  })
+})
+
+describe('a handler a subclass re-declares on another route', () => {
+  it('keeps answering the inherited route, as in 4.0, and is named as the bot starts, for every kind of handler', () => {
+    @Controller()
+    class ShopLeaf extends Base {
+      @Command('shop/page/{n:int}', CommandType.BUTTON)
+      @Command('store/page/{n:int}', CommandType.BUTTON)
+      page() {}
+
+      @MessageHandler('dice')
+      roll() {}
+
+      @ReactionHandler('⭐')
+      vote() {}
+
+      @Autocomplete('stats', 'member')
+      complete() {}
+    }
+
+    expect(Object.keys(getCommandMap(ShopLeaf.prototype))).toEqual(['page/{n:int}', 'ping', 'store/page/{n:int}', 'shop/page/{n:int}'])
+    expect(getMessageHandlers(ShopLeaf.prototype).map(handler => handler.pattern)).toEqual(['roll', 'dice'])
+    expect(warnings()).toEqual([])
+
+    start(ShopLeaf)
+
     expect(warnings()).toEqual([
-      'An inherited route that a re-declared handler keeps (ShopPager.page answers button "page/{n:int}" as well as ' +
-        'button "shop/page/{n:int}") is deprecated; in the next major version (5.0) it is dropped. Use a decorator for ' +
-        'each route ShopPager.page should answer instead.',
-      'An inherited route that a re-declared handler keeps (ShopPager.hi answers message "hi" as well as message ' +
-        '"hello") is deprecated; in the next major version (5.0) it is dropped. Use a decorator for each route ' +
-        'ShopPager.hi should answer instead.',
+      '4 re-declared handlers still answer routes they inherit:\n' +
+        '  ShopLeaf.page answers button "page/{n:int}", which it inherits, as well as its own button "store/page/{n:int}" and button "shop/page/{n:int}".\n' +
+        '  ShopLeaf.roll answers message "roll", which it inherits, as well as its own message "dice".\n' +
+        '  ShopLeaf.vote answers reaction "👍", which it inherits, as well as its own reaction "⭐".\n' +
+        '  ShopLeaf.complete answers autocomplete of "user" in "stats", which it inherits, as well as its own autocomplete of "member" in "stats".\n' +
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well.",
     ])
   })
 
-  it('says nothing when the subclass declares every route itself, or none, or repeats the inherited one', () => {
+  // The routes come down through every class between, so a class with no decorators of its own changes nothing
+  it('is named through a class between that declares nothing, and the subclass still takes its own options', () => {
+    class Mid extends Base {
+      roll() {}
+    }
     @Controller()
-    class Both extends BasePager {
+    class Leaf extends Mid {
+      @Command('shop/page/{n:int}', CommandType.BUTTON)
+      page() {}
+
+      @MessageHandler('roll', { description: 'Rolls two dice' })
+      roll() {}
+    }
+
+    start(Leaf)
+
+    expect(getMessageHandlers(Leaf.prototype).map(handler => handler.options.description)).toEqual(['Rolls two dice'])
+    expect(warnings()).toEqual([
+      '1 re-declared handler still answers routes it inherits:\n' +
+        '  Leaf.page answers button "page/{n:int}", which it inherits, as well as its own button "shop/page/{n:int}".\n' +
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well.",
+    ])
+  })
+
+  it('says nothing when the subclass declares every route itself, or none', () => {
+    @Controller()
+    class Both extends Base {
       @Command('page/{n:int}', CommandType.BUTTON)
       @Command('shop/page/{n:int}', CommandType.BUTTON)
       page() {}
     }
     @Controller()
-    class Same extends BasePager {
-      @MessageHandler('hi')
-      hi() {}
-    }
-    @Controller()
-    class Untouched extends BasePager {}
-    void [Both, Same, Untouched]
+    class Untouched extends Base {}
+
+    // Apart, since each answers the base's routes
+    start(Both)
+    start(Untouched)
 
     expect(warnings()).toEqual([])
   })
 
   // The same words under another kind is another route, which the subclass still answers as it inherits it
   it('tells a route of another kind from one with the same name', () => {
-    @CommandBuilder(CommandType.SLASH)
-    class PingBuilder {
-      build(name: string) {
-        return new SlashCommandBuilder().setName(name).setDescription('Ping')
-      }
-    }
-    @Controller()
-    class Base {
-      @Command('ping', PingBuilder)
-      ping() {}
-    }
     @Controller()
     class Sub extends Base {
       @MessageHandler('ping')
       ping() {}
     }
-    void Sub
+
+    start(Sub)
 
     expect(warnings()).toEqual([
-      'An inherited route that a re-declared handler keeps (Sub.ping answers slash "ping" as well as message "ping") ' +
-        'is deprecated; in the next major version (5.0) it is dropped. Use a decorator for each route Sub.ping should ' +
-        'answer instead.',
+      '1 re-declared handler still answers routes it inherits:\n' +
+        '  Sub.ping answers slash "ping", which it inherits, as well as its own message "ping".\n' +
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well.",
     ])
   })
 })

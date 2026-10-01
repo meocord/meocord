@@ -1,6 +1,6 @@
 import { ApplicationCommandOptionType, ApplicationCommandType } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
-import { getAutocompleteHandlers, getCommandMap } from '@src/decorator/controller.decorator.js'
+import { getAutocompleteHandlers, getCommandMap, getDeclaredRoutes, getHandlerRoutes } from '@src/decorator/controller.decorator.js'
 import { registrationKey, serialise } from '@src/core/command-registration.js'
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
@@ -309,5 +309,44 @@ export function warnDuplicateAutocompletes(controllerClasses: readonly Controlle
   logger.warn(
     `${problems.length} @Autocomplete ${one ? 'handler never runs' : 'handlers never run'}, since another completes the ` +
       `same first:\n${problems.join('\n')}\nThe next major version (5.0) refuses to start with these.`,
+  )
+}
+
+/** Items as a sentence lists them: `a`, `a and b`, `a, b and c`. */
+const listed = (items: readonly string[]): string =>
+  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+
+/**
+ * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for
+ * `@Command`, `@MessageHandler`, `@ReactionHandler` and `@Autocomplete` alike. The next major version (5.0) drops
+ * the inherited routes. Every class a listed controller extends is checked once, a base that is not listed included.
+ */
+export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[]): void {
+  const checked = new Set<object>()
+  const problems: string[] = []
+  for (const controllerClass of controllerClasses) {
+    for (let prototype = controllerClass.prototype as object | null; prototype && prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype) as object | null) {
+      if (checked.has(prototype)) break
+      checked.add(prototype)
+      const declared = getDeclaredRoutes(prototype)
+      const base = Object.getPrototypeOf(prototype) as object | null
+      if (declared.length === 0 || !base) continue
+      const inherited = getHandlerRoutes(base)
+      for (const method of new Set(declared.map(route => route.method))) {
+        const own = [...new Set(declared.filter(route => route.method === method).map(route => route.label))]
+        const kept = [...new Set(inherited.filter(route => route.method === method).map(route => route.label))].filter(label => !own.includes(label))
+        if (kept.length === 0) continue
+        const name = (prototype as { constructor: { name: string } }).constructor.name
+        problems.push(`  ${name}.${method} answers ${listed(kept)}, which it inherits, as well as its own ${listed(own)}.`)
+      }
+    }
+  }
+  if (problems.length === 0) return
+
+  const one = problems.length === 1
+  logger.warn(
+    `${problems.length} re-declared ${one ? 'handler still answers routes it inherits' : 'handlers still answer routes they inherit'}:\n` +
+      `${problems.join('\n')}\nIn the next major version (5.0), a handler's own routes replace the ones it inherits. ` +
+      "To keep an inherited route, declare it on the subclass's method as well.",
   )
 }

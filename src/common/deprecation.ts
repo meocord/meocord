@@ -11,7 +11,7 @@ export function warnDeprecated(logger: Logger, old: string, replacement: string)
  * Warns once per run that a behaviour changes in 5.0, such as a call 5.0 refuses or rejects, naming what to use
  * instead. For a deprecated name, use {@link warnDeprecated}.
  */
-export function warnDeprecatedBehaviour(logger: Logger, old: string, outcome: 'is refused' | 'rejects' | 'is dropped', replacement: string): void {
+export function warnDeprecatedBehaviour(logger: Logger, old: string, outcome: 'is refused' | 'rejects', replacement: string): void {
   warnOnce(logger, `${old} is deprecated; in the next major version (5.0) it ${outcome}. Use ${replacement} instead.`)
 }
 

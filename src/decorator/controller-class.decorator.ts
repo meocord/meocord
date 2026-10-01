@@ -2,7 +2,6 @@ import { type ControllerOptions } from '@src/interface/index.js'
 import { INHERIT_STAGES } from '@src/core/guard-runner.js'
 import { guardOwnHandlersWithBaseGuards } from '@src/decorator/guard.decorator.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
-import { warnInheritedRoutes } from '@src/decorator/controller.decorator.js'
 
 /**
  * Marks a class as a controller, whose methods handle commands, components, messages, reactions or events.
@@ -42,6 +41,5 @@ export function Controller(options: ControllerOptions = {}) {
     makeInjectable(target)
     if (options.inheritStages === false) Reflect.defineMetadata(INHERIT_STAGES, false, target)
     guardOwnHandlersWithBaseGuards(target)
-    warnInheritedRoutes(target)
   }
 }
