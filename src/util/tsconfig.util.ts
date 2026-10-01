@@ -145,7 +145,7 @@ export function prepareModifiedTsConfig(): string {
     }
 
     // A `paths` target is relative to baseUrl when there is one, made absolute above, and else to the project. Only
-    // this file's own baseUrl counts: one inherited through `extends` isn't read.
+    // this file's own baseUrl counts: one inherited through `extends` isn't applied, so paths are the project's own.
     if (parsedConfig.compilerOptions.paths) {
       const base: string = parsedConfig.compilerOptions.baseUrl ?? cwd
       Object.keys(parsedConfig.compilerOptions.paths).forEach(alias => {
