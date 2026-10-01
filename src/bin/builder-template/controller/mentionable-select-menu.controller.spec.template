@@ -1,0 +1,16 @@
+import { MentionableSelectMenuInteraction } from 'discord.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}MentionableSelectMenuController } from './{{kebabCaseName}}.mentionable-select-menu.controller.js'
+
+describe('{{className}}MentionableSelectMenuController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}MentionableSelectMenuController] }).compile()
+
+  it('answers with what was selected', async () => {
+    const interaction = createMockInteraction(MentionableSelectMenuInteraction, { customId: '{{commandName}}' })
+
+    await module.invoke({{className}}MentionableSelectMenuController, 'handle{{className}}', interaction)
+
+    // A component's answer edits the message it is on
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['update'])
+  })
+})

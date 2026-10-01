@@ -1,0 +1,19 @@
+import { Collection, Role, RoleSelectMenuInteraction } from 'discord.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}RoleSelectMenuController } from './{{kebabCaseName}}.role-select-menu.controller.js'
+
+describe('{{className}}RoleSelectMenuController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}RoleSelectMenuController] }).compile()
+
+  it('answers with the roles selected', async () => {
+    const role = createMockInteraction(Role, { id: '1', name: 'Staff' })
+    const interaction = createMockInteraction(RoleSelectMenuInteraction, {
+      customId: '{{commandName}}',
+      roles: new Collection([[role.id, role]]),
+    })
+
+    await module.invoke({{className}}RoleSelectMenuController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'Selected: Staff' })
+  })
+})

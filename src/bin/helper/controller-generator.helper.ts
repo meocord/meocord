@@ -7,7 +7,6 @@ import {
   createDirectoryIfNotExists,
   generateFile,
   populateTemplate,
-  toClassName,
   validateAndFormatName,
 } from '@src/util/generator-cli.util.js'
 import { fileURLToPath } from 'url'
@@ -115,9 +114,10 @@ export class ControllerGeneratorHelper {
     const controllerFilePath = path.join(controllerDir, `${kebabCaseName}.${type}.controller.ts`)
     generateFile(controllerFilePath, controllerTemplate)
 
-    const typeClassName = toClassName(type.replace(/-/g, ' '))
-    const specTemplatePath = path.resolve(__dirname, '..', 'builder-template', 'controller', 'controller.spec.template')
-    const specContent = populateTemplate(specTemplatePath, { className, kebabCaseName, type, typeClassName })
+    // Each type's own spec, which invokes the handler as dispatch would and checks its answer
+    const { variables } = this.getTemplateConfig(type, className, parts, kebabCaseName, options)!
+    const specTemplatePath = path.resolve(__dirname, '..', 'builder-template', 'controller', `${type}.controller.spec.template`)
+    const specContent = populateTemplate(specTemplatePath, { ...variables, kebabCaseName })
     generateFile(path.join(controllerDir, `${kebabCaseName}.${type}.controller.spec.ts`), specContent)
   }
 

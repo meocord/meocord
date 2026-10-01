@@ -1,0 +1,18 @@
+import { ChatInputCommandInteraction } from 'discord.js'
+import { createChatInputOptions, createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}SlashController } from './{{kebabCaseName}}.slash.controller.js'
+
+describe('{{className}}SlashController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}SlashController] }).compile()
+
+  it('replies', async () => {
+    const interaction = createMockInteraction(ChatInputCommandInteraction, {
+      commandName: '{{commandName}}',
+      options: createChatInputOptions({}),
+    })
+
+    await module.invoke({{className}}SlashController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+  })
+})
