@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { route } from '@src/common/route.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { Command, CommandBuilder, Controller, MeoCord } from '@src/decorator/index.js'
+import { Autocomplete, Command, CommandBuilder, Controller, MeoCord } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { MeoCordTestingModule } from '@src/testing/index.js'
@@ -198,6 +198,140 @@ describe('handlers of commands no builder registers', () => {
       '1 command handler handles what Discord never sends, so it never runs:\n' +
         '  Settings.misspeltSubcommand: "settings notfy" is not a subcommand of the slash command "settings", whose builder registers ' +
         '"settings view", "settings notify" and "settings alerts email". Correct the path.\n' +
+        'The next major version (5.0) refuses to start with these.',
+    )
+  })
+})
+
+@CommandBuilder(CommandType.SLASH)
+class SearchBuilder {
+  build(name: string) {
+    return new SlashCommandBuilder()
+      .setName(name)
+      .setDescription('Search')
+      .addStringOption(option => option.setName('query').setDescription('Query').setAutocomplete(true))
+      .addIntegerOption(option => option.setName('limit').setDescription('Limit'))
+  }
+}
+
+@CommandBuilder(CommandType.SLASH)
+class ChannelsBuilder {
+  build(name: string) {
+    return new SlashCommandBuilder()
+      .setName(name)
+      .setDescription('Channels')
+      .addSubcommand(sub => sub.setName('view').setDescription('View'))
+      .addSubcommand(sub =>
+        sub
+          .setName('notify')
+          .setDescription('Notify')
+          .addStringOption(option => option.setName('channel').setDescription('Channel').setAutocomplete(true)),
+      )
+      .addSubcommandGroup(group =>
+        group
+          .setName('alerts')
+          .setDescription('Alerts')
+          .addSubcommand(sub =>
+            sub
+              .setName('email')
+              .setDescription('Email')
+              .addStringOption(option => option.setName('address').setDescription('Address').setAutocomplete(true)),
+          ),
+      )
+  }
+}
+
+@Controller()
+class Commands {
+  @Command('search', SearchBuilder)
+  search() {}
+
+  @Command('channels', ChannelsBuilder)
+  channels() {}
+}
+
+describe('autocomplete handlers Discord never asks', () => {
+  // Listed as dispatch tries them: the handlers of one option before those of every option
+  it('are named in the same warning at create(), each with what is wrong and what to do', () => {
+    @Controller()
+    class Completions {
+      @Autocomplete('serch', 'query')
+      misspeltCommand() {}
+
+      @Autocomplete('channels notfy', 'channel')
+      misspeltSubcommand() {}
+
+      @Autocomplete('channels alerts')
+      group() {}
+
+      @Autocomplete('search', 'qeury')
+      misspeltOption() {}
+
+      @Autocomplete('search', 'limit')
+      notAutocomplete() {}
+
+      @Autocomplete('channels view')
+      nothingToComplete() {}
+    }
+
+    create([Commands, Completions])
+
+    expect(unregisteredWarning()).toBe(
+      '6 command handlers handle what Discord never sends, so they never run:\n' +
+        '  Completions.misspeltCommand: no builder registers the slash command "serch". Correct the name, or declare the command with a builder.\n' +
+        '  Completions.misspeltSubcommand: "channels notfy" is not a subcommand of the slash command "channels", whose builder registers ' +
+        '"channels view", "channels notify" and "channels alerts email". Correct the path.\n' +
+        '  Completions.misspeltOption: "search" has no option "qeury"; its options with autocomplete are "query". Correct the option name.\n' +
+        '  Completions.notAutocomplete: the option "limit" of "search" does not have autocomplete on, so Discord never asks to ' +
+        'complete it. Turn it on in the builder with setAutocomplete(true).\n' +
+        '  Completions.group: "channels alerts" is not a subcommand of the slash command "channels", whose builder registers ' +
+        '"channels view", "channels notify" and "channels alerts email". Correct the path.\n' +
+        '  Completions.nothingToComplete: "channels view" has no option with autocomplete on, so Discord never asks it to complete ' +
+        'one. Turn it on for an option in the builder with setAutocomplete(true).\n' +
+        'The next major version (5.0) refuses to start with these.',
+    )
+  })
+
+  it('leaves alone a handler of an option, a subcommand or a whole command its builder asks to complete', () => {
+    @Controller()
+    class Completions {
+      @Autocomplete('search', 'query')
+      query() {}
+
+      @Autocomplete('search')
+      anySearchOption() {}
+
+      @Autocomplete('channels notify', 'channel')
+      channel() {}
+
+      @Autocomplete('channels alerts email')
+      email() {}
+
+      // Every autocomplete of the command, whichever subcommand it is in
+      @Autocomplete('channels', 'address')
+      address() {}
+    }
+
+    create([Commands, Completions])
+
+    expect(unregisteredWarning()).toBeUndefined()
+  })
+
+  it('names, in the testing module, what is always a mistake, and leaves a fixture with no builder alone', () => {
+    @Controller()
+    class Completions {
+      @Autocomplete('sample', 'query')
+      fixture() {}
+
+      @Autocomplete('search', 'qeury')
+      misspeltOption() {}
+    }
+
+    MeoCordTestingModule.create({ controllers: [Commands, Completions] }).compile()
+
+    expect(unregisteredWarning()).toBe(
+      '1 command handler handles what Discord never sends, so it never runs:\n' +
+        '  Completions.misspeltOption: "search" has no option "qeury"; its options with autocomplete are "query". Correct the option name.\n' +
         'The next major version (5.0) refuses to start with these.',
     )
   })
