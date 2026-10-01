@@ -201,3 +201,49 @@ describe("the app's name in meocord.config.ts", () => {
     expect(new Function(`return ${literal}`)()).toBe(displayName)
   })
 })
+
+describe('the packages a new app uses', () => {
+  const dirs: string[] = []
+  afterAll(() => dirs.forEach(dir => fs.rmSync(dir, { recursive: true, force: true })))
+
+  const generated = (packageManager: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-app-packages-'))
+    dirs.push(dir)
+    new AppGeneratorHelper().generateApp(dir, { ...VARIABLES, packageManager, runtimePrefix: runtimePrefixFor(packageManager) })
+    return dir
+  }
+  const filesIn = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => (entry.isDirectory() ? filesIn(path.join(dir, entry.name)) : [path.join(dir, entry.name)]))
+  const packageOf = (specifier: string) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/')
+
+  // pnpm links only what package.json declares, so a package npm and bun happen to hoist is missing there
+  it('declares every package its files and the generated components import, and every type library its tsconfigs name', () => {
+    const dir = generated('bun')
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
+    const declared = new Set([...Object.keys(manifest.dependencies), ...Object.keys(manifest.devDependencies)])
+    const sources = [...filesIn(dir), ...filesIn(path.resolve(import.meta.dirname, '..', 'builder-template'))]
+      .filter(file => /\.ts(\.template)?$/.test(file))
+      .map(file => fs.readFileSync(file, 'utf8'))
+    const imported = sources.flatMap(source => [...source.matchAll(/(?:from|import)\s+'([^'.{][^']*)'/g)].map(([, specifier]) => specifier))
+    const typeLibraries = ['tsconfig.json', 'tsconfig.test.json'].flatMap(
+      file => JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')).compilerOptions.types as string[],
+    )
+    const used = new Set([
+      ...imported.filter(specifier => !specifier.startsWith('node:') && !specifier.startsWith('@src/')).map(packageOf),
+      ...typeLibraries.map(library => (library.includes('/') ? packageOf(library) : `@types/${library}`)),
+    ])
+
+    expect([...used].filter(name => !declared.has(name))).toEqual([])
+  })
+
+  // pnpm 11 and later refuse to install while a dependency's build script is neither allowed nor denied
+  it('settles, for pnpm, the install scripts it leaves off, in the file pnpm reads them from', () => {
+    const workspace = fs.readFileSync(path.join(generated('pnpm'), 'pnpm-workspace.yaml'), 'utf8')
+
+    expect(workspace).toMatch(/^allowBuilds:\n {2}'@swc\/core': false\n {2}unrs-resolver: false\n$/m)
+  })
+
+  it.each(['bun', 'npm', 'yarn'])('writes no pnpm-workspace.yaml for a %s project', packageManager => {
+    expect(fs.existsSync(path.join(generated(packageManager), 'pnpm-workspace.yaml'))).toBe(false)
+  })
+})

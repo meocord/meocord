@@ -43,8 +43,11 @@ interface Scenario {
   windows?: boolean
   /** Runs only on these platforms. */
   platforms?: NodeJS.Platform[]
-  /** Where it runs: the app bun installed, the app npm installed, an empty directory, or the directory holding the apps. */
-  cwd?: 'app' | 'npm-app' | 'empty' | 'parent'
+  /**
+   * Where it runs: the app bun installed, the app npm installed, the app as created for pnpm and not yet installed, an
+   * empty directory, or the directory holding the apps.
+   */
+  cwd?: 'app' | 'npm-app' | 'pnpm-app' | 'empty' | 'parent'
   /** Files written before it runs, relative to cwd; `null` deletes. Restored afterwards. */
   files?: Record<string, string | null>
   /** The CLI's arguments. */
@@ -95,6 +98,9 @@ interface Scenario {
 const workDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'meocord-cli-')))
 const appDir = path.join(workDir, 'app')
 const npmAppDir = path.join(workDir, 'npm-app')
+const pnpmAppDir = path.join(workDir, 'pnpm-app')
+/** pnpm as an app created for it installs with it: the newest release, from the registry, as npx runs it. */
+const PNPM = 'npx --yes pnpm@12.8.1'
 const emptyDir = path.join(workDir, 'empty')
 const hiddenDir = path.join(workDir, 'hidden')
 
@@ -404,7 +410,7 @@ function runtimeBinary(runtime: Runtime): string {
   return 'node'
 }
 
-const dirOf = (scenario: Scenario) => ({ app: appDir, 'npm-app': npmAppDir, empty: emptyDir, parent: workDir })[scenario.cwd ?? 'app']
+const dirOf = (scenario: Scenario) => ({ app: appDir, 'npm-app': npmAppDir, 'pnpm-app': pnpmAppDir, empty: emptyDir, parent: workDir })[scenario.cwd ?? 'app']
 
 /** The installed CLI a scenario runs: its own app's, or the bun-installed one outside an app. */
 const cliOf = (scenario: Scenario) => installedCliOf(scenario.cwd === 'npm-app' ? npmAppDir : appDir)
@@ -1028,6 +1034,18 @@ const scenarios: Scenario[] = [
     cwd: 'parent',
     argv: ['create', '!!!', '--use-bun'],
     expect: { code: 1, says: ['needs a name', 'my-bot'], never: ['already exists'] },
+  },
+
+  // pnpm links only what package.json declares, and from pnpm 11 refuses to install while a dependency's build script
+  // is neither allowed nor denied; the app installs and passes its own checks there
+  {
+    name: 'an app created for pnpm installs with pnpm, and passes its lint, tests and build',
+    tier: 'slow',
+    platforms: ['linux', 'darwin'],
+    cwd: 'pnpm-app',
+    command: ['sh', '-c', `${PNPM} install && ${PNPM} run lint && ${PNPM} run test && ${PNPM} run build:prod`],
+    timeoutMs: 300_000,
+    expect: { code: 0, creates: ['dist/main.js', 'dist/meocord.config.mjs'], never: ['ERR_PNPM', 'Ignored build scripts'] },
   },
 
   // Slow: an app npm installed, run through its own package scripts and the meocord bin
@@ -1722,6 +1740,7 @@ async function main(): Promise<void> {
       mustRun('install the application with npm', 'npm', ['install', '--no-audit', '--no-fund'], npmAppDir)
       cpSync(path.join(npmAppDir, '.env.example'), path.join(npmAppDir, '.env'))
     }
+    if (selected.some(scenario => scenario.cwd === 'pnpm-app')) renderApp(pnpmAppDir, tarball, 'pnpm')
 
     // Keeps a login waiting, so a bot is up and handling signals without a token that works
     const stalledApi = createServer()

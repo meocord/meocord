@@ -71,7 +71,7 @@ export function pack(into: string): string {
 }
 
 /** Renders the application template into `appDir`, with its framework dependency pointed at `tarball`. */
-export function renderApp(appDir: string, tarball: string, packageManager: 'bun' | 'npm' = 'bun'): void {
+export function renderApp(appDir: string, tarball: string, packageManager: 'bun' | 'npm' | 'pnpm' = 'bun'): void {
   mkdirSync(appDir, { recursive: true })
 
   new AppGeneratorHelper().generateApp(appDir, {

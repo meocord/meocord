@@ -1,0 +1,5 @@
+# Dependencies whose install scripts pnpm runs. @swc/core and unrs-resolver load the native binding pnpm installs for
+# this platform; their scripts only check it loads and fetch a fallback when it doesn't, so they stay off.
+allowBuilds:
+  '@swc/core': false
+  unrs-resolver: false
