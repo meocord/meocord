@@ -4,8 +4,8 @@ import { isShardProcess } from '@src/util/sharding-mode.util.js'
 export const DEV_RUNNER_ENV = 'MEOCORD_DEV_RUNNER'
 
 /**
- * What the application tells `meocord start --dev`: that the bot could not log in, which ends the watch session
- * since no code change fixes it, or that a later attempt logged in after all.
+ * What the application tells `meocord start --dev`: that the bot could not log in, which watch mode reports as it
+ * waits for a change to the code or `.env`, or that a later attempt logged in after all.
  */
 export type DevRunnerMessage = { meocord: 'login-failed' } | { meocord: 'online' }
 

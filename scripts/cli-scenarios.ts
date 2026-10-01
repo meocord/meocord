@@ -112,6 +112,8 @@ const configWith = (options: string) => validConfig.replace("// sharding: { shar
 const INVALID_TOKEN_ENV = 'DISCORD_TOKEN=not-a-real-token\n'
 /** What the bot logs when Discord refuses INVALID_TOKEN_ENV's token. */
 const REFUSED_TOKEN = 'Discord refused the bot token'
+/** What watch mode logs when the bot it runs could not log in. */
+const LOGIN_FAILED_IN_WATCH = 'watch mode starts it again on the next change'
 
 /** An entry that exits with code 3 before logging in, as a startup error in the app's own code does. */
 const selfExitingMain = `console.log('Leaving before logging in')\nprocess.exitCode = 3\n`
@@ -1482,15 +1484,26 @@ const scenarios: Scenario[] = [
     expect: { code: 0, says: ['Starting watch mode', 'The application exited with code 3; waiting for changes.'] },
   },
   {
-    name: 'start --dev ends with 1 when the bot cannot log in, as no code change fixes that',
+    name: 'start --dev exits 1 when its first build cannot start, as build does',
+    tier: 'fast',
+    files: { '.env': INVALID_TOKEN_ENV, 'meocord.config.ts': validConfig.replace('config.tools ??= {}', "throw new Error('hook broke')") },
+    argv: ['start', '--dev'],
+    timeoutMs: 60_000,
+    expect: { code: 1, says: ['Failed to start: hook broke'] },
+  },
+  {
+    name: 'start --dev keeps watching when the bot cannot log in, and starts it again, without a build, for an edit to .env',
     tier: 'slow',
     platforms: ['linux', 'darwin'],
     files: { '.env': INVALID_TOKEN_ENV },
     argv: ['start', '--dev'],
+    edits: [{ after: LOGIN_FAILED_IN_WATCH, files: { '.env': current => `${current}# edited\n` } }],
+    signal: { name: 'SIGINT', after: LOGIN_FAILED_IN_WATCH, times: 2 },
     timeoutMs: 60_000,
     expect: {
-      code: 1,
-      says: [REFUSED_TOKEN, 'The bot could not log in, and no code change fixes that; stopping watch mode.'],
+      code: 0,
+      // Two builds, the config's and the app's, as the session starts, and none for the edit
+      counts: { [REFUSED_TOKEN]: 2, [LOGIN_FAILED_IN_WATCH]: 2, '.env change detected': 1, 'built in': 2 },
       never: ['waiting for changes'],
     },
   },
