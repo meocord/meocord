@@ -13,6 +13,7 @@ import {
 } from 'discord.js'
 import { type Container } from 'inversify'
 import { Logger } from '@src/common/index.js'
+import { hideInLogs } from '@src/common/logger.js'
 import {
   getAutocompleteHandlers,
   getCommandMap,
@@ -113,6 +114,8 @@ export class MeoCordApp {
     private discordToken: string,
     private activities?: ActivityOptions[],
   ) {
+    // First, so nothing logged from here on, before login or after, prints it
+    hideInLogs(discordToken)
     this.bot = this.discordClient
     process.on('SIGINT', () => this.gracefulShutdown())
     process.on('SIGTERM', () => this.gracefulShutdown())

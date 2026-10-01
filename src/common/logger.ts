@@ -8,6 +8,46 @@ import chalk from 'chalk'
 dayjs.extend(utc)
 dayjs.extend(timezone)
 
+/**
+ * How deep an object argument prints: nested data a bot logs, such as a payload or its settings, shows in full, while
+ * a discord.js structure, which reaches its client and every cache, stops at a few hundred lines.
+ */
+const OBJECT_DEPTH = 4
+
+/** What a value registered with {@link hideInLogs} prints as. */
+export const REDACTED = '[redacted]'
+
+/**
+ * The shortest value registered: a bot's credential is far longer, and a short value, such as a test's placeholder,
+ * would replace ordinary words in every line.
+ */
+const MIN_HIDDEN_LENGTH = 16
+
+const hiddenValues = new Set<string>()
+
+/**
+ * Keeps `value`, such as the bot's credential, out of every line Logger prints from now on, whatever object, string
+ * or error carries it: as given, trimmed, and without the `Bot ` or `Bearer ` prefix discord.js strips.
+ */
+export function hideInLogs(value: string | undefined): void {
+  if (typeof value !== 'string') return
+  const trimmed = value.trim()
+  for (const form of [trimmed, trimmed.replace(/^(Bot|Bearer)\s*/i, '')]) {
+    if (form.length >= MIN_HIDDEN_LENGTH) hiddenValues.add(form)
+  }
+}
+
+/** Forgets every value {@link hideInLogs} registered: for specs. */
+export function forgetHiddenValues(): void {
+  hiddenValues.clear()
+}
+
+const redact = (text: string): string => {
+  let out = text
+  for (const value of hiddenValues) out = out.replaceAll(value, REDACTED)
+  return out
+}
+
 export class Logger {
   private readonly colorMap: Record<string, (msg: string) => string> = {
     LOG: chalk.green,
@@ -45,13 +85,8 @@ export class Logger {
 
   private formatMessage(message: any, logType: string): string {
     if (typeof message === 'object' && message !== null) {
-      return inspect(message, {
-        showHidden: true,
-        depth: null,
-        colors: true,
-        compact: false,
-        showProxy: true,
-      })
+      // As console.log inspects: without non-enumerable properties, which discord.js uses to keep its internals out of logs
+      return inspect(message, { depth: OBJECT_DEPTH, colors: true, compact: false })
     }
 
     return (this.colorMap[logType] || (msg => msg))(message)
@@ -61,6 +96,7 @@ export class Logger {
     if (messages.length === 0) return
 
     const config = loadMeoCordConfig()
+    hideInLogs(config?.discordToken)
     const logType = logLevel.toUpperCase()
     const applyColor = this.colorMap[logType] || (msg => msg)
     const formattedMessages = messages.map(message => this.formatMessage(message, logType))
@@ -71,8 +107,8 @@ export class Logger {
     const coloredContext = this.context ? chalk.yellow.bold(`[${this.context}]`) : ''
 
     const logTexts = [coloredAppName, timestamp, coloredLogLevel, coloredContext, ...formattedMessages].filter(
-      log => !!log,
+      (log): log is string => !!log,
     )
-    console[logLevel](...logTexts)
+    console[logLevel](...logTexts.map(redact))
   }
 }
