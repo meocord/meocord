@@ -53,6 +53,7 @@ import {
   createMockGuild,
   createMockChannel,
   createMockMessage,
+  createMockMember,
 } from './mock-interaction.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
 import { createTranslator } from '@src/common/translator.js'
@@ -833,6 +834,28 @@ describe('createChatInputOptions', () => {
     it('resolves getMember to null in a direct message, as Discord sends no member there', () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction, { options: createChatInputOptions({ target: createMockUser() }) })
       expect(interaction.options.getMember('target')).toBeNull()
+    })
+
+    it.each([
+      ['a user', (user: User) => user],
+      ['a member', (user: User) => createMockMember({ user })],
+    ])("carries its user, and in a server its member, in its data, as the gateway sends them, for %s given", (_name, given) => {
+      const user = createMockUser()
+      const guild = createMockGuild()
+      const options = createChatInputOptions({ target: given(user) })
+      createMockInteraction(ChatInputCommandInteraction, { guildId: guild.id, guild, options })
+
+      const [option] = options.data
+      expect(option.user).toBe(user)
+      expect(option.member).toBe(options.getMember('target'))
+      expect(option.member).toBeInstanceOf(GuildMember)
+    })
+
+    it('carries no member in its data in a direct message', () => {
+      const options = createChatInputOptions({ target: createMockUser() })
+      createMockInteraction(ChatInputCommandInteraction, { options })
+
+      expect(options.data[0].member).toBeUndefined()
     })
 
     it('resolves getUser to the user of a member given', () => {
@@ -1685,6 +1708,9 @@ describe('methods that return a promise in discord.js', () => {
   })
 })
 
+/** A collection of `items` by id, as discord.js keys a select menu's choices. */
+const collection = (...items: { id: string }[]) => new Collection(items.map(item => [item.id, item]))
+
 describe("a mock select menu's choices", () => {
   // discord.js builds `values` and a collection per kind of choice from what Discord sends, empty when none was picked
   it.each([
@@ -1701,6 +1727,18 @@ describe("a mock select menu's choices", () => {
       expect(interaction[kind]).toBeInstanceOf(Collection)
       expect((interaction[kind] as Collection<string, unknown>).map(item => item)).toEqual([])
     }
+  })
+
+  it.each([
+    ['users', UserSelectMenuInteraction, () => ({ users: collection(createMockUser()) })],
+    ['members alone', UserSelectMenuInteraction, () => ({ members: collection(createMockMember()) })],
+    ['roles', RoleSelectMenuInteraction, () => ({ roles: collection(createMockInteraction(Role, {})) })],
+    ['users and roles', MentionableSelectMenuInteraction, () => ({ users: collection(createMockUser()), roles: collection(createMockInteraction(Role, {})) })],
+  ] as const)('are the ids of the %s given, as Discord sends them in values', (_name, Class, picked) => {
+    const choices = picked() as Record<string, Collection<string, unknown>>
+    const interaction = createMockInteraction(Class as never, { customId: 'pick', ...choices }) as unknown as { values: string[] }
+
+    expect(interaction.values).toEqual(Object.values(choices).flatMap(given => [...given.keys()]))
   })
 
   it('keeps the values and collections a test gives', () => {

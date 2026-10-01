@@ -100,7 +100,8 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(Role, {
     id: snowflake,
     name: () => 'role',
-    position: () => 0,
+    // Above @everyone, which a server's role manager makes at position 0
+    position: () => 1,
     permissions: () => new PermissionsBitField().freeze(),
   }),
   // A message's text says which handler it is for, so it stays the test's to give, as a command's name does

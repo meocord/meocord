@@ -147,7 +147,8 @@ export interface ResponseSendOptions {
 }
 
 /**
- * One Discord call made through a response state, as the testing helpers report it.
+ * One answer call an interaction got, as `getResponse` from `meocord/testing` reports it: made through `respond()`, or
+ * with discord.js directly on a mock interaction.
  *
  * @group Responses
  */

@@ -81,6 +81,30 @@ describe("a mock interaction's channel", () => {
     const channel = createMockChannel(ThreadChannel)
     expect(createMockInteraction(ChatInputCommandInteraction, { channel: channel as never }).channel).toBe(channel)
   })
+
+  it.each([
+    ['a DM channel', () => createMockChannel(DMChannel), null],
+    ["a server's channel", () => createMockChannel(TextChannel, { guild: createMockGuild() } as never), 'guild'],
+  ] as const)('gives the interaction its channelId, guildId and guild, for %s given', (_name, make, server) => {
+    const channel = make() as unknown as { id: string; guild?: { id: string } }
+    const client = createMockClient()
+
+    const interaction = createMockInteraction(ChatInputCommandInteraction, { channel: channel as never, client: client as never })
+
+    const guild = server ? channel.guild! : null
+    expect([interaction.channelId, interaction.guildId, interaction.guild]).toEqual([channel.id, guild?.id ?? null, guild])
+    expect(interaction.inGuild()).toBe(server !== null)
+    expect(client.channels.cache.get(channel.id)).toBe(channel)
+  })
+
+  it("puts it in the interaction's server when it names none, so the two agree", () => {
+    const channel = createMockChannel(TextChannel)
+
+    const interaction = createMockInteraction(ChatInputCommandInteraction, { channel: channel as never })
+
+    expect(interaction.guildId).toEqual(expect.any(String))
+    expect(channel.guildId).toBe(interaction.guildId)
+  })
 })
 
 describe("a mock message's channel", () => {
@@ -110,6 +134,40 @@ describe("a mock message's channel", () => {
 
     expect(message.channel).toBe(channel)
     expect(message.channelId).toBe(channel.id)
+  })
+
+  it.each([
+    ['a DM channel', () => createMockChannel(DMChannel), false],
+    ["a server's channel", () => createMockChannel(TextChannel, { guild: createMockGuild() } as never), true],
+  ] as const)('gives the message its guild, for %s given, and is cached on its client', (_name, make, inServer) => {
+    const channel = make() as unknown as { id: string; guild?: { id: string } }
+
+    const message = createMockMessage({ channel: channel as never })
+
+    const guild = inServer ? channel.guild! : null
+    expect([message.guild, message.guildId, message.inGuild()]).toEqual([guild, guild?.id ?? null, inServer])
+    expect(message.client.channels.cache.get(channel.id)).toBe(channel)
+  })
+
+  it("puts it in the message's server when it names none, so the two agree", () => {
+    const channel = createMockChannel(TextChannel)
+
+    const message = createMockMessage({ channel })
+
+    expect(channel.guild).toBe(message.guild)
+    expect(channel.guildId).toBe(message.guildId)
+  })
+})
+
+describe("a mock channel's managers", () => {
+  it.each([
+    ['a text channel', TextChannel, { messages: 'channel', threads: 'channel' }],
+    ['a thread', ThreadChannel, { messages: 'channel', members: 'thread' }],
+    ['a DM channel', DMChannel, { messages: 'channel' }],
+  ] as const)('know their channel, as discord.js gives them, for %s', (_name, Class, owners) => {
+    const channel = createMockChannel(Class as never) as unknown as Record<string, Record<string, unknown>>
+
+    for (const [manager, key] of Object.entries(owners)) expect([manager, channel[manager][key]]).toEqual([manager, channel])
   })
 })
 

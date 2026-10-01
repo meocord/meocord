@@ -160,6 +160,33 @@ describe('MeoCordTestingModule.fromApp', () => {
     expect(hooks).toEqual(['provided store ready', 'Warmup ready', 'Warmup shutdown', 'provided store shutdown'])
   })
 
+  it('builds none of the app’s store, nor needs what it injects, when the test provides the CooldownStore', async () => {
+    const REDIS = createToken<object>('Redis')
+    @Service()
+    class RedisStore extends CooldownStore {
+      constructor(@Inject(REDIS) readonly redis: object) {
+        super()
+      }
+
+      async consume(): Promise<CooldownVerdict> {
+        throw new Error('the app’s store was asked')
+      }
+    }
+    @MeoCord({ controllers: [NotesController], providers: [{ provide: DATABASE, useFactory: connect }], cooldownStore: RedisStore, clientOptions: { intents: [] } })
+    class RedisApp {}
+    class TestStore extends CooldownStore {
+      async consume(key: string): Promise<CooldownVerdict> {
+        consumed.push(key)
+        return { allowed: true, retryAfterMs: 0 }
+      }
+    }
+
+    const module = MeoCordTestingModule.fromApp(RedisApp, { providers: [{ provide: CooldownStore, useValue: new TestStore() }] }).compile()
+
+    await expect(module.dispatch(slash('notes'))).resolves.toMatchObject({ ran: true })
+    expect(consumed).toHaveLength(1)
+  })
+
   it('adds a test’s own controllers and observers beside the app’s', async () => {
     const told: string[] = []
     @Observer()
