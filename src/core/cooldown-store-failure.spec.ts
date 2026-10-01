@@ -83,6 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 const said = (spy: ReturnType<typeof vi.spyOn>, text: string) => spy.mock.calls.filter(([message]) => String(message).includes(text))
@@ -102,7 +103,8 @@ describe("cooldownStoreFailure: 'deny', the default", () => {
     expect(said(logs.error, 'refused until it answers again')).toHaveLength(1)
   })
 
-  it('logs once when the store answers again, with how many calls failed', async () => {
+  it('logs once when the store answers again, 30 seconds after its last failure, with how many calls failed', async () => {
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
     const store = new FlakyStore('reject')
     const module = moduleWith(store, {})
     await expect(module.invoke(DailyController, 'daily', call('1'))).rejects.toThrow()
@@ -110,10 +112,33 @@ describe("cooldownStoreFailure: 'deny', the default", () => {
 
     store.failing = false
     await module.invoke(DailyController, 'daily', call('3'))
+    expect(said(logs.log, 'answers again')).toHaveLength(0)
+    vi.setSystemTime(30_000)
     await module.invoke(DailyController, 'daily', call('4'))
+    await module.invoke(DailyController, 'daily', call('5'))
 
-    expect(module.get(DailyController).runs).toBe(2)
+    expect(module.get(DailyController).runs).toBe(3)
     expect(said(logs.log, 'The cooldown store FlakyStore answers again, after 2 failed call(s)')).toHaveLength(1)
+  })
+
+  // As in a Redis Cluster with one master down: the keys in its slots fail, and the rest are counted
+  it('logs a partial outage once, however its failures and answers interleave', async () => {
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const store = new FlakyStore('reject')
+    const module = moduleWith(store, {})
+
+    for (let round = 0; round < 5; round++) {
+      vi.setSystemTime(round * 1_000)
+      store.failing = true
+      await expect(module.invoke(DailyController, 'daily', call(`failing-${round}`))).rejects.toThrow()
+      store.failing = false
+      await module.invoke(DailyController, 'daily', call(`answered-${round}`))
+    }
+    vi.setSystemTime(34_000)
+    await module.invoke(DailyController, 'daily', call('after'))
+
+    expect(said(logs.error, 'The cooldown store FlakyStore failed')).toHaveLength(1)
+    expect(said(logs.log, 'answers again')).toEqual([[expect.stringContaining('answers again, after 5 failed call(s) over 4s')]])
   })
 
   it('refuses a call the store does not answer within cooldownStoreTimeoutMs', async () => {
@@ -139,9 +164,11 @@ describe("cooldownStoreFailure: 'allow'", () => {
     const store = new FlakyStore('reject')
     const module = moduleWith(store, { cooldownStoreFailure: 'allow' })
 
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
     await module.invoke(DailyController, 'daily', call())
     await module.invoke(DailyController, 'daily', call())
     store.failing = false
+    vi.setSystemTime(30_000)
     await module.invoke(DailyController, 'daily', call())
 
     expect(module.get(DailyController).runs).toBe(3)
