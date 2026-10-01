@@ -295,9 +295,10 @@ export interface RunOptions {
   startedAt?: number
   /**
    * Told when a call ended without an error and left its interaction unanswered, or deferred without a
-   * follow-up, with the interceptor that returned without running the handler, if one did.
+   * follow-up: with the interceptor that returned before the handler finished, if one did, and whether the
+   * handler had started by then.
    */
-  onUnanswered?: (phase: 'unanswered' | 'deferred', returnedBy?: InterceptorClass) => void
+  onUnanswered?: (phase: 'unanswered' | 'deferred', returnedBy?: { interceptor: InterceptorClass; handlerStarted: boolean }) => void
 }
 
 /**
@@ -429,8 +430,10 @@ async function runPipeline(
   const starting = hasObservers(container) ? notifyStart(container, contextOf()) : undefined
 
   let ran = false
-  // The innermost interceptor entered: when the handler did not run, the one that returned without it
-  let innermost: InterceptorClass | undefined
+  // Once the handler has settled: before then, a call that ends is one an interceptor ended
+  let finished = false
+  // The outermost interceptor that returned before the handler finished, or without starting it
+  let returnedEarly: InterceptorClass | undefined
   try {
     // @Defer's first step, inside the filters so a failed acknowledgement reaches them.
     if (response) await startDefer(response, defer!, receivedAt)
@@ -460,12 +463,16 @@ async function runPipeline(
       // @Defer's second step, only once the call will run: a denied or invalid call never touches the message.
       await response?.lock({ disable: defer!.disable })
       ran = true
-      return callGuardedHandler(instance, methodName, handlerArgs)
+      try {
+        return await callGuardedHandler(instance, methodName, handlerArgs)
+      } finally {
+        finished = true
+      }
     }
     // Autocomplete answers within three seconds and has no reply to shape, so it skips interceptors.
     const applicable = type === 'autocomplete' ? [] : interceptors.filter(entry => appliesTo(entry, type))
     if (applicable.length === 0) await handler()
-    else await runInterceptors(applicable, container, contextOf(), handler, cls => (innermost = cls))
+    else await runInterceptors(applicable, container, contextOf(), handler, cls => (returnedEarly = cls))
     return { ran }
   } catch (error) {
     outcome = outcomeOf(error)
@@ -477,9 +484,11 @@ async function runPipeline(
     return { ran, error }
   } finally {
     await response?.release()
-    if (options.onUnanswered && (ran || innermost) && outcome === 'ran' && type === 'interaction') {
+    if (options.onUnanswered && (ran || returnedEarly) && outcome === 'ran' && type === 'interaction') {
       const phase = responsePhaseOf(contextOf())
-      if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered(phase, ran ? undefined : innermost)
+      // The handler is to blame only once it has finished; until then, the interceptor that ended the call is
+      const blamed = !finished && returnedEarly ? { interceptor: returnedEarly, handlerStarted: ran } : undefined
+      if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered(phase, blamed)
     }
     if (options.awaitObservers) await starting
     // After the answer and the release, so the duration covers the whole call

@@ -6,6 +6,16 @@ import { ExecutionContext, type HandlerExecutionContext } from '@src/common/exec
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { Logger } from '@src/common/logger.js'
+
+const logger = new Logger('Interceptor')
+
+/** A function's source when the engine wrote it: what `await` and `Promise.race` hand a promise, not code of the app's. */
+const NATIVE_SOURCE = /\{\s*\[native code\]\s*\}$/
+
+/** Whether `onRejected` is code of the app's that handles a rejection, rather than an engine's step passing it on. */
+const handlesRejection = (onRejected: unknown): boolean =>
+  typeof onRejected === 'function' && !NATIVE_SOURCE.test(Function.prototype.toString.call(onRejected))
 
 export type InterceptorClass = new (...args: any[]) => InterceptorInterface
 
@@ -65,10 +75,14 @@ export function prepareInterceptor(container: Container, entry: InterceptorEntry
 interface StartedRun {
   /** Settles, never rejecting, once the run has. */
   settled: Promise<void>
+  /** Whether the run has settled. */
+  done: boolean
   /** What the run rejected with, once it has. */
   failure?: { error: unknown }
   /** Chains from the run's promise that pass its rejection on and end there, so nothing handles it. */
   open: number
+  /** Whether code of the app's took the run's rejection in a chain from it, as `.catch()` does. */
+  caught?: boolean
 }
 
 /**
@@ -84,10 +98,10 @@ class Continuation extends Promise<unknown> {
   /** Starts `rest` as a run whose promise is tracked. */
   static start(rest: () => Promise<unknown>): { run: StartedRun; promise: Continuation } {
     const inner = rest()
-    const run: StartedRun = { settled: undefined as never, open: 0 }
+    const run: StartedRun = { settled: undefined as never, done: false, open: 0 }
     run.settled = inner.then(
-      () => undefined,
-      (error: unknown) => void (run.failure = { error }),
+      () => void (run.done = true),
+      (error: unknown) => void ((run.failure = { error }), (run.done = true)),
     )
     const promise = new Continuation((resolve, reject) => inner.then(resolve, reject))
     return { run, promise: promise.track(run, true) }
@@ -98,6 +112,7 @@ class Continuation extends Promise<unknown> {
     onRejected?: ((reason: any) => B | PromiseLike<B>) | null,
   ): Promise<A | B> {
     const next = super.then(onFulfilled, onRejected) as Promise<A | B>
+    if (this.run && handlesRejection(onRejected)) this.run.caught = true
     return this.branch(next, typeof onRejected !== 'function')
   }
 
@@ -144,14 +159,15 @@ class Continuation extends Promise<unknown> {
  * Runs `handler` inside `interceptors`, the first outermost. Each receives the call's context with its
  * own params, and continues with `next.handle()`. A level ends once its interceptor has settled and every
  * run it left on a chain that ends unhandled has, so the call ends when such a handler does; that run's
- * rejection fails the call. `entering` is told of each interceptor as it is called.
+ * rejection fails the call. `returnedEarly` is told of each interceptor that settles while a run it started is still
+ * going, or without starting one, innermost first, so the last it is told of is the outermost.
  */
 export async function runInterceptors(
   interceptors: readonly InterceptorEntry[],
   container: Container,
   context: HandlerExecutionContext,
   handler: () => Promise<unknown>,
-  entering?: (cls: InterceptorClass) => void,
+  returnedEarly?: (cls: InterceptorClass) => void,
 ): Promise<unknown> {
   const run = async (index: number): Promise<unknown> => {
     if (index === interceptors.length) return handler()
@@ -176,7 +192,6 @@ export async function runInterceptors(
       started.push(startedRun)
       return promise
     }
-    entering?.(cls)
     let outcome: { value: unknown } | { error: unknown }
     try {
       outcome = { value: await interceptor.intercept(context.withParams(params), { handle }) }
@@ -184,6 +199,19 @@ export async function runInterceptors(
       outcome = { error }
     }
     ended = true
+    if (started.length === 0 || started.some(({ done }) => !done)) returnedEarly?.(cls)
+    // A run it took on, as a timeout racing it does, and that fails once the call has ended reaches nobody: said here
+    for (const taken of started) {
+      if (taken.done || taken.open > 0) continue
+      void taken.settled.then(() => {
+        if (!taken.failure || taken.caught) return
+        logger.warn(
+          `${cls.name} returned before ${context.getController().name}.${context.getHandlerName()} finished, which then threw; ` +
+            'nothing caught it, so the call could not report it:',
+          taken.failure.error,
+        )
+      })
+    }
     // Only a run left on a chain that ends unhandled is the call's; one the interceptor took on, as a timeout
     // racing it does, is left to it
     const left = started.filter(({ open }) => open > 0)

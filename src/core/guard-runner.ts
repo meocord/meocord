@@ -361,8 +361,8 @@ export type StageClass = abstract new (...args: any[]) => unknown
  * The classes whose class-level stages apply to a handler, outermost first: the top of the chain, then each class
  * that extends it, down to the class the handler is dispatched on, the chain cut above a class with
  * `@Controller({ inheritStages: false })` at or above the declaring class. A base so wraps everything that extends it,
- * as global stages wrap controllers. Guards and interceptors run in this order; filters are tried, and cooldowns
- * counted, in reverse, from the innermost class out.
+ * as global stages wrap controllers. Guards, interceptors and cooldowns go in this order; filters are tried in
+ * reverse, from the innermost class out.
  */
 export const stageClasses = perHandler(
   (prototype: object, methodName: string): readonly StageClass[] => {
