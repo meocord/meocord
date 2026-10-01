@@ -581,8 +581,11 @@ describe('respond()', () => {
 
       await respond(interaction).error(new Error('x'))
 
+      expect(debug).toHaveBeenCalledOnce()
       expect(debug).toHaveBeenCalledWith(expect.stringContaining('Could not acknowledge the interaction privately'))
       expect(logged).not.toHaveBeenCalledWith(expect.stringContaining('Could not write the error answer for'), expect.anything())
+      // Discord no longer knows the interaction, so no answer is tried that could only fail the same way
+      expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['deferReply'])
       debug.mockRestore()
       logged.mockRestore()
     })
