@@ -1,20 +1,21 @@
 import { escapeForLog, quoteForLog, userWords } from '@src/util/user-text.util.js'
 
 describe('escapeForLog', () => {
-  it('escapes line breaks, controls, separators, bidi controls, quotes and backslashes', () => {
-    expect(escapeForLog('a\nb\r\tc\u0000\u001b[0m\u007f\u0085\u2028\u2029\u202e\u2066"\\')).toBe(
-      'a\\nb\\r\\tc\\u0000\\u001b[0m\\u007f\\u0085\\u2028\\u2029\\u202e\\u2066\\"\\\\',
+  it('escapes line breaks, controls, separators and bidi controls', () => {
+    expect(escapeForLog('a\nb\r\tc\u0000\u001b[0m\u007f\u0085\u2028\u2029\u202e\u2066')).toBe(
+      'a\\nb\\r\\tc\\u0000\\u001b[0m\\u007f\\u0085\\u2028\\u2029\\u202e\\u2066',
     )
   })
 
-  it('leaves other text as it is', () => {
-    expect(escapeForLog('héllo 👋 [x](y) **z**')).toBe('héllo 👋 [x](y) **z**')
+  // Not quoted, so a quote or a backslash can't end the text early, and markdown escaped for a reply reads as it is
+  it('leaves other text as it is, quotes and backslashes included', () => {
+    expect(escapeForLog('héllo 👋 [x](y) **z** "q" \\*')).toBe('héllo 👋 [x](y) **z** "q" \\*')
   })
 })
 
 describe('quoteForLog', () => {
-  it('quotes short text whole', () => {
-    expect(quoteForLog('!roll 20')).toBe('"!roll 20"')
+  it('quotes short text whole, escaping its quotes and backslashes', () => {
+    expect(quoteForLog('!say "hi" \\n\n')).toBe('"!say \\"hi\\" \\\\n\\n"')
   })
 
   // Counted by code point, so an emoji is never split into half a surrogate pair
