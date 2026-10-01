@@ -350,6 +350,15 @@ describe('a send Discord refuses as too large', () => {
 })
 
 describe('a presenter without messageError', () => {
+  // A cooldown notice prints its end as <t:…:R>, so both runs read one clock that does not move between them
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   /** What the bot sends for each message, the replies and direct messages, under an app. */
   async function answers(App: new () => unknown) {
     const module = MeoCordTestingModule.create({ app: App, controllers: [DiceController] }).compile()
