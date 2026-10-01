@@ -17,7 +17,14 @@ export function shutdownTimeoutProblem(value: unknown): string | undefined {
   return timeoutProblem(value, { allowZero: true, max: MAX_SHUTDOWN_TIMEOUT_MS })
 }
 
-/** The `shutdownTimeout` to wait: the configured one, or the default when none is set or the one set is not valid. */
-export function shutdownTimeoutOf(value: unknown): number {
-  return value !== undefined && shutdownTimeoutProblem(value) === undefined ? (value as number) : DEFAULT_SHUTDOWN_TIMEOUT_MS
+/**
+ * The `shutdownTimeout` to wait: the configured one, or the default when none is set. One set but not valid, which only
+ * a config the CLI never checked can carry, is named to `warn` in the check's own words, and the default is waited.
+ */
+export function shutdownTimeoutOf(value: unknown, warn: (message: string) => void): number {
+  if (value === undefined) return DEFAULT_SHUTDOWN_TIMEOUT_MS
+  const problem = shutdownTimeoutProblem(value)
+  if (problem === undefined) return value as number
+  warn(`shutdownTimeout ${problem}; shutdown waits the default ${DEFAULT_SHUTDOWN_TIMEOUT_MS} ms.`)
+  return DEFAULT_SHUTDOWN_TIMEOUT_MS
 }

@@ -699,7 +699,7 @@ copies or substantial portions of the Software.
    * @param then - What the stop is for, as the warning about killing it says.
    */
   private stopApp(app: ChildProcess, then: string, exited: () => void): void {
-    const shutdownTimeout = shutdownTimeoutOf(this.runConfig()?.shutdownTimeout)
+    const shutdownTimeout = shutdownTimeoutOf(this.runConfig()?.shutdownTimeout, message => this.logger.warn(message))
     const overdue = setTimeout(() => {
       if (!stillRunning(app)) return
       this.logger.warn(
