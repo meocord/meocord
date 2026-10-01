@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import { CooldownStore, MemoryCooldownStore, ShardedCooldownStore } from '@src/common/index.js'
 import {
   answerCooldown,
+  channelOver,
   type CooldownChannel,
   SHARDED_COOLDOWN_ABANDON_MS,
   shardedCooldownStoreOn,
@@ -91,15 +92,35 @@ describe('ShardedCooldownStore', () => {
     await failed
   })
 
-  it('fails a call at once when the channel to the manager has closed', async () => {
-    const closed: CooldownChannel = {
-      send: () => {
-        throw new Error('Channel closed')
-      },
-      onMessage: () => undefined,
-    }
+  it.each([
+    ['as the message is sent', (): CooldownChannel['send'] => () => {
+      throw new Error('Channel closed')
+    }],
+    // As a process's IPC reports it: the send returns, and the delivery fails a moment later
+    ['as the message is delivered', (): CooldownChannel['send'] => (_message, failed) => {
+      setImmediate(() => failed?.(new Error('Channel closed')))
+    }],
+  ])('fails a call at once when the channel to the manager has closed, %s', async (_when, send) => {
+    const closed: CooldownChannel = { send: send(), onMessage: () => undefined }
 
     await expect(shardedCooldownStoreOn(closed).consume('k', limit)).rejects.toThrow('Channel closed')
+  })
+
+  // A shard's own process: a send on a closed channel neither throws nor, without a callback, fails the call
+  it('sends over a process only while it is connected, and reports a failed delivery to the call', () => {
+    const send = vi.fn((_message: unknown, _handle: unknown, _options: unknown, callback: (error: Error | null) => void) => {
+      callback(new Error('Channel closed'))
+      return false
+    })
+    const proc = { connected: true, send, on: vi.fn() } as unknown as Parameters<typeof channelOver>[0]
+    const failed = vi.fn()
+
+    channelOver(proc).send({ meocord: 'cooldown', id: 'a', entries: [] }, failed)
+    expect(failed).toHaveBeenCalledWith(new Error('Channel closed'))
+
+    Object.assign(proc, { connected: false })
+    expect(() => channelOver(proc).send({ meocord: 'cooldown', id: 'b', entries: [] }, failed)).toThrow('The shard manager is gone')
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it("fails a call when the manager's own store fails, with its reason", async () => {
