@@ -9,6 +9,14 @@ const REFUSAL = Symbol.for('meocord.refusal')
 /** Whether this process reports refusals yet; see `reportRefusals`. */
 let reporting = false
 
+/** Refusals someone else reports, and ends the process for, which `reportRefusals` leaves to them. */
+const handedOff = new WeakSet<object>()
+
+/** Leaves a refusal to whoever reports it instead, such as a shard's manager: going uncaught, it is neither logged nor exits. */
+export function handOffRefusal(error: Error): void {
+  handedOff.add(error)
+}
+
 /**
  * Marks an error MeoCord raises for code it refuses as the application loads, such as a decorator given what it
  * cannot use, so the built application reports it as one line rather than a stack. The error is otherwise unchanged.
@@ -71,6 +79,7 @@ export function reportRefusals(
 ): void {
   reporting = true
   const report = (error: Error) => {
+    if (handedOff.has(error)) return
     if (!isExplainedError(error)) log(describeRefusal(error, process.cwd()))
     exit(1)
   }

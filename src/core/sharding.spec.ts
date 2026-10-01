@@ -497,6 +497,33 @@ describe('sharding', () => {
       expect(logged.error).toEqual([])
     })
 
+    // The refusal may go on uncaught, and a long reason takes a while to send; the process must last until it is sent
+    it('holds the process until its manager has the reason for a refusal, whatever becomes of the error', async () => {
+      const loaded = await load()
+      let sent: (() => void) | undefined
+      Reflect.set(process, 'send', (_message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+        sent = callback
+        return true
+      })
+      const holding = () => process.listenerCount('uncaughtException') + process.listenerCount('unhandledRejection')
+      const before = holding()
+      const [first, second] = [0, 1].map(() => {
+        @loaded.Service()
+        class Stats {}
+        return Stats
+      })
+
+      expect(() => loaded.MeoCordFactory.create(appClass(loaded, { services: [first, second] }))).toThrow('two classes have this name')
+      await new Promise(resolve => setTimeout(resolve, 20))
+
+      // An uncaught refusal would otherwise end the process now, with the message still on its way
+      expect(holding()).toBe(before + 2)
+      expect(exit).not.toHaveBeenCalled()
+      sent!()
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+      expect(holding()).toBe(before)
+    })
+
     it('listens to its manager while its providers are made, and stops before logging in', async () => {
       const loaded = await load()
       const login = vi.spyOn(loaded.discord.Client.prototype, 'login').mockResolvedValue('token')
