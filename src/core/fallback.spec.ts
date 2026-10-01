@@ -394,9 +394,12 @@ describe('the fallback on a message a guard or validation refuses', () => {
     },
   )
 
-  it('still reports a guard refusing a reaction, which has no message to answer', async () => {
+  // A reaction has no message to answer, so its guard only filters, as a listener's does
+  it('logs a guard refusing a reaction at debug level only', async () => {
     const logger = await fail(mockReaction(), new GuardDeniedError('Not for you.'))
-    expect(logger.error).toHaveBeenCalled()
+
+    expect(logger.error).not.toHaveBeenCalled()
+    expect(logger.debug).toHaveBeenCalledWith('Denied reaction "👍": Not for you.')
   })
 })
 

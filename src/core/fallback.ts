@@ -11,6 +11,7 @@ import { errorText } from '@src/common/translate-error.js'
 import { interactionLocale, messageLocale, renderText, translatorOfClient } from '@src/common/meocord-text.js'
 import { type MessageCommandOptions } from '@src/interface/index.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
+import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
 
 /** The app's message options the fallback's replies to messages follow. */
 type MessageReplyOptions = Pick<MessageCommandOptions, 'deleteUsageRepliesAfter' | 'replyEmoji' | 'dmOnError' | 'dmOnCooldown'>
@@ -55,14 +56,15 @@ export async function closeAutocomplete(interaction: AutocompleteInteraction, lo
   }
 }
 
+/** Names a call in a log line, quoting the message's text as {@link quoteForLog} does, since its author wrote it. */
 function describeCall(context: ExecutionContext): string {
   const handler = context.getHandlerName()
   const message = context.getMessage()
   const reaction = context.getReaction()
   const subject = message
-    ? `message "${message.content}"`
+    ? `message ${quoteForLog(String(message.content))}`
     : reaction
-      ? `reaction "${reaction.emoji.name}"`
+      ? `reaction ${quoteForLog(String(reaction.emoji.name))}`
       : `${context.getType()}`
   return handler ? `${subject} for method "${handler}"` : subject
 }
@@ -75,7 +77,7 @@ async function tellAuthor(
   withEmoji: boolean | undefined,
   answering: Answering,
 ): Promise<void> {
-  logger.debug(`Refused ${describeCall(context)}: ${error.message}`)
+  logger.debug(`Refused ${describeCall(context)}: ${escapeForLog(error.message)}`)
   const message = context.getMessage()
   if (message) await replyToMessage(message, error, logger, withEmoji, answering)
 }
@@ -130,7 +132,7 @@ export async function replyWithUserError(
 }
 
 async function replyToMessage(message: Message, error: UserError, logger: Logger, withEmoji: boolean | undefined, answering: Answering): Promise<void> {
-  const content = answering.build('the reply', `message "${message.content}"`, () => replyText(error.message, withEmoji))
+  const content = answering.build('the reply', `message ${quoteForLog(String(message.content))}`, () => replyText(error.message, withEmoji))
   if (content === undefined) return
   try {
     await message.reply({ content, allowedMentions: { repliedUser: false } })
@@ -183,6 +185,21 @@ async function tellPrivately(
   }
 }
 
+/**
+ * Logs an error an interaction's call raised that is the user's own outcome, below error level, and says whether it
+ * was one: a command no handler takes, a denial, a cooldown, a refusal or invalid input. `isUserOutcome` agrees.
+ */
+function logUserOutcome(logger: Logger, error: unknown, call: string): boolean {
+  if (error instanceof CommandNotFoundError) logger.warn(error.message)
+  else if (error instanceof GuardDeniedError) logger.debug(`Denied ${call}: ${escapeForLog(error.message)}`)
+  else if (error instanceof CooldownError) logger.debug(`Cooldown (${error.per}) blocked ${call} for ${error.retryAfterMs} ms`)
+  else if (error instanceof CooldownStoreError) logger.debug(`Cooldown store down; refused ${call}`)
+  else if (error instanceof UserError) logger.debug(`Refused ${call}: ${escapeForLog(error.message)}`)
+  else if (error instanceof ValidationError) logger.debug(`Invalid input for ${call}: ${escapeForLog(error.message)}`)
+  else return false
+  return true
+}
+
 /** How long a reply showing a command's usage stays, in seconds, when the app does not say. */
 export const DEFAULT_USAGE_REPLY_SECONDS = 10
 
@@ -221,9 +238,10 @@ async function answerUsage(
  * The built-in fallback: logs an error no filter handled, then answers the interaction through
  * `respond(interaction).error()` if it can still take an answer. A message that names a command but does
  * not fit it is answered with the command's usage, and one a guard denies or validation refuses with the
- * reason, each deleted after `deleteUsageRepliesAfter` seconds; a listener's denial only at debug level, since
- * its guard filters messages; one a `UserError` refused with that error's message; other errors of messages,
- * reactions and events are only logged.
+ * reason, each deleted after `deleteUsageRepliesAfter` seconds; a listener's or a reaction's denial only at debug
+ * level, since its guard filters calls; one a `UserError` refused with that error's message; other errors of
+ * messages, reactions and events are only logged. An autocomplete's menu is closed, its user's outcomes logged at debug
+ * level as a command's are.
  */
 export function createFallback(
   logger: Logger,
@@ -241,13 +259,13 @@ export function createFallback(
     if (!interaction) {
       if (error instanceof MessageUsageError) {
         // With no prefix or mention the message may be chat that happens to begin with a command's words
-        if (error.quiet) logger.debug(`Usage not shown for ${describeCall(context)}: ${error.message}`)
+        if (error.quiet) logger.debug(`Usage not shown for ${describeCall(context)}: ${escapeForLog(error.message)}`)
         else await answerUsage(error, context, logger, messageOptions(), answering)
         return
       }
-      if ((error instanceof GuardDeniedError || error instanceof ValidationError) && context.getMessage()) {
-        logger.debug(`${error instanceof GuardDeniedError ? 'Denied' : 'Invalid input for'} ${describeCall(context)}: ${error.message}`)
-        // A command's sender addressed the bot, so is told why, as with the usage; a listener's guard only filters
+      if (error instanceof GuardDeniedError || error instanceof ValidationError) {
+        logger.debug(`${error instanceof GuardDeniedError ? 'Denied' : 'Invalid input for'} ${describeCall(context)}: ${escapeForLog(error.message)}`)
+        // A command's sender addressed the bot, so is told why, as with the usage; a listener's or a reaction's guard only filters
         if (isCommand(context)) await answerUsage(error, context, logger, messageOptions(), answering)
         return
       }
@@ -271,7 +289,8 @@ export function createFallback(
     }
 
     if (interaction.isAutocomplete()) {
-      logger.error(`Error handling ${describeInteraction(interaction)}:`, error)
+      // The menu closes either way; a denial or a refusal is the user's outcome there as on a command
+      if (!logUserOutcome(logger, error, describeInteraction(interaction))) logger.error(`Error handling ${describeInteraction(interaction)}:`, error)
       await closeAutocomplete(interaction, logger)
       return
     }
@@ -297,30 +316,20 @@ export function createFallback(
         answering.fail('the answer', call, failure)
       }
     }
-    if (error instanceof CommandNotFoundError) {
-      logger.warn(error.message)
+    if (!logUserOutcome(logger, error, call)) {
+      logger.error(`Error handling ${call}:`, error)
+      await present(undefined, () => responseOf(interaction).presentAnswer(error))
+    } else if (error instanceof CommandNotFoundError) {
       const message = said()
       // Moot if a collector or another listener answered it meanwhile
       if (message !== undefined) await present(message, text => responseOf(interaction).presentAnswer(error, { message: text }, { ifUnanswered: true }))
-    } else if (error instanceof GuardDeniedError) {
-      logger.debug(`Denied ${call}: ${error.message}`)
-      await present(error.message, text => responseOf(interaction).presentAnswer(error, { message: text, visibility: 'private' }))
     } else if (error instanceof CooldownError || error instanceof CooldownStoreError) {
-      if (error instanceof CooldownError) logger.debug(`Cooldown (${error.per}) blocked ${call} for ${error.retryAfterMs} ms`)
-      else logger.debug(`Cooldown store down; refused ${call}`)
       const message = said()
       if (message !== undefined) await present(message, text => responseOf(interaction).presentAnswer(error, { message: text, visibility: 'private' }))
-    } else if (error instanceof UserError) {
-      // The caller's own mistake, which only they need to see, and no fault to log
-      logger.debug(`Refused ${call}: ${error.message}`)
-      await present(error.message, text => responseOf(interaction).presentAnswer(error, { message: text, visibility: 'private' }))
-    } else if (error instanceof ValidationError) {
-      // The caller's own input is wrong: only they need to see which part, and it is no fault to log.
-      logger.debug(`Invalid input for ${call}: ${error.message}`)
-      await present(error.message, text => responseOf(interaction).presentAnswer(error, { message: text, visibility: 'private' }))
     } else {
-      logger.error(`Error handling ${call}:`, error)
-      await present(undefined, () => responseOf(interaction).presentAnswer(error))
+      // A denial, a refusal or invalid input, in the app's own words, which only the caller needs to see
+      const { message } = error as Error
+      await present(message, text => responseOf(interaction).presentAnswer(error, { message: text, visibility: 'private' }))
     }
   }
 }

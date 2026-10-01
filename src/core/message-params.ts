@@ -7,6 +7,7 @@ import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/
 import { type GivenFlag, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { type RunOptions } from '@src/core/handler-pipeline.js'
 import { bool, choicesOf, duration, lookupTable, number } from '@src/core/scalar-types.js'
+import { userWords } from '@src/util/user-text.util.js'
 
 type ParamToken = Extract<PatternToken, { param: string }>
 
@@ -99,8 +100,8 @@ function wrongType(item: Item, types: Record<string, MessageParamType> | undefin
   const { label, word } = item
   const choices = choicesOf(item.type)
   return choices
-    ? usageIssue({ key: 'meocord.usage.notOneOf', params: { label, word, choices: { list: choices, style: 'or' } } }, item.key)
-    : usageIssue({ key: 'meocord.usage.notValid', params: { label, word, type: typeLabel(item.type, types) } }, item.key)
+    ? usageIssue({ key: 'meocord.usage.notOneOf', params: { label, word: userWords(word), choices: { list: choices, style: 'or' } } }, item.key)
+    : usageIssue({ key: 'meocord.usage.notValid', params: { label, word: userWords(word), type: typeLabel(item.type, types) } }, item.key)
 }
 
 /** What a param of a type takes, in words: `whole number`, `one of asc, desc`, an app type's label, or `text`. */
@@ -293,9 +294,9 @@ function missingEntity({ key, label, word, kind, noun, ref }: RefSlot): MessageU
     case 'role':
       return usageIssue({ key: 'meocord.usage.notRole', params: { label, id } }, key)
     case 'channel':
-      return usageIssue({ key: 'meocord.usage.notChannel', params: { label, word } }, key)
+      return usageIssue({ key: 'meocord.usage.notChannel', params: { label, word: userWords(word) } }, key)
     case 'own':
-      return usageIssue({ key: 'meocord.usage.notValid', params: { label, word, type: noun ?? '' } }, key)
+      return usageIssue({ key: 'meocord.usage.notValid', params: { label, word: userWords(word), type: noun ?? '' } }, key)
     default:
       return kind satisfies never
   }
@@ -385,7 +386,7 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
     if (declared) given.set(declared.flag, flag)
     else if (!unknown.has(flag.name)) {
       unknown.add(flag.name)
-      issues.push(usageIssue({ key: 'meocord.usage.unknownFlag', params: { flag: flag.name } }))
+      issues.push(usageIssue({ key: 'meocord.usage.unknownFlag', params: { flag: userWords(flag.name) } }))
     }
   }
   for (const flag of route.flags) {
@@ -394,7 +395,7 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
     delete params[flag.flag]
     if (flag.type === undefined) {
       const on = value === undefined ? given.has(flag.flag) : bool(value)
-      if (on === undefined) issues.push(usageIssue({ key: 'meocord.usage.notYesNo', params: { label, value: value! } }, flag.flag))
+      if (on === undefined) issues.push(usageIssue({ key: 'meocord.usage.notYesNo', params: { label, value: userWords(value!) } }, flag.flag))
       else params[flag.flag] = on
     } else if (!given.has(flag.flag)) {
       if (!flag.optional) issues.push(usageIssue({ key: 'meocord.usage.missing', params: { param: label } }, flag.flag))

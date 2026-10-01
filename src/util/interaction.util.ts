@@ -16,6 +16,7 @@ import {
   UserSelectMenuInteraction,
 } from 'discord.js'
 import { CommandType } from '@src/enum/controller.enum.js'
+import { quoteForLog } from '@src/util/user-text.util.js'
 
 /**
  * The discord.js interaction class each command type handles, shared by `@Command`, the dispatcher and
@@ -182,7 +183,8 @@ export function describeInteraction(interaction: Interaction): string {
     return `command "${interaction.commandName}"`
   }
   if (hasCustomId(interaction)) {
-    return `customId "${interaction.customId}"`
+    // The client sends the customId, so it is quoted as text a user could write
+    return `customId ${quoteForLog(String(interaction.customId))}`
   }
   return `interaction type ${type}`
 }
