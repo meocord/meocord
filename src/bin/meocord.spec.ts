@@ -30,9 +30,9 @@ vi.mock('@src/util/meocord-config-loader.util.js', async importOriginal => {
 
 import { spawn } from 'node:child_process'
 import { existsSync, watch } from 'node:fs'
-import { FORCE_STOP_GRACE_MS, MeoCordCLI } from '@src/bin/meocord.js'
+import { MeoCordCLI } from '@src/bin/meocord.js'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
-import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS, FORCE_STOP_GRACE_MS, MAX_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { namePathProblem, nextStepFor } from '@src/bin/generator.js'
 import { ControllerType } from '@src/enum/controller.enum.js'
 import { RUNTIME_OVERRIDE_ENV } from '@src/util/runtime.util.js'
@@ -603,12 +603,14 @@ describe('spawning the application', () => {
         expect(warned()).toContainEqual(expect.stringContaining('its shutdownTimeout of 3000 ms'))
       })
 
-      // The grace period on top would pass a timer's limit, and Node fires such a timer at once
-      it('waits as long as a timer keeps when the shutdownTimeout is the longest allowed', () => {
-        const { first } = restartOnce(2_147_483_647)
+      // The grace period on top still fits a timer, which Node would fire at once past its limit
+      it('keeps the whole grace period after the longest shutdownTimeout', () => {
+        const { first } = restartOnce(MAX_SHUTDOWN_TIMEOUT_MS)
 
-        vi.advanceTimersByTime(60_000)
+        vi.advanceTimersByTime(MAX_SHUTDOWN_TIMEOUT_MS + FORCE_STOP_GRACE_MS - 1)
         expect(first.kill).not.toHaveBeenCalledWith('SIGKILL')
+        vi.advanceTimersByTime(1)
+        expect(first.kill).toHaveBeenCalledWith('SIGKILL')
       })
 
       it('waits the default shutdownTimeout when none is configured', () => {

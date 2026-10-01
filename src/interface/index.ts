@@ -1166,7 +1166,7 @@ export interface MeoCordConfig {
   sourceMappedStacks?: boolean
   /**
    * How long, in milliseconds, shutdown waits for the `onShutdown` hooks before destroying the client
-   * anyway: from 0 to 2147483647, the longest a timer keeps. The limit covers the whole sequence, not each hook,
+   * anyway: from 0 to 2147478647, the longest a timer keeps less the margin the shard manager waits on top. The limit covers the whole sequence, not each hook,
    * including the calls under way that the cooldown store's shutdown waits for.
    *
    * @defaultValue `10_000`

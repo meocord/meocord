@@ -10,9 +10,12 @@ function quoted(value: unknown): string {
 
 /**
  * What is wrong with a timeout option, or `undefined` when it is a number of milliseconds a timer keeps: finite, above
- * 0, or 0 or more with `allowZero`, and at most {@link MAX_TIMER_MS}. The caller names the option before it.
+ * 0, or 0 or more with `allowZero`, and at most `max`, {@link MAX_TIMER_MS} unless less. The caller names the option.
  */
-export function timeoutProblem(value: unknown, { allowZero = false }: { allowZero?: boolean } = {}): string | undefined {
-  if (typeof value === 'number' && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0) && value <= MAX_TIMER_MS) return undefined
-  return `must be a number of milliseconds ${allowZero ? '0 or more' : 'above 0'}, at most ${MAX_TIMER_MS} (got ${quoted(value)})`
+export function timeoutProblem(
+  value: unknown,
+  { allowZero = false, max = MAX_TIMER_MS }: { allowZero?: boolean; max?: number } = {},
+): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0) && value <= max) return undefined
+  return `must be a number of milliseconds ${allowZero ? '0 or more' : 'above 0'}, at most ${max} (got ${quoted(value)})`
 }

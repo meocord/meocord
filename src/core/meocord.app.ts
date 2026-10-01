@@ -53,7 +53,7 @@ import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { deliverUncachedDmReactions } from '@src/core/dm-reactions.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
-import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
+import { shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { escapeForLog } from '@src/util/user-text.util.js'
 
 /** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
@@ -155,8 +155,8 @@ export class MeoCordApp implements MeoCordApplication {
       warnUnanswered,
     })
     this.dispatcher.getComponentRoutes()
-    this.shutdownTimeout =
-      typeof shutdownTimeout === 'number' && shutdownTimeout >= 0 ? shutdownTimeout : DEFAULT_SHUTDOWN_TIMEOUT_MS
+    // Read through the config's own check: a bot started without the CLI loads its config unchecked
+    this.shutdownTimeout = shutdownTimeoutOf(shutdownTimeout)
   }
 
   /** Everything whose lifecycle hooks run, classes and provided values, in dependency order. */

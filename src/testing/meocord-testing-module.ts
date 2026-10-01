@@ -64,8 +64,7 @@ import { createMockClient } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
-import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
-import { timeoutProblem } from '@src/util/timer-limit.util.js'
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
 import {
   assertProvided,
   assertTypedParameters,
@@ -111,7 +110,7 @@ export interface TestingModuleOptions {
 
   /**
    * How long `close()` waits, in milliseconds, for the calls under way, the cooldown store's operations and the
-   * `onShutdown` hooks, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown: from 0 to 2147483647,
+   * `onShutdown` hooks, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown: from 0 to 2147478647,
    * and 10000 unless set. A test whose fake store never answers, or whose `onShutdown` never settles, sets it short.
    */
   shutdownTimeout?: number
@@ -929,7 +928,7 @@ export class TestingModuleBuilder {
    */
   compile(): TestingModule {
     // The bound the bot's config gives it, with the same words
-    const shutdownTimeout = this.options.shutdownTimeout === undefined ? undefined : timeoutProblem(this.options.shutdownTimeout, { allowZero: true })
+    const shutdownTimeout = this.options.shutdownTimeout === undefined ? undefined : shutdownTimeoutProblem(this.options.shutdownTimeout)
     if (shutdownTimeout) throw new TypeError(`shutdownTimeout ${shutdownTimeout}.`)
     const container = new Container()
     const stages = this.globalStages()

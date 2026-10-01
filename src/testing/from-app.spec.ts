@@ -359,12 +359,12 @@ describe('closing a module, as the bot shuts down', () => {
   // Node fires a longer timer at once, so close() would give up on the hooks immediately
   it.each([
     [-1, '-1'],
-    [2_147_483_648, '2147483648'],
+    [2_147_478_648, '2147478648'],
     [Infinity, 'Infinity'],
     ['50', '"50"'],
   ])('refuses a shutdownTimeout of %s, in the words the config uses', (shutdownTimeout, shown) => {
     expect(() => MeoCordTestingModule.fromApp(DailyApp, { shutdownTimeout: shutdownTimeout as number }).compile()).toThrow(
-      new TypeError(`shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got ${shown}).`),
+      new TypeError(`shutdownTimeout must be a number of milliseconds 0 or more, at most 2147478647 (got ${shown}).`),
     )
   })
 })

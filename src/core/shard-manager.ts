@@ -6,8 +6,7 @@ import { MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { answerCooldown } from '@src/common/sharded-cooldown-store.js'
 import { registerCommands, type RegistrationRest } from '@src/core/command-registration.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
-import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
-import { MAX_TIMER_MS } from '@src/util/timer-limit.util.js'
+import { SHUTDOWN_MARGIN_MS, shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { bundleEntry } from '@src/util/bundle-entry.util.js'
 import { FORCE_REGISTER_ENV } from '@src/util/registration-mode.util.js'
@@ -27,8 +26,6 @@ export const RESPAWN_BASE_MS = 1_000
 export const RESPAWN_CAP_MS = 60_000
 /** How long a shard must stay up before its respawn delay starts from the beginning again. */
 export const RESPAWN_RESET_MS = 5 * 60_000
-/** How much longer than the shards' own shutdown timeout the manager waits before killing them. */
-export const SHUTDOWN_MARGIN_MS = 5_000
 
 /** What the manager needs from its environment; tests replace the parts that start processes or exit. */
 export interface ShardManagerOptions {
@@ -272,8 +269,7 @@ export class ShardManager implements MeoCordApplication {
       })
     }
 
-    // Within what a timer keeps, so a shutdownTimeout near the limit does not fire this at once
-    const wait = Math.min((this.options.config.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS) + SHUTDOWN_MARGIN_MS, MAX_TIMER_MS)
+    const wait = shutdownTimeoutOf(this.options.config.shutdownTimeout) + SHUTDOWN_MARGIN_MS
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<'timeout'>(resolve => {
       timer = setTimeout(() => resolve('timeout'), wait)
