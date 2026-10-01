@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { vi } from 'vitest'
 import { ChatInputCommandInteraction, Client } from 'discord.js'
 import { createToken } from '@src/common/token.js'
+import { Logger } from '@src/common/logger.js'
 import { CooldownStore, type CooldownLimit, type CooldownVerdict } from '@src/common/cooldown-store.js'
 import { respond } from '@src/common/response/response-state.js'
 import { Command, Controller, Cooldown, Inject, MeoCord, Observer, Service } from '@src/decorator/index.js'
@@ -269,6 +270,102 @@ describe('closing a module whose shutdown never finishes', () => {
     await module.close()
 
     expect(Date.now() - started).toBeLessThan(1_000)
+  })
+})
+
+// close() runs the bot's own shutdown sequence
+describe('closing a module, as the bot shuts down', () => {
+  const events: string[] = []
+  let running = Promise.withResolvers<void>()
+  let finish = Promise.withResolvers<void>()
+
+  beforeEach(() => {
+    events.length = 0
+    running = Promise.withResolvers<void>()
+    finish = Promise.withResolvers<void>()
+  })
+
+  @Service()
+  class Queries {
+    onShutdown() {
+      events.push('queries shutdown')
+    }
+  }
+
+  @Service()
+  class QueryStore extends CooldownStore {
+    constructor(readonly queries: Queries) {
+      super()
+    }
+
+    onShutdown() {
+      events.push('store shutdown')
+    }
+
+    async consume(): Promise<CooldownVerdict> {
+      return { allowed: true, retryAfterMs: 0 }
+    }
+  }
+
+  @Controller()
+  class DailyController {
+    @Command('daily', CommandType.SLASH)
+    @Cooldown({ seconds: 5 })
+    async claim() {
+      events.push('call runs')
+      running.resolve()
+      await finish.promise
+      events.push('call done')
+    }
+  }
+
+  @MeoCord({ controllers: [DailyController], cooldownStore: QueryStore, clientOptions: { intents: [] } })
+  class DailyApp {}
+
+  it('lets the calls under way finish, then shuts the store down before what it injects', async () => {
+    const module = MeoCordTestingModule.fromApp(DailyApp).compile()
+    const dispatched = module.dispatch(slash('daily'))
+    await running.promise
+
+    const closed = module.close()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(events).toEqual(['call runs'])
+
+    finish.resolve()
+    await Promise.all([dispatched, closed])
+
+    expect(events).toEqual(['call runs', 'call done', 'store shutdown', 'queries shutdown'])
+  })
+
+  it('waits for the sequence at most the shutdownTimeout fromApp is given, and says so', async () => {
+    @Service()
+    class Stuck {
+      onShutdown(): Promise<void> {
+        return new Promise(() => {})
+      }
+    }
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const module = MeoCordTestingModule.fromApp(DailyApp, { providers: [{ provide: Stuck, useClass: Stuck }], shutdownTimeout: 50 }).compile()
+    module.get(Stuck)
+
+    const started = Date.now()
+    await module.close()
+
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(warn).toHaveBeenCalledWith('onShutdown hooks did not finish within 50 ms; shutting down anyway.')
+    warn.mockRestore()
+  })
+
+  // Node fires a longer timer at once, so close() would give up on the hooks immediately
+  it.each([
+    [-1, '-1'],
+    [2_147_483_648, '2147483648'],
+    [Infinity, 'Infinity'],
+    ['50', '"50"'],
+  ])('refuses a shutdownTimeout of %s, in the words the config uses', (shutdownTimeout, shown) => {
+    expect(() => MeoCordTestingModule.fromApp(DailyApp, { shutdownTimeout: shutdownTimeout as number }).compile()).toThrow(
+      new TypeError(`shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got ${shown}).`),
+    )
   })
 })
 

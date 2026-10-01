@@ -426,6 +426,21 @@ describe('ShardManager', () => {
       expect(exit).toHaveBeenCalledWith(1)
     })
 
+    // The margin on top would pass a timer's limit, and Node fires such a timer at once
+    it('waits as long as a timer keeps when the shutdownTimeout is the longest allowed', async () => {
+      vi.useFakeTimers()
+      const { manager, shards, exit } = setup({ shards: 1, shutdownTimeout: 2_147_483_647 })
+      await manager.start()
+
+      const stopped = manager.stopAndExit()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(shards[0].process).not.toBeNull()
+
+      shards[0].die(0)
+      await stopped
+      expect(exit).toHaveBeenCalledWith(0)
+    })
+
     it('kills every shard at once on a signal repeated after the window', async () => {
       const { manager, shards, exit, clock } = setup({ shards: 2 })
       await manager.start()
