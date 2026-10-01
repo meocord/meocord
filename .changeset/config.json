@@ -3,14 +3,14 @@
   "changelog": [
     "@changesets/changelog-github",
     {
-      "repo": "l7aromeo/meocord"
+      "repo": "meocord/meocord"
     }
   ],
   "commit": false,
   "fixed": [],
   "linked": [],
   "access": "public",
-  "baseBranch": "main",
+  "baseBranch": "release/4.0",
   "updateInternalDependencies": "patch",
   "ignore": []
 }
