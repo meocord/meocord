@@ -296,19 +296,21 @@ export class MeoCordFactory {
       ...(token === store && { cooldownStore: true }),
     }))
 
-    // ShardContext.call reaches a service in another shard by its class name
-    const names = new Set<string>()
-    for (const cls of appClasses) {
-      if (names.has(cls.name) && meocordConfig.sharding?.mode === 'process') {
-        throw refuse(new Error(
-          `${cls.name}: two classes have this name; with process sharding, ShardContext.call finds a service in ` +
-            `another shard by its name, so give each controller and service a distinct name.`,
-        ))
+    // What ShardContext.call reaches: the app's classes, and the classes its providers stand in for
+    const callable = [...new Set([...appClasses, ...[...providers.keys()].filter(isAppClassToken)])]
+    // From another shard a call names its class, so with process sharding every name it can reach is one class's
+    if (meocordConfig.sharding?.mode === 'process') {
+      const names = new Set<string>()
+      for (const cls of callable) {
+        if (names.has(cls.name)) {
+          throw refuse(new Error(
+            `${cls.name}: two classes have this name; with process sharding, ShardContext.call finds a class in another ` +
+              'shard by its name, so give each controller, service and provided class a distinct name.',
+          ))
+        }
+        names.add(cls.name)
       }
-      names.add(cls.name)
     }
-    // The app's classes, and the classes its providers stand in for
-    const callable = [...appClasses, ...[...providers.keys()].filter(isAppClassToken)]
     Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
 
     // Stamp each class with the container so @UseGuard can resolve guards on a direct call

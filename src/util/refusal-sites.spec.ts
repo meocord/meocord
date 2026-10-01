@@ -138,7 +138,7 @@ const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   'core/interceptor-runner.ts': { count: 1, why: 'an interceptor, resolved as it runs' },
   'core/meocord.app.ts': { count: 1, why: 'start() of an app that was stopped' },
   'core/message-params.ts': { count: 6, why: 'a message whose params do not fit its command, answered with its usage' },
-  'core/shard-context.ts': { count: 3, why: 'ShardContext.call, from a handler' },
+  'core/shard-context.ts': { count: 2, why: 'ShardContext.call, from a handler' },
   'core/shard-manager.ts': { count: 1, why: 'start() of an app that was stopped' },
   'core/message-routes.ts': {
     count: 18,
