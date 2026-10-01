@@ -38,7 +38,8 @@ export function defineStageTypes(
 /** Why an entry is not a class or `{ provide: Class, params? }`, or undefined when it is one. */
 function malformation(entry: unknown): string | undefined {
   if (isConstructor(entry)) return undefined
-  if (typeof entry !== 'object' || entry === null) return `${describeValue(entry)} is not a class`
+  // An array is an object too, but no { provide }: a list nested in the list, as `guards: [[Staff]]` writes
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return `${describeValue(entry)} is not a class`
   const { provide, params } = entry as { provide?: unknown; params?: unknown }
   if (!isConstructor(provide)) return '{ provide } does not name a class'
   if (params !== undefined && (typeof params !== 'object' || params === null || Array.isArray(params))) {
