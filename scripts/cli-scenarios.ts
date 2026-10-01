@@ -27,6 +27,7 @@ import { tmpdir } from 'os'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import { ControllerType } from '../src/enum/controller.enum.js'
+import { AUTOCOMPLETE_QUERY_OPTION } from '../src/bin/generator.js'
 import { startFakeDiscord } from './lib/fake-discord.js'
 import { cleanEnv, installedCliOf, mustRun, outputOf, pack, renderApp } from './lib/packed-app.js'
 
@@ -53,6 +54,8 @@ interface Scenario {
   env?: NodeJS.ProcessEnv
   /** CLI runs that must succeed first, such as the build a bundle is run from. */
   before?: string[][]
+  /** Files changed once `before` has run, as a user edits what a generator wrote. */
+  thenEdits?: Record<string, (current: string) => string>
   /** Paths, relative to cwd, moved away while it runs. */
   hides?: string[]
   /**
@@ -151,6 +154,14 @@ const generateTwoOfEach = generatedNames.flatMap(({ name }) => [
   ...Object.values(ControllerType).map(type => ['g', 'co', type, name]),
   ...['s', 'gu', 'i', 'f', 'pi', 'ob'].map(kind => ['g', kind, name]),
 ])
+
+/** Each generated slash command given the option its generated autocomplete completes, as the generator says to. */
+const autocompleteOptions = Object.fromEntries(
+  generatedNames.map(({ dir, file }) => [
+    `src/controllers/${ControllerType.SLASH}/${dir}builders/${file}.builder.ts`,
+    (builder: string) => builder.replace(/(\.setDescription\('Describe what [^']*'\))/, `$1${AUTOCOMPLETE_QUERY_OPTION}`),
+  ]),
+)
 
 /** The template's app.ts with every generated controller and observer listed beside the samples. */
 const appWithGenerated = (() => {
@@ -524,6 +535,9 @@ async function check(scenario: Scenario): Promise<string[]> {
   try {
     for (const argv of scenario.before ?? []) {
       mustRun(`meocord ${argv.join(' ')}`, runtime, [cliOf(scenario), ...argv], dir, cleanEnv(scenario.env))
+    }
+    for (const [file, edit] of Object.entries(scenario.thenEdits ?? {})) {
+      writeFileSync(path.join(dir, file), edit(readFileSync(path.join(dir, file), 'utf8')))
     }
     for (const file of scenario.hides ?? []) {
       const moved = { from: path.join(dir, file), to: path.join(hiddenDir, file) }
@@ -945,6 +959,7 @@ const scenarios: Scenario[] = [
     tier: 'slow',
     files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': appWithGenerated, dist: null },
     before: generateTwoOfEach,
+    thenEdits: autocompleteOptions,
     argv: ['start', '--prod', '--build'],
     timeoutMs: 120_000,
     expect: {

@@ -12,3 +12,5 @@ The startup warning about command handlers that Discord never sends now also cov
 A handler of the whole command is checked against every option of the command, its subcommands' included, since Discord falls back to it for all of them. The bot still starts. In 5.0, these refuse to start.
 
 `MeoCordTestingModule.compile()` names the same cases, apart from a command no builder registers, as it already does for `@Command` handlers.
+
+`meocord generate controller autocomplete <name>` now ends by saying what to add to `/<name>`'s builder, the `query` option with `setAutocomplete(true)`, since the generated handler completes that option and Discord never asks it to until the command declares it.

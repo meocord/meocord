@@ -753,6 +753,15 @@ describe('nextStepFor', () => {
     expect(nextStepFor(component, name, type)).toBe(next)
   })
 
+  // The command it completes already exists, so the generator leaves its builder to the user, and says what to add
+  it('tells an autocomplete controller to give its command the option it completes', () => {
+    expect(nextStepFor('controller', 'admin/search', ControllerType.AUTOCOMPLETE)).toBe(
+      'Next: add AdminSearchAutocompleteController to @MeoCord({ controllers }) in src/app.ts, and declare the option it ' +
+        "completes on /admin-search's builder: .addStringOption(option => option.setName('query').setDescription('What to " +
+        "search for').setAutocomplete(true))",
+    )
+  })
+
   it.each([
     ['guard', 'UseGuard(AdminGuard)', 'guards'],
     ['interceptor', 'UseInterceptor(AdminInterceptor)', 'interceptors'],

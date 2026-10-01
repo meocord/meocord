@@ -24,15 +24,25 @@ export function namePathProblem(name: string, folder: string): string | undefine
     : undefined
 }
 
+/** The option a generated autocomplete controller completes, as its command's builder declares it. */
+export const AUTOCOMPLETE_QUERY_OPTION =
+  ".addStringOption(option => option.setName('query').setDescription('What to search for').setAutocomplete(true))"
+
 /**
  * What to do with a generated class for it to take part: generating writes files and never edits
  * `src/app.ts`, so a controller or observer does nothing until it is listed there.
  */
 export function nextStepFor(component: string, name: string, type?: ControllerType): string | undefined {
-  const { className } = validateAndFormatName(name)
+  const { className, commandName } = validateAndFormatName(name)
   switch (component) {
-    case 'controller':
-      return `Next: add ${className}${toClassName((type ?? '').replace(/-/g, ' '))}Controller to @MeoCord({ controllers }) in src/app.ts.`
+    case 'controller': {
+      const add = `Next: add ${className}${toClassName((type ?? '').replace(/-/g, ' '))}Controller to @MeoCord({ controllers }) in src/app.ts`
+      // The command it completes already exists, with its own builder, which the generator leaves alone
+      if (type === ControllerType.AUTOCOMPLETE) {
+        return `${add}, and declare the option it completes on /${commandName}'s builder: ${AUTOCOMPLETE_QUERY_OPTION}`
+      }
+      return `${add}.`
+    }
     case 'observer':
       return `Next: add ${className}Observer to @MeoCord({ observers }) in src/app.ts.`
     case 'guard':
