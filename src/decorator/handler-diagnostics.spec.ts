@@ -55,7 +55,8 @@ describe("a handler whose params do not fit its pattern's", () => {
   }, 60_000)
 
   it.each([
-    ['unknownParam', "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>", 2],
+    // A key the pattern lacks is no pipe's, so its refusal leaves Piped<T> out
+    ['unknownParam', `The handler's params do not fit the pattern": {`, 2],
     ['wrongType', "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>", 2],
     ['wrongSegment', "The handler's params give a typed customId param a type its value does not fit; a key a pipe produces is marked Piped<T>", 3],
     ['wrongChoice', "The handler's params give a select menu's choices a type their values do not fit; a key a pipe produces is marked Piped<T>", 3],
