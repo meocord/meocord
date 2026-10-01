@@ -265,9 +265,9 @@ function isOtherPlatformPackage(source: string, platform: BuildPlatform): boolea
 /**
  * Copies packages and their runtime dependencies into `<outDir>/node_modules`, where a bundle finds
  * them with nothing installed beside it. Skips `@types` packages and any whose `os`, `cpu` or `libc`
- * exclude `platform`, since bun installs both libc builds on Linux. A dependency needed in two
- * versions, as pnpm installs them side by side, keeps the first at the top and nests each other
- * under the package that needs it, which Node's resolution reaches first. Returns the names copied.
+ * exclude `platform`, since bun installs both libc builds on Linux. The listed packages take the top;
+ * a dependency needed in another version than the one there, as pnpm installs them side by side,
+ * nests under the package that needs it, which Node's resolution reaches first. Returns the names copied.
  */
 export function copyPackagesInto(
   packages: Map<string, string>,
@@ -310,9 +310,11 @@ export function copyPackagesInto(
     }
   }
 
-  for (const [name, dir] of packages) {
-    if (!name.startsWith('@types/')) place(name, realpathSync(dir), topDir)
-  }
+  // Every listed package claims its place at the top before any dependency is placed, since the bundle requires it
+  // from there; a dependency on another version of one then nests under its parent instead
+  const listed = [...packages].filter(([name]) => !name.startsWith('@types/')).map(([name, dir]) => [name, realpathSync(dir)] as const)
+  for (const [name, dir] of listed) atTop.set(name, dir)
+  for (const [name, dir] of listed) copy(name, dir, topDir)
   return [...copied]
 }
 
