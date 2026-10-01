@@ -136,12 +136,14 @@ export function route<const T extends string>(pattern: T): Route<T> {
     const unknown = Object.keys(values).filter(name => !names.has(name))
     if (unknown.length > 0) throw new TypeError(`route('${pattern}') has no param ${unknown.map(name => `{${name}}`).join(', ')}.`)
     const id = pattern.replace(PLACEHOLDER, (placeholder, name: string) => {
-      const value = values[name]
+      // Own keys only: a param may be named as something every object inherits, such as `constructor`
+      const value = Object.hasOwn(values, name) ? values[name] : undefined
+      const type = Object.hasOwn(types, name) ? types[name] : undefined
       if (value === undefined || value === null) throw new TypeError(`route('${pattern}').build() needs a value for ${placeholder}.`)
       const text = String(value)
       if (text === '') throw new TypeError(`route('${pattern}').build() got an empty {${name}}, which no customId segment can hold.`)
       // A typed segment must read back as the value it was built from, or the route could never match it
-      if (types[name] && parseSegment(types[name], text) === undefined) {
+      if (type && parseSegment(type, text) === undefined) {
         const shown = typeof value === 'string' ? JSON.stringify(value) : String(value)
         throw new TypeError(`route('${pattern}').build() got ${shown} for ${placeholder}, which is not a value of its type.`)
       }
