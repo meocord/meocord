@@ -24,7 +24,7 @@ export function errorText(error: unknown, translator: Translator<any> | undefine
     if (error.serverOnly || error.dmOnly) return issues.join('\n')
     return [renderText(translator, locale, usageHeading(error.usage)), ...issues].join('\n')
   }
-  if (error instanceof CooldownError) return renderText(translator, locale, cooldownText(error.retryAfterMs))
+  if (error instanceof CooldownError) return renderText(translator, locale, cooldownText(error.retryAt))
   if (error instanceof CooldownStoreError) return render('meocord.cooldown.storeDown')
   if (error instanceof CommandNotFoundError) return render('meocord.fallback.notFound')
   if (error instanceof UserError || error instanceof GuardDeniedError || error instanceof ValidationError) return error.message

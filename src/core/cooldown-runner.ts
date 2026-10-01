@@ -363,7 +363,7 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
   reportRecovery(store)
   if (verdict.allowed) return
   const blocking = counted[verdict.blocked ?? 0] ?? counted[0]
-  const refusal = new CooldownError(verdict.retryAfterMs, blocking.per)
+  const refusal = new CooldownError(verdict.retryAfterMs, blocking.per, { uses: blocking.uses, windowMs: blocking.windowMs })
   refusalKeys.set(refusal, { key: blocking.key, windowMs: blocking.windowMs })
   throw refusal
 }

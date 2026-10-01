@@ -13,7 +13,6 @@ import { vi } from 'vitest'
 import {
   CommandNotFoundError,
   CooldownError,
-  cooldownMessage,
   CooldownStoreError,
   cooldownStoreMessage,
   GuardDeniedError,
@@ -139,10 +138,11 @@ describe('the fallback', () => {
     it('tells a caller blocked by a cooldown privately how long to wait, logging it only at debug level', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
 
-      const logger = await fail(interaction, new CooldownError(12_000, 'user'))
+      const refusal = new CooldownError(12_000, 'user')
+      const logger = await fail(interaction, refusal)
 
       const payload = sent(interaction.reply)
-      expect(describedAs(payload, 'warning')).toBe('Slow down: try again in 12s.')
+      expect(describedAs(payload, 'warning')).toBe(`Slow down: try again <t:${Math.ceil(refusal.retryAt.getTime() / 1000)}:R>.`)
       expect(payload.flags).toBe(Ephemeral)
       expect(logger.error).not.toHaveBeenCalled()
       expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Cooldown (user)'))
@@ -206,16 +206,17 @@ describe('the fallback', () => {
       expect(payload.flags).toBe(Ephemeral)
     })
 
-    it('keeps a CooldownError private on a public deferred command, with cooldownMessage()', async () => {
+    it('keeps a CooldownError private on a public deferred command, with the time its wait ends', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
       await interaction.deferReply()
+      const refusal = new CooldownError(12_000, 'user')
 
-      await fail(interaction, new CooldownError(12_000, 'user'))
+      await fail(interaction, refusal)
 
       expect(interaction.editReply).not.toHaveBeenCalled()
       expect(interaction.deleteReply).toHaveBeenCalledTimes(1)
       const payload = sent(interaction.followUp)
-      expect(describedAs(payload, 'warning')).toBe(cooldownMessage(12_000))
+      expect(describedAs(payload, 'warning')).toBe(`Slow down: try again <t:${Math.ceil(refusal.retryAt.getTime() / 1000)}:R>.`)
       expect(payload.flags).toBe(Ephemeral)
     })
 

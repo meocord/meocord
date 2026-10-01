@@ -1,5 +1,6 @@
 import { type StandardSchemaV1Issue } from '@src/interface/standard-schema.interface.js'
 import { type MeoCordText, renderText } from '@src/common/meocord-text.js'
+import { type CooldownLimit } from '@src/common/cooldown-store.js'
 
 /**
  * Thrown by a guard to deny a call and tell the user why.
@@ -260,10 +261,11 @@ export function usageHeading(usage: string): MeoCordText {
 export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
 
 /**
- * What a blocked caller is told in English, such as "Slow down: try again in 12s."
+ * The wait before a cooldown allows another call, in plain English, such as "Slow down: try again in 12s.": the
+ * message of a {@link CooldownError}, for logs and tests.
  *
- * An app translates it with a `meocord.cooldown` group in its catalogs, and {@link translateError} gives it in a
- * user's language; a filter that catches `CooldownError` can word it otherwise.
+ * The answer a caller sees is `meocord.cooldown.until` instead, with the time the wait ends as a Discord timestamp,
+ * which the reader's client words in their language and counts down; {@link translateError} gives it.
  *
  * @param retryAfterMs - How long until the next call is allowed.
  *
@@ -271,28 +273,41 @@ export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
  * ```ts
  * cooldownMessage(12_000) // 'Slow down: try again in 12s.'
  * cooldownMessage(90_000) // 'Slow down: try again in 1m 30s.'
+ * cooldownMessage(86_340_000) // 'Slow down: try again in 23h 59m.'
  * ```
  *
  * @group Utilities
  */
 export function cooldownMessage(retryAfterMs: number): string {
-  return renderText(undefined, undefined, cooldownText(retryAfterMs))
+  return `Slow down: try again in ${waitText(retryAfterMs)}.`
 }
 
-/** The text of a cooldown's wait, by whole seconds, minutes and seconds, or whole minutes. */
-export function cooldownText(retryAfterMs: number): MeoCordText {
-  const total = Math.max(1, Math.ceil(retryAfterMs / 1000))
-  const minutes = Math.floor(total / 60)
-  const seconds = total % 60
-  if (minutes === 0) return { key: 'meocord.cooldown.seconds', params: { seconds } }
-  return seconds === 0 ? { key: 'meocord.cooldown.wholeMinutes', params: { minutes } } : { key: 'meocord.cooldown.minutes', params: { minutes, seconds } }
+/**
+ * A wait in its two biggest units: seconds, then minutes and seconds, from an hour hours and minutes, and from a day
+ * days and hours. The smaller unit is rounded up, so the text never says less than the wait.
+ */
+function waitText(retryAfterMs: number): string {
+  const both = (big: number, bigUnit: string, small: number, smallUnit: string) =>
+    small === 0 ? `${big}${bigUnit}` : `${big}${bigUnit} ${small}${smallUnit}`
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000))
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3_600) return both(Math.floor(seconds / 60), 'm', seconds % 60, 's')
+  const minutes = Math.ceil(seconds / 60)
+  if (minutes < 1_440) return both(Math.floor(minutes / 60), 'h', minutes % 60, 'm')
+  const hours = Math.ceil(minutes / 60)
+  return both(Math.floor(hours / 24), 'd', hours % 24, 'h')
+}
+
+/** The text a caller sees for a cooldown's wait: when it ends, as a Discord timestamp, rounded up to the second. */
+export function cooldownText(retryAt: Date): MeoCordText {
+  return { key: 'meocord.cooldown.until', params: { when: `<t:${Math.ceil(retryAt.getTime() / 1000)}:R>` } }
 }
 
 /**
  * Thrown when a `@Cooldown` blocks a call, so the handler does not run.
  *
  * Catch it in a filter to answer the caller your own way. Without one, the built-in fallback answers only the caller,
- * with {@link cooldownMessage}.
+ * with `meocord.cooldown.until`: the time the wait ends, which `retryAt` holds, as a Discord timestamp.
  *
  * @example
  * ```ts
@@ -301,7 +316,7 @@ export function cooldownText(retryAfterMs: number): MeoCordText {
  *   async catch(error: CooldownError, context: ExecutionContext) {
  *     const interaction = context.getInteraction()
  *     if (interaction?.isRepliable()) {
- *       await interaction.reply({ content: `Wait ${Math.ceil(error.retryAfterMs / 1000)}s.`, flags: MessageFlags.Ephemeral })
+ *       await interaction.reply({ content: `You can do that again ${time(error.retryAt, 'R')}.`, flags: MessageFlags.Ephemeral })
  *     }
  *   }
  * }
@@ -311,16 +326,22 @@ export function cooldownText(retryAfterMs: number): MeoCordText {
  * @category Errors
  */
 export class CooldownError extends Error {
+  /** When the next call is allowed: when the error was made, plus {@link CooldownError.retryAfterMs}. */
+  readonly retryAt: Date
+
   /**
    * @param retryAfterMs - How long until the next call is allowed.
    * @param per - The scope of the cooldown that blocked the call.
+   * @param limit - The limit of the cooldown that blocked the call, as `@Cooldown` gives it: its uses and window.
    */
   constructor(
     readonly retryAfterMs: number,
     readonly per: CooldownScope,
+    readonly limit?: CooldownLimit,
   ) {
     super(cooldownMessage(retryAfterMs))
     this.name = 'CooldownError'
+    this.retryAt = new Date(Date.now() + retryAfterMs)
   }
 }
 

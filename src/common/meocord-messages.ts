@@ -35,9 +35,7 @@ export const MEOCORD_MESSAGES = {
       channel: 'channel',
     },
     cooldown: {
-      seconds: 'Slow down: try again in {seconds}s.',
-      minutes: 'Slow down: try again in {minutes}m {seconds}s.',
-      wholeMinutes: 'Slow down: try again in {minutes}m.',
+      until: 'Slow down: try again {when}.',
       storeDown: "Cooldowns can't be checked right now: try again shortly.",
     },
     fallback: {
