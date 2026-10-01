@@ -228,7 +228,9 @@ export class MeoCordApp implements MeoCordApplication {
    *
    * @returns A promise that resolves once the bot is logged in.
    * @throws The error of a factory that failed, already logged and naming its token, or the login
-   *   error, such as an invalid token or Discord being unreachable.
+   *   error, such as an invalid token or Discord being unreachable. A start that `stop()` ends rejects with "The bot
+   *   was stopped before it came online.", and a start of an app already stopped with "This app was stopped".
+   *   Use `MeoCordFactory.create` to make a new one.
    *
    * @example
    * ```ts
@@ -249,7 +251,8 @@ export class MeoCordApp implements MeoCordApplication {
    * closes the client. A stop while the bot logs in ends the login, and that `start()` rejects. A call after the first
    * waits for it, and a stopped app does not start again.
    *
-   * @returns A promise that resolves once the bot is stopped. A failure to close the client is logged.
+   * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close the client is
+   *   logged.
    *
    * @example
    * ```ts
@@ -310,6 +313,8 @@ export class MeoCordApp implements MeoCordApplication {
         throw error
       }
     }
+    // A stop that came while the providers were being made has nothing to close: nothing is attached or logged in
+    if (this.closing) throw stoppedBeforeOnline()
 
     installSignalHandlers()
 

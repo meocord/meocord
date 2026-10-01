@@ -127,4 +127,26 @@ describe('app.stop()', () => {
 
     expect(exit).toHaveBeenCalledWith(1)
   })
+
+  it("ends a start whose providers are still being made, so it never logs in", async () => {
+    const { destroy } = login('at once')
+    let release!: () => void
+    const held = new Promise<void>(resolve => (release = resolve))
+    @MeoCord({
+      controllers: [Ping],
+      providers: [{ provide: 'db', useFactory: async () => (await held, { connected: true }) }],
+      clientOptions: { intents: [] },
+    })
+    class SlowApp {}
+    const app = MeoCordFactory.create(SlowApp)
+
+    const started = app.start()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await app.stop()
+    release()
+
+    await expect(started).rejects.toThrow('The bot was stopped before it came online.')
+    expect(Client.prototype.login).not.toHaveBeenCalled()
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
 })
