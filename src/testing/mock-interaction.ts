@@ -32,6 +32,7 @@ import {
   GuildChannelManager,
   GuildMember,
   GuildMemberManager,
+  GuildMemberRoleManager,
   GuildMessageManager,
   GuildManager,
   InteractionType,
@@ -206,6 +207,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>): obj
 const PROMISE_METHODS = new Set([
   'ban',
   'clone',
+  'createDM',
   'createInvite',
   'disableCommunicationUntil',
   'edit',
@@ -240,6 +242,19 @@ const MESSAGE_METHODS = new Set([
 
 // Methods of a structure that resolve to the structure itself, as discord.js patches and returns it
 const SELF_METHODS = new Set(['ban', 'delete', 'disableCommunicationUntil', 'edit', 'fetch', 'pin', 'timeout', 'unpin'])
+
+// The DM channel of each user, made once, as Discord keeps one per user
+const dmChannels = new WeakMap<object, object>()
+function dmChannelOf(user: object): object {
+  let channel = dmChannels.get(user)
+  if (!channel) {
+    channel = createMockChannel(DMChannel)
+    // A getter in discord.js, so set through the mock, which defines it
+    ;(channel as Record<string, unknown>).recipientId = (user as User).id
+    dmChannels.set(user, channel)
+  }
+  return channel
+}
 
 // The item each manager fetches, creates and edits
 const MANAGER_ITEMS: [{ prototype: object }, () => object][] = [
@@ -282,7 +297,14 @@ function fetchesOne(args: unknown[]): boolean {
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
   if (!returnsPromise(key, method)) return createMockFn()
-  if (key === 'createDM') return createMockFn(async () => createMockChannel(DMChannel))
+  // A member's DMs go through its user, and a user's through its one DM channel, as discord.js sends them
+  if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
+    return createMockFn(async (...args: unknown[]) => ((receiver() as GuildMember).user[key] as (...args: unknown[]) => unknown)(...args))
+  }
+  if (key === 'createDM') return createMockFn(async () => dmChannelOf(target))
+  if (key === 'send' && target instanceof User) {
+    return createMockFn(async (...args: unknown[]) => ((await (receiver() as User).createDM()).send as (...args: unknown[]) => unknown)(...args))
+  }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
   if (target instanceof BaseManager) {
     const item = MANAGER_ITEMS.find(([Manager]) => Manager.prototype.isPrototypeOf(target))?.[1]
@@ -414,6 +436,9 @@ function defineCreatedTime(instance: object, generatedId: string | undefined): v
   }
 }
 
+/** The interaction a mock options resolver was given to, for the server a user option's member is in. */
+const optionOwners = new WeakMap<object, { guildId?: unknown; guild?: unknown }>()
+
 /** A mock user that is a person, with an id of its own unless given one. */
 const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object.create(User.prototype), { id, bot: false }))
 
@@ -437,7 +462,11 @@ const MOCK_BOT_ID = '1300000000000000000'
  * Type guards such as `isButton()` run the real discord.js logic. An interaction gets an `id`, a `channelId` and a
  * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM, and with one its
  * `member` is its user: for a `user` given, when the test gives the `guild`, the guild's cached member for that user,
- * so a message and an interaction from one user in that server share it. Other data Discord always sends reads as
+ * so a message and an interaction from one user in that server share it, and `memberPermissions` are that member's
+ * permissions (`null` in a DM). A user is a person, `bot: false`, and a member has the server's @everyone role and the
+ * roles {@link createMockMember} gave it; with a `guildId` but no `guild`, a server the bot isn't in, that @everyone role
+ * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel.
+ * Other data Discord always sends reads as
  * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
  * or `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and
  * {@link getResponse} reports what `respond()` sent. Every method is a mock function, and one that returns a promise in
@@ -649,6 +678,8 @@ export function createMockInteraction<T extends object>(
           : given
       Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true })
     }
+    const { options } = props as { options?: unknown }
+    if (typeof options === 'object' && options !== null) optionOwners.set(options, instance)
   }
 
   // Ids and a user, as Discord always sends; no server unless the test names one, as in a direct message
@@ -667,7 +698,7 @@ export function createMockInteraction<T extends object>(
     let member: unknown
     if (unset('member')) {
       Object.defineProperty(instance, 'member', {
-        get: () => (own('guildId') ? (member ??= memberFor(own('guild'), own('user') as { id: string }, userGiven)) : null),
+        get: () => (own('guildId') ? (member ??= memberFor(own('guild'), own('user') as { id: string }, userGiven, own('guildId') as string)) : null),
         set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
         enumerable: true,
         configurable: true,
@@ -896,7 +927,10 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  * @remarks
  * A manager's `fetch(id)`, `create()` and `edit()` resolve to a mock of its item, and a list fetch to an empty
  * collection. Members, roles and channels given are put in their managers' caches, where dispatch looks first when it
- * resolves a message's typed params. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given,
+ * resolves a message's typed params; a member {@link createMockMember} made without a server is in this one. Its
+ * `roles.everyone` is the role given with the guild's id, or else an @everyone role of its own at position 0 with no
+ * permissions, in `roles.cache` as Discord has it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'`
+ * unless given,
  * so `t.forGuild(guild)` translates as for a new English server.
  *
  * @example
@@ -920,10 +954,16 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   if (overrides.preferredLocale !== undefined) instance.preferredLocale = overrides.preferredLocale
   instance.members = managerWith(GuildMemberManager.prototype, overrides.members as never)
   instance.channels = managerWith(GuildChannelManager.prototype, overrides.channels as never)
-  instance.roles = managerWith(RoleManager.prototype, overrides.roles as never)
+  instance.roles = guildRoleManager(instance.id as string, overrides.roles)
   instance.bans = managerWith(GuildBanManager.prototype, undefined)
 
-  return stubDeep(instance) as DeepMocked<Guild>
+  const guild = stubDeep(instance) as DeepMocked<Guild>
+  // A member made without a server of its own is in this one
+  for (const member of overrides.members ?? []) {
+    if (!unhomedMembers.delete(member)) continue
+    ;(member as unknown as Record<string, unknown>).guild = guild
+  }
+  return guild
 }
 
 /**
@@ -978,19 +1018,162 @@ export function createMockChannel<T extends BaseChannel>(Class: InteractionClass
 }
 
 /** A member of `guild` as the user with `id`: its id, user and guild own values, as the gateway delivers a member. */
-function memberIn(guild: unknown, id: string, user: unknown): object {
-  const own = { id: { value: id }, user: { value: user }, ...(guild ? { guild: { value: guild } } : {}) }
-  return stubDeep(Object.defineProperties(Object.create(GuildMember.prototype), own))
+function memberIn(guild: unknown, id: string, user: unknown, guildId?: string): object {
+  // The guild stays writable, for the guild createMockGuild puts the member in
+  const own = { id: { value: id }, user: { value: user }, ...(guild ? { guild: { value: guild, writable: true, configurable: true } } : {}) }
+  const member = Object.defineProperties(Object.create(GuildMember.prototype), own) as object
+  // A server the mock has only the id of, as one the bot isn't in
+  if (!guild && guildId) Object.defineProperty(member, RAW_GUILD_ID, { value: guildId })
+  return stubDeep(member)
 }
+
+/** The id of the server a member without a mock guild is in, read for its @everyone role. */
+const RAW_GUILD_ID = Symbol('raw guild id')
 
 /**
  * The member a server has for `user`. A user the test gave is looked up in the guild's member cache, and cached
  * there when missing, as the gateway resolves a member, so every mock from that user in that server shares it.
  */
-function memberFor(guild: unknown, user: { id: string }, given: boolean): object {
-  const make = () => memberIn(guild, user.id, user)
+function memberFor(guild: unknown, user: { id: string }, given: boolean, guildId?: string): object {
+  const make = () => memberIn(guild, user.id, user, guildId)
   return given ? cached(cacheOf((guild as Guild | null | undefined)?.members), user.id, make) : make()
 }
+
+/** Whether `a` ranks above `b`: the higher position, or at one position the lower id, as discord.js compares roles. */
+const ranksAbove = (a: Role, b: Role): boolean =>
+  a.position !== b.position ? a.position > b.position : isSnowflake(a.id) && isSnowflake(b.id) ? BigInt(a.id) < BigInt(b.id) : a.id < b.id
+
+/**
+ * A member's role manager. Its `cache` is read live, as discord.js reads it: the server's @everyone role, then `roles`;
+ * `add`, `remove` and `set` change `roles` and resolve to the member, and `highest` is the role that ranks highest.
+ */
+export function memberRoles(member: object, roles: readonly Role[]): GuildMemberRoleManager {
+  const own = new Collection<string, Role>(roles.map(role => [role.id, role]))
+  const guildRoles = () => (member as GuildMember).guild?.roles
+  // A server the mock has only the id of still has its @everyone role, made once
+  let rawEveryone: Role | undefined
+  const everyone = (): Role | undefined => {
+    const fromGuild: unknown = guildRoles()?.everyone
+    if (fromGuild instanceof Role) return fromGuild
+    const rawGuildId = (member as Record<symbol, string | undefined>)[RAW_GUILD_ID]
+    return rawGuildId ? (rawEveryone ??= createMockInteraction(Role, { id: rawGuildId, name: '@everyone' }) as Role) : undefined
+  }
+  const cache = (): Collection<string, Role> => {
+    const first = everyone()
+    return first ? new Collection([[first.id, first], ...own]) : own.clone()
+  }
+  const highest = (): Role | undefined => {
+    let top: Role | undefined
+    for (const role of cache().values()) if (!top || ranksAbove(role, top)) top = role
+    return top
+  }
+  // A role given by id is the guild's role with that id, when its cache has one
+  const resolve = (value: unknown): Role[] =>
+    (Array.isArray(value) || value instanceof Collection ? [...value.values()] : [value]).map(entry =>
+      typeof entry === 'string'
+        ? ((cacheOf(guildRoles())?.get(entry) as Role | undefined) ?? (createMockInteraction(Role, { id: entry }) as Role))
+        : (entry as Role),
+    )
+  const manager = Object.create(GuildMemberRoleManager.prototype) as Record<string, unknown>
+  Object.defineProperties(manager, {
+    cache: { get: cache },
+    member: { value: member },
+    highest: { get: highest },
+  })
+  manager.add = createMockFn(async (value: unknown) => {
+    for (const role of resolve(value)) own.set(role.id, role)
+    return member
+  })
+  manager.remove = createMockFn(async (value: unknown) => {
+    for (const role of resolve(value)) own.delete(role.id)
+    return member
+  })
+  manager.set = createMockFn(async (value: unknown) => {
+    own.clear()
+    for (const role of resolve(value)) own.set(role.id, role)
+    return member
+  })
+  return stubDeep(manager) as GuildMemberRoleManager
+}
+
+/**
+ * A guild's role manager with `roles` in its cache, and the guild's @everyone role: the one given with the guild's id,
+ * or a role of its own at position 0, as every server has one.
+ */
+function guildRoleManager(guildId: string, roles: readonly Role[] | undefined): object {
+  const given = roles ?? []
+  const everyone = given.some(role => role.id === guildId) ? [] : [createMockInteraction(Role, { id: guildId, name: '@everyone' })]
+  const manager = managerWith(RoleManager.prototype, [...everyone, ...given] as never)
+  Object.defineProperty(manager, 'everyone', { get: () => cacheOf(manager)?.get(guildId), configurable: true })
+  return manager
+}
+
+/**
+ * What {@link createMockMember} builds a member with.
+ *
+ * @group Testing
+ * @category Mocks
+ */
+export interface MockMemberOverrides {
+  /** The member's user, a new person unless given. */
+  user?: User
+  /**
+   * The server the member is in. Unless given, the guild whose `createMockGuild({ members })` it is given to, or a new
+   * mock guild.
+   */
+  guild?: Guild
+  /** The member's roles, in `roles.cache` after @everyone; its `permissions` are theirs and @everyone's combined. */
+  roles?: readonly Role[]
+  /** The member's nickname in the server, `null` unless given. */
+  nickname?: string | null
+}
+
+/**
+ * Creates a mock {@link GuildMember}: a user in a server, with the roles given.
+ *
+ * Use it for a member whose roles or permissions a guard or a handler checks, or one a command acts on.
+ *
+ * @remarks
+ * `roles.cache` holds the server's @everyone role, then the roles given, as discord.js reads it; `roles.add()`,
+ * `remove()` and `set()` change the roles given and resolve to the member, and `roles.highest` is the role that ranks
+ * highest, by position, then the lower id. `permissions` are computed as discord.js computes them: every permission for
+ * the server's owner, and otherwise its roles' permissions combined, @everyone's included, so a member with no roles has
+ * @everyone's alone. The member is put in its guild's member cache, so an interaction or a message from its user in that
+ * server has it as its `member`, and `memberPermissions` are its permissions. A DM sent to the member goes through its
+ * user's `send()` and the user's one DM channel.
+ *
+ * @param overrides - The member's user, server, roles and nickname; see {@link MockMemberOverrides}.
+ * @returns The mock member.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const moderator = createMockInteraction(Role, { permissions: new PermissionsBitField([PermissionFlagsBits.KickMembers]) })
+ * const user = createMockUser()
+ * const guild = createMockGuild({ members: [createMockMember({ user, roles: [moderator] })] })
+ * const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'kick', user, guildId: guild.id, guild })
+ *
+ * expect(interaction.memberPermissions?.has(PermissionFlagsBits.KickMembers)).toBe(true)
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link MockMemberOverrides}
+ * @see {@link createMockGuild}
+ */
+export function createMockMember(overrides: MockMemberOverrides = {}): DeepMocked<GuildMember> {
+  const { user = createMockUser(), guild = createMockGuild(), roles = [], nickname } = overrides
+  const member = memberIn(guild, user.id, user) as Record<string, unknown>
+  member.roles = memberRoles(member, roles)
+  if (nickname !== undefined) member.nickname = nickname
+  cacheOf(guild.members)?.set(user.id, member)
+  if (!overrides.guild) unhomedMembers.add(member)
+  return member as unknown as DeepMocked<GuildMember>
+}
+
+/** Members createMockMember made without a server given, until createMockGuild puts them in one. */
+const unhomedMembers = new WeakSet<object>()
 
 /** The guild a mock message carries: a guild with the same stubbed managers as createMockGuild. */
 function createMockGuildForMessage(): object {
@@ -998,7 +1181,7 @@ function createMockGuildForMessage(): object {
   guild.id = nextSnowflake()
   guild.members = managerWith(GuildMemberManager.prototype, undefined)
   guild.channels = managerWith(GuildChannelManager.prototype, undefined)
-  guild.roles = managerWith(RoleManager.prototype, undefined)
+  guild.roles = guildRoleManager(guild.id as string, undefined)
   guild.bans = managerWith(GuildBanManager.prototype, undefined)
   return stubDeep(guild)
 }
@@ -1336,7 +1519,7 @@ export interface ChatInputOptions {
 /** The option type Discord would have sent for a given JavaScript value. */
 function optionTypeOf(value: unknown): ApplicationCommandOptionType {
   if (typeof value === 'boolean') return ApplicationCommandOptionType.Boolean
-  if (typeof value === 'number') return ApplicationCommandOptionType.Number
+  if (typeof value === 'number') return Number.isInteger(value) ? ApplicationCommandOptionType.Integer : ApplicationCommandOptionType.Number
   if (value instanceof User) return ApplicationCommandOptionType.User
   if (value instanceof GuildMember) return ApplicationCommandOptionType.User
   if (value instanceof Role) return ApplicationCommandOptionType.Role
@@ -1402,7 +1585,10 @@ function buildOptionData(
  *
  * @remarks
  * Every method is a mock function, and methods not listed, such as `getAttachment`, are stubbed automatically. An
- * entity option carries its id in `value` and the object itself, as the gateway sends it.
+ * entity option carries its id in `value` and the object itself, as the gateway sends it. A user option's
+ * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
+ * a member given resolves `getUser()` to its user. A whole number is an Integer option and a fraction a Number one, so
+ * `getInteger()` reads only a whole number, and `getNumber()` reads either.
  *
  * @typeParam Cached - `any` by default, to match `createMockInteraction(ChatInputCommandInteraction)`; pass it when the
  *   interaction under test is cache-pinned.
@@ -1464,9 +1650,10 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     (name: string, required?: boolean) =>
       resolveOrThrow(name, typeof values[name] === 'number' ? (values[name] as number) : null, required),
   )
+  // A fraction is only ever a Number option's value
   base.getInteger = createMockFn<(name: string, required?: boolean) => number | null>(
     (name: string, required?: boolean) =>
-      resolveOrThrow(name, typeof values[name] === 'number' ? (values[name] as number) : null, required),
+      resolveOrThrow(name, Number.isInteger(values[name]) ? (values[name] as number) : null, required),
   )
   base.getBoolean = createMockFn<(name: string, required?: boolean) => boolean | null>(
     (name: string, required?: boolean) =>
@@ -1476,10 +1663,26 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   const getObjectOption = (name: string, required?: boolean) =>
     resolveOrThrow(name, isObjectOption(values[name]) ? (values[name] as { id: string }) : null, required)
 
-  base.getUser = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
+  // A user option carries both the user and, in a server, its member, whichever of the two the test gave
+  const members = new Map<string, object | null>()
+  const memberOf = (name: string, user: User): object | null => {
+    if (!members.has(name)) {
+      const owner = optionOwners.get(resolver)
+      members.set(name, !owner ? memberIn(undefined, user.id, user) : owner.guildId ? memberFor(owner.guild, user, true) : null)
+    }
+    return members.get(name) ?? null
+  }
+
+  base.getUser = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) => {
+    const value = getObjectOption(name, required)
+    return value instanceof GuildMember ? value.user : value
+  })
   base.getRole = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
   base.getChannel = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
-  base.getMember = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
+  base.getMember = createMockFn<(name: string) => object | null>((name: string) => {
+    const value = getObjectOption(name)
+    return value instanceof User ? memberOf(name, value) : value
+  })
   base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
 
   base.getFocused = createMockFn((getFull?: boolean) => {
@@ -1493,5 +1696,6 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   // rather than auto-stubbed, or every params assertion would see an empty record.
   base.data = buildOptionData(subcommandGroup, subcommand, values)
 
-  return stubDeep(base) as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
+  const resolver = stubDeep(base)
+  return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
 }

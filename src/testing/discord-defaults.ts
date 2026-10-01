@@ -19,13 +19,15 @@ import {
   Message,
   MessageType,
   NewsChannel,
+  PermissionsBitField,
+  Role,
   SnowflakeUtil,
   TextChannel,
   ThreadChannel,
   User,
   VoiceChannel,
 } from 'discord.js'
-import { createMockUser } from './mock-interaction.js'
+import { createMockUser, memberRoles } from './mock-interaction.js'
 
 /** A property discord.js computes from the others: its own getter runs, reading the mock's values. */
 export const REAL_GETTER: unique symbol = Symbol('real getter')
@@ -72,6 +74,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   }),
   defaultsOf(User, {
     username: () => 'user',
+    bot: () => false,
     globalName: () => null,
     discriminator: () => '0',
     avatar: () => null,
@@ -91,6 +94,14 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     communicationDisabledUntilTimestamp: () => null,
     pending: () => false,
     displayName: REAL_GETTER,
+    roles: member => memberRoles(member, []),
+    permissions: REAL_GETTER,
+  }),
+  defaultsOf(Role, {
+    id: snowflake,
+    name: () => 'role',
+    position: () => 0,
+    permissions: () => new PermissionsBitField().freeze(),
   }),
   // A message's text says which handler it is for, so it stays the test's to give, as a command's name does
   defaultsOf(Message, {
@@ -113,6 +124,8 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     token: () => 'mock-interaction-token',
     version: () => 1,
     context: () => null,
+    // What Discord sends with an interaction in a server, the member's permissions there; typed for a cached one
+    memberPermissions: interaction => (interaction.guildId && interaction.member instanceof GuildMember ? interaction.member.permissions : null) as never,
   }),
   defaultsOf(TextChannel, { type: () => ChannelType.GuildText as const, nsfw: () => false, topic: () => null, rateLimitPerUser: () => 0 }),
   defaultsOf(NewsChannel, { type: () => ChannelType.GuildAnnouncement as const, nsfw: () => false, topic: () => null }),
