@@ -55,7 +55,7 @@ describe("a handler whose params do not fit its pattern's", () => {
     ['unknownParam', "The handler's params do not fit the pattern", 2],
     ['wrongType', "The handler's params do not fit the pattern", 2],
     ['wrongSegment', "The handler's params give a typed customId param a type its value does not fit", 3],
-    ['unknownKey', "The handler's params name keys its route does not capture", 3],
+    ['unknownKey', "The handler's params name keys its pattern does not capture", 3],
   ])('%s is refused, naming why within its first lines', (method, message, within) => {
     const lines = found[method]
 

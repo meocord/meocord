@@ -69,11 +69,12 @@ export type InferSchemaOutput<S extends StandardSchemaV1> = NonNullable<S['~stan
 export declare const PIPED_BRAND: unique symbol
 
 /**
- * Marks a value of a handler's input that a separate `@UsePipe` produces, so `@Validate` leaves its type to
- * that pipe.
+ * Marks a value of a handler's input that a separate `@UsePipe` produces, so the checks of what a call gives leave
+ * its type to that pipe.
  *
- * Use it on a handler with both `@Validate` and `@UsePipe` for the same key; inside the handler it is exactly
- * `T`. Pipes given to `@Validate` itself need no marker.
+ * Use it on a key both `@Validate` and `@UsePipe` handle, and on a select menu's choice or a typed customId param,
+ * such as `{id:int}`, that `@UsePipe` turns into something else; inside the handler it is exactly `T`. Pipes given
+ * to `@Validate` itself need no marker.
  *
  * @example
  * ```ts
@@ -99,3 +100,10 @@ export declare const PIPED_BRAND: unique symbol
  * @see {@link Validate}
  */
 export type Piped<T> = T & { readonly [PIPED_BRAND]?: true }
+
+/**
+ * Whether a handler's param is marked {@link Piped}, so the checks of what a call gives leave it to its pipe.
+ *
+ * @internal
+ */
+export type IsPiped<T> = typeof PIPED_BRAND extends keyof T ? true : false
