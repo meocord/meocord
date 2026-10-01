@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { vi } from 'vitest'
+import { BUNDLE_ENTRY_KEY } from '@src/util/bundle-entry.util.js'
 
 let project: string
 
@@ -18,6 +19,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  Reflect.deleteProperty(globalThis, BUNDLE_ENTRY_KEY)
   rmSync(project, { recursive: true, force: true })
 })
 
@@ -60,6 +62,33 @@ describe('loadMeoCordConfig', () => {
     expect(loadMeoCordConfig()).toBe(first)
   })
 
+  // pm2 without a cwd, a unit file without WorkingDirectory, or `cd dist && node main.js`
+  it('finds a built bot\'s config beside its bundle, wherever the bot was started from', async () => {
+    writeCompiledConfig(`export default { appName: 'Beside' }\n`)
+    Reflect.set(globalThis, BUNDLE_ENTRY_KEY, path.join(project, 'dist', 'main.js'))
+    vi.spyOn(process, 'cwd').mockReturnValue(tmpdir())
+    const { loadMeoCordConfig, compiledConfigProblem } = await freshLoader()
+
+    expect(loadMeoCordConfig()).toEqual({ appName: 'Beside' })
+    expect(compiledConfigProblem()).toBeUndefined()
+  })
+
+  it('says whether a config was missing or failed to load, and where it looked', async () => {
+    const missing = await freshLoader()
+    expect(missing.loadMeoCordConfig()).toBeUndefined()
+    expect(missing.compiledConfigProblem()).toEqual({ path: path.join(project, 'dist', 'meocord.config.mjs'), missing: true })
+
+    writeCompiledConfig(`throw new Error('broken config')\n`)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failed = await freshLoader()
+    expect(failed.loadMeoCordConfig()).toBeUndefined()
+    expect(failed.compiledConfigProblem()).toEqual({
+      path: path.join(project, 'dist', 'meocord.config.mjs'),
+      missing: false,
+      error: expect.objectContaining({ message: 'broken config' }),
+    })
+  })
+
   // The logger and the factory import this module, so a bot bundled with bundleDependencies
   // carries whatever it imports. jiti would be most of a minimal bot's bundle.
   it('imports no transpiler', () => {
@@ -67,6 +96,7 @@ describe('loadMeoCordConfig', () => {
     const imports = [...source.matchAll(/^import .* from '([^']+)'/gm)].map(match => match[1])
 
     expect(imports).not.toContain('jiti')
-    expect(imports.filter(specifier => specifier.startsWith('@src/'))).toEqual(['@src/interface/index.js'])
+    // bundle-entry imports only node:fs
+    expect(imports.filter(specifier => specifier.startsWith('@src/'))).toEqual(['@src/interface/index.js', '@src/util/bundle-entry.util.js'])
   })
 })

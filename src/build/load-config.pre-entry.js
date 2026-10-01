@@ -12,7 +12,14 @@ import { installStackRemapper } from './stack-remap.js'
 const entry = fileURLToPath(import.meta.url)
 globalThis[Symbol.for('meocord.bundleEntry')] = entry
 
-const compiledPath = path.resolve(process.cwd(), 'dist', 'meocord.config.mjs')
+// A development build fixes import.meta.url to this file's source, so there the bundle is what was started
+const started = process.argv[1]
+const bundle = entry.endsWith('load-config.pre-entry.js') ? started && existsSync(started) && realpathSync(started) : entry
+
+// Beside the bundle, wherever the bot was started from, as the runtime loader reads it
+const compiledPath = bundle
+  ? path.join(path.dirname(bundle), 'meocord.config.mjs')
+  : path.resolve(process.cwd(), 'dist', 'meocord.config.mjs')
 let config
 
 if (existsSync(compiledPath)) {
@@ -25,9 +32,4 @@ if (existsSync(compiledPath)) {
   }
 }
 
-if ((config?.default ?? config)?.sourceMappedStacks !== false) {
-  // A development build fixes import.meta.url to this file's source, so there the bundle is what was started
-  const started = process.argv[1]
-  const bundle = entry.endsWith('load-config.pre-entry.js') ? started && existsSync(started) && realpathSync(started) : entry
-  if (bundle) installStackRemapper(bundle)
-}
+if (bundle && (config?.default ?? config)?.sourceMappedStacks !== false) installStackRemapper(bundle)
