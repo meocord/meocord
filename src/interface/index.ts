@@ -1232,6 +1232,7 @@ export interface CommandBuilderOptions {
 export type { CooldownOptions, CooldownStoreFailure } from '@src/core/cooldown-runner.js'
 export type { DispatchObserver, DispatchOutcome, DispatchResult } from './observer.interface.js'
 export type { StageParams } from './stage-params.interface.js'
+export type { GuardOptions, InterceptorOptions, ObserverOptions, ValidateOptions } from './stage-options.interface.js'
 export type {
   InferSchemaOutput,
   PIPED_BRAND,
@@ -1249,6 +1250,7 @@ export type {
   CommandBuilderConstructor,
   CommandInteractionType,
   CommandMetadata,
+  PrimaryEntryPointCommandData,
 } from './command-decorator.interface.js'
 export type {
   ClassProvider,

@@ -1,8 +1,8 @@
 import 'reflect-metadata'
+import { type ObserverOptions } from '@src/interface/stage-options.interface.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { OBSERVER_CLASS } from '@src/core/observer-runner.js'
 import { type DispatchObserver } from '@src/interface/index.js'
-import { type ExecutionContextType } from '@src/common/execution-context.js'
 import { defineStageTypes } from '@src/core/stage-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
 
@@ -39,15 +39,7 @@ import { refuse } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.1/observers | Observers}
  */
 export function Observer(
-  options: {
-    /**
-     * The context types the observer is told about, as `ExecutionContext.getType()` reports them; calls of any
-     * other type pass it by. A subclass inherits them unless it declares its own.
-     *
-     * @defaultValue every type
-     */
-    types?: readonly ExecutionContextType[]
-  } = {},
+  options: ObserverOptions = {},
 ) {
   return function (target: new (...args: any[]) => DispatchObserver) {
     if (typeof (target.prototype as Partial<DispatchObserver>).onSettled !== 'function') {

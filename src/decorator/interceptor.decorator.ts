@@ -1,9 +1,9 @@
 import 'reflect-metadata'
+import { type InterceptorOptions } from '@src/interface/stage-options.interface.js'
 import { type InterceptorInterface } from '@src/interface/index.js'
 import { CLASS_INTERCEPTORS, type InterceptorEntry, METHOD_INTERCEPTORS } from '@src/core/interceptor-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
-import { type ExecutionContextType } from '@src/common/execution-context.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 
 /**
@@ -40,15 +40,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * @see {@link https://meocord.dev/docs/4.1/interceptors | Interceptors}
  */
 export function Interceptor(
-  options: {
-    /**
-     * The context types the interceptor runs for, as `ExecutionContext.getType()` reports them; it is skipped for
-     * any other call. A subclass inherits them unless it declares its own.
-     *
-     * @defaultValue every type
-     */
-    types?: readonly ExecutionContextType[]
-  } = {},
+  options: InterceptorOptions = {},
 ) {
   return function (target: new (...args: any[]) => InterceptorInterface) {
     makeInjectable(target)
