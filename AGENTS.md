@@ -72,8 +72,8 @@ The pre-commit hook runs `bun run lint`. Do not bypass it for code changes.
 
 - **Public API** is exactly what the package entry points export: `meocord/core`, `/decorator`,
   `/common`, `/interface`, `/enum`, `/testing`, `/eslint`. `src/public-api.spec.ts` pins the
-  runtime exports of each; adding or removing a name there is an API decision, and removing one is
-  a breaking change. Entry indexes use named exports, never `export *`.
+  runtime and type exports of each; adding or removing a name there is an API decision, and removing
+  one is a breaking change. Entry indexes use named exports, never `export *`.
 - **Types ship twice**: `.d.ts` for `import` and `.d.cts` for `require`. Keep both conditions in
   the `exports` map when adding an entry point.
 - **Configuration**: a built bot loads only `dist/meocord.config.mjs` with `require()` and imports
