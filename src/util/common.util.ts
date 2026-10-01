@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { loadMeoCordCliConfig, readMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
-import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
+import { compiledConfigMessage, compiledConfigProblem, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { configProblems } from '@src/util/meocord-config-validation.util.js'
 import wait from '@src/util/wait.util.js'
 import chalk from 'chalk'
@@ -66,6 +66,13 @@ export async function compileAndValidateConfig() {
 export async function validateRunConfig() {
   const compiled = loadMeoCordConfig()
   if (compiled) return assertConfigShape(compiled)
+  // Only a missing one falls back: a broken one is what the bot would run, so it stops here as the bot would
+  if (compiledConfigProblem()?.missing === false) {
+    console.error(chalk.red(compiledConfigMessage()))
+    await wait(100)
+    process.exit(1)
+    return
+  }
   return compileAndValidateConfig()
 }
 

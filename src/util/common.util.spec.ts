@@ -9,6 +9,7 @@ const {
   mockReadSourceConfig,
   mockWait,
   mockLoadCompiledConfig,
+  mockCompiledProblem,
 } = vi.hoisted(() => ({
   mockReadSourceConfig: vi.fn(),
   mockExistsSync: vi.fn(),
@@ -17,6 +18,7 @@ const {
   mockLoadMeoCordConfig: vi.fn(),
   mockWait: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   mockLoadCompiledConfig: vi.fn(),
+  mockCompiledProblem: vi.fn(),
 }))
 
 vi.mock('fs', () => ({
@@ -44,6 +46,8 @@ vi.mock('@src/util/meocord-source-config.util.js', () => ({
 
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({
   loadMeoCordConfig: mockLoadCompiledConfig,
+  compiledConfigProblem: mockCompiledProblem,
+  compiledConfigMessage: () => 'MeoCord config at dist/meocord.config.mjs failed to load: boom. Fix meocord.config.ts, then run `meocord build`.',
 }))
 
 vi.mock('@src/util/wait.util.js', () => ({
@@ -107,6 +111,7 @@ describe('validateRunConfig', () => {
     mockExistsSync.mockReset()
     mockReadSourceConfig.mockReset()
     mockLoadCompiledConfig.mockReset()
+    mockCompiledProblem.mockReset()
   })
 
   afterEach(() => {
@@ -122,6 +127,22 @@ describe('validateRunConfig', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1)
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('shutdownTimeout must be a number'))
+    expect(mockReadSourceConfig).not.toHaveBeenCalled()
+  })
+
+  // A broken one is what the bot would run; meocord.config.ts would pass for it, and a later check stop before the bot says why
+  it('stops at a compiled config that fails to load, with why, rather than check meocord.config.ts', async () => {
+    mockLoadCompiledConfig.mockReturnValue(undefined)
+    mockCompiledProblem.mockReturnValue({ path: 'dist/meocord.config.mjs', missing: false, error: new Error('boom') })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await validateRunConfig()
+
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(consoleSpy.mock.calls.map(([message]) => String(message))).toEqual([
+      'MeoCord config at dist/meocord.config.mjs failed to load: boom. Fix meocord.config.ts, then run `meocord build`.',
+    ])
     expect(mockReadSourceConfig).not.toHaveBeenCalled()
   })
 

@@ -42,6 +42,21 @@ export function compiledConfigProblem(): CompiledConfigProblem | undefined {
 }
 
 /**
+ * Why {@link loadMeoCordConfig} returned no config, naming the file it looked for and, for a missing one, where it was
+ * started from. `MeoCordFactory.create` refuses with it, and the CLI stops with it before starting a bot that would.
+ */
+export function compiledConfigMessage(): string {
+  const problem = compiledConfigProblem()
+  if (problem && !problem.missing) {
+    // One full stop, whether or not the reason ends with one
+    const reason = (problem.error instanceof Error ? problem.error.message : String(problem.error)).replace(/\.$/, '')
+    return `MeoCord config at ${problem.path} failed to load: ${reason}. Fix meocord.config.ts, then run \`meocord build\`.`
+  }
+  const where = problem?.path ?? 'meocord.config.mjs'
+  return `MeoCord config not found at ${where} (working directory ${process.cwd()}). Run \`meocord build\`, and start the bot from the dist it writes.`
+}
+
+/**
  * `require` of an ES module, which Node supports cleanly from 22.13 and bun always has.
  * Synchronous, like the logger and the factory that call it.
  */
@@ -59,8 +74,7 @@ function loadCompiledConfig(): MeoCordConfig | undefined {
     const loaded = load(compiledPath) as { default?: MeoCordConfig } & MeoCordConfig
     return loaded.default ?? loaded
   } catch (error) {
-    // Kept, not printed: MeoCordFactory.create reports it once, and every CLI path that falls back to
-    // meocord.config.ts goes on to start the bot, which does
+    // Kept, not printed: MeoCordFactory.create refuses with it, and the CLI stops with it rather than fall back
     problem = { path: compiledPath, missing: false, error }
     return undefined
   }

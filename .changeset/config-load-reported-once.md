@@ -2,4 +2,4 @@
 'meocord': patch
 ---
 
-A built bot whose `meocord.config.mjs` fails to load reports it once: "MeoCord config at … failed to load: <reason>. Fix meocord.config.ts, then run `meocord build`." It printed a separate "[MeoCord] Failed to load …" line before that one, and under `meocord start --prod` the CLI printed it a third time.
+A compiled config that fails to load is reported once, with its reason and what to do: "MeoCord config at … failed to load: <reason>. Fix meocord.config.ts, then run `meocord build`." A built bot printed a separate "[MeoCord] Failed to load …" line before that one, and `meocord start --prod` printed it a third time. `meocord start --prod` without `--build` now stops with that message, rather than check `meocord.config.ts` in its place, which could stop on a missing token without naming the broken config the bot would run.
