@@ -58,34 +58,47 @@ export function ownHandlerList<T>(key: symbol, target: object): T[] {
   return Reflect.getOwnMetadata(key, target) ?? [...(Reflect.getMetadata(key, target) ?? [])]
 }
 
+/** A route a handler answers: its kind, a command type in lower case or `message`, and its name or pattern. */
+interface HandlerRoute {
+  method: string
+  kind: string
+  route: string
+}
+
+const commandKind = (type: CommandType): string => type.toLowerCase().replaceAll('_', ' ')
+
 /** Records a route a class's own decorator declares for a method, which {@link warnInheritedRoutes} reads. */
-function declareRoute(target: object, method: string, route: string): void {
-  const declared: { method: string; route: string }[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target) ?? []
-  declared.push({ method, route })
-  Reflect.defineMetadata(DECLARED_ROUTES_KEY, declared, target)
+function declareRoute(target: object, declared: HandlerRoute): void {
+  const routes: HandlerRoute[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target) ?? []
+  routes.push(declared)
+  Reflect.defineMetadata(DECLARED_ROUTES_KEY, routes, target)
 }
 
 /**
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, which
- * the next major version (5.0) drops. `@Controller` calls it, after every method decorator of the class has run.
+ * the next major version (5.0) drops. A route of another kind is another route, even under the same name.
+ * `@Controller` calls it, after every method decorator of the class has run.
  */
 export function warnInheritedRoutes(target: abstract new (...args: any[]) => unknown): void {
-  const declared: { method: string; route: string }[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target.prototype) ?? []
+  const declared: HandlerRoute[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target.prototype) ?? []
   const base = Object.getPrototypeOf(target.prototype) as object | null
   if (declared.length === 0 || !base) return
-  const inherited = [
-    ...Object.entries(getCommandMap(base) ?? {}).flatMap(([route, metas]) => metas.map(meta => ({ method: meta.methodName, route }))),
-    ...getMessageHandlers(base).map(handler => ({ method: handler.method, route: handler.pattern ?? '' })),
+  const inherited: HandlerRoute[] = [
+    ...Object.entries(getCommandMap(base) ?? {}).flatMap(([route, metas]) =>
+      metas.map(meta => ({ method: meta.methodName, kind: commandKind(meta.type), route })),
+    ),
+    ...getMessageHandlers(base).map(handler => ({ method: handler.method, kind: 'message', route: handler.pattern ?? '' })),
   ]
+  const label = ({ kind, route }: HandlerRoute) => `${kind} "${route}"`
   for (const method of new Set(declared.map(entry => entry.method))) {
-    const own = declared.filter(entry => entry.method === method).map(entry => entry.route)
-    const kept = [...new Set(inherited.filter(entry => entry.method === method && !own.includes(entry.route)).map(entry => entry.route))]
+    const own = declared.filter(entry => entry.method === method)
+    const ownLabels = new Set(own.map(label))
+    const kept = [...new Set(inherited.filter(entry => entry.method === method).map(label))].filter(text => !ownLabels.has(text))
     if (kept.length === 0) continue
     const where = `${target.name}.${method}`
-    const quote = (routes: string[]) => routes.map(route => `"${route}"`).join(', ')
     warnDeprecatedBehaviour(
       logger,
-      `An inherited route that a re-declared handler keeps (${where} answers ${quote(kept)} as well as ${quote(own)})`,
+      `An inherited route that a re-declared handler keeps (${where} answers ${kept.join(', ')} as well as ${[...ownLabels].join(', ')})`,
       'is dropped',
       `a decorator for each route ${where} should answer`,
     )
@@ -241,7 +254,7 @@ export function MessageHandler(pattern?: string, options: MessageHandlerOptions 
     }
     handlers.push({ pattern: pattern || undefined, method: propertyKey.toString(), options })
     Reflect.defineMetadata(MESSAGE_HANDLER_METADATA_KEY, handlers, target)
-    declareRoute(target, propertyKey.toString(), pattern || '')
+    declareRoute(target, { method: propertyKey.toString(), kind: 'message', route: pattern || '' })
   }
 }
 
@@ -720,7 +733,7 @@ export function Command<
     })
 
     Reflect.defineMetadata(COMMAND_METADATA_KEY, commands, target)
-    declareRoute(target, propertyKey, commandName)
+    declareRoute(target, { method: propertyKey, kind: commandKind(commandType), route: commandName })
   }
 }
 
