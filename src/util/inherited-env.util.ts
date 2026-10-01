@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseEnv } from 'node:util'
 import { buildMode } from '@src/util/bundle-entry.util.js'
@@ -13,18 +13,26 @@ export function envFiles(nodeEnv: string | undefined): string[] {
 }
 
 /**
- * The development .env files Bun loaded into a production build: with `NODE_ENV` unset, Bun reads the development
- * files before any code runs, and the config's dotenv keeps a value already set. Empty on Node, with `NODE_ENV` set,
- * and in any other build.
+ * The variables holding a development .env file's value in a production build on Bun, and the files those came from:
+ * with `NODE_ENV` unset, Bun reads the development files before any code runs, and the config's dotenv keeps a value
+ * already set. One the production files give the same value is left out. Empty on Node, with `NODE_ENV` set, in any
+ * other build, and when Bun read no .env files.
  */
-export function bunDevelopmentEnvFiles(
+export function bunDevelopmentValues(
   env: NodeJS.ProcessEnv = process.env,
   root = process.cwd(),
   bun = process.versions.bun !== undefined,
-): string[] {
-  if (!bun || env.NODE_ENV || buildMode() !== 'production') return []
-  const production = envFiles('production')
-  return envFiles(undefined).filter(file => !production.includes(file) && existsSync(path.join(root, file)))
+): { files: string[]; keys: string[] } {
+  if (!bun || env.NODE_ENV || buildMode() !== 'production') return { files: [], keys: [] }
+  const productionFiles = envFiles('production')
+  // In Bun's order, a later file winning, as the config's dotenv also settles them
+  const production: Record<string, string> = Object.assign({}, ...productionFiles.map(file => read(root, file)))
+  const development = new Map<string, { value: string; file: string }>()
+  for (const file of envFiles(undefined).filter(file => !productionFiles.includes(file))) {
+    for (const [key, value] of Object.entries(read(root, file))) development.set(key, { value, file })
+  }
+  const loaded = [...development].filter(([key, { value }]) => env[key] === value && production[key] !== value)
+  return { files: [...new Set(loaded.map(([, { file }]) => file))].sort(), keys: loaded.map(([key]) => key) }
 }
 
 /**

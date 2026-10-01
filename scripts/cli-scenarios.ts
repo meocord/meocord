@@ -1858,6 +1858,12 @@ const scenarios: Scenario[] = [
         'slow',
         { before: [['build', '--prod']], command: [runtimeBinary('bun'), '--no-install', 'dist/main.js'], env: { NODE_ENV: 'production' } },
       ],
+      [
+        'a production build started with bun --no-env-file',
+        'production',
+        'slow',
+        { before: [['build', '--prod']], command: [runtimeBinary('bun'), '--no-install', '--no-env-file', 'dist/main.js'] },
+      ],
     ] as [string, string, Tier, Pick<Scenario, 'argv' | 'before' | 'command' | 'env' | 'runtime'>][]
   ).map(
     ([how, mode, tier, run]): Scenario => ({
@@ -1885,8 +1891,8 @@ const scenarios: Scenario[] = [
     expect: {
       code: 0,
       says: [
-        'Bun loaded .env.development because NODE_ENV is unset, and this is a production build; set NODE_ENV=production, ' +
-          'or start with `bun --no-env-file`.',
+        'Bun loaded .env.development because NODE_ENV is unset, and this is a production build, so FROM_MODE has its ' +
+          'development value; set NODE_ENV=production, or start with `bun --no-env-file`.',
         'Ready with FROM_LOCAL=local FROM_MODE=development',
       ],
     },
