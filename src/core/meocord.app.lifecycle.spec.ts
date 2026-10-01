@@ -45,8 +45,8 @@ async function load() {
   const { inject } = await import('inversify')
   const { CooldownStore, MemoryCooldownStore } = await import('@src/common/index.js')
   const { CommandType } = await import('@src/enum/index.js')
-  const { createMockInteraction } = await import('@src/testing/index.js')
-  return { discord, inject, CooldownStore, MemoryCooldownStore, CommandType, createMockInteraction, ...app, ...factory, ...decorators }
+  const { createMockInteraction, getResponse } = await import('@src/testing/index.js')
+  return { discord, inject, CooldownStore, MemoryCooldownStore, CommandType, createMockInteraction, getResponse, ...app, ...factory, ...decorators }
 }
 
 type Loaded = Awaited<ReturnType<typeof load>>
@@ -54,7 +54,7 @@ type Loaded = Awaited<ReturnType<typeof load>>
 /** Starts an app built by the factory, with a client that logs in without a network. */
 async function startApp(
   loaded: Loaded,
-  options: { controllers: any[]; services?: any[]; cooldownStore?: any; cooldownStoreTimeoutMs?: number },
+  options: { controllers: any[]; services?: any[]; cooldownStore?: any; cooldownStoreTimeoutMs?: number; cooldownStoreFailure?: 'deny' | 'allow' },
 ) {
   const clients: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
@@ -68,6 +68,7 @@ async function startApp(
     services: options.services,
     cooldownStore: options.cooldownStore,
     cooldownStoreTimeoutMs: options.cooldownStoreTimeoutMs,
+    cooldownStoreFailure: options.cooldownStoreFailure,
     clientOptions: { intents: [] },
   })
   class App {}
@@ -75,6 +76,12 @@ async function startApp(
   const app = loaded.MeoCordFactory.create(App)
   await app.start()
   return { app, client: clients[0] }
+}
+
+/** Gives the client an application, so it registers its commands when ready, and has the REST call that does it answer with `put`. */
+function registerThrough(client: Client, put: () => Promise<unknown>) {
+  Object.defineProperty(client, 'application', { value: { id: '100000000000000001' }, configurable: true })
+  return vi.spyOn(client.rest, 'put').mockImplementation(put)
 }
 
 /** Emits clientReady and waits for the listener, which runs the hooks and registration, to settle. */
@@ -323,23 +330,21 @@ describe('lifecycle hooks', () => {
 
     it('runs without waiting for command registration, which never finishes here', async () => {
       const loaded = await load()
-      let ready = false
+      const ready = Promise.withResolvers<void>()
 
       @loaded.Service()
       class Scheduler implements OnReady {
         onReady() {
-          ready = true
+          ready.resolve()
         }
       }
 
       const { client } = await startApp(loaded, { controllers: [], services: [Scheduler] })
-      Object.defineProperty(client, 'application', {
-        value: { commands: { set: () => new Promise(() => {}) } },
-        configurable: true,
-      })
+      const put = registerThrough(client, () => new Promise(() => {}))
 
       void becomeReady(client)
-      await vi.waitFor(() => expect(ready).toBe(true))
+      await ready.promise
+      expect(put).toHaveBeenCalled()
     })
 
     it('still runs when command registration fails', async () => {
@@ -354,13 +359,11 @@ describe('lifecycle hooks', () => {
       }
 
       const { client } = await startApp(loaded, { controllers: [], services: [Scheduler] })
-      Object.defineProperty(client, 'application', {
-        value: { commands: { set: () => Promise.reject(new Error('registration failed')) } },
-        configurable: true,
-      })
+      const put = registerThrough(client, () => Promise.reject(new Error('registration failed')))
 
       await becomeReady(client)
 
+      expect(put).toHaveBeenCalled()
       expect(ready).toBe(true)
     })
   })
@@ -532,7 +535,8 @@ describe('lifecycle hooks', () => {
     it('on a signal mid-ready, shuts down only classes whose onReady finished, and starts no more', async () => {
       const loaded = await load()
       const stopped: string[] = []
-      let finishSlow!: () => void
+      const slowBegan = Promise.withResolvers<void>()
+      const finishSlow = Promise.withResolvers<void>()
 
       @loaded.Service()
       class Cache implements OnReady, OnShutdown {
@@ -552,7 +556,8 @@ describe('lifecycle hooks', () => {
       @loaded.Service()
       class Scheduler implements OnReady, OnShutdown {
         onReady() {
-          return new Promise<void>(resolve => (finishSlow = resolve))
+          slowBegan.resolve()
+          return finishSlow.promise
         }
         onShutdown() {
           stopped.push('Scheduler')
@@ -571,10 +576,10 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [], services: [Cache, Metrics, Scheduler, Later] })
       const ready = becomeReady(client)
-      await vi.waitFor(() => expect(finishSlow).toBeDefined())
+      await slowBegan.promise
 
       await loaded.shutdownAndExit()
-      finishSlow()
+      finishSlow.resolve()
       await ready
 
       expect(stopped).toEqual(['Metrics', 'Cache'])
@@ -862,11 +867,12 @@ describe('lifecycle hooks', () => {
 
   // MeoCord asks the store on every call with a cooldown, so it opens before the first and closes after the last
   describe('of a cooldownStore class', () => {
-    /** A store that records its hooks and calls in `events`, whose onReady waits for `connect`. */
-    function storeWith(loaded: Loaded, events: string[], connect: Promise<void> = Promise.resolve()) {
+    /** A store that records its hooks and calls in `events`, whose onReady resolves `began`, then waits for `connect`. */
+    function storeWith(loaded: Loaded, events: string[], connect: Promise<void> = Promise.resolve(), began?: PromiseWithResolvers<void>) {
       return class AppStore extends loaded.MemoryCooldownStore implements OnReady, OnShutdown {
         async onReady() {
           events.push('store ready begins')
+          began?.resolve()
           await connect
           events.push('store ready')
         }
@@ -880,14 +886,15 @@ describe('lifecycle hooks', () => {
       }
     }
 
-    /** A controller whose slash command counts a cooldown, and waits for `finish` once it runs. */
-    function dailyController(loaded: Loaded, events: string[], finish: Promise<void> = Promise.resolve()) {
+    /** A controller whose slash command counts a cooldown, resolves `began` once it runs, then waits for `finish`. */
+    function dailyController(loaded: Loaded, events: string[], finish: Promise<void> = Promise.resolve(), began?: PromiseWithResolvers<void>) {
       @loaded.Controller()
       class Daily {
         @loaded.Command('daily', loaded.CommandType.SLASH)
         @loaded.Cooldown({ seconds: 60 })
         async claim() {
           events.push('call runs')
+          began?.resolve()
           await finish
           events.push('call done')
         }
@@ -924,13 +931,14 @@ describe('lifecycle hooks', () => {
       const loaded = await load()
       const events: string[] = []
       const connect = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
 
       const { client } = await startApp(loaded, {
         controllers: [dailyController(loaded, events)],
-        cooldownStore: storeWith(loaded, events, connect.promise),
+        cooldownStore: storeWith(loaded, events, connect.promise, began),
       })
       const ready = becomeReady(client)
-      await vi.waitFor(() => expect(events).toContain('store ready begins'))
+      await began.promise
       const handled = call(client, slash(loaded))
       await new Promise(resolve => setTimeout(resolve, 20))
       expect(events).toEqual(['store ready begins'])
@@ -941,18 +949,46 @@ describe('lifecycle hooks', () => {
       expect(events).toEqual(['store ready begins', 'store ready', 'store asked', 'call runs', 'call done'])
     })
 
+    // A store that takes longer to get ready than the timeout is one that does not answer, so the app's policy decides
+    it.each([
+      ['deny', 'refuses it with the store-down answer', [], true],
+      ['allow', 'runs it uncounted', ['call runs', 'call done'], false],
+    ] as const)("gives a call that outwaits its onReady the store-failure policy: '%s' %s", async (failure, _what, ran, told) => {
+      const loaded = await load()
+      const events: string[] = []
+      const connect = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events)],
+        cooldownStore: storeWith(loaded, events, connect.promise, began),
+        cooldownStoreTimeoutMs: 20,
+        cooldownStoreFailure: failure,
+      })
+      const ready = becomeReady(client)
+      await began.promise
+      const interaction = slash(loaded)
+      await call(client, interaction)
+
+      expect(events).toEqual(['store ready begins', ...ran])
+      expect(JSON.stringify(loaded.getResponse(interaction).calls).includes("Cooldowns can't be checked right now")).toBe(told)
+      connect.resolve()
+      await ready
+    })
+
     it('runs its onShutdown once the calls under way have finished, and takes no new one', async () => {
       const loaded = await load()
       const events: string[] = []
       const finish = Promise.withResolvers<void>()
+      const running = Promise.withResolvers<void>()
 
       const { client } = await startApp(loaded, {
-        controllers: [dailyController(loaded, events, finish.promise)],
+        controllers: [dailyController(loaded, events, finish.promise, running)],
         cooldownStore: storeWith(loaded, events),
       })
       await becomeReady(client)
       const handled = call(client, slash(loaded))
-      await vi.waitFor(() => expect(events).toContain('call runs'))
+      await running.promise
 
       const stopped = loaded.shutdownAndExit()
       await new Promise(resolve => setTimeout(resolve, 20))
