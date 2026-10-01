@@ -13,6 +13,11 @@ export function isShardProcess(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[SHARDING_MANAGER_ENV] !== undefined
 }
 
+/** Whether a shard's manager is gone: the IPC channel it asks a shard to stop through is closed. */
+export function managerGone(proc: Pick<NodeJS.Process, 'connected'> = process): boolean {
+  return proc.connected === false
+}
+
 /** Whether process sharding is on for this run: configured, and allowed in development when that is where it runs. */
 export function processShardingEnabled(config: MeoCordConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   if (config.sharding?.mode !== 'process') return false

@@ -41,8 +41,9 @@ import { tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
-import { isShardProcess } from '@src/util/sharding-mode.util.js'
-import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
+import { isShardProcess, managerGone } from '@src/util/sharding-mode.util.js'
+import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
+import { isShardMessage } from '@src/core/shard-messages.js'
 import { releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerCommands } from '@src/core/command-registration.js'
 import { undoFailedLogin } from '@src/core/failed-login.js'
@@ -107,9 +108,7 @@ function installSignalHandlers(): void {
 
 /** Tells the manager a shard cannot log in, and why, and waits until the message is sent. */
 async function reportFatalLogin(code: FatalLoginCode, reason: string): Promise<void> {
-  if (!isShardProcess() || !process.send) return
-  const message: ShardMessage = { meocord: 'fatal', code, message: reason }
-  await new Promise<void>(resolve => process.send!(message, undefined, {}, () => resolve()))
+  if (isShardProcess()) await tellManager({ meocord: 'fatal', code, message: reason })
 }
 
 export class MeoCordApp implements MeoCordApplication {
@@ -216,7 +215,8 @@ export class MeoCordApp implements MeoCordApplication {
    *
    * If a provider's factory or the login fails, the process exit code is set to `1` before the
    * promise rejects, so the process exits non-zero even when the caller catches the error to log it.
-   * A later `start()` that logs in clears that code again.
+   * A later `start()` that logs in clears that code again. A shard whose start fails exits 1 once the rejection is
+   * handled, so its manager restarts it.
    *
    * The providers, services and event handlers are set up once: a `start()` after a failed one logs in
    * again with them, a call while one is under way waits for it, and a call once the bot is online
@@ -242,7 +242,13 @@ export class MeoCordApp implements MeoCordApplication {
     if (isRegisterOnly()) return this.registerOnly()
     if (this.stopped) throw new Error('This app was stopped; use MeoCordFactory.create to make a new one.')
     if (this.online) return
-    this.starting ??= this.startOnce().finally(() => (this.starting = undefined))
+    this.starting ??= this.startOnce()
+      .catch(error => {
+        // Its manager restarts a shard once it exits; a start a stop ended is the stop's to finish
+        if (isShardProcess() && !this.closing) endFailedShard(error)
+        throw error
+      })
+      .finally(() => (this.starting = undefined))
     return this.starting
   }
 
@@ -274,11 +280,15 @@ export class MeoCordApp implements MeoCordApplication {
 
   private async startOnce(): Promise<void> {
     this.logger.log('Starting bot...')
+    // Before the providers are made, so a signal, or a shard's manager, can stop a start that is slow to come online
+    runningApps.add(this.close)
+    installSignalHandlers()
+    // A shard whose manager is already gone has no one to answer to, and nothing would stop it later
+    if (isShardProcess() && managerGone()) void shutdownAndExit()
     if (!this.prepared) {
       await this.prepare()
       this.prepared = true
     }
-    runningApps.add(this.close)
     if (this.loginFailed) {
       if (!MeoCordApp.warnedRetry) {
         MeoCordApp.warnedRetry = true
@@ -315,8 +325,6 @@ export class MeoCordApp implements MeoCordApplication {
     }
     // A stop that came while the providers were being made has nothing to close: nothing is attached or logged in
     if (this.closing) throw stoppedBeforeOnline()
-
-    installSignalHandlers()
 
     this.bot.on('clientReady', readyClient =>
       this.runListener('clientReady', async () => {

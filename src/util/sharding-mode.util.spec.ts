@@ -1,5 +1,5 @@
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { clientOptionsWithSharding, shardingRole } from '@src/util/sharding-mode.util.js'
+import { clientOptionsWithSharding, managerGone, shardingRole } from '@src/util/sharding-mode.util.js'
 
 const config = (sharding?: MeoCordConfig['sharding']): MeoCordConfig => ({ discordToken: 'token', sharding })
 
@@ -48,5 +48,14 @@ describe('clientOptionsWithSharding', () => {
       'must be unset',
     )
     expect(clientOptionsWithSharding(config({ mode: 'process' }), intents)).toBe(intents)
+  })
+})
+
+describe('managerGone', () => {
+  it('is true only once the IPC channel to the manager is closed', () => {
+    expect(managerGone({ connected: false })).toBe(true)
+    expect(managerGone({ connected: true })).toBe(false)
+    // A process no manager forked has no channel at all
+    expect(managerGone({} as Pick<NodeJS.Process, 'connected'>)).toBe(false)
   })
 })

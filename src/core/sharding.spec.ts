@@ -8,7 +8,8 @@ import type * as ShardContextModule from '@src/core/shard-context.js'
 import { type MeoCordConfig, type OnReady, type ReadyInfo } from '@src/interface/index.js'
 import { CommandType } from '@src/enum/index.js'
 
-const { logged, config, platformChecked } = vi.hoisted(() => ({
+const { logged, config, platformChecked, channel } = vi.hoisted(() => ({
+  channel: { closed: false },
   logged: { info: [] as string[], error: [] as string[] },
   config: { current: { discordToken: 'token' } as MeoCordConfig },
   platformChecked: { count: 0 },
@@ -26,6 +27,11 @@ vi.mock('@src/common/index.js', async importOriginal => ({
   },
 }))
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => config.current }))
+// The test runner's own IPC reads process.connected, so a closed channel is stood in for here
+vi.mock('@src/util/sharding-mode.util.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  managerGone: () => channel.closed,
+}))
 vi.mock('@src/util/platform.util.js', () => ({
   assertBuiltForThisPlatform: () => {
     platformChecked.count++
@@ -74,6 +80,7 @@ describe('sharding', () => {
     logged.info.length = 0
     logged.error.length = 0
     platformChecked.count = 0
+    channel.closed = false
     config.current = { discordToken: 'token' }
     exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     signals = {
@@ -203,6 +210,7 @@ describe('sharding', () => {
       expect(() => loaded.MeoCordFactory.create(appClass(loaded, { services: [first, second] }))).toThrow(
         'Stats: two classes have this name',
       )
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
     })
   })
 
@@ -259,6 +267,20 @@ describe('sharding', () => {
       expect(loaded.isExplainedError(unreachable)).toBe(false)
       expect(logged.error).toEqual([])
     })
+  })
+
+  it('leaves the process to main.ts when its start fails, in one process', async () => {
+    const loaded = await load()
+    vi.spyOn(loaded.discord.Client.prototype, 'login').mockRejectedValue(new Error('getaddrinfo ENOTFOUND'))
+    const exitCode = process.exitCode
+
+    try {
+      await expect(loaded.MeoCordFactory.create(appClass(loaded)).start()).rejects.toThrow('ENOTFOUND')
+      await new Promise(resolve => setTimeout(resolve, 10))
+    } finally {
+      process.exitCode = exitCode
+    }
+    expect(exit).not.toHaveBeenCalled()
   })
 
   describe('a login Discord refuses for its token, in one process', () => {
@@ -321,6 +343,7 @@ describe('sharding', () => {
 
       try {
         await expect(loaded.MeoCordFactory.create(appClass(loaded)).start()).rejects.toBe(invalid)
+        await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
       } finally {
         process.exitCode = exitCode
       }
@@ -348,6 +371,7 @@ describe('sharding', () => {
         await expect(
           loaded.MeoCordFactory.create(appClass(loaded, { intents: [loaded.discord.GatewayIntentBits.MessageContent] })).start(),
         ).rejects.toThrow(closed)
+        await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
       } finally {
         process.exitCode = exitCode
       }
@@ -356,7 +380,7 @@ describe('sharding', () => {
       expect(logged.error).toEqual([])
     })
 
-    it('reports nothing for a login error a restart can fix', async () => {
+    it('reports nothing for a login error a restart can fix, and ends itself so its manager restarts it', async () => {
       const loaded = await load()
       const send = vi.fn()
       Reflect.set(process, 'send', send)
@@ -365,6 +389,7 @@ describe('sharding', () => {
 
       try {
         await expect(loaded.MeoCordFactory.create(appClass(loaded)).start()).rejects.toThrow('ENOTFOUND')
+        await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
       } finally {
         process.exitCode = exitCode
       }
@@ -422,6 +447,87 @@ describe('sharding', () => {
       process.emit('disconnect')
 
       await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+    })
+
+    it('ends itself when a provider factory fails, before logging in', async () => {
+      const loaded = await load()
+      const login = vi.spyOn(loaded.discord.Client.prototype, 'login').mockResolvedValue('token')
+      @loaded.MeoCord({
+        controllers: [],
+        providers: [{ provide: 'database', useFactory: () => Promise.reject(new Error('connection refused')) }],
+        clientOptions: { intents: [] },
+      })
+      class App {}
+      const exitCode = process.exitCode
+
+      try {
+        await expect(loaded.MeoCordFactory.create(App).start()).rejects.toThrow('connection refused')
+        await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+      } finally {
+        process.exitCode = exitCode
+      }
+      expect(login).not.toHaveBeenCalled()
+    })
+
+    it('tells its manager of a refusal, which no restart fixes, and ends itself', async () => {
+      const loaded = await load()
+      const sent: unknown[] = []
+      Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+        sent.push(message)
+        callback()
+        return true
+      })
+      const [first, second] = [0, 1].map(() => {
+        @loaded.Service()
+        class Stats {}
+        return Stats
+      })
+
+      let refused: unknown
+      try {
+        loaded.MeoCordFactory.create(appClass(loaded, { services: [first, second] }))
+      } catch (error) {
+        refused = error
+      }
+
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+      expect(sent).toEqual([{ meocord: 'fatal', code: 'Refused', message: expect.stringContaining('Stats: two classes have this name') }])
+      // The manager logs it, once for every shard
+      expect(loaded.isExplainedError(refused)).toBe(true)
+      expect(logged.error).toEqual([])
+    })
+
+    it('listens to its manager while its providers are made, and stops before logging in', async () => {
+      const loaded = await load()
+      const login = vi.spyOn(loaded.discord.Client.prototype, 'login').mockResolvedValue('token')
+      vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
+      let connect!: () => void
+      @loaded.MeoCord({
+        controllers: [],
+        providers: [{ provide: 'database', useFactory: () => new Promise<void>(resolve => (connect = resolve)) }],
+        clientOptions: { intents: [] },
+      })
+      class App {}
+
+      const started = loaded.MeoCordFactory.create(App).start()
+      await vi.waitFor(() => expect(connect).toBeTypeOf('function'))
+      process.emit('message', { meocord: 'shutdown' }, undefined)
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+      connect()
+
+      await expect(started).rejects.toThrow('The bot was stopped before it came online.')
+      expect(login).not.toHaveBeenCalled()
+    })
+
+    it('stops before logging in when its manager is already gone', async () => {
+      const loaded = await load()
+      const login = vi.spyOn(loaded.discord.Client.prototype, 'login').mockResolvedValue('token')
+      vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
+      channel.closed = true
+
+      await expect(loaded.MeoCordFactory.create(appClass(loaded)).start()).rejects.toThrow('The bot was stopped before it came online.')
+      expect(exit).toHaveBeenCalledWith(0)
+      expect(login).not.toHaveBeenCalled()
     })
 
     it('ignores IPC messages that are not its own', async () => {
