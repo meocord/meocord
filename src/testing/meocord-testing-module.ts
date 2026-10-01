@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { Container, type ServiceIdentifier } from 'inversify'
-import { claimCooldownNotice, COOLDOWN_POLICY, DEFAULT_COOLDOWN_STORE_TIMEOUT_MS } from '@src/core/cooldown-runner.js'
+import { claimCooldownNotice, COOLDOWN_POLICY, cooldownPolicyFrom, type CooldownStoreFailure } from '@src/core/cooldown-runner.js'
 import {
   BaseInteraction,
   Client,
@@ -89,9 +89,9 @@ export interface TestingModuleOptions {
 
   /**
    * The `@MeoCord` app class, whose global guards, interceptors and filters run with each handler's own, and whose
-   * translator, presenter, message options, theme and observers the module uses. Its controllers, services and
-   * providers are not registered: list the ones a test needs, or build the whole app with
-   * {@link MeoCordTestingModule.fromApp}.
+   * translator, presenter, message options, theme, cooldown store and policy, and observers the module uses. A
+   * `CooldownStore` in `providers` takes the store's place. Its controllers, services and providers are not
+   * registered: list the ones a test needs, or build the whole app with {@link MeoCordTestingModule.fromApp}.
    */
   app?: new (...args: any[]) => unknown
 
@@ -118,11 +118,10 @@ export interface FromAppOptions {
   observers?: (new (...args: any[]) => DispatchObserver)[]
 }
 
-/** What `fromApp` takes from the app beyond what `app` gives: its providers, services and cooldown store. */
+/** What `fromApp` takes from the app beyond what `app` gives: its providers and services. */
 interface AppWiring {
   providers: Provider[]
   services: (new (...args: any[]) => unknown)[]
-  cooldownStore?: new (...args: any[]) => CooldownStore
 }
 
 /**
@@ -900,7 +899,13 @@ export class TestingModuleBuilder {
     for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
     for (const [token, override] of this.overrides) providers.set(token, override)
     const services = this.wiring?.services ?? []
-    const store = this.wiring?.cooldownStore
+    const appOptions = this.options.app
+      ? (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as
+          | { cooldownStore?: new (...args: any[]) => CooldownStore; cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }
+          | undefined)
+      : undefined
+    // The app's own store, as the bot binds it, whether the module is given the app or built from it
+    const store = appOptions?.cooldownStore
     const roots = [
       ...(this.options.controllers ?? []),
       ...services,
@@ -936,13 +941,7 @@ export class TestingModuleBuilder {
     }
 
     // The app's cooldown policy, so a test of a failing store sees what the bot would do
-    const appOptions = this.options.app && (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as { cooldownStoreFailure?: 'deny' | 'allow'; cooldownStoreTimeoutMs?: number })
-    if (appOptions && !container.isBound(COOLDOWN_POLICY)) {
-      container.bind(COOLDOWN_POLICY).toConstantValue({
-        failure: appOptions.cooldownStoreFailure ?? 'deny',
-        timeoutMs: appOptions.cooldownStoreTimeoutMs ?? DEFAULT_COOLDOWN_STORE_TIMEOUT_MS,
-      })
-    }
+    if (appOptions && !container.isBound(COOLDOWN_POLICY)) container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(appOptions))
 
     // The app's translator, unless a provider stands in for it
     const i18n = this.options.app && (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as { i18n?: Translator })?.i18n
@@ -1137,14 +1136,13 @@ export class MeoCordTestingModule {
           controllers: (new (...args: any[]) => any)[]
           services?: (new (...args: any[]) => unknown)[]
           providers?: Provider[]
-          cooldownStore?: new (...args: any[]) => CooldownStore
         }
       | undefined
     if (!appOptions) throw new TypeError(`${app?.name ?? String(app)} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.`)
     const controllers = [...new Set([...appOptions.controllers, ...(options.controllers ?? [])])]
     return new TestingModuleBuilder(
       { app, controllers, providers: options.providers, observers: options.observers },
-      { providers: appOptions.providers ?? [], services: appOptions.services ?? [], cooldownStore: appOptions.cooldownStore },
+      { providers: appOptions.providers ?? [], services: appOptions.services ?? [] },
     )
   }
 }

@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { COOLDOWN_POLICY, type CooldownPolicy, DEFAULT_COOLDOWN_STORE_TIMEOUT_MS } from '@src/core/cooldown-runner.js'
+import { COOLDOWN_POLICY, cooldownPolicyFrom } from '@src/core/cooldown-runner.js'
 import { Container, type ServiceIdentifier } from 'inversify'
 import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
@@ -220,10 +220,7 @@ export class MeoCordFactory {
         ),
       )
 
-    container.bind(COOLDOWN_POLICY).toConstantValue({
-      failure: options.cooldownStoreFailure ?? 'deny',
-      timeoutMs: options.cooldownStoreTimeoutMs ?? DEFAULT_COOLDOWN_STORE_TIMEOUT_MS,
-    } satisfies CooldownPolicy)
+    container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(options))
     // A store of the app's own is resolved like a service, so it can inject its client
     if (options.cooldownStore) {
       bindDependencies(container, options.cooldownStore, providers)

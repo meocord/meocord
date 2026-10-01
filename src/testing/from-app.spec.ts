@@ -166,6 +166,39 @@ describe('MeoCordTestingModule.fromApp', () => {
   })
 })
 
+describe('MeoCordTestingModule.create({ app })', () => {
+  const create = (providers: { provide: unknown; useValue: unknown }[] = []) =>
+    MeoCordTestingModule.create({
+      app: NotesApp,
+      controllers: [NotesController],
+      providers: [{ provide: DATABASE, useValue: { count: async () => 5 } }, ...providers] as never,
+    }).compile()
+
+  it("counts cooldowns in the app's cooldown store, as the bot does", async () => {
+    const module = create()
+
+    await module.dispatch(slash('notes'))
+    await module.dispatch(slash('notes'))
+
+    expect(consumed).toHaveLength(2)
+  })
+
+  it("lets a CooldownStore the test provides take the app's place", async () => {
+    const taken: string[] = []
+    class OtherStore extends CooldownStore {
+      async consume(key: string): Promise<CooldownVerdict> {
+        taken.push(key)
+        return { allowed: true, retryAfterMs: 0 }
+      }
+    }
+    const module = create([{ provide: CooldownStore, useValue: new OtherStore() }])
+
+    await module.dispatch(slash('notes'))
+
+    expect([taken.length, consumed.length]).toEqual([1, 0])
+  })
+})
+
 describe('a class that injects the Discord Client', () => {
   @Service()
   class Presence {
