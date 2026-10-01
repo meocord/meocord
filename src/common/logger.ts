@@ -61,7 +61,8 @@ const redact = (text: string): string => {
  * prints it, an object four levels deep: its non-enumerable properties stay unprinted, and an error prints its stack,
  * its own properties and its `cause`. The bot's credentials print as
  * `[redacted]` wherever they appear in a line. A line prints when its level is at or above the threshold: `debug`,
- * then `log` (with `info` and `verbose`), `warn`, `error`.
+ * then `log` (with `info` and `verbose`, tagged `[INFO]` and `[VERBOSE]`), `warn`, `error`. Colour follows chalk:
+ * none where the output is no terminal, such as a file or a log collector, unless `FORCE_COLOR` asks for it.
  *
  * @example
  * ```ts
@@ -82,6 +83,7 @@ export class Logger {
   private readonly colorMap: Record<string, (msg: string) => string> = {
     LOG: chalk.green,
     INFO: chalk.cyan,
+    VERBOSE: chalk.gray,
     WARN: chalk.yellow,
     ERROR: chalk.red,
     DEBUG: chalk.magenta,
@@ -110,9 +112,9 @@ export class Logger {
     if (Logger.shows('log')) this.logWithContext('log', args)
   }
 
-  /** Prints a line at the `log` level, as `log` does. */
+  /** Prints a line tagged `[INFO]`, shown at the `log` level as `log` is. */
   info(...args: any[]): void {
-    if (Logger.shows('log')) this.logWithContext('log', args)
+    if (Logger.shows('log')) this.logWithContext('log', args, 'INFO')
   }
 
   /** Prints a warning, shown unless the level is `error` or `silent`. */
@@ -130,25 +132,26 @@ export class Logger {
     if (Logger.shows('debug')) this.logWithContext('debug', args)
   }
 
-  /** Prints a line at the `log` level, as `log` does. */
+  /** Prints a line tagged `[VERBOSE]`, shown at the `log` level as `log` is. */
   verbose(...args: any[]): void {
-    if (Logger.shows('log')) this.logWithContext('log', args)
+    if (Logger.shows('log')) this.logWithContext('log', args, 'VERBOSE')
   }
 
   private formatMessage(message: unknown, logType: string): string {
     if (typeof message === 'string') return (this.colorMap[logType] || (msg => msg))(message)
     // Anything else as console.log inspects it, so no value, a Symbol included, makes the log call throw. Without
     // non-enumerable properties, which discord.js uses to keep its internals out of logs.
-    return inspect(message, { depth: OBJECT_DEPTH, colors: true, compact: false })
+    // In colour only where chalk finds a terminal that shows it, or FORCE_COLOR asks for it, as the text around it is
+    return inspect(message, { depth: OBJECT_DEPTH, colors: chalk.level > 0, compact: false })
   }
 
-  private logWithContext(logLevel: string, messages: any[]): void {
+  private logWithContext(logLevel: string, messages: any[], tag = logLevel.toUpperCase()): void {
     if (messages.length === 0) return
 
     // The built bot's own config only: elsewhere dist holds a previous build's, and loading it runs its dotenv import
     const config = isBuiltApplication() ? loadMeoCordConfig() : undefined
     hideInLogs(config?.discordToken)
-    const logType = logLevel.toUpperCase()
+    const logType = tag
     const applyColor = this.colorMap[logType] || (msg => msg)
     const formattedMessages = messages.map(message => this.formatMessage(message, logType))
 
