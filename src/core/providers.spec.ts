@@ -1,4 +1,5 @@
-import { providerMap, tokenName } from '@src/core/providers.js'
+import { Container } from 'inversify'
+import { bindProvider, providerMap, tokenName } from '@src/core/providers.js'
 import { type Provider } from '@src/interface/index.js'
 
 const where = '@MeoCord({ providers })'
@@ -40,5 +41,43 @@ describe('tokenName', () => {
     expect(tokenName(Symbol('Database'))).toBe('Symbol(Database)')
     expect(tokenName(Symbol())).toBe('a symbol')
     expect(tokenName('config')).toBe("'config'")
+  })
+})
+
+describe('bindProvider, for a factory', () => {
+  /** A thenable that is not a native promise, as a library's promise or one from another realm is. */
+  const thenable = <T>(settle: (resolve: (value: T) => void, reject: (error: unknown) => void) => void) => ({
+    then(onFulfilled?: (value: T) => unknown, onRejected?: (error: unknown) => unknown) {
+      return new Promise<T>(settle).then(onFulfilled, onRejected)
+    },
+  })
+
+  function bound(useFactory: () => unknown) {
+    const container = new Container()
+    bindProvider(container, { provide: 'db', useFactory }, () => undefined)
+    return container
+  }
+
+  it("makes a thenable's value once and keeps the value, not the thenable", async () => {
+    let made = 0
+    const container = bound(() => {
+      made++
+      return thenable<{ connected: boolean }>(resolve => resolve({ connected: true }))
+    })
+
+    expect(await container.getAsync('db')).toEqual({ connected: true })
+    expect(container.get('db')).toEqual({ connected: true })
+    expect(made).toBe(1)
+  })
+
+  it('makes it again on the next resolve after a thenable or a promise rejected', async () => {
+    for (const fail of [() => thenable(( _, reject) => reject(new Error('refused'))), () => Promise.reject(new Error('refused'))]) {
+      let made = 0
+      const container = bound(() => (++made === 1 ? fail() : Promise.resolve('ok')))
+
+      await expect(container.getAsync('db')).rejects.toThrow('refused')
+      expect(await container.getAsync('db')).toBe('ok')
+      expect(made).toBe(2)
+    }
   })
 })
