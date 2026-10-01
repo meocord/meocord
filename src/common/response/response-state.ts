@@ -30,7 +30,15 @@ import {
   type ResponseStep,
 } from '@src/common/response/flags.js'
 import { keptAttachmentNames, rewriteAttachmentUrls } from '@src/common/response/attachments.js'
-import { presenterFor, renderContainer, renderEmbed } from '@src/common/response/presenter.js'
+import {
+  attachmentsOf,
+  DEFAULT_ATTACHMENT_SIZE_LIMIT,
+  defaultPresenter,
+  presenterFor,
+  renderContainer,
+  renderEmbed,
+  withSendableFiles,
+} from '@src/common/response/presenter.js'
 import {
   countComponents,
   EMBED_LIMIT,
@@ -219,6 +227,10 @@ function editedSince(stamp: number | null | undefined, ours: number | undefined)
 interface MessageLock {
   /** The message with no call holding it: before the first lock, then as the last settled call left it. */
   original: Snapshot
+  /** The message's own attachments when it was first locked, which every edit keeps by listing them. */
+  attachments: unknown[]
+  /** Whether a loading view put files of its own on it, which putting it back has to leave out. */
+  drawn?: boolean
   /** The calls holding it, with the control each disabled. */
   holders: Map<InteractionResponse, LockOptions>
   /**
@@ -267,6 +279,17 @@ function field(part: unknown, key: string): unknown {
 /** A view MeoCord renders, in the theme's primary colour when its presenter gave it none. */
 function themedView(view: ResponseView, theme: ResolvedTheme): ResponseView {
   return view.color === undefined ? { ...view, color: theme.colors.primary } : view
+}
+
+/** A message's attachments, as an edit lists them to keep them. */
+function attachmentList(message: { attachments?: unknown } | null | undefined): unknown[] {
+  const values = (message?.attachments as { values?: () => unknown } | undefined)?.values?.()
+  return values && typeof (values as Iterable<unknown>)[Symbol.iterator] === 'function' ? [...(values as Iterable<unknown>)] : []
+}
+
+/** Whether a presenter's result is a view still being drawn. */
+function isDrawing(view: ResponseView | Promise<ResponseView>): view is Promise<ResponseView> {
+  return typeof (view as { then?: unknown }).then === 'function'
 }
 
 function toJson(value: unknown): Record<string, unknown> {
@@ -409,6 +432,8 @@ export class InteractionResponse implements ResponseState {
   /** The message this call locked, kept after it settles so its edits are still recorded there. */
   private lockEntry?: MessageLock
   private loadingView?: ResponseView
+  /** Whether the interaction was acknowledged with a private deferred reply for a drawn error view, which that view replaces. */
+  private privateDeferral = false
   /** Whether the locked message was answered, so nothing restores it again. */
   private settled = false
   private suppressNotifications = false
@@ -581,7 +606,9 @@ export class InteractionResponse implements ResponseState {
     if (this.phase === 'replied' && !this.acknowledging) return
 
     const theme = await themeForInteraction(this.interaction)
-    const view = themedView(presenterFor(this.interaction.client).loading(this.presenterContext(this.v2, theme)), theme)
+    // Drawn only now, after the acknowledgement, so a slow drawing never misses Discord's three seconds
+    const drawn = await presenterFor(this.interaction.client).loading(this.presenterContext(this.v2, theme))
+    const view = this.sendable(themedView(drawn, theme), attachmentList(message).length)
     const loadingEmbed = renderEmbed(view)
     const key = typeof message.id === 'string' ? message.id : message
     // A message another call holds is snapshotted as it was before any lock, not as that call's lock shows it
@@ -592,6 +619,7 @@ export class InteractionResponse implements ResponseState {
           components: withoutRenderedViews(message.components.map(component => component.toJSON() as unknown as Record<string, unknown>)),
           embeds: message.embeds.map(embed => embed.toJSON()).filter(embed => !sameEmbed(embed, loadingEmbed)),
         },
+        attachments: attachmentList(message),
         holders: new Map(),
       }
       messageLocks.set(key, entry)
@@ -613,13 +641,28 @@ export class InteractionResponse implements ResponseState {
       (components, options) => lockComponents(components, options),
       base.components,
     )
-    if (!view || entry.holders.size === 0) return this.v2 ? { components: locked } : { components: locked, embeds: base.embeds }
+    if (!view || entry.holders.size === 0) return this.leavingDrawn(entry, this.v2 ? { components: locked } : { components: locked, embeds: base.embeds })
+    let body: Body
+    let shown: boolean
     if (this.v2) {
       const withView = [...locked, renderContainer(view) as unknown as Record<string, unknown>]
-      return { components: countComponents(withView) <= V2_COMPONENT_LIMIT ? withView : locked }
+      shown = countComponents(withView) <= V2_COMPONENT_LIMIT
+      body = { components: shown ? withView : locked }
+    } else {
+      shown = base.embeds.length < EMBED_LIMIT
+      body = { components: locked, embeds: shown ? [...base.embeds, renderEmbed(view)] : base.embeds }
     }
-    const loadingEmbed = renderEmbed(view)
-    return { components: locked, embeds: base.embeds.length < EMBED_LIMIT ? [...base.embeds, loadingEmbed] : base.embeds }
+    const files = shown ? attachmentsOf(view) : []
+    if (files.length === 0) return this.leavingDrawn(entry, body)
+    entry.drawn = true
+    return { ...body, files, attachments: [...entry.attachments] }
+  }
+
+  /** `body`, listing the message's own attachments when a loading view's files are on it, so the edit takes them off. */
+  private leavingDrawn(entry: MessageLock, body: Body): Body {
+    if (!entry.drawn) return body
+    entry.drawn = false
+    return { ...body, attachments: [...entry.attachments] }
   }
 
   /**
@@ -878,6 +921,12 @@ export class InteractionResponse implements ResponseState {
       this.settled = true
       this.leave()
     }
+    // An answer that takes the place of a drawn loading view leaves its files out, keeping the message's own
+    const entry = this.lockEntry
+    if (!restoring && entry?.drawn && body.attachments === undefined) {
+      entry.drawn = false
+      body = { ...body, attachments: [...entry.attachments] }
+    }
     const flags = this.flagsFor('edit', body.flags) | this.keptFlags(body)
     this.v2 ||= hasComponentsV2(flags)
     const sent = { ...this.withAttachments(forMode(body, this.v2)), flags }
@@ -898,9 +947,22 @@ export class InteractionResponse implements ResponseState {
   }
 
   private render(view: ResponseView, v2: boolean): Body {
-    return v2
+    const body: Body = v2
       ? { components: [renderContainer(view)], flags: MessageFlags.IsComponentsV2 }
       : { embeds: [renderEmbed(view)] }
+    const files = attachmentsOf(view)
+    return files.length > 0 ? { ...body, files } : body
+  }
+
+  /** A view Discord takes, its files dropped with a warning when it would refuse them; `kept` attachments stay beside them. */
+  private sendable(view: ResponseView, kept = 0): ResponseView {
+    const limit = (this.interaction as { attachmentSizeLimit?: unknown }).attachmentSizeLimit
+    const sizeLimit = typeof limit === 'number' && limit > 0 ? limit : DEFAULT_ATTACHMENT_SIZE_LIMIT
+    return withSendableFiles(view, { kept, sizeLimit }, problem => {
+      const presenter = presenterFor(this.interaction.client)
+      const named = presenter.constructor?.name && presenter.constructor !== Object ? ` of ${presenter.constructor.name}` : ''
+      logger.warn(`The view${named} for ${describeInteraction(this.interaction as Interaction)} is sent without its files: ${problem}.`)
+    })
   }
 
   /**
@@ -929,7 +991,7 @@ export class InteractionResponse implements ResponseState {
     const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
     const theme = await themeForInteraction(this.interaction)
     // Built before anything is sent, so a presenter that fails throws to the caller rather than passing for a refusal
-    const view = this.view(error, message, this.v2, theme)
+    const view = await this.drawnView(error, message, theme)
     try {
       await this.presentError(view, visibility, ifUnanswered)
     } catch (deliveryError) {
@@ -953,9 +1015,47 @@ export class InteractionResponse implements ResponseState {
     return { interaction: this.interaction as Interaction, locale: this.interaction.locale, mode: v2 ? 'v2' : 'embed', theme }
   }
 
-  private view(error: unknown, message: string, v2: boolean, theme: ResolvedTheme): ResponseView {
+  /**
+   * The presenter's error view. One it draws asynchronously has the interaction acknowledged privately first, so the
+   * drawing never misses Discord's three seconds; should that drawing then fail, the acknowledgement is answered with
+   * MeoCord's own view before the failure is thrown, so the user is never left with it.
+   */
+  private async drawnView(error: unknown, message: string, theme: ResolvedTheme): Promise<ResponseView> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
-    return themedView(presenterFor(this.interaction.client).error(this.presenterContext(v2, theme), { message, error, tone }), theme)
+    const presented = { message, error, tone } as const
+    const produced = presenterFor(this.interaction.client).error(this.presenterContext(this.v2, theme), presented)
+    if (!isDrawing(produced)) return this.sendable(themedView(produced, theme), this.keptBeside())
+    this.sync()
+    if (this.phase === 'unanswered') await this.acknowledgePrivately()
+    try {
+      return this.sendable(themedView(await produced, theme), this.keptBeside())
+    } catch (failure) {
+      if (this.privateDeferral) {
+        const fallback = themedView(defaultPresenter.error(this.presenterContext(this.v2, theme), presented), theme)
+        await this.editMessage(this.render(fallback, this.v2)).catch(sendError => logFailedSend(logger, 'deliver the error reply', sendError))
+      }
+      throw failure
+    }
+  }
+
+  /** How many attachments the message an error view may be added to keeps: a private component message's own. */
+  private keptBeside(): number {
+    if (answersWithOwnMessage(this.interaction) || this.modalShown) return 0
+    const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
+    return current?.flags?.has(MessageFlags.Ephemeral) ? attachmentList(current).length : 0
+  }
+
+  /** Acknowledges with a private deferred reply, which the error view then replaces, as a private reply would show it. */
+  private async acknowledgePrivately(): Promise<void> {
+    const flags = this.flagsFor('deferReply', MessageFlags.Ephemeral)
+    try {
+      await this.call('deferReply', { flags }, () => this.interaction.deferReply({ flags }))
+      this.phase = 'deferred'
+      this.privateDeferral = true
+    } catch (error) {
+      if (errorCode(error) !== ALREADY_ACKNOWLEDGED) throw error
+      this.answeredElsewhere()
+    }
   }
 
   private privateError(view: ResponseView): ResponsePayload {
@@ -965,6 +1065,12 @@ export class InteractionResponse implements ResponseState {
 
   private async presentError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered = false): Promise<void> {
     this.sync()
+    // The private deferral made for a drawn view is that view's reply
+    if (this.privateDeferral && this.phase === 'deferred') {
+      this.privateDeferral = false
+      await this.editMessage(this.render(view, this.v2))
+      return
+    }
     if (this.phase === 'unanswered') {
       await this.reply(toBody(this.privateError(view)))
       return
@@ -1009,9 +1115,11 @@ export class InteractionResponse implements ResponseState {
       components: current.components.map(component => component.toJSON()),
       embeds: current.embeds.map(embed => embed.toJSON()),
     }
-    return this.v2
+    const body: Body = this.v2
       ? { components: [...base.components, renderContainer(view)] }
       : { components: base.components, embeds: [...base.embeds, renderEmbed(view)] }
+    const files = attachmentsOf(view)
+    return files.length > 0 ? { ...body, files, attachments: attachmentList(current) } : body
   }
 }
 

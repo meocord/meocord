@@ -99,3 +99,40 @@ describe('renderContainer and renderEmbed', () => {
   })
 })
 
+
+describe("a view's image and thumbnail", () => {
+  const files = [
+    { name: 'card.png', data: Buffer.from('p') },
+    { name: 'badge.png', data: Buffer.from('p') },
+  ]
+
+  it('take a file by name, or a URL, in place of the first image in an embed', () => {
+    expect(renderEmbed({ text: 't', files, image: 'badge.png', thumbnail: 'https://example.com/a.png' })).toMatchObject({
+      image: { url: 'attachment://badge.png' },
+      thumbnail: { url: 'https://example.com/a.png' },
+    })
+  })
+
+  it('leave the first image to the embed image when the thumbnail takes another', () => {
+    expect(renderEmbed({ text: 't', files, thumbnail: 'card.png' })).toMatchObject({
+      image: { url: 'attachment://badge.png' },
+      thumbnail: { url: 'attachment://card.png' },
+    })
+  })
+
+  it('put the thumbnail beside the text, and the image first in the gallery, in a container', () => {
+    const container = renderContainer({ title: 'Cooldown', text: 't', files, thumbnail: 'card.png', image: 'https://example.com/b.png' })
+
+    expect(container.components).toMatchObject([
+      {
+        type: ComponentType.Section,
+        components: [{ type: ComponentType.TextDisplay, content: '### Cooldown\nt' }],
+        accessory: { type: ComponentType.Thumbnail, media: { url: 'attachment://card.png' } },
+      },
+      {
+        type: ComponentType.MediaGallery,
+        items: [{ media: { url: 'https://example.com/b.png' } }, { media: { url: 'attachment://badge.png' } }],
+      },
+    ])
+  })
+})
