@@ -2,7 +2,6 @@ import { vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { simpleGit } from 'simple-git'
 
 vi.mock('@src/common/index.js', () => ({
   Logger: vi.fn(
@@ -51,11 +50,11 @@ vi.mock('@src/util/package-manager.util.js', async importOriginal => ({
   detectInstalledPMs: () => ['bun'],
 }))
 
-import { MeoCordCLI } from '@src/bin/meocord.js'
+// Git itself is initial-commit.helper.spec's; here, when create runs it and what create does with each outcome
+const { makeInitialCommit } = vi.hoisted(() => ({ makeInitialCommit: vi.fn() }))
+vi.mock('@src/bin/helper/initial-commit.helper.js', () => ({ makeInitialCommit }))
 
-const IDENTITY = '[user]\n  name = Test\n  email = test@example.com\n[init]\n  defaultBranch = main\n'
-// As on a machine where git cannot guess an email, such as a fresh Linux container
-const NO_IDENTITY = '[user]\n  useConfigOnly = true\n[init]\n  defaultBranch = main\n'
+import { MeoCordCLI } from '@src/bin/meocord.js'
 
 describe('meocord create', () => {
   const roots: string[] = []
@@ -64,14 +63,10 @@ describe('meocord create', () => {
   let root: string
   let exit: ReturnType<typeof vi.spyOn>
 
-  /** Runs `create bot` in a directory of its own, with git configured only by `gitconfig`. */
-  function sandbox(gitconfig: string) {
+  /** Runs `create bot` in a directory of its own. */
+  function sandbox() {
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-create-')))
     roots.push(root)
-    fs.writeFileSync(path.join(root, '.gitconfig'), gitconfig)
-    for (const name of Object.keys(process.env)) if (name.startsWith('GIT_') || name === 'EMAIL') vi.stubEnv(name, undefined)
-    for (const name of ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME']) vi.stubEnv(name, root)
-    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
     vi.spyOn(process, 'cwd').mockReturnValue(root)
   }
 
@@ -80,25 +75,27 @@ describe('meocord create', () => {
       throw new Error(`process.exit(${code})`)
     })
   })
-  afterEach(() => {
-    vi.restoreAllMocks()
-    vi.unstubAllEnvs()
-  })
+  afterEach(() => vi.restoreAllMocks())
 
-  it('commits the lockfile the install wrote, with the rest of the app', async () => {
-    sandbox(IDENTITY)
+  it('makes the first commit after the install, so the lockfile the install wrote is in it', async () => {
+    sandbox()
+    let lockfileWritten = false
+    makeInitialCommit.mockImplementation(async (appPath: string) => {
+      lockfileWritten = fs.existsSync(path.join(appPath, 'bun.lock'))
+      return { outcome: 'committed' }
+    })
 
     await new MeoCordCLI().createApp('bot', { useBun: true })
 
-    const git = simpleGit(path.join(root, 'bot'))
-    expect((await git.raw(['ls-files'])).split('\n')).toContain('bun.lock')
-    expect((await git.status()).isClean()).toBe(true)
+    expect(makeInitialCommit).toHaveBeenCalledWith(path.join(root, 'bot'))
+    expect(lockfileWritten).toBe(true)
     expect(exit).not.toHaveBeenCalled()
   })
 
   // The app is complete and installed by then; deleting it for a commit git could not make lost all of it
   it('keeps the app, and says what is left to do, when git cannot make the first commit', async () => {
-    sandbox(NO_IDENTITY)
+    sandbox()
+    makeInitialCommit.mockResolvedValue({ outcome: 'not-committed', reason: 'Author identity unknown' })
 
     await new MeoCordCLI().createApp('bot', { useBun: true })
 
