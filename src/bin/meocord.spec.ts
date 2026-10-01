@@ -530,10 +530,16 @@ describe('spawning the application', () => {
       })
     })
 
-    // One save can make two builds of the same output; the second may finish just after the replacement started
-    it('leaves a bot running that was launched from the build that finished, and restarts it for a new one', async () => {
+    // One save can make two builds of the same output; the second may finish just after the replacement started.
+    // Rspack gives every rebuild a new hash, even of unchanged sources, so each build here has its own.
+    it('leaves a bot running that was launched from the output a build emitted, and restarts it for a new one', async () => {
       spawnMock.mockImplementation(() => createChild() as never)
-      let build: (hash: string) => void = () => {}
+      let build: (output: string) => void = () => {}
+      let builds = 0
+      const statsOf = (output: string) => ({
+        hash: `build ${++builds}`,
+        compilation: { getAssets: () => [{ name: 'main.js', source: { buffer: () => Buffer.from(output) } }] },
+      })
       const cli = new MeoCordCLI() as unknown as {
         startDev: () => Promise<void>
         clearScreen: () => void
@@ -546,7 +552,7 @@ describe('spawning the application', () => {
       vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
       vi.spyOn(cli, 'createBundler').mockResolvedValue({
         rsbuild: {
-          onAfterBuild: (callback: (params: object) => void) => (build = hash => callback({ stats: { hash } })),
+          onAfterBuild: (callback: (params: object) => void) => (build = output => callback({ stats: statsOf(output) })),
           build: async () => ({ close: async () => {} }),
         },
       })

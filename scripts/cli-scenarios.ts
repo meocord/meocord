@@ -272,6 +272,8 @@ const HALF_WRITTEN = '\nexport const halfWritten = {\n'
 
 /** A change to a file that leaves what it does as it was. */
 const touched = (current: string) => `${current}\n`
+/** A save of the bytes a file already holds, which rebuilds it as a second filesystem event for one save does. */
+const resaved = (current: string) => current
 /** A template file of the generated app, to change one line of. */
 const templateFile = (file: string) =>
   readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', `${file}.template`), 'utf8')
@@ -1257,14 +1259,18 @@ const scenarios: Scenario[] = [
   // A restart of start --dev is one sequence: the old bot stops, even mid-login, and one new bot starts
   ...(['node', 'bun'] as const).flatMap((runtime): Scenario[] => [
     {
-      name: `start --dev on ${runtime} restarts once for a change made while the bot logs in`,
+      name: `start --dev on ${runtime} restarts once for a change made while the bot logs in, and saved again unchanged`,
       tier: runtime === 'node' ? 'fast' : 'slow',
       platforms: ['linux', 'darwin'],
       runtime,
       files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
       discord: { readyDelayMs: 3_000 },
       argv: ['start', '--dev'],
-      edits: [{ after: 'Starting bot', files: { 'src/ready.service.ts': touched } }],
+      // The second build, of the same output, finishes once the replacement has started
+      edits: [
+        { after: 'Starting bot', files: { 'src/ready.service.ts': touched } },
+        { after: 'Bot has shut down', files: { 'src/ready.service.ts': resaved } },
+      ],
       signal: { name: 'SIGINT', after: 'Ready hook ran' },
       timeoutMs: 60_000,
       expect: {

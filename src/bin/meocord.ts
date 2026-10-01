@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import path from 'path'
-import { createRsbuild } from '@rsbuild/core'
+import { createRsbuild, type Rspack } from '@rsbuild/core'
+import { createHash } from 'node:crypto'
 import { Logger } from '@src/common/index.js'
 import { spawn, ChildProcess } from 'node:child_process'
 import { capitalize } from 'lodash-es'
@@ -94,6 +95,19 @@ function installFailure(error: unknown): Error {
  */
 export function stillRunning(child: ChildProcess | null): child is ChildProcess {
   return child !== null && child.exitCode === null && child.signalCode === null
+}
+
+/**
+ * A digest of the files a build emitted, which is what the application runs. Rspack gives every rebuild a new
+ * `stats.hash`, even of unchanged sources, so two builds of one save are told apart only by what they emitted.
+ */
+export function emittedDigest(stats: Rspack.Stats | Rspack.MultiStats): string {
+  const digest = createHash('sha256')
+  for (const { compilation } of 'stats' in stats ? stats.stats : [stats]) {
+    const assets = [...compilation.getAssets()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    for (const { name, source } of assets) digest.update(`${name}\0`).update(source.buffer()).update('\0')
+  }
+  return digest.digest('hex')
 }
 
 /** How long the application has to stop itself on a repeated signal before the CLI kills it. */
@@ -623,10 +637,10 @@ copies or substantial portions of the Software.
   /** The running application, while a watch session owns one, including while it exits to be replaced. */
   private appProcess: ChildProcess | null = null
 
-  /** The hash of the last build watch mode finished, which a bot launched now runs. */
+  /** The {@link emittedDigest} of the last build watch mode finished, which a bot launched now runs. */
   private latestBuild?: string
 
-  /** The hash of the build the running bot was launched from, unless a reload has since made that out of date. */
+  /** The digest of the output the running bot was launched from, unless a reload has since made that out of date. */
   private launchedFrom?: string
 
   /** Whether the running application is exiting to be replaced; a build that finishes meanwhile joins that restart. */
@@ -646,7 +660,7 @@ copies or substantial portions of the Software.
    * login conflict rather than a reload. Builds that finish while it exits start nothing
    * more: the replacement runs `dist/main.js` as it stands at launch, the latest build.
    *
-   * @param build - The hash of the build asking for it; one the running bot was launched from leaves it running.
+   * @param build - The digest of the build asking for it; the output the running bot was launched from leaves it running.
    */
   private restartApp(build?: string): void {
     if (this.stopping || this.restarting) return
@@ -755,7 +769,7 @@ copies or substantial portions of the Software.
         // rebuild reports its own errors and does not reach here, so the process already
         // running is left alone rather than being replaced by a broken build.
         rsbuild.onAfterBuild(({ stats }) => {
-          this.latestBuild = stats?.hash ?? undefined
+          this.latestBuild = stats ? emittedDigest(stats) : undefined
           this.restartApp(this.latestBuild)
           isRunning = true
         })
