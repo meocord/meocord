@@ -5,7 +5,7 @@ import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
 import { MeoCordApp } from '@src/core/meocord.app.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
-import { bunDevelopmentEnvFiles } from '@src/util/inherited-env.util.js'
+import { bunDevelopmentValues } from '@src/util/inherited-env.util.js'
 import { assertBuiltForThisPlatform } from '@src/util/platform.util.js'
 import { MetadataKey } from '@src/enum/index.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
@@ -184,11 +184,12 @@ export class MeoCordFactory {
       warnUnregisteredCommands(options.controllers)
       warnInheritedRoutes(options.controllers)
       warnOverlappingPatterns(options.controllers)
-      const developmentEnv = bunDevelopmentEnvFiles()
-      if (developmentEnv.length > 0) {
+      const developmentEnv = bunDevelopmentValues()
+      if (developmentEnv.keys.length > 0) {
         this.logger.warn(
-          `Bun loaded ${developmentEnv.join(' and ')} because NODE_ENV is unset, and this is a production build; set ` +
-            'NODE_ENV=production, or start with `bun --no-env-file`.',
+          `Bun loaded ${developmentEnv.files.join(' and ')} because NODE_ENV is unset, and this is a production build, so ` +
+            `${developmentEnv.keys.join(', ')} ${developmentEnv.keys.length === 1 ? 'has its development value' : 'have their development values'}; ` +
+            'set NODE_ENV=production, or start with `bun --no-env-file`.',
         )
       }
     }

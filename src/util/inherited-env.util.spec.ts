@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { bunDevelopmentEnvFiles, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
+import { bunDevelopmentValues, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
 import { BUILD_MODE_KEY } from '@src/util/bundle-entry.util.js'
 
 let root: string
@@ -49,29 +49,44 @@ describe('inheritedEnvironment', () => {
   })
 })
 
-describe('bunDevelopmentEnvFiles', () => {
+describe('bunDevelopmentValues', () => {
+  beforeEach(() => {
+    ;(globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY] = 'production'
+    writeFileSync(path.join(root, '.env.development'), 'MODE=development\nSHARED=same\nONLY_DEV=dev\n')
+    writeFileSync(path.join(root, '.env.development.local'), 'LOCAL_DEV=mine\n')
+    writeFileSync(path.join(root, '.env.production'), 'MODE=production\nSHARED=same\n')
+  })
+
   afterEach(() => {
     delete (globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY]
   })
 
-  // Bun reads the development files of an unset NODE_ENV before the config's dotenv, which keeps them
-  it.each([
-    ['names the development files on Bun in a production build with NODE_ENV unset', 'production', {}, true, ['.env.development', '.env.development.local']],
-    ['is empty with NODE_ENV set', 'production', { NODE_ENV: 'production' }, true, []],
-    ['is empty on Node', 'production', {}, false, []],
-    ['is empty in a development build', 'development', {}, true, []],
-    ['is empty outside a built application', undefined, {}, true, []],
-  ])('%s', (_case, mode, env: NodeJS.ProcessEnv, bun, files) => {
-    if (mode) (globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY] = mode
-    for (const file of ['.env', '.env.local', '.env.development', '.env.development.local']) writeFileSync(path.join(root, file), 'A=1\n')
+  // As Bun leaves the environment with NODE_ENV unset, the config's dotenv having filled in what it lacked
+  const bunLoaded = { MODE: 'development', SHARED: 'same', ONLY_DEV: 'dev', LOCAL_DEV: 'mine' }
 
-    expect(bunDevelopmentEnvFiles(env, root, bun)).toEqual(files)
+  it('names the variables a development file gave, other than what the production files give, and their files', () => {
+    expect(bunDevelopmentValues(bunLoaded, root, true)).toEqual({
+      files: ['.env.development', '.env.development.local'],
+      keys: ['MODE', 'ONLY_DEV', 'LOCAL_DEV'],
+    })
   })
 
-  it('names only the development files there are', () => {
-    ;(globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY] = 'production'
-    writeFileSync(path.join(root, '.env.development'), 'A=1\n')
+  it.each([
+    // bun --no-env-file: only the config's dotenv read the files, the production ones
+    ['when Bun read no .env files', { MODE: 'production', SHARED: 'same' }, true, 'production'],
+    ['with NODE_ENV set', { ...bunLoaded, NODE_ENV: 'production' }, true, 'production'],
+    ['on Node', bunLoaded, false, 'production'],
+    ['in a development build', bunLoaded, true, 'development'],
+  ])('is empty %s', (_case, env: NodeJS.ProcessEnv, bun, mode) => {
+    ;(globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY] = mode
 
-    expect(bunDevelopmentEnvFiles({}, root, true)).toEqual(['.env.development'])
+    expect(bunDevelopmentValues(env, root, bun)).toEqual({ files: [], keys: [] })
+  })
+
+  it('is empty when the development files agree with the production ones', () => {
+    writeFileSync(path.join(root, '.env.development'), 'SHARED=same\n')
+    rmSync(path.join(root, '.env.development.local'))
+
+    expect(bunDevelopmentValues({ SHARED: 'same' }, root, true)).toEqual({ files: [], keys: [] })
   })
 })
