@@ -174,3 +174,30 @@ describe('generated scripts', () => {
     expect(scripts.start).toBe(scripts['start:prod'])
   })
 })
+
+describe("the app's name in meocord.config.ts", () => {
+  const dirs: string[] = []
+  afterAll(() => dirs.forEach(dir => fs.rmSync(dir, { recursive: true, force: true })))
+
+  // Names a user can type: quotes of either kind, and backslashes, which a literal would read as escapes
+  it.each([
+    "Bob's Bot",
+    'Say "hi"',
+    `Bob's "best" bot's`,
+    'Back\\slash',
+    'Ends in a backslash\\',
+    'Tab\tand\nnewline',
+  ])('%j is written as the app names itself, in a file its own Prettier leaves as it is', async displayName => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-app-name-'))
+    dirs.push(dir)
+    new AppGeneratorHelper().generateApp(dir, { ...VARIABLES, displayName })
+    const config = fs.readFileSync(path.join(dir, 'meocord.config.ts'), 'utf8')
+    const { default: prettierrc } = await import(path.join(dir, '.prettierrc.mjs'))
+    const prettier = await import('prettier')
+
+    // Prettier refuses a file that does not parse, and rewrites one its config would format differently
+    expect(await prettier.format(config, { ...prettierrc, parser: 'typescript' })).toBe(config)
+    const literal = /appName: (.+),\n/.exec(config)![1]
+    expect(new Function(`return ${literal}`)()).toBe(displayName)
+  })
+})

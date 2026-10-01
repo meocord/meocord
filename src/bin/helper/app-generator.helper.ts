@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { populateTemplate } from '@src/util/generator-cli.util.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -52,6 +51,36 @@ export function runtimePrefixFor(packageManager: string): string {
   return RUNTIME_PREFIXES[packageManager] ?? ''
 }
 
+/**
+ * `value` as a TypeScript string literal, quoted as the generated app's Prettier config writes it: in single quotes,
+ * or in double quotes when it holds more single quotes than double, so the file passes the app's lint unchanged.
+ */
+export function stringLiteral(value: string): string {
+  const count = (quote: string) => value.split(quote).length - 1
+  const quote = count("'") > count('"') ? '"' : "'"
+  const escaped = value.replace(/[\\\u0000-\u001f\u2028\u2029'"]/g, char => {
+    if (char === '\\') return '\\\\'
+    if (char === "'" || char === '"') return char === quote ? `\\${char}` : char
+    const named: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' }
+    return named[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`
+  })
+  return `${quote}${escaped}${quote}`
+}
+
+/**
+ * Renders a packaged template. In a TypeScript template, a placeholder in quotes, such as `'{{displayName}}'`, is
+ * written whole as a string literal of its value, so a name with a quote or a backslash still makes valid code.
+ */
+function renderTemplate(templatePath: string, variables: AppTemplateVariables): string {
+  const typescript = templatePath.endsWith(`.ts${TEMPLATE_SUFFIX}`)
+  let text = fs.readFileSync(templatePath, 'utf8')
+  for (const [key, value] of Object.entries(variables)) {
+    if (typescript) text = text.replaceAll(`'{{${key}}}'`, stringLiteral(value))
+    text = text.replaceAll(`{{${key}}}`, value)
+  }
+  return text
+}
+
 /** The name a packaged template is written under. */
 function outputName(templateName: string): string {
   const name = templateName.endsWith(TEMPLATE_SUFFIX)
@@ -79,7 +108,7 @@ export class AppGeneratorHelper {
 
       const destination = path.join(targetDir, relative)
       fs.mkdirSync(path.dirname(destination), { recursive: true })
-      fs.writeFileSync(destination, populateTemplate(templatePath, variables))
+      fs.writeFileSync(destination, renderTemplate(templatePath, variables))
 
       return relative
     })
