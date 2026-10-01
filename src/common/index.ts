@@ -31,6 +31,7 @@ export type { RedisCooldownStoreOptions, RedisEval, RedisEvalSha } from '@src/co
 export { createTranslator, defineCatalog, Translator } from '@src/common/translator.js'
 export { translateError } from '@src/common/translate-error.js'
 export type {
+  CatalogDefinition,
   CatalogShape,
   LocaleCatalog,
   MessageKey,
@@ -39,6 +40,7 @@ export type {
   PluralMessage,
   StringMessageKey,
   Translate,
+  TranslatorOptions,
 } from '@src/common/translator.js'
 export type { ValidationIssue } from '@src/common/errors.js'
 export { respond } from '@src/common/response/response-state.js'
