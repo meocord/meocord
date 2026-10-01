@@ -57,8 +57,9 @@ const redact = (text: string): string => {
  * `meocord.config.ts`'s `logLevel`, or `MEOCORD_LOG_LEVEL` for one run, decides which print.
  *
  * @remarks
- * An object argument is printed as `console.log` prints it, four levels deep: its non-enumerable properties stay
- * unprinted, and an error prints its stack, its own properties and its `cause`. The bot's credentials print as
+ * A string prints in the level's colour. Any other argument, a Symbol or a BigInt included, is printed as `console.log`
+ * prints it, an object four levels deep: its non-enumerable properties stay unprinted, and an error prints its stack,
+ * its own properties and its `cause`. The bot's credentials print as
  * `[redacted]` wherever they appear in a line. A line prints when its level is at or above the threshold: `debug`,
  * then `log` (with `info` and `verbose`), `warn`, `error`.
  *
@@ -134,13 +135,11 @@ export class Logger {
     if (Logger.shows('log')) this.logWithContext('log', args)
   }
 
-  private formatMessage(message: any, logType: string): string {
-    if (typeof message === 'object' && message !== null) {
-      // As console.log inspects: without non-enumerable properties, which discord.js uses to keep its internals out of logs
-      return inspect(message, { depth: OBJECT_DEPTH, colors: true, compact: false })
-    }
-
-    return (this.colorMap[logType] || (msg => msg))(message)
+  private formatMessage(message: unknown, logType: string): string {
+    if (typeof message === 'string') return (this.colorMap[logType] || (msg => msg))(message)
+    // Anything else as console.log inspects it, so no value, a Symbol included, makes the log call throw. Without
+    // non-enumerable properties, which discord.js uses to keep its internals out of logs.
+    return inspect(message, { depth: OBJECT_DEPTH, colors: true, compact: false })
   }
 
   private logWithContext(logLevel: string, messages: any[]): void {

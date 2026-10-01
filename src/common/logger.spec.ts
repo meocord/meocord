@@ -126,6 +126,26 @@ describe('what Logger prints of an object', () => {
     expect(out).toContain('second failure')
   })
 
+  it("prints an error's message once, in its stack, never again below it", () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    new Logger().error(new Error('the store went down'))
+
+    expect(printed([errorSpy]).match(/the store went down/g)).toHaveLength(1)
+  })
+
+  // MeoCord logs whatever a handler or an observer throws, so no value may make the log call itself throw
+  it('prints a value of any type as console.log does, and never throws on one', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    function handler() {}
+
+    expect(() => new Logger().log('Thrown:', Symbol('boom'), 10n, undefined, null, handler, 4, true)).not.toThrow()
+    expect(() => new Logger().log(Symbol('alone'))).not.toThrow()
+
+    const [first, second] = logSpy.mock.calls.map(call => call.map(part => stripVTControlCharacters(String(part))))
+    expect(first.slice(-8)).toEqual(['Thrown:', 'Symbol(boom)', '10n', 'undefined', 'null', '[Function: handler]', '4', 'true'])
+    expect(second.at(-1)).toBe('Symbol(alone)')
+  })
+
   it('prints data four levels below the object it is given', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     new Logger().log({ guild: { settings: { roles: { staff: { id: 'level five' } } } } })
