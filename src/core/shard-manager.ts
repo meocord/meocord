@@ -78,6 +78,7 @@ export class ShardManager implements MeoCordApplication {
    * once each has been spawned; a shard that fails is restarted in the background.
    */
   async start(): Promise<void> {
+    if (this.shuttingDown) throw new Error('This app was stopped; use MeoCordFactory.create to make a new one.')
     const { token, config } = this.options
     if (!token?.trim()) {
       this.logger.error(tokenMessage(token))
@@ -86,8 +87,8 @@ export class ShardManager implements MeoCordApplication {
     this.logger.log('Starting shards in separate processes...')
     if (!(await this.register())) return this.exitForLogin()
 
-    process.on('SIGINT', () => void this.stop())
-    process.on('SIGTERM', () => void this.stop())
+    process.on('SIGINT', () => void this.stopAndExit())
+    process.on('SIGTERM', () => void this.stopAndExit())
 
     let total: number
     try {
@@ -214,11 +215,19 @@ export class ShardManager implements MeoCordApplication {
   }
 
   /**
-   * Asks every shard to shut down through its own hooks, waits for them up to the shutdown timeout plus
-   * a margin, kills any left, and exits: 0 when every shard stopped, 1 when one had to be killed. A call
-   * within `REPEAT_SIGNAL_WINDOW_MS` of the first is the same request; one after it kills them all at once.
+   * Asks every shard to shut down through its own hooks, waits for them up to the shutdown timeout plus a margin, and
+   * kills any left, without ending the manager's process. A call after the first waits for it.
    */
   async stop(): Promise<void> {
+    await this.shutDown()
+  }
+
+  /**
+   * Stops every shard as {@link stop} does, then exits: 0 when every shard stopped, 1 when one had to be killed.
+   * SIGINT and SIGTERM call it. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first is the same request; one after it
+   * kills them all at once.
+   */
+  async stopAndExit(): Promise<void> {
     const request = this.stopRequest()
     if (request === 'duplicate') return
     if (request === 'repeat') {
@@ -226,6 +235,17 @@ export class ShardManager implements MeoCordApplication {
       this.killAll()
       return this.exit(1)
     }
+    this.exit((await this.shutDown()) ? 0 : 1)
+  }
+
+  /** The shutdown under way or done, which a later stop waits for: whether every shard stopped on its own. */
+  private shuttingDown?: Promise<boolean>
+
+  private shutDown(): Promise<boolean> {
+    return (this.shuttingDown ??= this.shutDownShards())
+  }
+
+  private async shutDownShards(): Promise<boolean> {
     this.stopping = true
     this.logger.log('Shutting down the shards...')
 
@@ -251,10 +271,10 @@ export class ShardManager implements MeoCordApplication {
     if (outcome === 'timeout') {
       this.logger.warn(`Some shards did not stop within ${wait} ms; killing them.`)
       this.killAll()
-      return this.exit(1)
+      return false
     }
     this.logger.log('Every shard has shut down')
-    this.exit(0)
+    return true
   }
 
   private killAll(): void {

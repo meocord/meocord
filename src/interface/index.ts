@@ -105,6 +105,15 @@ export interface MeoCordApplication {
   start(): Promise<void>
 
   /**
+   * Stops the bot without ending the process: runs the `onShutdown` hooks under the configured `shutdownTimeout`
+   * and closes the client, or with process sharding, asks every shard to shut down and waits for it. A stop while
+   * the bot starts ends that start, a call after the first waits for it, and a stopped app does not start again.
+   *
+   * @returns A promise that resolves once the bot is stopped.
+   */
+  stop(): Promise<void>
+
+  /**
    * Registers the application's commands with Discord, where `meocord.config.ts`'s `commands` says.
    * A failure is logged rather than thrown.
    */
