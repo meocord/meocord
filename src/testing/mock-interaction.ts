@@ -42,6 +42,7 @@ import {
   MessageMentions,
   Role,
   RoleManager,
+  type TextBasedChannel,
   TextChannel,
   ThreadChannel,
   ThreadMember,
@@ -51,6 +52,7 @@ import {
   type CacheType,
   type CommandInteractionOption,
   DMChannel,
+  BaseGuildVoiceChannel,
   ForumChannel,
   GuildForumThreadManager,
   GuildTextThreadManager,
@@ -256,21 +258,33 @@ function dmChannelOf(user: object): object {
   return channel
 }
 
-// The item each manager fetches, creates and edits
-const MANAGER_ITEMS: [{ prototype: object }, () => object][] = [
-  [UserManager, () => createMockUser()],
-  [GuildManager, () => createMockGuild()],
-  [GuildMemberManager, () => createMockInteraction(GuildMember)],
-  [RoleManager, () => createMockInteraction(Role)],
+/** The guild a manager belongs to, when it is a mock guild's. */
+const guildOf = (manager: object): Guild | undefined => {
+  const guild: unknown = (manager as { guild?: unknown }).guild
+  return guild instanceof Guild ? guild : undefined
+}
+
+// The item each manager fetches, creates and edits: with the id asked for, when there is one, in the manager's guild
+const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: object) => object][] = [
+  [UserManager, id => createMockUser(id ? { id } : {})],
+  [GuildManager, id => createMockGuild(id ? { id } : {})],
+  [
+    GuildMemberManager,
+    (id, manager) => {
+      const guild = guildOf(manager)
+      return guild ? createMockMember({ user: createMockUser(id ? { id } : {}), guild }) : createMockInteraction(GuildMember)
+    },
+  ],
+  [RoleManager, id => createMockInteraction(Role, id ? { id } : {})],
   [GuildBanManager, () => createMockInteraction(GuildBan)],
-  [GuildMessageManager, () => createMockMessage()],
-  [DMMessageManager, () => createMockMessage()],
-  [GuildTextThreadManager, () => createMockChannel(ThreadChannel)],
-  [GuildForumThreadManager, () => createMockChannel(ThreadChannel)],
+  [GuildMessageManager, id => createMockMessage(id ? { id } : {})],
+  [DMMessageManager, id => createMockMessage(id ? { id } : {})],
+  [GuildTextThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
+  [GuildForumThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [ThreadMemberManager, () => createMockInteraction(ThreadMember)],
-  [ApplicationCommandManager, () => createMockInteraction(ApplicationCommand)],
-  [ChannelManager, () => createMockChannel(TextChannel)],
-  [GuildChannelManager, () => createMockChannel(TextChannel)],
+  [ApplicationCommandManager, id => createMockInteraction(ApplicationCommand, id ? { id } : {})],
+  [ChannelManager, id => createMockChannel(TextChannel, id ? { id } : {})],
+  [GuildChannelManager, (id, manager) => createMockChannel(TextChannel, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
 ]
 
 const returnsPromise = (key: string, method: (...args: unknown[]) => unknown) =>
@@ -278,15 +292,17 @@ const returnsPromise = (key: string, method: (...args: unknown[]) => unknown) =>
   PROMISE_METHODS.has(key) ||
   (/^set[A-Z]/.test(key) && !SYNC_SETTERS.has(key))
 
-// A fetch for one item: an id, a discord.js object, or options naming one, such as `{ user: id }`
-function fetchesOne(args: unknown[]): boolean {
+// The id of the one item a fetch asks for: an id, a discord.js object, or options naming one, such as `{ user: id }`;
+// undefined for a fetch of a list
+function fetchedId(args: unknown[]): string | undefined {
+  const idOf = (value: unknown) => (typeof value === 'string' ? value : value instanceof Base ? (value as { id?: string }).id : undefined)
   const [first] = args
-  if (typeof first === 'string' || first instanceof Base) return true
-  if (typeof first !== 'object' || first === null) return false
-  return ['user', 'member', 'message', 'guild', 'thread', 'id'].some(key => {
-    const value = (first as Record<string, unknown>)[key]
-    return typeof value === 'string' || value instanceof Base
-  })
+  if (typeof first !== 'object' || first === null || first instanceof Base) return idOf(first)
+  for (const key of ['user', 'member', 'message', 'guild', 'thread', 'id']) {
+    const id = idOf((first as Record<string, unknown>)[key])
+    if (id !== undefined) return id
+  }
+  return undefined
 }
 
 /**
@@ -301,15 +317,22 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
     return createMockFn(async (...args: unknown[]) => ((receiver() as GuildMember).user[key] as (...args: unknown[]) => unknown)(...args))
   }
-  if (key === 'createDM') return createMockFn(async () => dmChannelOf(target))
+  if (key === 'createDM') return createMockFn(async () => dmChannelOf(receiver()))
   if (key === 'send' && target instanceof User) {
     return createMockFn(async (...args: unknown[]) => ((await (receiver() as User).createDM()).send as (...args: unknown[]) => unknown)(...args))
   }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
   if (target instanceof BaseManager) {
     const item = MANAGER_ITEMS.find(([Manager]) => Manager.prototype.isPrototypeOf(target))?.[1]
-    if (item && key === 'fetch') return createMockFn(async (...args: unknown[]) => (fetchesOne(args) ? item() : new Collection()))
-    if (item && (key === 'create' || key === 'edit')) return createMockFn(async () => item())
+    // A fetch of one item finds it in the cache first, as discord.js does, and caches one it makes
+    if (item && key === 'fetch') {
+      return createMockFn(async (...args: unknown[]) => {
+        const id = fetchedId(args)
+        if (id === undefined) return new Collection()
+        return cached(cacheOf(receiver()), id, () => item(id, receiver()))
+      })
+    }
+    if (item && (key === 'create' || key === 'edit')) return createMockFn(async () => item(undefined, receiver()))
   } else if (target instanceof Base && (SELF_METHODS.has(key) || /^set[A-Z]/.test(key))) {
     return createMockFn(async () => receiver())
   }
@@ -465,7 +488,8 @@ const MOCK_BOT_ID = '1300000000000000000'
  * so a message and an interaction from one user in that server share it, and `memberPermissions` are that member's
  * permissions (`null` in a DM). A user is a person, `bot: false`, and a member has the server's @everyone role and the
  * roles {@link createMockMember} gave it; with a `guildId` but no `guild`, a server the bot isn't in, that @everyone role
- * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel.
+ * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel. Its
+ * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel.
  * Other data Discord always sends reads as
  * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
  * or `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and
@@ -689,10 +713,21 @@ export function createMockInteraction<T extends object>(
     defineCreatedTime(instance, generatedId)
     const userGiven = !unset('user')
     if (!userGiven) instance.user = mockUser()
-    if (unset('channelId')) instance.channelId = nextSnowflake()
+    // In a direct message, the user's DM channel, the one their send() goes through
+    if (unset('channelId')) instance.channelId = unset('guildId') ? (dmChannelOf(instance.user as object) as { id: string }).id : nextSnowflake()
     if (unset('guildId')) {
       instance.guildId = null
       if (unset('guild')) Object.defineProperty(instance, 'guild', { value: null, writable: true, configurable: true })
+    }
+    // The channel it came from, as the gateway caches it for an interaction: one of its server's, or the user's DM
+    let channel: unknown
+    if (unset('channel')) {
+      Object.defineProperty(instance, 'channel', {
+        get: () => (channel ??= channelFor(own('guild'), own('guildId') as string | null, own('channelId') as string, own('user') as object)),
+        set: (value: unknown) => Object.defineProperty(instance, 'channel', { value, writable: true, enumerable: true, configurable: true }),
+        enumerable: true,
+        configurable: true,
+      })
     }
     // The user as a member while the mock has a guildId, as discord.js has one for an interaction in a server
     let member: unknown
@@ -852,8 +887,9 @@ export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
  * the bot. A mock message or interaction built without one gets a client of its own.
  *
  * @remarks
- * Its managers' methods resolve as discord.js's do: `users.send()` to a mock message, `users.fetch(id)` to a mock
- * user, `channels.fetch(id)` to a mock text channel, and a list fetch to an empty collection. `users.cache` and
+ * Its managers' methods resolve as discord.js's do: `users.send()` to a mock message, `users.fetch(id)` and
+ * `channels.fetch(id)` to the cached user or channel with that id, or a new one with it that they cache, and a list
+ * fetch to an empty collection. `users.cache` and
  * `channels.cache` are real, empty collections. Every mock client is logged in as the same bot, so `user.id` is the id
  * a message mentions to address it.
  *
@@ -925,8 +961,9 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  * up in it.
  *
  * @remarks
- * A manager's `fetch(id)`, `create()` and `edit()` resolve to a mock of its item, and a list fetch to an empty
- * collection. Members, roles and channels given are put in their managers' caches, where dispatch looks first when it
+ * A manager's `fetch(id)` resolves to its cached item with that id, as discord.js looks there first, or to a new one with
+ * that id, in this guild, which it caches; `create()` and `edit()` resolve to a mock of its item, and a list fetch to an
+ * empty collection. Members, roles and channels given are put in their managers' caches, where dispatch looks first when it
  * resolves a message's typed params; a member {@link createMockMember} made without a server is in this one. Its
  * `roles.everyone` is the role given with the guild's id, or else an @everyone role of its own at position 0 with no
  * permissions, in `roles.cache` as Discord has it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'`
@@ -958,6 +995,7 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   instance.bans = managerWith(GuildBanManager.prototype, undefined)
 
   const guild = stubDeep(instance) as DeepMocked<Guild>
+  homeManagers(instance, guild)
   // A member made without a server of its own is in this one
   for (const member of overrides.members ?? []) {
     if (!unhomedMembers.delete(member)) continue
@@ -974,6 +1012,8 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
  * @remarks
  * The managers the class has are ready to stub: `messages`, `threads` on text, announcement, forum and media channels,
  * and `members` on threads, each with a real, empty `cache`. A subclass gets the managers of the class it extends.
+ * Type guards such as `isTextBased()`, `isDMBased()` and `isThread()` run discord.js's own logic, so each answers what
+ * the channel is.
  *
  * @param Class - The discord.js channel class to mock.
  * @param props - Values for the channel's properties, such as its `id`, `name` or `topic`; see {@link MockProps}.
@@ -1004,6 +1044,13 @@ export function createMockChannel<T extends BaseChannel>(Class: InteractionClass
   // Forum and media channels hold posts, each a thread started with its first message
   if (is(ForumChannel) || is(MediaChannel)) {
     instance.threads = managerWith(GuildForumThreadManager.prototype, undefined)
+    instance.availableTags = []
+  }
+  // Voice and stage channels carry a text chat of their own, and a bitrate, which discord.js tells them apart by
+  if (is(BaseGuildVoiceChannel)) {
+    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.bitrate = 64_000
+    instance.userLimit = 0
   }
   if (is(DMChannel)) {
     instance.messages = managerWith(DMMessageManager.prototype, undefined)
@@ -1014,8 +1061,17 @@ export function createMockChannel<T extends BaseChannel>(Class: InteractionClass
   }
   Object.assign(instance, props)
 
-  return stubDeep(instance) as DeepMocked<T>
+  const stubs = new Map<string, StubValue>()
+  const channel = stubDeep(instance, stubs)
+  // Type guards run discord.js's own logic, which reads the channel's type and the managers it has
+  for (const name of CHANNEL_TYPE_GUARDS) {
+    const method = findPrototypeMethod(instance, name)
+    if (method !== null) stubs.set(name, createMockFn(() => method.call(channel)))
+  }
+  return channel as DeepMocked<T>
 }
+
+const CHANNEL_TYPE_GUARDS = ['isThread', 'isTextBased', 'isDMBased', 'isVoiceBased', 'isThreadOnly', 'isSendable'] as const
 
 /** A member of `guild` as the user with `id`: its id, user and guild own values, as the gateway delivers a member. */
 function memberIn(guild: unknown, id: string, user: unknown, guildId?: string): object {
@@ -1175,6 +1231,17 @@ export function createMockMember(overrides: MockMemberOverrides = {}): DeepMocke
 /** Members createMockMember made without a server given, until createMockGuild puts them in one. */
 const unhomedMembers = new WeakSet<object>()
 
+/**
+ * The channel an interaction or a message in `guild` came from: the guild's channel with that id, or a text channel
+ * made and cached there, as the gateway caches it. With only a guild id, a server the bot isn't in, a text channel of
+ * that id; with neither, the user's DM channel.
+ */
+function channelFor(guild: unknown, guildId: string | null, channelId: string, user: object): object {
+  if (!guildId) return dmChannelOf(user)
+  const make = () => createMockChannel(TextChannel, (guild ? { id: channelId, guild } : { id: channelId, guildId }) as MockProps<TextChannel>)
+  return guild ? cached(cacheOf((guild as Guild).channels), channelId, make) : make()
+}
+
 /** The guild a mock message carries: a guild with the same stubbed managers as createMockGuild. */
 function createMockGuildForMessage(): object {
   const guild = Object.create(Guild.prototype) as Record<string, unknown>
@@ -1183,7 +1250,14 @@ function createMockGuildForMessage(): object {
   guild.channels = managerWith(GuildChannelManager.prototype, undefined)
   guild.roles = guildRoleManager(guild.id as string, undefined)
   guild.bans = managerWith(GuildBanManager.prototype, undefined)
-  return stubDeep(guild)
+  const proxy = stubDeep(guild)
+  homeManagers(guild, proxy)
+  return proxy
+}
+
+/** Gives a guild's managers the guild, as discord.js's do, so what they fetch or make is in it. */
+function homeManagers(instance: Record<string, unknown>, guild: object): void {
+  for (const key of ['members', 'channels', 'roles', 'bans']) (instance[key] as Record<string, unknown>).guild = guild
 }
 
 /**
@@ -1213,6 +1287,11 @@ export interface MockMessageOverrides {
   flags?: MessageFlagsResolvable
   /** The guild it was sent in, such as one from `createMockGuild` with members in its cache; `null` for a DM. */
   guild?: Guild | null
+  /**
+   * The channel it was sent in, such as one from `createMockChannel`. Unless given, a text channel of its guild, cached
+   * there, or the author's DM channel for a DM.
+   */
+  channel?: TextBasedChannel | DeepMocked<BaseChannel>
   /** The client it arrived on, such as one from `createMockClient`; a new mock client otherwise. */
   client?: Client
   /** Users in the client's `users.cache`, by their id, beside those the content mentions. */
@@ -1408,8 +1487,8 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   // Getters on the prototype — the proxy sees them as functions and returns
   // a mock fn, which is wrong. Pre-initialize as own properties to shadow
   // the prototype getters.
-  const channel = stubDeep(Object.assign(Object.create(TextChannel.prototype), { id: nextSnowflake() })) as { id: string }
   const guild = (overrides.guild === undefined ? createMockGuildForMessage() : overrides.guild) as { id: string } | null
+  const channel = (overrides.channel ?? channelFor(guild, guild?.id ?? null, nextSnowflake(), instance.author as object)) as { id: string }
   Object.defineProperty(instance, 'channel', { value: channel, writable: true })
   Object.defineProperty(instance, 'guild', { value: guild, writable: true })
   // The author as a member of the message's server; a direct message has none. A given author's member is the one
