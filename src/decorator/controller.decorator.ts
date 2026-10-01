@@ -75,20 +75,54 @@ export interface MessageHandlerMetadata {
 
 /**
  * What `@MessageHandler(pattern)` returns: a decorator for a handler taking no arguments, the message, or
- * the message and its params, whose declared type is checked against the pattern. The last form comes last
- * so a mismatch is explained against it.
+ * the message and its params, whose declared type is checked against the pattern. One signature, so a
+ * mismatch is explained by {@link MessageHandlerAccepts} alone rather than by every form in turn.
  */
-export interface PatternedMessageHandlerDecorator<T, R, Pattern extends string> {
-  (target: object, propertyKey: string, descriptor: TypedPropertyDescriptor<() => R>): void
-  (target: object, propertyKey: string, descriptor: TypedPropertyDescriptor<(message: T) => R>): void
-  <P extends Record<string, any>>(
-    target: object,
-    propertyKey: string,
-    descriptor: TypedPropertyDescriptor<(message: T, params: P) => R> & {
-      value?: (message: T, params: CheckedParams<Pattern, P>) => R
-    },
-  ): void
-}
+export type PatternedMessageHandlerDecorator<T, R, Pattern extends string> = <F extends (...args: any[]) => R>(
+  target: object,
+  propertyKey: string,
+  descriptor: TypedPropertyDescriptor<F> & MessageHandlerAccepts<Parameters<F>, T, Pattern>,
+) => void
+
+/** Whether `A` takes `B` as a method parameter does, in either direction. */
+type TakesEither<A, B> = [B] extends [A] ? true : [A] extends [B] ? true : false
+
+/**
+ * Allows a handler whose parameters are none, the message, or the message and params the pattern gives; anything
+ * else resolves to an object naming what does not fit, which the descriptor then lacks.
+ */
+type MessageHandlerAccepts<Args extends unknown[], T, Pattern extends string> = Args extends []
+  ? unknown
+  : Args extends [infer M, ...infer Rest]
+    ? TakesEither<M, T> extends false
+      ? { "The handler's first parameter is not the message": M }
+      : Rest extends []
+        ? unknown
+        : // A rest parameter of any length after the message takes no params, as a method with one may be called
+          number extends Rest['length']
+          ? Rest extends [infer P, ...unknown[]]
+            ? ParamsAccept<P, Pattern>
+            : unknown
+          : Rest extends [infer P, ...unknown[]] | [(infer P)?]
+            ? [Rest] extends [[unknown, unknown, ...unknown[]]]
+              ? { 'A message handler takes the message and its params, and nothing more': Args }
+              : ParamsAccept<P, Pattern>
+            : { 'A message handler takes the message and its params, and nothing more': Args }
+    : unknown
+
+/** Allows params that are an object the pattern's params fit, the second parameter a message handler takes. */
+type ParamsAccept<P, Pattern extends string> = NonNullable<P> extends Record<string, any>
+  ? ParamsFit<NonNullable<P>, CheckedParams<Pattern, NonNullable<P>>>
+  : { "The handler's params are an object of the pattern's params": P }
+
+/** Unknown when the declared params take what the pattern gives, else the keys that do not, with what they get. */
+type ParamsFit<P, Given> = [Given] extends [P]
+  ? unknown
+  : {
+      "The handler's params do not fit the pattern": {
+        [K in keyof Given & keyof P as [Given[K]] extends [P[K]] ? never : K]: Given[K]
+      }
+    }
 
 /**
  * Runs the method it decorates for every message a user sends, whatever it says.
