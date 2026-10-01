@@ -235,9 +235,10 @@ export interface OnShutdown {
 export interface CallHandler {
   /**
    * Continues the call. Call it at most once: each call runs the rest of the pipeline, and the
-   * handler, again. Return or await what it returns to act on the result. The call ends when the
-   * handler does even if the interceptor returns first, and a rejection the interceptor leaves
-   * unhandled fails the call, so its filters see it.
+   * handler, again. Return or await what it returns to act on the result. When the interceptor
+   * returns first and leaves the promise, or a `then` or `finally` chain from it, without a rejection
+   * handler, the call ends when the handler does and fails with what it throws, so its filters see
+   * it. A promise it hands to something else, such as `Promise.all`, is that one's to handle.
    *
    * @returns What the handler returns, once it has run. Rejects with what the handler throws.
    */

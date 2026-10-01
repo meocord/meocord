@@ -130,9 +130,10 @@ class Continuation extends Promise<unknown> {
     this.passesRejection = passesRejection
     if (passesRejection) {
       run.open++
-      // The run's own rejection is the call's to report; any other, from a callback in the chain, stays unhandled
+      // The run's own rejection is the call's to report. Any other, from a callback in the chain, stays unhandled
+      // where the chain ends; a branch from here passes it on to be handled or reported there
       Promise.prototype.then.call(this, undefined, (reason: unknown) => {
-        if (reason !== run.failure?.error) throw reason
+        if (reason !== run.failure?.error && !this.branched) throw reason
       })
     }
     return this
@@ -142,8 +143,8 @@ class Continuation extends Promise<unknown> {
 /**
  * Runs `handler` inside `interceptors`, the first outermost. Each receives the call's context with its
  * own params, and continues with `next.handle()`. A level ends once its interceptor has settled and every
- * run it started has, so the call ends when the handler does even if the interceptor did not wait; a run's
- * rejection the interceptor left unhandled fails the call. `entering` is told of each interceptor as it is called.
+ * run it left on a chain that ends unhandled has, so the call ends when such a handler does; that run's
+ * rejection fails the call. `entering` is told of each interceptor as it is called.
  */
 export async function runInterceptors(
   interceptors: readonly InterceptorEntry[],
@@ -183,9 +184,12 @@ export async function runInterceptors(
       outcome = { error }
     }
     ended = true
-    await Promise.all(started.map(({ settled }) => settled))
+    // Only a run left on a chain that ends unhandled is the call's; one the interceptor took on, as a timeout
+    // racing it does, is left to it
+    const left = started.filter(({ open }) => open > 0)
+    await Promise.all(left.map(({ settled }) => settled))
     if ('error' in outcome) throw outcome.error
-    const dropped = started.find(({ failure, open }) => failure && open > 0)?.failure
+    const dropped = left.find(({ failure }) => failure)?.failure
     if (dropped) throw dropped.error
     return outcome.value
   }
