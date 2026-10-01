@@ -52,6 +52,7 @@ import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
+import { escapeForLog } from '@src/util/user-text.util.js'
 
 /** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
 export const SLOW_READY_HOOK_MS = 10_000
@@ -490,9 +491,9 @@ export class MeoCordApp implements MeoCordApplication {
         // events the handler takes, and a UserError is meant for the sender of the event's message, if it has one
         const fallback: Fallback = async (error, context) => {
           const where = `event "${event}" in ${lifecycleClass.name}.${method}`
-          if (error instanceof GuardDeniedError) this.logger.debug(`Denied ${where}: ${error.message}`)
+          if (error instanceof GuardDeniedError) this.logger.debug(`Denied ${where}: ${escapeForLog(error.message)}`)
           else if (error instanceof UserError) {
-            this.logger.debug(`Refused ${where}: ${error.message}`)
+            this.logger.debug(`Refused ${where}: ${escapeForLog(error.message)}`)
             // The newest message the event carries: an edit's new message, not its old one
             const message = [...context.getArgs()].reverse().find((arg): arg is Message => arg instanceof Message)
             if (message) return replyWithUserError(message, error, this.logger, this.messageOptions?.replyEmoji)

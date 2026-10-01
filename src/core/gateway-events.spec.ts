@@ -11,7 +11,7 @@ import {
   Partials,
 } from 'discord.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
-import { UserError } from '@src/common/errors.js'
+import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import {
   Catch,
   Controller,
@@ -39,14 +39,14 @@ import {
 import { createMockInteraction, createMockMessage } from '@src/testing/index.js'
 
 const { logged } = vi.hoisted(() => ({
-  logged: { error: [] as unknown[][], warn: [] as unknown[][], info: [] as unknown[][] },
+  logged: { error: [] as unknown[][], warn: [] as unknown[][], info: [] as unknown[][], debug: [] as unknown[][] },
 }))
 
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   Logger: class {
     log = vi.fn()
-    debug = vi.fn()
+    debug = (...args: unknown[]) => logged.debug.push(args)
     info = (...args: unknown[]) => logged.info.push(args)
     verbose = vi.fn()
     error = (...args: unknown[]) => logged.error.push(args)
@@ -93,6 +93,7 @@ describe('gateway event handlers', () => {
     logged.error.length = 0
     logged.warn.length = 0
     logged.info.length = 0
+    logged.debug.length = 0
   })
 
   afterEach(() => {
@@ -359,6 +360,38 @@ describe('gateway event handlers', () => {
 
       expect(handled).toEqual([['boom', 'event', 'greet']])
       expect(logged.error).toEqual([])
+    })
+
+    // The message's author wrote the text these errors quote, so its line breaks stay on the debug line
+    it("escapes a refusal's or a denial's message in its debug line", async () => {
+      @Guard()
+      class EditGuard implements GuardInterface {
+        canActivate(_before: Message, after: Message): boolean {
+          throw new GuardDeniedError(`Edit ignored: ${after.content}`)
+        }
+      }
+
+      @Service()
+      class Search {
+        @On('messageCreate')
+        query(message: Message) {
+          throw new UserError(`Unknown query ${message.content}`)
+        }
+
+        @On('messageUpdate')
+        @UseGuard(EditGuard)
+        edited() {
+          return undefined
+        }
+      }
+
+      const client = await startApp({ services: [Search] })
+      const message = createMockMessage({ content: '?q\n[ERROR] [MeoCordApp] Fake line' })
+      await emit(client, 'messageCreate', message)
+      await emit(client, 'messageUpdate', createMockMessage({ content: 'old' }), message)
+
+      expect(logged.debug).toContainEqual(['Refused event "messageCreate" in Search.query: Unknown query ?q\\n[ERROR] [MeoCordApp] Fake line'])
+      expect(logged.debug).toContainEqual(['Denied event "messageUpdate" in Search.edited: Edit ignored: ?q\\n[ERROR] [MeoCordApp] Fake line'])
     })
 
     it('only logs an unhandled error from an event handler, even when its argument is an interaction', async () => {

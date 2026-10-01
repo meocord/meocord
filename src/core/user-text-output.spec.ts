@@ -134,7 +134,8 @@ describe('message content in a log line', () => {
     await createFallback(log)(new MessageUsageError('roll <sides>', [issue], { quiet: true }), new UnroutedExecutionContext([createMockMessage()]))
 
     const [line] = log.debug.mock.calls[0] as [string]
-    expect(line).toContain('\\u001b[2J')
+    // Escaped once: the issue's quotes and any backslash it holds stay as the reply shows them
+    expect(line).toContain('sides: "6\\u001b[2J" is not a valid whole number')
     expect(line).not.toMatch(/[\u0000-\u001f]/)
   })
 })
