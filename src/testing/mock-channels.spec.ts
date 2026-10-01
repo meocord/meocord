@@ -97,6 +97,25 @@ describe("a mock interaction's channel", () => {
     expect(client.channels.cache.get(channel.id)).toBe(channel)
   })
 
+  it.each([
+    ['in another server than the guildId given', () => createMockChannel(TextChannel, { guild: createMockGuild({ id: '100000000000000001' }) } as never), '100000000000000002', 'server 100000000000000001', 'server 100000000000000002'],
+    ['of a DM, with a guildId given', () => createMockChannel(DMChannel), '100000000000000002', 'a DM', 'server 100000000000000002'],
+    ['of a server, in a DM', () => createMockChannel(TextChannel), null, "a server's channel", 'a DM'],
+  ] as const)('refuses a channel %s, naming both', (_name, make, guildId, channelPlace, mockPlace) => {
+    expect(() => createMockInteraction(ChatInputCommandInteraction, { channel: make() as never, guildId: guildId as string })).toThrow(
+      new RegExp(`${channelPlace}.*${mockPlace}`),
+    )
+  })
+
+  it('refuses a channel reused in another server, which the first mock put in its own', () => {
+    const channel = createMockChannel(TextChannel)
+    createMockInteraction(ChatInputCommandInteraction, { channel: channel as never, guildId: '100000000000000001' })
+
+    expect(() => createMockInteraction(ChatInputCommandInteraction, { channel: channel as never, guildId: '100000000000000002' })).toThrow(
+      /server 100000000000000001.*server 100000000000000002/,
+    )
+  })
+
   it("puts it in the interaction's server when it names none, so the two agree", () => {
     const channel = createMockChannel(TextChannel)
 
@@ -147,6 +166,14 @@ describe("a mock message's channel", () => {
     const guild = inServer ? channel.guild! : null
     expect([message.guild, message.guildId, message.inGuild()]).toEqual([guild, guild?.id ?? null, inServer])
     expect(message.client.channels.cache.get(channel.id)).toBe(channel)
+  })
+
+  it("refuses a channel in another server than the guild given, naming both", () => {
+    const channel = createMockChannel(TextChannel, { guild: createMockGuild({ id: '100000000000000001' }) } as never)
+
+    expect(() => createMockMessage({ channel, guild: createMockGuild({ id: '100000000000000002' }) })).toThrow(
+      /server 100000000000000001.*server 100000000000000002/,
+    )
   })
 
   it("puts it in the message's server when it names none, so the two agree", () => {

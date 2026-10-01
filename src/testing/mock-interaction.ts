@@ -545,7 +545,8 @@ const MOCK_BOT_ID = '1300000000000000000'
  * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel. Its
  * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel. A
  * `channel` given sets what the test leaves out of `channelId`, `guildId` and `guild`, as discord.js reads them from
- * it: a DM channel is no server, and a server's channel its server. A select menu has picked nothing unless given: its
+ * it: a DM channel is no server, and a server's channel its server; one in another server than the `guildId` given is
+ * refused, naming both. A select menu has picked nothing unless given: its
  * `values` are the ids of the `users` and `members`, `roles` or `channels` given, the collections of what it picks,
  * each empty unless given. Other data Discord always sends reads as
  * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
@@ -781,7 +782,9 @@ export function createMockInteraction<T extends object>(
     // A channel given says where the interaction was made, for what the test leaves unset, as discord.js reads it
     const given = own('channel')
     if (typeof given === 'object' && given !== null) {
-      const place = placeOf(given, () => ({ guildId: (own('guildId') as string | undefined) ?? nextSnowflake(), guild: (own('guild') as Guild | undefined) ?? null }))
+      const givenGuild = own('guild') as Guild | null | undefined
+      const givenGuildId = unset('guildId') ? (givenGuild === undefined ? undefined : (givenGuild?.id ?? null)) : (own('guildId') as string | null)
+      const place = placeOf(given, givenGuildId, () => ({ guildId: givenGuildId ?? nextSnowflake(), guild: givenGuild ?? null }))
       if (unset('channelId')) instance.channelId = place.channelId
       if (place.guildId !== undefined) {
         if (unset('guildId')) instance.guildId = place.guildId
@@ -1358,19 +1361,27 @@ interface ChannelPlace {
   guild?: Guild | null
 }
 
+/** A server's id as a refusal names it, or a DM. */
+const placeName = (guildId: string | null) => (guildId === null ? 'a DM' : `server ${guildId}`)
+
 /**
  * Where a channel a test gives puts the mock made in it, read from the channel as discord.js reads it: no server for a
  * DM channel, else the server the channel names. A server channel that names none is put in `fallback`'s, and named
- * it, so the two agree. Any other object, such as one from `createMock`, gives only its id.
+ * it, so the two agree from then on. Any other object, such as one from `createMock`, gives only its id.
+ *
+ * @throws When the channel is in another server than the one `given`, or a DM, as a test that says both means one.
  */
-function placeOf(channel: object, fallback: () => { guildId: string; guild: Guild | null }): ChannelPlace {
+function placeOf(channel: object, given: string | null | undefined, fallback: () => { guildId: string; guild: Guild | null }): ChannelPlace {
   const channelId = (channel as { id: string }).id
   if (!(channel instanceof BaseChannel)) return { channelId }
-  if (channel.isDMBased()) return { channelId, guildId: null, guild: null }
   const own = (key: string) => (Object.prototype.hasOwnProperty.call(channel, key) ? (channel as unknown as Record<string, unknown>)[key] : undefined)
-  const guild = own('guild') instanceof Guild ? (own('guild') as Guild) : null
-  const guildId = typeof own('guildId') === 'string' ? (own('guildId') as string) : guild?.id
+  const guild = channel.isDMBased() ? null : own('guild') instanceof Guild ? (own('guild') as Guild) : null
+  const guildId = channel.isDMBased() ? null : typeof own('guildId') === 'string' ? (own('guildId') as string) : guild?.id
+  if (guildId !== undefined && given !== undefined && guildId !== given) {
+    throw new Error(`The channel given is in ${placeName(guildId)}, but the mock's guild is ${placeName(given)}: give a channel of that server, or leave one of them out.`)
+  }
   if (guildId !== undefined) return { channelId, guildId, guild }
+  if (given === null) throw new Error("The channel given is a server's channel, but the mock is a DM: give a DM channel, or leave one of them out.")
   const place = fallback()
   Object.assign(channel, { guildId: place.guildId, ...(place.guild ? { guild: place.guild } : {}) })
   return { channelId, ...place }
@@ -1432,8 +1443,9 @@ export interface MockMessageOverrides {
   /**
    * The channel it was sent in, such as one from `createMockChannel`. Unless given, a text channel of its guild, cached
    * there, or the author's DM channel for a DM. A channel given sets the message's guild, unless `guild` is given too:
-   * none for a DM channel, so `inGuild()` is `false`, and the channel's own server for a server's channel. The channel is
-   * cached on the message's client, as the gateway caches it.
+   * none for a DM channel, so `inGuild()` is `false`, and the channel's own server for a server's channel. One in another
+   * server than the `guild` given is refused, naming both. The channel is cached on the message's client, as the
+   * gateway caches it.
    */
   channel?: TextBasedChannel | DeepMocked<BaseChannel>
   /** The client it arrived on, such as one from `createMockClient`; a new mock client otherwise. */
@@ -1633,7 +1645,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   // the prototype getters.
   // A channel given says where the message was sent, unless its guild is given too
   const place = overrides.channel
-    ? placeOf(overrides.channel, () => {
+    ? placeOf(overrides.channel, overrides.guild === undefined ? undefined : (overrides.guild?.id ?? null), () => {
         const guild = (overrides.guild ?? createMockGuildForMessage()) as Guild
         return { guildId: guild.id, guild }
       })
@@ -1913,12 +1925,16 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     resolveOrThrow(name, isObjectOption(values[name]) ? (values[name] as { id: string }) : null, required)
 
   // A user option carries both the user and, in a server, its member, whichever of the two the test gave
+  // Kept apart, so a member read before the options belong to an interaction is not what one in a DM reads later
   const members = new Map<string, object | null>()
+  const unowned = new Map<string, object>()
   const memberOf = (name: string, user: User): object | null => {
-    if (!members.has(name)) {
-      const owner = optionOwners.get(resolver)
-      members.set(name, !owner ? memberIn(undefined, user.id, user) : owner.guildId ? memberFor(owner.guild, user, true) : null)
+    const owner = optionOwners.get(resolver)
+    if (!owner) {
+      if (!unowned.has(name)) unowned.set(name, memberIn(undefined, user.id, user))
+      return unowned.get(name)!
     }
+    if (!members.has(name)) members.set(name, owner.guildId ? memberFor(owner.guild, user, true) : null)
     return members.get(name) ?? null
   }
 
