@@ -1,7 +1,13 @@
 import { ApplicationCommandOptionType, ApplicationCommandType } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
-import { getAutocompleteHandlers, getCommandMap, getDeclaredRoutes, getHandlerRoutes } from '@src/decorator/controller.decorator.js'
+import {
+  getAutocompleteHandlers,
+  getCommandMap,
+  getDeclaredRoutes,
+  getHandlerRoutes,
+} from '@src/decorator/controller.decorator.js'
 import { registrationKey, serialise } from '@src/core/command-registration.js'
+import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts, literalFirst } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
@@ -150,7 +156,9 @@ const quoted = (names: string[]) =>
  * Warns, in one message, about every name-routed handler Discord never sends an interaction to: a subcommand path
  * the builder of its command does not register, a customId pattern given as a command name, a builder that
  * registers another name than its `@Command`'s, and a command no builder registers at all. An `@Autocomplete`
- * handler is checked the same way, and for an option the builder does not register with autocomplete on.
+ * handler is checked the same way, for an option the builder does not register with autocomplete on, and for one
+ * that completes what an earlier handler Discord asks already does: dispatch runs the first, in the order the
+ * controllers are listed.
  *
  * @param options - `missingBuilders: false` leaves out the commands no builder registers, as the testing
  *   module does, where a handler with no builder is how a fixture is written.
@@ -186,18 +194,32 @@ export function warnUnregisteredCommands(controllerClasses: readonly ControllerC
     const problem = unregistered(here.name, here.meta, built.get(here.meta), registered, missingBuilders)
     if (problem) problems.push(`  ${where(here)}: ${problem}`)
   }
+  // Among the handlers Discord asks, the first of each option or path, which dispatch runs
+  const first = new Map<string, string>()
   for (const { controllerClass, meta } of completions) {
-    const problem = unasked(meta, registered, missingBuilders)
-    if (problem) problems.push(`  ${controllerClass.name}.${meta.methodName}: ${problem}`)
+    const here = `${controllerClass.name}.${meta.methodName}`
+    const problem = unasked(meta, registered, missingBuilders) ?? completedEarlier(meta, here, first)
+    if (problem) problems.push(`  ${here}: ${problem}`)
   }
   if (problems.length === 0) return
 
   const one = problems.length === 1
   logger.warn(
-    `${problems.length} command ${one ? 'handler handles' : 'handlers handle'} what Discord never sends, so ` +
-      `${one ? 'it never runs' : 'they never run'}:\n${problems.join('\n')}\n` +
+    `${problems.length} command ${one ? 'handler never runs' : 'handlers never run'}:\n${problems.join('\n')}\n` +
       'The next major version (5.0) refuses to start with these.',
   )
+}
+
+/** The earlier handler that completes what `here` does and runs instead, or `undefined`, recording `here` as the first. */
+function completedEarlier({ commandPath, optionName }: AutocompleteMeta, here: string, first: Map<string, string>): string | undefined {
+  const key = `${commandPath}\0${optionName ?? ''}`
+  const earlier = first.get(key)
+  if (earlier === undefined) {
+    first.set(key, here)
+    return undefined
+  }
+  const what = optionName === undefined ? `every option of "${commandPath}"` : `the option "${optionName}" of "${commandPath}"`
+  return `${earlier} also completes ${what}, and runs first. Keep one, or give this one a path or option of its own.`
 }
 
 /** What keeps Discord from sending a handler its command, or `undefined` when a builder registers it. */
@@ -282,36 +304,6 @@ function unasked(
   return `"${commandPath}" has no option "${optionName}"${others}. Correct the option name.`
 }
 
-/**
- * Warns about `@Autocomplete` handlers that complete what another already does: the same option of the same command
- * path, or every option of the same path. Dispatch runs the first, in the order the controllers are listed, so the
- * others never run.
- */
-export function warnDuplicateAutocompletes(controllerClasses: readonly ControllerClass[]): void {
-  const first = new Map<string, string>()
-  const problems: string[] = []
-  for (const controllerClass of new Set(controllerClasses)) {
-    for (const { commandPath, optionName, methodName } of getAutocompleteHandlers(controllerClass.prototype)) {
-      const key = `${commandPath}\0${optionName ?? ''}`
-      const here = `${controllerClass.name}.${methodName}`
-      const earlier = first.get(key)
-      if (earlier === undefined) {
-        first.set(key, here)
-        continue
-      }
-      const what = optionName === undefined ? `every option of "${commandPath}"` : `the option "${optionName}" of "${commandPath}"`
-      problems.push(`  ${here}: ${earlier} also completes ${what}, and runs first. Keep one, or give this one a path or option of its own.`)
-    }
-  }
-  if (problems.length === 0) return
-
-  const one = problems.length === 1
-  logger.warn(
-    `${problems.length} @Autocomplete ${one ? 'handler never runs' : 'handlers never run'}, since another completes the ` +
-      `same first:\n${problems.join('\n')}\nThe next major version (5.0) refuses to start with these.`,
-  )
-}
-
 /** Items as a sentence lists them: `a`, `a and b`, `a, b and c`. */
 const listed = (items: readonly string[]): string =>
   items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
@@ -348,5 +340,46 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
     `${problems.length} re-declared ${one ? 'handler still answers routes it inherits' : 'handlers still answer routes they inherit'}:\n` +
       `${problems.join('\n')}\nIn the next major version (5.0), a handler's own routes replace the ones it inherits. ` +
       "To keep an inherited route, declare it on the subclass's method as well.",
+  )
+}
+
+/**
+ * Warns about customId patterns of one component type that can match the same customId, naming for each pair the
+ * handler that runs and why. Warns rather than refuses: an app whose patterns overlap works, and refusing to start
+ * would turn a latent mis-route into an outage.
+ *
+ * @throws Error for two handlers whose patterns match the same customIds, as the app refuses them, so the shard
+ *   manager and the testing module refuse them too.
+ */
+export function warnOverlappingPatterns(controllerClasses: readonly ControllerClass[]): void {
+  const routes = buildComponentRoutes(controllerClasses)
+  const conflicts = findComponentRouteConflicts(routes)
+  if (conflicts.length === 0) return
+
+  const routeOf = new Map(routes.map(route => [`${route.meta.type}\0${route.pattern}`, route]))
+  const lines = conflicts.map(({ type, patterns: [left, right] }) => {
+    const outcome = ambiguityOutcome(routeOf.get(`${type}\0${left}`)!, routeOf.get(`${type}\0${right}`)!)
+    return `  "${left}"  vs  "${right}": ${outcome}`
+  })
+  logger.warn(
+    `${conflicts.length} pattern pair(s) can match the same customId, so which one runs is decided by ranking rather ` +
+      `than by the ids themselves:\n${lines.join('\n')}`,
+  )
+}
+
+/**
+ * Which of two overlapping routes runs for the ids both match, and why: `runs` ranks first. Between equally
+ * specific patterns, the order they are listed in decides until 5.0, which prefers the earlier literal segment.
+ */
+function ambiguityOutcome(runs: ComponentRoute, other: ComponentRoute): string {
+  const name = ({ controllerClass, meta }: ComponentRoute) => `${controllerClass.name}.${meta.methodName}`
+  if ((runs.meta.specificity ?? 0) !== (other.meta.specificity ?? 0)) return `${name(runs)} runs, as its pattern is more specific.`
+  const together = runs.controllerClass === other.controllerClass
+  const listed = together ? 'it is declared first' : 'its controller is listed first'
+  if (!literalFirst(other.pattern, runs.pattern)) return `${name(runs)} runs, as ${listed}.`
+  const reorder = together ? `Declare ${name(other)} first` : `List ${other.controllerClass.name} first`
+  return (
+    `${name(runs)} runs, as ${listed}. In the next major version (5.0), ${name(other)} runs instead, as ` +
+    `"${other.pattern}" spells out the first segment where the two differ. ${reorder}, or make the patterns distinct.`
   )
 }

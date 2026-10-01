@@ -550,75 +550,8 @@ describe('MeoCordApp', () => {
     })
   })
 
-  // `a/{x}/c` and `a/b/{y}` both take `a/b/c`, and neither is more literal than the
-  // other, so the order they are listed in settles it. Saying so at startup beats
-  // letting one of them quietly win every click.
-  describe('ambiguous routes', () => {
-    it('warns about a pair that trades a literal for a parameter in each direction', async () => {
-      @Controller()
-      class AmbiguousController {
-        @Command('a/{x}/c', CommandType.BUTTON)
-        async one(..._args: any[]) {}
-
-        @Command('a/b/{y}', CommandType.BUTTON)
-        async two(..._args: any[]) {}
-      }
-
-      const app = new MeoCordApp([AmbiguousController] as any, createMockContainer() as any, mockClient as any, 't')
-      await app.start()
-
-      // Before any interaction arrives
-      const warn = vi.mocked(Logger).mock.results[0]?.value.warn
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('can match the same customId'))
-
-      // Built once: the first click reuses the routes and does not warn again
-      mockClient.emit('interactionCreate', createMockInteraction(ButtonInteraction))
-      await vi.advanceTimersByTimeAsync(0)
-      expect(warn.mock.calls.filter(([message]: [string]) => message.includes('can match the same customId'))).toHaveLength(1)
-    })
-
-    it.each([
-      ['XC listed first', 'XC', 'BY'],
-      ['BY listed first', 'BY', 'XC'],
-    ] as const)('names the handler that runs for each pair, and the one that runs in 5.0: %s', async (_order, ...listed) => {
-      @Controller()
-      class XC {
-        @Command('a/{x}/c', CommandType.BUTTON)
-        async xc(..._args: any[]) {}
-
-        @Command('a/{x}', CommandType.BUTTON)
-        async x(..._args: any[]) {}
-      }
-      @Controller()
-      class BY {
-        @Command('a/b/{y}', CommandType.BUTTON)
-        async by(..._args: any[]) {}
-
-        @Command('a/b', CommandType.BUTTON)
-        async b(..._args: any[]) {}
-      }
-      const controllers = { XC, BY }
-
-      await new MeoCordApp(listed.map(name => controllers[name]) as any, createMockContainer() as any, mockClient as any, 't').start()
-
-      const warn = vi.mocked(Logger).mock.results[0]?.value.warn
-      const pairs = (warn.mock.calls.find(([message]: [string]) => message.includes('can match the same customId'))?.[0] as string)
-        .split('\n')
-        .filter(line => line.startsWith('  '))
-      expect(pairs).toEqual(
-        listed[0] === 'XC'
-          ? [
-              '  "a/{x}/c"  vs  "a/b/{y}": XC.xc runs, as its controller is listed first. In the next major version (5.0), ' +
-                'BY.by runs instead, as "a/b/{y}" spells out the first segment where the two differ.',
-              '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.',
-            ]
-          : [
-              '  "a/b/{y}"  vs  "a/{x}/c": BY.by runs, as its controller is listed first.',
-              '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.',
-            ],
-      )
-    })
-
+  // The overlap warning is a startup check of its own (overlapping-patterns.spec); two patterns of one shape stop the app
+  describe('patterns of one shape', () => {
     it('refuses the app as it is created, before start() attaches anything, when two handlers have the same pattern', () => {
       @Controller()
       class Profile {
@@ -641,26 +574,6 @@ describe('MeoCordApp', () => {
       expect(isRefusal(thrown)).toBe(true)
       expect(mockClient.on).not.toHaveBeenCalled()
       expect(mockClient.login).not.toHaveBeenCalled()
-    })
-
-    it('stays quiet when the patterns cannot collide', async () => {
-      @Controller()
-      class DistinctController {
-        @Command('profile/{uuid}', CommandType.BUTTON)
-        async one(..._args: any[]) {}
-
-        @Command('profile/{uuid}/{id}', CommandType.BUTTON)
-        async two(..._args: any[]) {}
-      }
-
-      const app = new MeoCordApp([DistinctController] as any, createMockContainer() as any, mockClient as any, 't')
-      await app.start()
-
-      mockClient.emit('interactionCreate', createMockInteraction(ButtonInteraction))
-      await vi.advanceTimersByTimeAsync(0)
-
-      const warn = vi.mocked(Logger).mock.results[0]?.value.warn
-      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('can match the same customId'))
     })
   })
 
@@ -726,26 +639,6 @@ describe('MeoCordApp', () => {
       await vi.advanceTimersByTimeAsync(0)
 
       expect(calls).toEqual(['select'])
-    })
-
-    it('does not warn about an overlap between two different component types', async () => {
-      @Controller()
-      class SharedController {
-        @Command('shared/{id}', CommandType.BUTTON)
-        async button(..._args: any[]) {}
-
-        @Command('shared/{id}', CommandType.SELECT_MENU)
-        async select(..._args: any[]) {}
-      }
-
-      const app = new MeoCordApp([SharedController] as any, createMockContainer() as any, mockClient as any, 't')
-      await app.start()
-
-      mockClient.emit('interactionCreate', createMockInteraction(ButtonInteraction, { customId: 'shared/7' }))
-      await vi.advanceTimersByTimeAsync(0)
-
-      const warn = vi.mocked(Logger).mock.results[0]?.value.warn
-      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('can match the same customId'))
     })
   })
 

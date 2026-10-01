@@ -17,7 +17,6 @@ import {
   getReactionHandlers,
   matchesEmoji,
   type ReactionHandlerMetadata,
-  PARAM_SEPARATOR,
 } from '@src/decorator/controller.decorator.js'
 import {
   describeInteraction,
@@ -33,8 +32,6 @@ import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-
 import {
   buildComponentRoutes,
   type ComponentRoute,
-  findComponentRouteConflicts,
-  literalFirst,
   matchComponentRoute,
   type RouteParamValue,
 } from '@src/core/component-routes.js'
@@ -226,34 +223,9 @@ export class Dispatcher {
    */
   private componentRoutes?: ComponentRoute[]
 
-  /** The component routes, built and checked for overlaps on first use; the app calls it as it is created. */
+  /** The component routes, built on first use; the app calls it as it is created. */
   getComponentRoutes(): ComponentRoute[] {
-    if (this.componentRoutes) return this.componentRoutes
-
-    const routes = buildComponentRoutes([...this.controllerClasses])
-    this.reportAmbiguousRoutes(routes)
-    this.componentRoutes = routes
-    return routes
-  }
-
-  /**
-   * Warns rather than throws: an app whose patterns overlap boots and works, and refusing to start
-   * would turn a latent mis-route into an outage.
-   */
-  private reportAmbiguousRoutes(routes: ComponentRoute[]): void {
-    const conflicts = findComponentRouteConflicts(routes)
-    if (conflicts.length === 0) return
-
-    // Each pair lists the route that ranks first, which runs for the ids both match
-    const routeOf = new Map(routes.map(route => [`${route.meta.type}\0${route.pattern}`, route]))
-    const outcome = ({ type, patterns: [left, right] }: (typeof conflicts)[number]) =>
-      ambiguityOutcome(routeOf.get(`${type}\0${left}`)!, routeOf.get(`${type}\0${right}`)!)
-    this.logger.warn(
-      `${conflicts.length} pattern pair(s) can match the same customId, so which one runs is decided by ` +
-        `ranking rather than by the ids themselves:\n` +
-        conflicts.map(conflict => `  "${conflict.patterns[0]}"  vs  "${conflict.patterns[1]}": ${outcome(conflict)}`).join('\n') +
-        `\nA parameter stops at "${PARAM_SEPARATOR}", so separating these segments with it makes them distinct.`,
-    )
+    return (this.componentRoutes ??= buildComponentRoutes([...this.controllerClasses]))
   }
 
   /**
@@ -633,19 +605,4 @@ export class Dispatcher {
       return null
     }
   }
-}
-
-/**
- * Which of two overlapping routes runs for the ids both match, and why: `runs` ranks first. Between equally
- * specific patterns, the order they are listed in decides until 5.0, which prefers the earlier literal segment.
- */
-function ambiguityOutcome(runs: ComponentRoute, other: ComponentRoute): string {
-  const name = ({ controllerClass, meta }: ComponentRoute) => `${controllerClass.name}.${meta.methodName}`
-  if ((runs.meta.specificity ?? 0) !== (other.meta.specificity ?? 0)) return `${name(runs)} runs, as its pattern is more specific.`
-  const listed = runs.controllerClass === other.controllerClass ? 'it is declared first' : 'its controller is listed first'
-  const next = literalFirst(other.pattern, runs.pattern)
-    ? ` In the next major version (5.0), ${name(other)} runs instead, as "${other.pattern}" spells out the first ` +
-      'segment where the two differ.'
-    : ''
-  return `${name(runs)} runs, as ${listed}.${next}`
 }
