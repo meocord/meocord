@@ -47,3 +47,10 @@ for (const name of ['toThrow', 'toThrowError']) {
       },
   )
 }
+
+// The first use of ICU in a process loads its data, a one-time cost. Done here, once per worker, so setup pays it
+// rather than whichever test first collates, formats a list, picks a plural form or lowercases for a locale.
+'a'.localeCompare('b')
+new Intl.ListFormat('en-US').format(['a', 'b'])
+new Intl.PluralRules('en-US').select(1)
+'A'.toLocaleLowerCase('en-US')

@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { ComponentType } from 'discord.js'
 import { countComponents, lockComponents, sameEmbed, sameJson, withoutRenderedViews } from '@src/common/response/components.js'
 import { RENDERED_CONTAINER_ID } from '@src/common/response/presenter.js'
@@ -103,6 +104,17 @@ describe('sameJson', () => {
     expect(sameJson('x', 'x')).toBe(true)
     expect(sameJson(null, {})).toBe(false)
     expect(sameJson([1, 2], { 0: 1, 1: 2 })).toBe(false)
+  })
+
+  // Collation would load ICU on first use, which a canonical key order has no need of, and could rank two keys equal
+  it('orders keys by code unit, never by a locale', () => {
+    const collate = vi.spyOn(String.prototype, 'localeCompare')
+    const composed = { 'caf\u00e9': 1, 'cafe\u0301': 2 }
+
+    expect(sameJson(composed, { 'cafe\u0301': 2, 'caf\u00e9': 1 })).toBe(true)
+    expect(sameEmbed({ title: 'x', fields: [{ name: 'a', value: 'b' }] }, { fields: [{ value: 'b', name: 'a' }], title: 'x' })).toBe(true)
+    expect(collate).not.toHaveBeenCalled()
+    collate.mockRestore()
   })
 })
 
