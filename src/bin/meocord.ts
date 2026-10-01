@@ -8,10 +8,10 @@ import { capitalize } from 'lodash-es'
 import wait from '@src/util/wait.util.js'
 import { GeneratorCLI } from '@src/bin/generator.js'
 import { AppGeneratorHelper, runtimePrefixFor } from '@src/bin/helper/app-generator.helper.js'
+import { makeInitialCommit } from '@src/bin/helper/initial-commit.helper.js'
 import * as fs from 'node:fs'
 import { compileAndValidateConfig, setEnvironment, validateDiscordToken, validateRunConfig } from '@src/util/common.util.js'
 import { Command } from 'commander'
-import { simpleGit } from 'simple-git'
 import { execSync } from 'child_process'
 import * as p from '@clack/prompts'
 import { detectInstalledPMs, getInstallCommand, type PackageManager } from '@src/util/package-manager.util.js'
@@ -357,18 +357,6 @@ copies or substantial portions of the Software.
     }
     s.stop(`App created at: ${appPath}`)
 
-    s.start('Initializing Git repository...')
-    try {
-      const git = simpleGit(appPath)
-      await git.init()
-      await git.add('./*')
-      await git.commit('Initial commit')
-    } catch (error) {
-      s.stop('Failed to initialize Git.')
-      await this.abortCreate(appPath, error)
-    }
-    s.stop('Git repository initialized.')
-
     s.start(`Installing dependencies with ${pm}...`)
     try {
       // Output is captured rather than discarded: a failed install is only actionable
@@ -379,6 +367,26 @@ copies or substantial portions of the Software.
       await this.abortCreate(appPath, installFailure(error))
     }
     s.stop('Dependencies installed.')
+
+    // After the install, so the lockfile is in the first commit. A git failure leaves the app as it is: it is ready
+    s.start('Making the first commit...')
+    const commit = await makeInitialCommit(appPath)
+    switch (commit.outcome) {
+      case 'committed':
+        s.stop('Git repository initialized with the first commit.')
+        break
+      case 'inside-repository':
+        s.stop("Inside an existing Git repository, so no new one was made; the app's files are left for you to commit.")
+        break
+      case 'not-committed':
+        s.stop(`Git repository initialized, but the first commit failed: ${commit.reason}`)
+        p.log.warn('The files are staged. Fix what git said, such as setting user.name and user.email, then run:\n  git commit -m "Initial commit"')
+        break
+      case 'no-repository':
+        s.stop(`Skipped the Git repository: ${commit.reason}`)
+        p.log.warn('The app is ready without one. To add it later, run git init, git add -A and git commit in its directory.')
+        break
+    }
 
     p.outro(`MeoCord app "${kebabCaseAppName}" is ready!`)
   }
