@@ -42,7 +42,7 @@ export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[
     makeInjectable(target)
     errorTypes.forEach((type, index) => {
       if (isConstructor(type)) return
-      const entry = `${ORDINALS[index] ?? `entry ${index + 1}`} entry`
+      const entry = ORDINALS[index] ? `${ORDINALS[index]} entry` : `entry ${index + 1}`
       warnDeprecatedBehaviour(
         logger,
         `${target.name}: @Catch's ${entry}, ${describeValue(type)}, which matches no error,`,
