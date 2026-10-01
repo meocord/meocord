@@ -236,8 +236,8 @@ async function keyed(
   return counted
 }
 
-/** The store key of the cooldown each refusal came from, for {@link claimCooldownNotice}. */
-const refusalKeys = new WeakMap<CooldownError, string>()
+/** The store key and window of the cooldown each refusal came from, for {@link claimCooldownNotice}. */
+const refusalKeys = new WeakMap<CooldownError, { key: string; windowMs: number }>()
 
 /** Asks the store about the call under the app's policy, and throws what the answer means for it. */
 async function ask(container: Container, counted: Counted[], peek: boolean, call: Peeked | undefined): Promise<void> {
@@ -262,22 +262,26 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
   if (verdict.allowed) return
   const blocking = counted[verdict.blocked ?? 0] ?? counted[0]
   const refusal = new CooldownError(verdict.retryAfterMs, blocking.per)
-  refusalKeys.set(refusal, blocking.key)
+  refusalKeys.set(refusal, { key: blocking.key, windowMs: blocking.windowMs })
   throw refusal
 }
 
 /**
  * Whether the caller a cooldown refused is yet to be told so during this wait: a one-use cooldown in the same
- * store, keyed on the refusing cooldown's own key, over the wait left. The first refusal of a wait claims it;
- * every retry in that wait is refused it, and the next wait claims its own. A refusal `@Cooldown` did not
- * make, or a store that fails to answer, claims nothing.
+ * store, keyed on the refusing cooldown's own key and on the second the wait ends, which every retry in it
+ * shares. The first refusal of a wait claims it; every retry in that wait is refused it, and the next wait
+ * claims its own. A refusal `@Cooldown` did not make, or a store that fails to answer, claims nothing.
  */
 export async function claimCooldownNotice(container: Container, refusal: CooldownError): Promise<boolean> {
-  const key = refusalKeys.get(refusal)
-  if (key === undefined) return false
-  const notice = { key: `${key}:notice`, limit: { uses: 1, windowMs: Math.max(1, refusal.retryAfterMs) } }
+  const refused = refusalKeys.get(refusal)
+  if (refused === undefined) return false
+  // The cooldown's own window, which outlasts the wait and, unlike the wait left, stays the same for every retry
+  const limit = { uses: 1, windowMs: refused.windowMs }
+  // A retry's end of the wait can land a moment either side of a second, so a notice takes that one and the one before
+  const endsAt = Math.floor((Date.now() + refusal.retryAfterMs) / 1000)
+  const notices = [endsAt, endsAt - 1].map(second => ({ key: `${refused.key}:notice:${second}`, limit }))
   try {
-    return (await askWithin(cooldownStoreOf(container), [notice], cooldownPolicyOf(container).timeoutMs, false)).allowed
+    return (await askWithin(cooldownStoreOf(container), notices, cooldownPolicyOf(container).timeoutMs, false)).allowed
   } catch (error) {
     logger.debug(`Could not ask the cooldown store whether to tell a refused caller: ${String((error as Error).cause ?? error)}`)
     return false

@@ -202,6 +202,26 @@ describe('dmOnCooldown', () => {
     expect(nextWait.author.send).toHaveBeenCalledTimes(1)
   })
 
+  // The wait left shrinks with each retry, so a notice counted over it would expire halfway through
+  it('DMs once in a wait the author retries every second until it ends', async () => {
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.fromApp(TellingApp).compile()
+    const sendAt = async (ms: number) => {
+      vi.setSystemTime(ms)
+      const message = messageOf('!roll 6')
+      await module.dispatch(message)
+      return vi.mocked(message.author.send).mock.calls.length > 0 ? [ms] : []
+    }
+
+    await sendAt(0)
+    const dmedAt: number[] = []
+    for (let ms = 1_000; ms < 60_000; ms += 1_000) dmedAt.push(...(await sendAt(ms)))
+    await sendAt(60_000)
+    for (let ms = 61_000; ms < 120_000; ms += 1_000) dmedAt.push(...(await sendAt(ms)))
+
+    expect(dmedAt).toEqual([1_000, 61_000])
+  })
+
   it('keeps each author’s wait to themselves', async () => {
     vi.useFakeTimers({ now: 0, toFake: ['Date'] })
     const module = MeoCordTestingModule.fromApp(TellingApp).compile()
