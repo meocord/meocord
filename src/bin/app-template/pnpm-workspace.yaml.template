@@ -3,3 +3,8 @@
 allowBuilds:
   '@swc/core': false
   unrs-resolver: false
+
+# The meocord version that created this app is the one it depends on, already run to create it, so it installs however
+# recently it was published
+minimumReleaseAgeExclude:
+  - meocord

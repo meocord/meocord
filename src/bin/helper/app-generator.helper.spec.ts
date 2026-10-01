@@ -243,6 +243,13 @@ describe('the packages a new app uses', () => {
     expect(workspace).toMatch(/^allowBuilds:\n {2}'@swc\/core': false\n {2}unrs-resolver: false\n$/m)
   })
 
+  // pnpm 11 and later hold back a release for a day; the app pins the meocord that created it, published or not that long
+  it('lets pnpm install the meocord that created the app, however recently it was published', () => {
+    const workspace = fs.readFileSync(path.join(generated('pnpm'), 'pnpm-workspace.yaml'), 'utf8')
+
+    expect(workspace).toMatch(/^minimumReleaseAgeExclude:\n {2}- meocord\n$/m)
+  })
+
   it.each(['bun', 'npm', 'yarn'])('writes no pnpm-workspace.yaml for a %s project', packageManager => {
     expect(fs.existsSync(path.join(generated(packageManager), 'pnpm-workspace.yaml'))).toBe(false)
   })
