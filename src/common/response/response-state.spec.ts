@@ -1255,3 +1255,106 @@ describe('respond(), the last details', () => {
     expect(interaction.editReply).not.toHaveBeenCalled()
   })
 })
+
+describe('respond(), answers asked for together', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const modal = new ModalBuilder().setCustomId('m').setTitle('M')
+
+  it('makes answers asked for at once in order, each from where the last left the interaction', async () => {
+    const sends = command()
+    const mixed = command()
+    const fallback = command()
+
+    await Promise.all([respond(sends).send('first'), respond(sends).send('second')])
+    await Promise.all([respond(mixed).send('answer'), respond(mixed).followUp('more')])
+    void respond(fallback).send('answer')
+    await responseOf(fallback).presentAnswer(new Error('x'))
+
+    expect(getResponse(sends).calls.map(call => call.method)).toEqual(['reply', 'editReply'])
+    expect(sent(sends.editReply)).toMatchObject({ content: 'second' })
+    expect(getResponse(mixed).calls.map(call => call.method)).toEqual(['reply', 'followUp'])
+    expect(getResponse(fallback).calls.map(call => call.method)).toEqual(['reply', 'followUp'])
+  })
+
+  it('replies after an acknowledgement Discord failed, rather than throwing its error again', async () => {
+    const interaction = command()
+    interaction.deferReply.mockRejectedValueOnce(new Error('ECONNRESET'))
+    await expect(respond(interaction).acknowledge()).rejects.toThrow('ECONNRESET')
+
+    await respond(interaction).send('answer')
+
+    expect(sent(interaction.reply)).toMatchObject({ content: 'answer' })
+    expect(respond(interaction).state).toBe('replied')
+  })
+
+  it('acknowledges again after an acknowledgement that failed before reaching Discord', async () => {
+    const interaction = command()
+    const state = respond(interaction)
+    // Thrown as the acknowledgement picks its Discord call, before any of it is awaited
+    interaction.isCommand.mockImplementationOnce(() => {
+      throw new Error('picked nothing')
+    })
+    await expect(state.acknowledge()).rejects.toThrow('picked nothing')
+
+    await state.acknowledge()
+
+    expect(interaction.deferReply).toHaveBeenCalledTimes(1)
+    expect(state.state).toBe('deferred')
+  })
+
+  // discord.js refuses an edit or a follow-up while it holds the interaction unanswered, as it does after a 40060
+  it('takes a reply or an update refused with 40060 as answered elsewhere, so the next send edits', async () => {
+    const replied = command()
+    replied.reply.mockRejectedValueOnce(createDiscordError(40060))
+    const updated = button()
+    updated.update.mockRejectedValueOnce(createDiscordError(40060))
+
+    for (const interaction of [replied, updated]) {
+      await expect(respond(interaction).send('first')).rejects.toMatchObject({ code: 40060 })
+      expect(respond(interaction).state).toBe('replied')
+      await respond(interaction).send('second')
+    }
+
+    expect(sent(replied.editReply)).toMatchObject({ content: 'second' })
+    expect(sent(updated.editReply)).toMatchObject({ content: 'second' })
+  })
+
+  it('reaches Discord with the follow-up and the edit it makes after a 40060, which discord.js did not see', async () => {
+    const erred = command()
+    erred.reply.mockRejectedValueOnce(createDiscordError(40060))
+    const acknowledged = command()
+    acknowledged.deferReply.mockRejectedValueOnce(createDiscordError(40060))
+
+    await respond(erred).error(new Error('x'))
+    await respond(acknowledged).acknowledge()
+    await respond(acknowledged).send('answer')
+
+    expect(getResponse(erred).calls.filter(call => 'error' in call).map(call => call.method)).toEqual(['reply'])
+    expect(getResponse(acknowledged).calls.filter(call => 'error' in call).map(call => call.method)).toEqual(['deferReply'])
+    expect(sent(acknowledged.editReply)).toMatchObject({ content: 'answer' })
+  })
+
+  it("refuses to send, edit or delete after a modal, which has no message, and points at the modal's submit", async () => {
+    const interaction = command()
+    await respond(interaction).modal(modal)
+
+    await expect(respond(interaction).send('x')).rejects.toThrow("answer the modal's submit instead")
+    await expect(respond(interaction).edit('x')).rejects.toThrow("answer the modal's submit instead")
+    await expect(respond(interaction).delete()).rejects.toThrow("answer the modal's submit instead")
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['showModal'])
+  })
+
+  it('answers an error after a modal with a private follow-up, never an edit of the clicked message', async () => {
+    const interaction = button(messageWith({ flags: Ephemeral, embeds: [{ description: 'card' }] }))
+    await respond(interaction).modal(modal)
+
+    await respond(interaction).error(new Error('x'))
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['showModal', 'followUp'])
+    expect(sent(interaction.followUp).flags).toBe(Ephemeral)
+  })
+})

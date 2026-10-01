@@ -274,7 +274,8 @@ function toJson(value: unknown): Record<string, unknown> {
 /**
  * How one interaction is answered: the single place its replies, edits and follow-ups go through.
  *
- * Get it with `respond()`. Each call picks the right Discord method for where the answer stands.
+ * Get it with `respond()`. Each call picks the right Discord method for where the answer stands. Calls made
+ * together run one after another, in the order they were made, so two `send()` calls at once reply, then edit.
  *
  * @group Responses
  */
@@ -294,7 +295,8 @@ export interface ResponseState {
   /**
    * Acknowledges the interaction without answering it yet: a deferred reply for a command, and an
    * invisible deferred update for a component or a modal from a message. Does nothing once answered,
-   * and concurrent calls share one acknowledgement.
+   * and concurrent calls share one acknowledgement. One that fails leaves the interaction unanswered,
+   * so the next answer replies.
    *
    * @param options - `ephemeral` to make a command's deferred reply private.
    */
@@ -315,6 +317,8 @@ export interface ResponseState {
   /**
    * Sends the answer: a reply to an unanswered command, an update of an unanswered component's
    * message, and an edit once the interaction is deferred or replied. A second `send()` edits again.
+   * A reply Discord refuses as already acknowledged elsewhere still throws, and the next `send()` edits.
+   * After `modal()` it throws: a modal has no message, and the modal's submit is answered instead.
    *
    * After `@Defer` locked a message, omitting `components` puts back its components as they were
    * before the lock, and omitting `embeds` drops the loading view; `components: []` clears them.
@@ -338,7 +342,8 @@ export interface ResponseState {
    * Sends another message after the answer. Before any answer it is the first reply. While a command's
    * reply is deferred and nothing is sent yet, Discord turns a follow-up into the deferred reply and
    * ignores its flags, so it is sent as that edit; a private follow-up on a public deferral deletes the
-   * deferral first and is sent privately.
+   * deferral first and is sent privately. After `modal()` it is sent as made, and Discord decides whether it
+   * accepts a follow-up there; the modal's submit is the interaction to answer.
    *
    * @param payload - Text, or reply options; `Ephemeral` makes the follow-up private.
    * @param options - `fill: false` leaves this follow-up's embeds and containers uncoloured.
@@ -346,12 +351,16 @@ export interface ResponseState {
    */
   followUp(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined>
 
-  /** Deletes the answer: the reply, or for a component deferred without a reply of its own, its message. */
+  /**
+   * Deletes the answer: the reply, or for a component deferred without a reply of its own, its message.
+   * Throws before any answer, and after `modal()`, which leaves no message.
+   */
   delete(): Promise<void>
 
   /**
    * Shows a modal. A modal must be the interaction's first response, so this throws once the
-   * interaction is acknowledged, rather than failing at Discord.
+   * interaction is acknowledged, or while another answer is in flight, rather than failing at Discord.
+   * What the user enters arrives as a modal submit interaction, which is answered in its own right.
    *
    * @param modal - The modal to show.
    */
@@ -381,6 +390,11 @@ export class InteractionResponse implements ResponseState {
 
   private phase: ResponsePhase = 'unanswered'
   private acknowledging?: Promise<void>
+  /** The answer steps asked for, run one after another; `pending` counts those not yet settled. */
+  private queue: Promise<unknown> = Promise.resolve()
+  private pending = 0
+  /** Whether the answer was a modal, which has no message to edit or delete. */
+  private modalShown = false
   private v2: boolean
   private lastMessage?: Message
   private readonly calls: ResponseCall[] = []
@@ -449,11 +463,33 @@ export class InteractionResponse implements ResponseState {
     return flags
   }
 
+  /**
+   * Runs an answer step once every step asked for before it has settled, so each picks its Discord method from where
+   * the last left the interaction. Steps call each other's unqueued forms, which never wait on the queue they run in.
+   * A Discord call that hangs holds the steps after it until discord.js's REST timeout (15 s by default) rejects it.
+   */
+  private queued<T>(step: () => Promise<T>): Promise<T> {
+    this.pending++
+    const run = this.queue.then(step).finally(() => this.pending--)
+    this.queue = run.catch(() => undefined)
+    return run
+  }
+
   acknowledge(options: { ephemeral?: boolean } = {}): Promise<void> {
+    return this.queued(() => this.acknowledgeNow(options))
+  }
+
+  private acknowledgeNow(options: { ephemeral?: boolean } = {}): Promise<void> {
     this.sync()
     if (this.phase !== 'unanswered') return this.acknowledging ?? Promise.resolve()
-    this.acknowledging ??= this.runAcknowledge(options).finally(() => this.sync())
-    return this.acknowledging
+    if (this.acknowledging) return this.acknowledging
+    const acknowledging = this.runAcknowledge(options).finally(() => this.sync())
+    this.acknowledging = acknowledging
+    // Still unanswered after a failure, so the next answer acknowledges or replies rather than throwing it again
+    acknowledging.catch(() => {
+      if (this.acknowledging === acknowledging) this.acknowledging = undefined
+    })
+    return acknowledging
   }
 
   private async runAcknowledge({ ephemeral }: { ephemeral?: boolean }): Promise<void> {
@@ -467,15 +503,14 @@ export class InteractionResponse implements ResponseState {
       }
       this.phase = 'deferred'
     } catch (error) {
-      // Acknowledged elsewhere, which discord.js did not see: the interaction is answered either way.
       if (errorCode(error) !== ALREADY_ACKNOWLEDGED) throw error
-      this.phase = 'replied'
+      this.answeredElsewhere()
     }
   }
 
   private async acknowledgeUnanswered(options: { ephemeral?: boolean } = {}): Promise<void> {
     try {
-      await this.acknowledge(options)
+      await this.acknowledgeNow(options)
     } catch (error) {
       logFailedSend(logger, 'acknowledge', error)
     }
@@ -500,9 +535,10 @@ export class InteractionResponse implements ResponseState {
         this.warnIfAnsweredOutside()
         return
       }
-      this.acknowledge(options)
-        .then(() => (this.pendingLock ? this.lock(this.pendingLock) : undefined))
-        .catch(error => logFailedSend(logger, 'acknowledge in time', error))
+      this.queued(async () => {
+        await this.acknowledgeNow(options)
+        if (this.pendingLock) await this.lockNow(this.pendingLock)
+      }).catch(error => logFailedSend(logger, 'acknowledge in time', error))
     }, delayMs)
     this.timer.unref?.()
   }
@@ -522,7 +558,11 @@ export class InteractionResponse implements ResponseState {
     }
   }
 
-  async lock({ disable = 'all' }: ResponseLockOptions = {}): Promise<void> {
+  lock(options: ResponseLockOptions = {}): Promise<void> {
+    return this.queued(() => this.lockNow(options))
+  }
+
+  private async lockNow({ disable = 'all' }: ResponseLockOptions): Promise<void> {
     if (this.snapshot || disable === 'none' || answersWithOwnMessage(this.interaction)) return
     const message = 'message' in this.interaction ? this.interaction.message : undefined
     if (!message) return
@@ -531,7 +571,7 @@ export class InteractionResponse implements ResponseState {
       this.pendingLock = { disable }
       return
     }
-    await this.acknowledge()
+    await this.acknowledgeNow()
     this.sync()
     if (this.phase === 'replied' && !this.acknowledging) return
 
@@ -603,17 +643,19 @@ export class InteractionResponse implements ResponseState {
    * Puts a locked message back as it was, unless something else changed it since the lock. `@Defer`
    * calls it after the handler, for a handler that never answered. Never throws.
    */
-  async release(): Promise<void> {
+  release(): Promise<void> {
     const waiting = this.timer !== undefined
     this.cancelScheduled()
-    // A component's handler that returned before the 'auto' timer, unanswered, gets eager's invisible acknowledgement
-    if (waiting && !answersWithOwnMessage(this.interaction)) await this.acknowledgeUnanswered()
-    this.warnIfAnsweredOutside()
-    try {
-      await this.restore()
-    } catch (error) {
-      logFailedSend(logger, 'restore the message', error)
-    }
+    return this.queued(async () => {
+      // A component's handler that returned before the 'auto' timer, unanswered, gets eager's invisible acknowledgement
+      if (waiting && !answersWithOwnMessage(this.interaction)) await this.acknowledgeUnanswered()
+      this.warnIfAnsweredOutside()
+      try {
+        await this.restore()
+      } catch (error) {
+        logFailedSend(logger, 'restore the message', error)
+      }
+    })
   }
 
   /** Restores the snapshot while the message still shows the lock. */
@@ -641,38 +683,44 @@ export class InteractionResponse implements ResponseState {
    * reply is deleted while nothing was sent into it; a component's invisible acknowledgement needs
    * nothing. Never throws.
    */
-  async abandon(): Promise<void> {
+  abandon(): Promise<void> {
     const waiting = this.timer !== undefined
     this.cancelScheduled()
-    // Denied before the 'auto' timer: acknowledged here, since Discord tells the user an unanswered call failed
-    if (waiting) await this.acknowledgeUnanswered({ ephemeral: true })
-    await this.acknowledging?.catch(() => undefined)
-    this.sync()
-    const onlyDeferred = this.calls.every(call => call.method === 'deferReply')
-    if (this.phase !== 'deferred' || !answersWithOwnMessage(this.interaction) || !onlyDeferred) return
-    try {
-      await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
-    } catch (error) {
-      logFailedSend(logger, 'delete the deferred reply', error)
-    }
+    return this.queued(async () => {
+      // Denied before the 'auto' timer: acknowledged here, since Discord tells the user an unanswered call failed
+      if (waiting) await this.acknowledgeUnanswered({ ephemeral: true })
+      this.sync()
+      const onlyDeferred = this.calls.every(call => call.method === 'deferReply')
+      if (this.phase !== 'deferred' || !answersWithOwnMessage(this.interaction) || !onlyDeferred) return
+      try {
+        await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
+      } catch (error) {
+        logFailedSend(logger, 'delete the deferred reply', error)
+      }
+    })
   }
 
-  async send(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
+  send(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
     this.cancelScheduled()
-    await this.acknowledging
-    this.sync()
-    const body = this.withRestore(await this.themed(payload, options))
-    if (this.phase !== 'unanswered') return this.editMessage(body)
-    return answersWithOwnMessage(this.interaction) ? this.reply(body) : this.update(body)
+    return this.queued(async () => {
+      this.sync()
+      this.refuseAfterModal()
+      const body = this.withRestore(await this.themed(payload, options))
+      if (this.phase !== 'unanswered') return this.editMessage(body)
+      return answersWithOwnMessage(this.interaction) ? this.reply(body) : this.update(body)
+    })
   }
 
   edit(payload: ResponseEditPayload, options?: ResponseSendOptions): Promise<Message | undefined> {
     return this.send(payload as ResponsePayload, options)
   }
 
-  async followUp(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
+  followUp(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
     this.cancelScheduled()
-    await this.acknowledging
+    return this.queued(() => this.followUpNow(payload, options))
+  }
+
+  private async followUpNow(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
     this.sync()
     const body = await this.themed(payload, options)
     if (this.phase === 'unanswered') return this.reply(body)
@@ -694,17 +742,27 @@ export class InteractionResponse implements ResponseState {
     return message as Message
   }
 
-  async delete(): Promise<void> {
-    await this.acknowledging
-    this.sync()
-    if (this.phase === 'unanswered') throw new Error('There is no answer to delete: the interaction has not been answered.')
-    await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
+  delete(): Promise<void> {
+    return this.queued(async () => {
+      this.sync()
+      if (this.phase === 'unanswered') throw new Error('There is no answer to delete: the interaction has not been answered.')
+      this.refuseAfterModal()
+      await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
+    })
+  }
+
+  /** A modal is the interaction's whole answer: what the user enters arrives as a submit interaction of its own. */
+  private refuseAfterModal(): void {
+    if (this.modalShown) {
+      throw new Error("This interaction was answered with a modal, which has no message to edit or delete; answer the modal's submit instead.")
+    }
   }
 
   async modal(modal: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData): Promise<void> {
     this.cancelScheduled()
     this.sync()
-    if (this.phase !== 'unanswered' || this.acknowledging) {
+    // Refused at once while any answer is in flight, since a modal can only be the first
+    if (this.phase !== 'unanswered' || this.pending > 0) {
       throw new Error(
         this.underDefer
           ? 'A modal must be the first response to an interaction, and @Defer acknowledged it before the handler ran. ' +
@@ -714,8 +772,11 @@ export class InteractionResponse implements ResponseState {
     }
     if (!('showModal' in this.interaction)) throw new Error('This interaction cannot show a modal.')
     const target = this.interaction
-    await this.call('showModal', modal, () => target.showModal(modal))
-    this.phase = 'replied'
+    return this.queued(async () => {
+      await this.call('showModal', modal, () => target.showModal(modal))
+      this.phase = 'replied'
+      this.modalShown = true
+    })
   }
 
   /** The payload as a body, filled with the theme's primary colour unless `fill: false` asks for it as written. */
@@ -757,8 +818,10 @@ export class InteractionResponse implements ResponseState {
     const flags = this.withSuppression(this.flagsFor('reply', body.flags, false))
     this.v2 = hasComponentsV2(flags)
     const sent = forMode(body, this.v2)
-    const response = await this.call('reply', { ...sent, flags }, () =>
-      this.interaction.reply({ ...sent, flags, withResponse: true } as InteractionReplyOptions & { withResponse: true }),
+    const response = await this.firstAnswer(() =>
+      this.call('reply', { ...sent, flags }, () =>
+        this.interaction.reply({ ...sent, flags, withResponse: true } as InteractionReplyOptions & { withResponse: true }),
+      ),
     )
     this.phase = 'replied'
     this.lastMessage = response?.resource?.message ?? this.lastMessage
@@ -773,10 +836,31 @@ export class InteractionResponse implements ResponseState {
     this.v2 ||= hasComponentsV2(flags)
     const sent = this.withAttachments(forMode(body, this.v2))
     const target = this.interaction
-    const response = await this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never))
+    const response = await this.firstAnswer(() =>
+      this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never)),
+    )
     this.phase = 'replied'
     this.lastMessage = (response as { resource?: { message?: Message } })?.resource?.message ?? this.lastMessage
     return this.lastMessage
+  }
+
+  /** Makes a first answer; one Discord refuses as already acknowledged leaves the interaction answered, as for a deferral. */
+  private async firstAnswer<T>(answer: () => Promise<T>): Promise<T> {
+    try {
+      return await answer()
+    } catch (error) {
+      if (errorCode(error) === ALREADY_ACKNOWLEDGED) this.answeredElsewhere()
+      throw error
+    }
+  }
+
+  /**
+   * Records an acknowledgement made elsewhere, which discord.js did not see, on the interaction as well: discord.js
+   * refuses an edit or a follow-up of an interaction it holds unanswered.
+   */
+  private answeredElsewhere(): void {
+    this.interaction.replied = true
+    this.phase = 'replied'
   }
 
   private withAttachments(body: Body): Body {
@@ -830,12 +914,15 @@ export class InteractionResponse implements ResponseState {
    * {@link error}, but throwing when the presenter fails to build the view, for MeoCord's own fallback to report
    * that fault; a failed delivery is logged, as by `error()`.
    */
-  async presentAnswer(error: unknown, options: ResponseErrorOptions = {}, { ifUnanswered = false }: { ifUnanswered?: boolean } = {}): Promise<void> {
+  presentAnswer(error: unknown, options: ResponseErrorOptions = {}, answer: { ifUnanswered?: boolean } = {}): Promise<void> {
+    return this.queued(() => this.presentAnswerNow(error, options, answer))
+  }
+
+  private async presentAnswerNow(error: unknown, options: ResponseErrorOptions, { ifUnanswered = false }: { ifUnanswered?: boolean }): Promise<void> {
     // A UserError is the user's own mistake: its message, for them alone, unless told otherwise
     const own = error instanceof UserError
     const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
     const theme = await themeForInteraction(this.interaction)
-    await this.acknowledging?.catch(() => undefined)
     // Built before anything is sent, so a presenter that fails throws to the caller rather than passing for a refusal
     const view = this.view(error, message, this.v2, theme)
     try {
@@ -847,10 +934,10 @@ export class InteractionResponse implements ResponseState {
       }
       // Answered by something discord.js did not see: follow up once instead, unless the answer was only for
       // an interaction nothing else answered
-      this.phase = 'replied'
+      this.answeredElsewhere()
       if (ifUnanswered) return
       try {
-        await this.followUp(this.privateError(view))
+        await this.followUpNow(this.privateError(view))
       } catch (retryError) {
         logFailedSend(logger, 'deliver the error reply', retryError)
       }
@@ -880,13 +967,14 @@ export class InteractionResponse implements ResponseState {
     // Answered meanwhile, as by a collector while the theme was looked up: an answer only for an unanswered one is moot
     if (ifUnanswered) return
 
-    if (answersWithOwnMessage(this.interaction)) {
+    // A command answers with its own reply; a modal leaves no message to edit, so its error follows up too
+    if (answersWithOwnMessage(this.interaction) || this.modalShown) {
       if (this.phase === 'deferred' && visibility === 'reply') {
         await this.editMessage(this.render(view, this.v2))
         return
       }
       // A private follow-up edits a private deferral into it, and replaces a public one
-      await this.followUp(this.privateError(view))
+      await this.followUpNow(this.privateError(view))
       return
     }
 
@@ -900,7 +988,7 @@ export class InteractionResponse implements ResponseState {
       }
     }
     await this.restore()
-    await this.followUp(this.privateError(view))
+    await this.followUpNow(this.privateError(view))
   }
 
   /** Whether a message stays within Discord's limits of 10 embeds and of Components V2 components. */

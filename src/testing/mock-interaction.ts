@@ -555,10 +555,14 @@ export function createMockInteraction<T extends object>(
     // and fetchReply() reads that back, so code comparing the two sees what it would against Discord.
     let held: HeldMessage | undefined
     const current = (): HeldMessage => (held ??= heldFrom(instance.message))
+    // A command answered with a modal has no original response, and Discord refuses one asked for
+    let modalAnswered = false
+    const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
     stubs.set(
       'editReply',
       createMockFn(async (options?: unknown) => {
         if (!instance.deferred && !instance.replied) throw notYetReplied('editReply')
+        if (modalAnswered) throw unknownMessage()
         instance.replied = true
         held = edited(current(), options)
         // The response has the message as Discord answers the edit, before its uploaded files have loaded again
@@ -567,12 +571,16 @@ export function createMockInteraction<T extends object>(
     )
     stubs.set(
       'fetchReply',
-      createMockFn(async () => messageFrom(current())),
+      createMockFn(async () => {
+        if (modalAnswered) throw unknownMessage()
+        return messageFrom(current())
+      }),
     )
     stubs.set(
       'deleteReply',
       createMockFn(async () => {
         if (!instance.deferred && !instance.replied) throw notYetReplied('deleteReply')
+        if (modalAnswered) throw unknownMessage()
       }),
     )
 
@@ -583,6 +591,7 @@ export function createMockInteraction<T extends object>(
         createMockFn(async () => {
           if (instance.deferred || instance.replied) throw alreadyReplied()
           instance.replied = true
+          modalAnswered = instance.type === InteractionType.ApplicationCommand
         }),
       )
     }
