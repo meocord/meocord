@@ -3,8 +3,16 @@ import { vi } from 'vitest'
 import { Command, Controller, Cooldown, MessageHandler, On, Once, Pipe, ReactionHandler, UsePipe, Validate } from '@src/decorator/index.js'
 import { handlerCooldowns, methodCooldowns } from '@src/core/cooldown-runner.js'
 import { CommandType } from '@src/enum/index.js'
-import { type PipeInterface, type StandardSchemaV1 } from '@src/interface/index.js'
-import { applyDecorators, CooldownError, cooldownMessage, CooldownStore, type CooldownLimit, MemoryCooldownStore } from '@src/common/index.js'
+import { type CooldownOptions, type PipeInterface, type StandardSchemaV1 } from '@src/interface/index.js'
+import {
+  applyDecorators,
+  CooldownError,
+  cooldownMessage,
+  CooldownStore,
+  type CooldownLimit,
+  type ExecutionContext,
+  MemoryCooldownStore,
+} from '@src/common/index.js'
 import { createChatInputOptions, createMockInteraction, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
 
 /** Applies a method decorator to a handler, as writing it above one does. */
@@ -390,6 +398,64 @@ describe('a cooldown key', () => {
     }
 
     expect(results).toEqual(outcomes)
+  })
+
+  // The documented exception: cooldowns whose by or bypass functions differ record different calls, told apart by uses and order
+  describe('with another by or bypass over the same window', () => {
+    const owners = (context: ExecutionContext) => context.getInteraction()?.user.id === 'owner'
+    const byChannel = (context: ExecutionContext) => context.getInteraction()?.channelId ?? undefined
+    const byGuild = (context: ExecutionContext) => context.getInteraction()?.guildId ?? undefined
+
+    it.each([
+      // The lone cooldown's key gains its uses once a sibling joins, so its count starts again
+      ['adds a cooldown with another bypass', [{ seconds: 60 }], [{ seconds: 60 }, { seconds: 60, uses: 5, bypass: owners }], ['ran', 'refused']],
+      // Uses tells the two apart, so a new number is a new count
+      ['changes the uses of one', [{ seconds: 60 }, { seconds: 60, uses: 5, bypass: owners }], [{ seconds: 60, uses: 2 }, { seconds: 60, uses: 5, bypass: owners }], ['ran', 'ran']],
+    ] as const)('starts the count again when a later release %s', async (_how, before, after, outcomes) => {
+      const store = new MemoryCooldownStore()
+      const releaseWith = (limits: readonly CooldownOptions[]) => {
+        @Controller()
+        class Rewards {
+          @Command('claim', CommandType.SLASH)
+          @applyDecorators(...limits.map(limit => Cooldown(limit as CooldownOptions & { by?: undefined })))
+          async claim(_interaction: ChatInputCommandInteraction) {}
+        }
+        return Rewards
+      }
+      const [release1, release2] = [releaseWith(before), releaseWith(after)]
+      const module = (controller: typeof release1) =>
+        MeoCordTestingModule.create({ controllers: [controller], providers: [{ provide: CooldownStore, useValue: store }] }).compile()
+
+      await module(release1).invoke(release1, 'claim', slash())
+      const upgraded = module(release2)
+      const results: string[] = []
+      for (let call = 0; call < 2; call++) results.push(await upgraded.invoke(release2, 'claim', slash()).then(() => 'ran', () => 'refused'))
+
+      expect(results).toEqual(outcomes)
+    })
+
+    // Their order tells two with the same uses apart, so swapping them swaps their counts
+    it('swaps the counts of two with the same uses when a later release reorders them', async () => {
+      const store = new MemoryCooldownStore()
+      const releaseWith = (first: typeof byChannel, second: typeof byChannel) => {
+        @Controller()
+        class Rooms {
+          @Command('rooms', CommandType.SLASH)
+          @Cooldown({ seconds: 60, by: first })
+          @Cooldown({ seconds: 60, by: second })
+          async rooms(_interaction: ChatInputCommandInteraction) {}
+        }
+        return Rooms
+      }
+      const [release1, release2] = [releaseWith(byChannel, byGuild), releaseWith(byGuild, byChannel)]
+      const module = (controller: typeof release1) =>
+        MeoCordTestingModule.create({ controllers: [controller], providers: [{ provide: CooldownStore, useValue: store }] }).compile()
+
+      await module(release1).invoke(release1, 'rooms', slash({ channel: 'X', guild: 'Y' }))
+
+      // Channel X has had its one call this minute, but its count now sits under the other cooldown's key
+      await expect(module(release2).invoke(release2, 'rooms', slash({ channel: 'X', guild: 'Q' }))).resolves.toMatchObject({ ran: true })
+    })
   })
 
   it('counts cooldowns with the same window under one key, held to the smaller uses', async () => {
