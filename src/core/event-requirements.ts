@@ -103,23 +103,31 @@ export const MESSAGE_HANDLER_REQUIREMENTS: EventRequirements = {
   intents: [MESSAGES, [GatewayIntentBits.MessageContent]],
 }
 
-/**
- * A `@MessageHandler` only messages that mention the bot, or direct messages, can reach: Discord sends their text
- * without MessageContent.
- */
-export const MENTION_OR_DM_HANDLER_REQUIREMENTS: EventRequirements = { intents: [MESSAGES] }
+/** A `@MessageHandler` only messages that mention the bot can reach: Discord sends their text without MessageContent. */
+export const MENTION_ONLY_HANDLER_REQUIREMENTS: EventRequirements = { intents: [MESSAGES] }
 
 /**
- * What a `@MessageHandler` needs: MessageContent, unless it has a pattern that only a mention of the bot starts,
- * or works in direct messages only.
+ * A `@MessageHandler` that works in direct messages only. They carry their text without MessageContent, but arrive
+ * only with DirectMessages, and only with Partials.Channel: no DM channel is cached after the bot starts, and
+ * discord.js drops a message from a channel it has not cached unless that partial is on.
+ */
+export const DM_HANDLER_REQUIREMENTS: EventRequirements = {
+  intents: [[GatewayIntentBits.DirectMessages]],
+  partials: [Partials.Channel],
+}
+
+/**
+ * What a `@MessageHandler` needs: MessageContent, unless it has a pattern that only a mention of the bot starts;
+ * one that works in direct messages only needs what lets them arrive instead.
  */
 export function messageHandlerRequirements(
   handler: { pattern?: string; options: { mention?: unknown; prefix?: unknown; scope?: unknown } },
   app: { mention?: unknown },
 ): EventRequirements {
   if (handler.pattern === undefined) return MESSAGE_HANDLER_REQUIREMENTS
+  if (handler.options.scope === 'dm') return DM_HANDLER_REQUIREMENTS
   const mentionOnly = handler.options.mention === 'only' || (app.mention === 'only' && handler.options.prefix === undefined)
-  return mentionOnly || handler.options.scope === 'dm' ? MENTION_OR_DM_HANDLER_REQUIREMENTS : MESSAGE_HANDLER_REQUIREMENTS
+  return mentionOnly ? MENTION_ONLY_HANDLER_REQUIREMENTS : MESSAGE_HANDLER_REQUIREMENTS
 }
 
 /** A `@ReactionHandler` needs the reaction intents, and the partials for messages sent before the bot started. */
@@ -185,8 +193,11 @@ export function missingRequirementWarnings(options: ClientOptions, handlers: rea
   }
   for (const [partial, labels] of missingPartials) {
     warnings.push(
-      `Partials.${Partials[partial]} is not in clientOptions.partials, so ${labels.join(', ')} will miss events ` +
-        `about messages, reactions or users the bot has not cached, such as messages sent before it started.`,
+      `Partials.${Partials[partial]} is not in clientOptions.partials, so ${labels.join(', ')} will miss ` +
+        (partial === Partials.Channel
+          ? 'direct messages: no DM channel is cached after the bot starts, and discord.js drops a message from a ' +
+            'channel it has not cached.'
+          : 'events about messages, reactions or users the bot has not cached, such as messages sent before it started.'),
     )
   }
   return warnings

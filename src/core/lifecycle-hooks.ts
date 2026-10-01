@@ -7,6 +7,8 @@ import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/in
 export interface LifecycleEntry {
   name: string
   instance: Partial<OnReady & OnShutdown>
+  /** The app's cooldown store, which shuts down after the last call. */
+  cooldownStore?: boolean
 }
 
 /** What the ready hooks report as they run; the app logs each, a testing module collects the failures. */
@@ -27,6 +29,8 @@ export interface ReadyHooksOptions {
   stopped?: () => boolean
   /** How long a hook runs before `report.slow` is called. */
   slowAfterMs?: number
+  /** Called as each unit is done: resolved and readied, or failed. */
+  settled?: (unit: LifecycleUnit) => void
 }
 
 /**
@@ -41,7 +45,7 @@ export async function runReadyHooks(
   info: ReadyInfo,
   entries: LifecycleEntry[],
   report: ReadyHooksReport,
-  { stopped = () => false, slowAfterMs }: ReadyHooksOptions = {},
+  { stopped = () => false, slowAfterMs, settled }: ReadyHooksOptions = {},
 ): Promise<void> {
   const failed = new Set<unknown>()
   // For each unit, the failed units it depends on, directly or through another dependency
@@ -64,12 +68,15 @@ export async function runReadyHooks(
     } catch (error) {
       failed.add(unit.token)
       report.resolveFailed(unit, error)
+      settled?.(unit)
       continue
     }
+    const entry: LifecycleEntry = { name: unit.name, instance, ...(unit.cooldownStore && { cooldownStore: true }) }
     // Only a unit whose onReady has settled, or that has none, is shut down: a stop mid-ready skips
     // the one still starting, and those not reached yet
     if (typeof instance.onReady !== 'function') {
-      entries.push({ name: unit.name, instance })
+      entries.push(entry)
+      settled?.(unit)
       continue
     }
 
@@ -84,7 +91,8 @@ export async function runReadyHooks(
     } finally {
       clearTimeout(slow)
     }
-    entries.push({ name: unit.name, instance })
+    entries.push(entry)
+    settled?.(unit)
   }
 }
 

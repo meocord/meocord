@@ -34,6 +34,7 @@ import {
   type RequiringHandler,
 } from '@src/core/event-requirements.js'
 import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
+import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
 import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
@@ -183,12 +184,26 @@ export class MeoCordApp implements MeoCordApplication {
    * unhandled rejection, which would terminate the whole bot.
    */
   private async runListener(event: string, run: () => Promise<void>): Promise<void> {
-    try {
-      await run()
-    } catch (error) {
-      this.logger.error(`Unhandled error while handling "${event}":`, error)
+    const handled = (async () => {
+      try {
+        await run()
+      } catch (error) {
+        this.logger.error(`Unhandled error while handling "${event}":`, error)
+      }
+    })()
+    // A call, which the cooldown store outlasts at shutdown; the ready listener only runs the hooks
+    if (event !== 'clientReady') {
+      this.calls.add(handled)
+      void handled.then(() => this.calls.delete(handled))
     }
+    await handled
   }
+
+  /** The calls under way, each settling once its handling has. */
+  private readonly calls = new Set<Promise<void>>()
+
+  /** Settles once the cooldown store's `onReady` has, which calls wait for before asking it. */
+  private storeReady?: PromiseWithResolvers<void>
 
   /**
    * Rotates the bot's activity.
@@ -318,6 +333,12 @@ export class MeoCordApp implements MeoCordApplication {
     }
     // A stop that came while the providers were being made has nothing to close: nothing is attached or logged in
     if (this.closing) throw stoppedBeforeOnline()
+
+    // Calls wait for the store's onReady, which may connect it, before asking it
+    if (this.lifecycleUnits.some(unit => unit.cooldownStore)) {
+      this.storeReady = Promise.withResolvers<void>()
+      waitForCooldownStore(this.container, this.storeReady.promise)
+    }
 
     this.bot.on('clientReady', readyClient =>
       this.runListener('clientReady', async () => {
@@ -589,16 +610,35 @@ export class MeoCordApp implements MeoCordApplication {
         slow: unit => this.logger.warn(`onReady in ${unit.name} has run for over ${SLOW_READY_HOOK_MS} ms; the hooks after it are waiting.`),
       },
       // Shutdown has begun: the client is going away, so no further hook starts
-      { stopped: () => this.closing, slowAfterMs: SLOW_READY_HOOK_MS },
+      {
+        stopped: () => this.closing,
+        slowAfterMs: SLOW_READY_HOOK_MS,
+        settled: unit => unit.cooldownStore && this.storeReady?.resolve(),
+      },
     )
+    // Also when shutdown stopped the hooks before the store's, so no call waits on it
+    this.storeReady?.resolve()
   }
 
   /**
-   * Runs the `onShutdown` hooks one at a time in reverse dependency order, each isolated, and stops
-   * waiting once the whole sequence has run for the configured `shutdownTimeout`.
+   * Runs the `onShutdown` hooks one at a time in reverse dependency order, each isolated, the cooldown store's
+   * last, once no call is left that may ask it, and stops waiting once the whole sequence has run for the
+   * configured `shutdownTimeout`.
    */
   private async runShutdownHooks(entries: LifecycleEntry[]): Promise<void> {
-    const hooks = runShutdownHooks(entries, (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error))
+    const failed = (name: string, error: unknown) => this.logger.error(`onShutdown failed in ${name}:`, error)
+    const hooks = (async () => {
+      await runShutdownHooks(
+        entries.filter(entry => !entry.cooldownStore),
+        failed,
+      )
+      const store = entries.filter(entry => entry.cooldownStore)
+      if (store.length === 0) return
+      // The store shuts down after the last call that may ask it: no new one starts, and those under way finish
+      this.bot.removeAllListeners()
+      await Promise.all(this.calls)
+      await runShutdownHooks(store, failed)
+    })()
 
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<'timeout'>(resolve => {

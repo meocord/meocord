@@ -270,10 +270,13 @@ export class MeoCordFactory {
       [...appClasses, ...(options.cooldownStore ? [options.cooldownStore] : [])],
       '@MeoCord({ providers })',
     )
-    const lifecycle: LifecycleUnit[] = order.map(token => ({
+    // The store first, after only what it injects: it is ready before anything a call reaches, and shuts down last
+    const store = options.cooldownStore
+    const lifecycle: LifecycleUnit[] = (store ? resolutionOrder(container, providers, [store, ...order]) : order).map(token => ({
       token,
       name: tokenName(token),
       dependencies: tokenDependencies(container, providers, token),
+      ...(token === store && { cooldownStore: true }),
     }))
 
     // ShardContext.call reaches a service in another shard by its class name

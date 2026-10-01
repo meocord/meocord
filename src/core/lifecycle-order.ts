@@ -33,6 +33,8 @@ export interface LifecycleUnit {
   token: unknown
   name: string
   dependencies: unknown[]
+  /** The app's cooldown store: calls wait for its `onReady`, and its `onShutdown` runs after the last call. */
+  cooldownStore?: boolean
 }
 
 /** The units for a list of classes already in dependency order, as the app runs them without providers. */
