@@ -252,7 +252,7 @@ async function tellPrivately(
     const place = { command: invocations.get(message) ?? message.content.split(/\s+/)[0]!, channel, server: message.guild.name }
     const text =
       error instanceof CooldownError
-        ? { key: 'meocord.dm.cooldown', params: { ...place, wait: cooldownText(error.retryAfterMs) } }
+        ? { key: 'meocord.dm.cooldown', params: { ...place, wait: cooldownText(error.retryAt) } }
         : { key: 'meocord.dm.error', params: place }
     return presentedReply(message, error, renderText(translator, locale, text), withEmoji, logger)
   })

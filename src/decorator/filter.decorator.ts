@@ -24,8 +24,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * @Catch(CooldownError)
  * export class WaitFilter implements ExceptionFilter<CooldownError> {
  *   async catch(error: CooldownError, context: ExecutionContext) {
- *     const seconds = Math.ceil(error.retryAfterMs / 1000)
- *     await context.response?.error(error, { message: `Slow down: try again in ${seconds}s.` })
+ *     await context.response?.error(error, { message: `Slow down: try again ${time(error.retryAt, 'R')}.` })
  *   }
  * }
  * ```

@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { ChatInputCommandInteraction } from 'discord.js'
 import {
   CommandNotFoundError,
@@ -19,7 +20,7 @@ const t = createTranslator({
     id: {
       meocord: {
         usage: { heading: 'Cara pakai: {usage}', headingMany: 'Cara pakai:\n{usages}', notOneOf: '{label}: "{word}" bukan {choices}', serverOnly: 'Hanya di server.' },
-        cooldown: { minutes: 'Tunggu {minutes} menit {seconds} detik.', wholeMinutes: 'Tunggu {minutes} menit.', storeDown: 'Cooldown sedang tidak bisa dicek.' },
+        cooldown: { until: 'Coba lagi {when}.', storeDown: 'Cooldown sedang tidak bisa dicek.' },
         fallback: { notFound: 'Perintah tidak ditemukan!', error: 'Terjadi kesalahan.' },
       },
     },
@@ -55,10 +56,13 @@ describe('translateError', () => {
   })
 
   it("translates a cooldown's wait, the store's refusal, a command not found and a fault", () => {
-    expect(translateError(new CooldownError(125_000, 'user'), t, 'id')).toBe('Tunggu 2 menit 5 detik.')
-    expect(translateError(new CooldownError(120_000, 'user'), t, 'id')).toBe('Tunggu 2 menit.')
-    // The catalog has no text for seconds alone, which stays in English
-    expect(translateError(new CooldownError(12_000, 'user'), t, 'id')).toBe('Slow down: try again in 12s.')
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    // A day's wait as a Discord timestamp, which the reader's client words in their language and counts down
+    expect(translateError(new CooldownError(86_400_000, 'user'), t, 'id')).toBe('Coba lagi <t:86400:R>.')
+    expect(translateError(new CooldownError(86_400_000, 'user'), t, 'en-US')).toBe('Slow down: try again <t:86400:R>.')
+    // Rounded up, so it never reads as now while the call is still refused
+    expect(translateError(new CooldownError(1_500, 'user'), t, 'en-US')).toBe('Slow down: try again <t:2:R>.')
+    vi.useRealTimers()
     expect(translateError(new CooldownStoreError(undefined, true), t, 'id')).toBe('Cooldown sedang tidak bisa dicek.')
     expect(translateError(new CommandNotFoundError(), t, 'id')).toBe('Perintah tidak ditemukan!')
     expect(translateError(new Error('socket hang up'), t, 'id')).toBe('Terjadi kesalahan.')

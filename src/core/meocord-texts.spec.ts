@@ -31,7 +31,7 @@ const id = {
   meocord: {
     usage: { heading: 'Cara pakai: {usage}', notValid: '{label}: "{word}" bukan {type} yang sah', notOneOf: '{label}: "{word}" bukan salah satu dari {choices}' },
     types: { int: 'bilangan bulat' },
-    cooldown: { seconds: 'Pelan-pelan: coba lagi dalam {seconds} detik.' },
+    cooldown: { until: 'Pelan-pelan: coba lagi {when}.' },
     fallback: { notFound: 'Perintah tidak ditemukan!', error: 'Terjadi kesalahan.' },
     presenter: { loading: 'Sedang diproses…', errorTitle: 'Aduh!' },
     help: { commandsHeading: 'Perintah:', listOf: '{label}, satu atau lebih', aliases: 'Juga: {aliases}', flagOn: 'aktif jika diberikan' },
@@ -219,7 +219,7 @@ describe("MeoCord's own texts for an interaction", () => {
     // Rethrown to the test, as a fault is, after the fallback answered it
     await module.dispatch(broken).catch(() => undefined)
 
-    expect(answer(blocked)).toMatchObject({ title: 'Aduh!', description: 'Pelan-pelan: coba lagi dalam 10 detik.' })
+    expect(answer(blocked)).toMatchObject({ title: 'Aduh!', description: expect.stringMatching(/^Pelan-pelan: coba lagi <t:\d+:R>\.$/) })
     expect(answer(lost)).toMatchObject({ title: 'Aduh!', description: 'Perintah tidak ditemukan!' })
     expect(answer(broken)).toMatchObject({ title: 'Aduh!', description: 'Terjadi kesalahan.' })
   })

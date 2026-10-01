@@ -135,7 +135,13 @@ describe('@Cooldown', () => {
     const blocked = module.invoke(DailyController, 'daily', slash())
 
     await expect(blocked).rejects.toBeInstanceOf(CooldownError)
-    await expect(blocked).rejects.toMatchObject({ retryAfterMs: 6_000, per: 'user', message: 'Slow down: try again in 6s.' })
+    await expect(blocked).rejects.toMatchObject({
+      retryAfterMs: 6_000,
+      per: 'user',
+      limit: { uses: 1, windowMs: 10_000 },
+      retryAt: expect.any(Date),
+      message: 'Slow down: try again in 6s.',
+    })
     expect(ran).toEqual(['daily'])
   })
 
@@ -475,6 +481,13 @@ describe('cooldownMessage', () => {
     expect(cooldownMessage(12_000)).toBe('Slow down: try again in 12s.')
     expect(cooldownMessage(125_000)).toBe('Slow down: try again in 2m 5s.')
     expect(cooldownMessage(120_000)).toBe('Slow down: try again in 2m.')
+    // From an hour, hours and minutes; from a day, days and hours; the smaller unit rounded up, so it never says less
+    expect(cooldownMessage(3_600_000)).toBe('Slow down: try again in 1h.')
+    expect(cooldownMessage(9_000_000)).toBe('Slow down: try again in 2h 30m.')
+    expect(cooldownMessage(86_340_000)).toBe('Slow down: try again in 23h 59m.')
+    expect(cooldownMessage(86_399_000)).toBe('Slow down: try again in 1d.')
+    expect(cooldownMessage(183_600_000)).toBe('Slow down: try again in 2d 3h.')
+    expect(cooldownMessage(183_600_001)).toBe('Slow down: try again in 2d 4h.')
   })
 })
 

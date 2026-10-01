@@ -18,7 +18,7 @@ const t = createTranslator({
       ping: 'Pong!',
       meocord: {
         dm: { error: 'Gagal menjalankan {command} di {channel} ({server}).', cooldown: '{command} di {channel} ({server}): {wait}' },
-        cooldown: { wholeMinutes: 'Tunggu {minutes} menit.' },
+        cooldown: { until: 'Tunggu sampai {when}.' },
       },
     },
   },
@@ -230,7 +230,7 @@ describe('dmOnCooldown', () => {
 
     expect(ran.author.send).not.toHaveBeenCalled()
     expect(afterWait.author.send).not.toHaveBeenCalled()
-    expect(retries[0]!.author.send).toHaveBeenCalledWith({ content: '!roll di #general (Cat Cafe): Tunggu 1 menit.', allowedMentions: { parse: [] } })
+    expect(retries[0]!.author.send).toHaveBeenCalledWith({ content: '!roll di #general (Cat Cafe): Tunggu sampai <t:60:R>.', allowedMentions: { parse: [] } })
     expect(retries[1]!.author.send).not.toHaveBeenCalled()
     expect(retries[2]!.author.send).not.toHaveBeenCalled()
     expect(nextWait.author.send).toHaveBeenCalledTimes(1)
