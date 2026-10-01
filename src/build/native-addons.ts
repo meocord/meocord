@@ -286,9 +286,9 @@ export function copyPackagesInto(
   const listed = [...packages].filter(([name]) => !name.startsWith('@types/')).map(([name, dir]) => [name, realpathSync(dir)] as const)
   for (const [name, dir] of listed) write(name, dir, path.join(topDir, name))
 
-  // A package's dependencies are all placed before any of theirs, so a copy nested under it later cannot come
-  // between one of them and a version it already resolved further up
-  for (let next = pending.shift(); next; next = pending.shift()) {
+  // A queue, walked as it grows: a package's dependencies are all placed before any of theirs, so a copy nested under
+  // it later cannot come between one of them and a version it already resolved further up
+  for (const next of pending) {
     const { dependencies, optional } = readDependencies(next.dir)
     for (const dependency of new Set([...dependencies, ...optional])) {
       if (dependency.startsWith('@types/')) continue
