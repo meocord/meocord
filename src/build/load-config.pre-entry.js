@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { installStackRemapper } from './stack-remap.js'
 import { listenForDevRunnerStop } from '../util/dev-runner.util.js'
-import { BUNDLE_ENTRY_KEY } from '../util/bundle-entry.util.js'
+import { BUILD_MODE_KEY, BUNDLE_ENTRY_KEY } from '../util/bundle-entry.util.js'
 import { loadMeoCordConfig } from '../util/meocord-config-loader.util.js'
 
 // First, so a restart `meocord start --dev` asks for while the bundle still loads is heard
@@ -15,6 +15,8 @@ listenForDevRunnerStop()
 // it: process.argv[1] may be a process manager's wrapper instead.
 const bundle = fileURLToPath(import.meta.url)
 globalThis[BUNDLE_ENTRY_KEY] = bundle
+// The bundler writes the build's mode in for process.env.NODE_ENV, so this is the mode the bundle was built in
+globalThis[BUILD_MODE_KEY] = process.env.NODE_ENV
 
 // Assets are beside the bundle too, wherever dist was copied to: an asset import is this directory and its file name,
 // rather than the directory the build ran in, which the bundle would otherwise carry
