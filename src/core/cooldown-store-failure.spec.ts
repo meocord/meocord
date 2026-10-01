@@ -203,7 +203,9 @@ describe('@MeoCord({ cooldownStoreFailure, cooldownStoreTimeoutMs })', () => {
     [{ cooldownStoreTimeoutMs: '1s' }, 'must be a number of milliseconds above 0, at most 2147483647 (got "1s")'],
     // The longest delay a timer keeps; a longer one fires at once, so every call would time out
     [{ cooldownStoreTimeoutMs: 3_000_000_000 }, 'must be a number of milliseconds above 0, at most 2147483647 (got 3000000000)'],
-  ])('refuses %j where the app is declared', (options, message) => {
+    [{ cooldownStoreTimeoutMs: Infinity }, 'must be a number of milliseconds above 0, at most 2147483647 (got Infinity)'],
+    [{ cooldownStoreTimeoutMs: Number.NaN }, 'must be a number of milliseconds above 0, at most 2147483647 (got NaN)'],
+  ])('refuses %o where the app is declared', (options, message) => {
     const declare = () => {
       @MeoCord({ controllers: [], clientOptions: { intents: [] }, ...(options as object) })
       class App {}

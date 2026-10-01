@@ -87,8 +87,10 @@ class BlindPeekStore extends MemoryCooldownStore {
 
 describe('testCooldownStore', () => {
   it('fails a store that checks and records in two steps, where concurrent calls at the limit both pass', async () => {
+    // It keeps the default consumeMany, which takes each key with its consume
     expect(await failures(() => new TwoStepStore())).toEqual([
       expect.stringContaining('lets exactly one of several concurrent calls take the last use'),
+      expect.stringContaining('lets exactly one of several concurrent batches take the last use'),
     ])
   })
 
@@ -113,6 +115,17 @@ describe('testCooldownStore', () => {
     const failed = await failures(() => new BlindPeekStore())
     expect(failed).toContainEqual(expect.stringContaining('peeks a refusal with the wait consume gives'))
     expect(failed).toContainEqual(expect.stringContaining('peeks a batch as consumeMany would'))
+  })
+
+  it('passes a store that keeps the default consumeMany and peekMany, checking what those defaults do', async () => {
+    const memory = new MemoryCooldownStore()
+    class ConsumeOnlyStore extends CooldownStore {
+      consume(key: string, limit: CooldownLimit) {
+        return memory.consume(key, limit)
+      }
+    }
+
+    expect(await failures(() => new ConsumeOnlyStore())).toEqual([])
   })
 
   it('names its cases after the store, under one describe', () => {

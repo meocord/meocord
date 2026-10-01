@@ -259,7 +259,7 @@ function assertCooldownPolicy(
   ) {
     throw refuse(new TypeError(
       `${appName}: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0, at most ${MAX_TIMER_MS} ` +
-        `(got ${JSON.stringify(cooldownStoreTimeoutMs)}).`,
+        `(got ${typeof cooldownStoreTimeoutMs === 'number' ? cooldownStoreTimeoutMs : JSON.stringify(cooldownStoreTimeoutMs)}).`,
     ))
   }
 }
