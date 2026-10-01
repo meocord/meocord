@@ -423,12 +423,23 @@ export interface PipeInterface<In = any, Out = any> {
  * @group Types
  * @see {@link ReactionHandler}
  */
-export interface ReactionHandlerOptions {
+export interface ReactionEvent {
   /** The user who added or removed the reaction. */
   user: User | PartialUser
   /** Whether the reaction was added or removed. */
   action: ReactionHandlerAction
 }
+
+/**
+ * The second argument a `@ReactionHandler` method receives, under its earlier name.
+ *
+ * @deprecated Since 4.1, and removed in the next major version (5.0). Use `ReactionEvent` instead. Every other
+ * `…Options` type is what a decorator takes, and this one is what a handler receives.
+ *
+ * @group Types
+ * @see {@link ReactionEvent}
+ */
+export type ReactionHandlerOptions = ReactionEvent
 
 /**
  * The settings a `@ReactionHandler` takes for itself.

@@ -85,12 +85,11 @@ export interface CommandBuilderBase<T extends BuildableCommandType = BuildableCo
 export type CommandBuilderConstructor<T extends BuildableCommandType> = new () => CommandBuilderBase<T>
 
 /**
- * What `@Command` records about a handler method: its route, its type and its builder. Exported, but not public
- * API: no public type or function takes or returns it.
+ * What `@Command` records about a handler method: its route, its type and its builder.
  *
  * @internal
  */
-export interface CommandMetadata<T extends string = string> {
+export interface CommandMeta<T extends string = string> {
   /** The handler method's name. */
   methodName: string
   /** What the command's builder built, which is registered with Discord; `undefined` for a handler with a `CommandType`. */
@@ -113,12 +112,11 @@ export interface CommandMetadata<T extends string = string> {
 }
 
 /**
- * What `@Autocomplete` records about a handler method: the command and option it completes. Exported, but not
- * public API: no public type or function takes or returns it.
+ * What `@Autocomplete` records about a handler method: the command and option it completes.
  *
  * @internal
  */
-export interface AutocompleteMetadata {
+export interface AutocompleteMeta {
   /** The command path the handler serves, e.g. `settings` or `settings notify email`. */
   commandPath: string
   /** The option it completes, or `undefined` to complete every option of that command. */
@@ -126,6 +124,26 @@ export interface AutocompleteMetadata {
   /** The handler method's name. */
   methodName: string
 }
+
+/**
+ * What `@Command` records about a handler method.
+ *
+ * @deprecated Since 4.1, and removed in the next major version (5.0). Internal: nothing replaces it. No public type
+ * or function takes or returns it.
+ *
+ * @internal
+ */
+export type CommandMetadata<T extends string = string> = CommandMeta<T>
+
+/**
+ * What `@Autocomplete` records about a handler method.
+ *
+ * @deprecated Since 4.1, and removed in the next major version (5.0). Internal: nothing replaces it. No public type
+ * or function takes or returns it.
+ *
+ * @internal
+ */
+export type AutocompleteMetadata = AutocompleteMeta
 
 /** The interaction class each non-buildable command type hands to its handler. */
 interface ComponentInteractionMap {

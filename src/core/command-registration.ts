@@ -7,7 +7,7 @@ import { getCommandMap } from '@src/decorator/controller.decorator.js'
 import { localizationProblems } from '@src/core/command-localizations.js'
 import { CommandType } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
-import { type CommandMetadata } from '@src/interface/command-decorator.interface.js'
+import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 
 /** The part of discord.js's `REST` registration uses, so a client's own and a standalone one both fit. */
 export interface RegistrationRest {
@@ -38,7 +38,7 @@ export interface RegistrationTarget {
   commands: CollectedCommand[]
 }
 
-type Builder = NonNullable<CommandMetadata['builder']>
+type Builder = NonNullable<CommandMeta['builder']>
 
 /** What Discord assumes a command body is when it carries no type of its own. */
 const DEFAULT_APPLICATION_COMMAND_TYPE = ApplicationCommandType.ChatInput

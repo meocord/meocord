@@ -19,7 +19,7 @@ import {
 } from '@src/decorator/index.js'
 import { CommandType, ReactionHandlerAction } from '@src/enum/index.js'
 import { CommandNotFoundError, MessageUsageError, UserError } from '@src/common/errors.js'
-import { type DispatchObserver, type ExceptionFilter, type ReactionHandlerOptions } from '@src/interface/index.js'
+import { type DispatchObserver, type ExceptionFilter, type ReactionEvent } from '@src/interface/index.js'
 import { type DispatchedCall, MeoCordTestingModule } from './meocord-testing-module.js'
 import { resolveRoute } from './routing.js'
 import { createChatInputOptions, createMock, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
@@ -90,7 +90,7 @@ class TalkController {
   }
 
   @ReactionHandler('👍')
-  thumbs(_reaction: MessageReaction, { action }: ReactionHandlerOptions) {
+  thumbs(_reaction: MessageReaction, { action }: ReactionEvent) {
     calls.push(`thumbs ${action}`)
   }
 }

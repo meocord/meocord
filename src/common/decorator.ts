@@ -1,3 +1,5 @@
+import { warnDeprecated } from '@src/common/deprecation.js'
+import { Logger } from '@src/common/logger.js'
 import { MetadataKey } from '@src/enum/index.js'
 import { decoratedName, refuse } from '@src/util/refusal.util.js'
 
@@ -33,6 +35,8 @@ export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator
   } as any
 }
 
+const logger = new Logger('SetMetadata')
+
 /** The keys MeoCord and inversify keep their own metadata under, which a user's value would replace. */
 const RESERVED_KEYS: ReadonlySet<string> = new Set([
   MetadataKey.Injectable,
@@ -46,8 +50,8 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
 /**
  * Attaches a value to a controller or a handler under a string key of your choosing.
  *
- * Prefer {@link createMetadata}, whose decorator is typed and whose key cannot collide with another. A stage
- * reads the value with `ExecutionContext.get(key)`, the method's first, then the controller's.
+ * A stage reads the value with `ExecutionContext.get(key)`, the method's first, then the controller's. Using it
+ * logs a warning once.
  *
  * @param metadataKey - The key to store the value under.
  * @param metadataValue - The value to store.
@@ -67,10 +71,14 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
  * // In a guard that injects ExecutionContext: this.context.get<string[]>('roles')
  * ```
  *
+ * @deprecated Since 4.1, and removed in the next major version (5.0). Use `createMetadata` instead. Its decorator is
+ * typed, and its key cannot collide with another.
+ *
  * @group Utilities
  * @see {@link createMetadata}
  */
 export function SetMetadata<V = any>(metadataKey: string, metadataValue: V): ClassDecorator & MethodDecorator {
+  warnDeprecated(logger, 'SetMetadata', 'createMetadata')
   return function (target: any, propertyKey?: string | symbol): void {
     // Checked where it applies, so the refusal names the handler or controller
     if (RESERVED_KEYS.has(metadataKey)) {

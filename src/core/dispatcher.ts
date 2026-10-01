@@ -28,8 +28,8 @@ import {
   resolveCommandPaths,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
-import { type MessageCommandOptions, type ReactionHandlerOptions } from '@src/interface/index.js'
-import { type AutocompleteMetadata, type CommandMetadata } from '@src/interface/command-decorator.interface.js'
+import { type MessageCommandOptions, type ReactionEvent } from '@src/interface/index.js'
+import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import {
   buildComponentRoutes,
   type ComponentRoute,
@@ -104,7 +104,7 @@ type ControllerClass = new (...args: any[]) => any
 
 interface AutocompleteRoute {
   controllerClass: ControllerClass
-  meta: AutocompleteMetadata
+  meta: AutocompleteMeta
 }
 
 /** Told what one dispatched call did: each handler it ran, as it settled, and each error that reached the fallback. */
@@ -412,7 +412,7 @@ export class Dispatcher {
    */
   private async executeCommand(
     controllerInstance: Record<string, (...args: unknown[]) => Promise<void>>,
-    commandMetadata: CommandMetadata<string>,
+    commandMetadata: CommandMeta<string>,
     interaction: Interaction<CacheType>,
     call: Call,
   ): Promise<void> {
@@ -553,7 +553,7 @@ export class Dispatcher {
    */
   async reaction(
     reaction: MessageReaction | PartialMessageReaction,
-    { user, action }: ReactionHandlerOptions,
+    { user, action }: ReactionEvent,
     record?: DispatchRecorder,
   ): Promise<void> {
     const call = this.callFor(record)

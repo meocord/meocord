@@ -1,6 +1,9 @@
 /**
  * The reflect-metadata keys MeoCord reads and writes, its own and the ones Inversify and TypeScript set.
  *
+ * @deprecated Since 4.1, and removed in the next major version (5.0). Internal: nothing replaces it. Read and write
+ * your own metadata with `createMetadata` and `ExecutionContext.get`.
+ *
  * @internal
  */
 export const enum MetadataKey {

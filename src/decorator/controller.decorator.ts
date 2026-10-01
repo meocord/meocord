@@ -10,14 +10,14 @@ import {
   UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
-import { type CheckedParams, type MessageHandlerOptions, type ReactionHandlerOptions, type ReactionHandlerSettings } from '@src/interface/index.js'
+import { type CheckedParams, type MessageHandlerOptions, type ReactionEvent, type ReactionHandlerSettings } from '@src/interface/index.js'
 import {
-  type AutocompleteMetadata,
+  type AutocompleteMeta,
   type BuildableCommandType,
   type CommandBuilderBase,
   type CommandBuilderConstructor,
   type CommandInteractionType,
-  type CommandMetadata,
+  type CommandMeta,
 } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
@@ -43,11 +43,11 @@ export function ownHandlerList<T>(key: symbol, target: object): T[] {
 }
 
 /** The class's own command map, started from a copy of the inherited one, for the same reason. */
-function ownCommandMap(target: object): Record<string, CommandMetadata[]> {
-  const own: Record<string, CommandMetadata[]> | undefined = Reflect.getOwnMetadata(COMMAND_METADATA_KEY, target)
+function ownCommandMap(target: object): Record<string, CommandMeta[]> {
+  const own: Record<string, CommandMeta[]> | undefined = Reflect.getOwnMetadata(COMMAND_METADATA_KEY, target)
   if (own) return own
 
-  const inherited: Record<string, CommandMetadata[]> = Reflect.getMetadata(COMMAND_METADATA_KEY, target) ?? {}
+  const inherited: Record<string, CommandMeta[]> = Reflect.getMetadata(COMMAND_METADATA_KEY, target) ?? {}
   return Object.fromEntries(Object.entries(inherited).map(([name, metas]) => [name, [...metas]]))
 }
 
@@ -167,7 +167,7 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
   target: object,
   propertyKey: string,
   descriptor:
-    | TypedPropertyDescriptor<(reaction: T, options: ReactionHandlerOptions) => R>
+    | TypedPropertyDescriptor<(reaction: T, options: ReactionEvent) => R>
     | TypedPropertyDescriptor<(reaction: T) => R>
     | TypedPropertyDescriptor<() => R>,
 ) => void
@@ -190,7 +190,7 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * @example
  * ```ts
  * @ReactionHandler('⭐')
- * async star(reaction: MessageReaction, { user, action }: ReactionHandlerOptions) {
+ * async star(reaction: MessageReaction, { user, action }: ReactionEvent) {
  *   if (action === ReactionHandlerAction.ADD) await reaction.message.reply(`${user.username} starred this.`)
  * }
  * ```
@@ -198,7 +198,7 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * @pipeline handler after every stage the call passed
  * @group Decorators
  * @category Handlers
- * @see {@link ReactionHandlerOptions}
+ * @see {@link ReactionEvent}
  * @see {@link https://meocord.dev/docs/4.1/reactions | Reactions}
  */
 export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>>(
@@ -505,7 +505,7 @@ export function Command<
     // This class's own map, inherited routes included
     const commands = ownCommandMap(target)
 
-    let builderInstance: CommandMetadata['builder']
+    let builderInstance: CommandMeta['builder']
     let commandType: CommandType
     let regex: RegExp | undefined
     let dynamicParams: string[] = []
@@ -622,7 +622,7 @@ function assertContextMenuKind(target: object, propertyKey: string, builderName:
  * @param controller - The controller class instance.
  * @returns A record containing command metadata indexed by command names.
  */
-export function getCommandMap<T extends string>(controller: any): Record<string, CommandMetadata<T>[]> {
+export function getCommandMap<T extends string>(controller: any): Record<string, CommandMeta<T>[]> {
   return Reflect.getMetadata(COMMAND_METADATA_KEY, controller)
 }
 
@@ -666,7 +666,7 @@ export function Autocomplete<R extends void | Promise<void>>(commandPath: string
       | TypedPropertyDescriptor<(interaction: AutocompleteInteraction) => R>
       | TypedPropertyDescriptor<() => R>,
   ) {
-    const handlers = ownHandlerList<AutocompleteMetadata>(AUTOCOMPLETE_METADATA_KEY, target)
+    const handlers = ownHandlerList<AutocompleteMeta>(AUTOCOMPLETE_METADATA_KEY, target)
     handlers.push({ commandPath, optionName, methodName: propertyKey.toString() })
     Reflect.defineMetadata(AUTOCOMPLETE_METADATA_KEY, handlers, target)
   }
@@ -676,8 +676,8 @@ export function Autocomplete<R extends void | Promise<void>>(commandPath: string
  * Returns a controller's autocomplete handlers, option-specific ones first.
  * @param controller - The controller instance.
  */
-export function getAutocompleteHandlers(controller: any): AutocompleteMetadata[] {
-  const handlers: AutocompleteMetadata[] = Reflect.getMetadata(AUTOCOMPLETE_METADATA_KEY, controller) || []
+export function getAutocompleteHandlers(controller: any): AutocompleteMeta[] {
+  const handlers: AutocompleteMeta[] = Reflect.getMetadata(AUTOCOMPLETE_METADATA_KEY, controller) || []
   return [...handlers].sort((a, b) => Number(Boolean(b.optionName)) - Number(Boolean(a.optionName)))
 }
 
