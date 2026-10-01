@@ -48,7 +48,8 @@ describe('ShardContext', () => {
       expect(await shards.call(StatsService, 'guildCount')).toEqual([{ shardIds: [0], ok: true, value: 7 }])
     })
 
-    // A process-sharded bot passes them as JSON, so one process and a test see what production sees
+    // A process-sharded bot passes them as JSON, so one process and a test see what production sees. The arguments go by
+    // position, so an undefined one arrives as itself rather than as null
     it('passes the arguments and the result through JSON, as a call between processes does', async () => {
       @Controller()
       class Echo {
@@ -62,7 +63,7 @@ describe('ShardContext', () => {
         {
           shardIds: [0],
           ok: true,
-          value: { received: ['[object String]', '[object Object]', '[object Null]'], map: {}, at: '1970-01-01T00:00:00.000Z' },
+          value: { received: ['[object String]', '[object Object]', '[object Undefined]'], map: {}, at: '1970-01-01T00:00:00.000Z' },
         },
       ])
     })
@@ -223,7 +224,7 @@ describe('ShardContext', () => {
       ])
       expect(client.shard!.broadcastEval).toHaveBeenCalledWith(expect.any(Function), {
         shard: 2,
-        context: { id: expect.any(String), service: 'StatsService', method: 'guildCount', args: [] },
+        context: { id: expect.any(String), service: 'StatsService', method: 'guildCount', args: { length: 0 } },
       })
     })
 

@@ -13,8 +13,17 @@ export const SHARD_CALL_KEY = Symbol.for('meocord.shardCall')
 export type ShardCallHandler = (
   service: string | (abstract new (...args: any[]) => unknown),
   method: string,
-  args: unknown[],
+  args: PackedArgs,
 ) => Promise<unknown>
+
+/**
+ * A call's arguments as they travel: keyed by position, so JSON drops an `undefined` one, which arrives as `undefined`
+ * again, where in a list it would be `null`. A plain list also fits.
+ */
+type PackedArgs = { length: number } & Record<number, unknown>
+
+const packArgs = (args: readonly unknown[]): PackedArgs => Object.assign({ length: args.length }, args)
+const unpackArgs = (packed: PackedArgs): unknown[] => Array.from({ length: packed.length }, (_, index) => packed[index])
 
 type ClassToken = abstract new (...args: any[]) => unknown
 
@@ -31,7 +40,7 @@ export function shardCallHandler(container: Container, classes: () => readonly C
     if (!target) throw new Error(`${name} is not a controller, service or provided class of ${owner}.`)
     const instance = container.get(target) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[method] !== 'function') throw new Error(`${name}.${method} is not a method.`)
-    const result = await instance[method](...args)
+    const result = await instance[method](...unpackArgs(args))
     // From another shard, the answer goes back as JSON: encoded here, a value JSON cannot carry fails the call at once
     // rather than leaving discord.js nothing to send, and the caller waiting out its timeout
     return typeof service === 'string' ? asJson(result) : result
@@ -81,7 +90,9 @@ type JsonObject<T> = {
 /**
  * A value as it arrives after a trip through JSON: what `toJSON` returns, so a `Date` as a string; a `Map` or a `Set`
  * as an empty object; a function, a symbol or `undefined` left out of an object, `null` in a list, and `undefined` on
- * its own. A `BigInt` cannot be written, so it is `never`.
+ * its own.
+ *
+ * A `BigInt` cannot be written, so it is `never`.
  *
  * @typeParam T - The value before it is sent.
  * @group Types
@@ -108,6 +119,17 @@ type MethodName<T> = {
 }[keyof T] &
   string
 
+/** A param as it arrives through JSON: what JSON gives back, and `undefined` as itself, since arguments go by position. */
+type ArrivesAs<P> = Jsonified<Exclude<P, undefined>> | (undefined extends P ? undefined : never)
+
+/**
+ * A method's params as a call passes them: each that JSON would change, such as a `Date`, is replaced by what to
+ * declare instead, so the argument is refused naming it.
+ */
+type JsonArgs<A extends unknown[]> = {
+  [I in keyof A]: [ArrivesAs<A[I]>] extends [A[I]] ? A[I] : { 'This argument arrives as JSON, so declare the param as': ArrivesAs<A[I]> }
+}
+
 type MethodArgs<T, M extends keyof T> = T[M] extends (...args: infer A) => unknown ? A : never
 type MethodResult<T, M extends keyof T> = T[M] extends (...args: any[]) => infer R ? Awaited<R> : never
 
@@ -116,7 +138,7 @@ type MethodResult<T, M extends keyof T> = T[M] extends (...args: any[]) => infer
  * only its parameters; coverage instrumentation would add references it cannot resolve.
  */
 /* istanbul ignore next */
-const runInShard = (client: Client, ctx: { service: string; method: string; args: unknown[] }) =>
+const runInShard = (client: Client, ctx: { service: string; method: string; args: PackedArgs }) =>
   (client as unknown as Record<symbol, ShardCallHandler>)[Symbol.for('meocord.shardCall')](ctx.service, ctx.method, ctx.args)
 
 function describe(error: unknown): string {
@@ -203,8 +225,10 @@ export class ShardContext {
    * With process sharding that is one result per shard; with one process, a single result listing every
    * shard. The arguments and the result pass as JSON in every mode, one process and tests included, so a
    * `Date` arrives as a string and a `Map` as `{}` wherever it runs, and a value JSON cannot carry, such as a
-   * `BigInt`, fails the call. A process that throws, lacks the service, or does not answer within 10 seconds
-   * gives an error result instead of failing the others.
+   * `BigInt`, fails the call. A method whose params JSON would change, such as one taking a `Date`, cannot be called:
+   * the argument is refused, naming what to declare instead. An `undefined` argument arrives as `undefined`. A process
+   * that throws, lacks the service, or does not answer within 10 seconds gives an error result instead of failing the
+   * others.
    *
    * @param service - The controller, the service, or a class a provider stands in for; each process resolves its own
    *   instance.
@@ -215,13 +239,13 @@ export class ShardContext {
   async call<T, M extends MethodName<T>>(
     service: abstract new (...args: any[]) => T,
     method: M,
-    ...args: MethodArgs<T, M>
+    ...args: JsonArgs<MethodArgs<T, M>>
   ): Promise<ShardCallResult<Jsonified<MethodResult<T, M>>>[]> {
     const shard = this.client?.shard
     if (!shard) {
       try {
         // As JSON, as between processes, so one process and a test see what a process-sharded bot does
-        const value = await withTimeout(this.runHere(service, method, asJson(args)), SHARD_CALL_TIMEOUT_MS, service.name)
+        const value = await withTimeout(this.runHere(service, method, asJson(packArgs(args))), SHARD_CALL_TIMEOUT_MS, service.name)
         return [{ shardIds: this.ids, ok: true, value: asJson(value) as Jsonified<MethodResult<T, M>> }]
       } catch (error) {
         return [{ shardIds: this.ids, ok: false, error: describe(error) }]
@@ -230,7 +254,7 @@ export class ShardContext {
 
     // discord.js matches a shard's answer to the script it sent, and shares one in flight among identical scripts, so
     // the id gives each call a script of its own
-    const context = { id: randomUUID(), service: service.name, method, args }
+    const context = { id: randomUUID(), service: service.name, method, args: packArgs(args) }
     const ids = [...Array(shard.count).keys()]
     return Promise.all(
       ids.map(async id => {

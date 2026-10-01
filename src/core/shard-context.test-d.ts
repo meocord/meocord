@@ -37,6 +37,18 @@ class StatsService {
   forget(): void {
     void this.label
   }
+  since(at: Date): number {
+    return at.getTime()
+  }
+  page(n?: number, filter?: { tag?: string }): number {
+    return (n ?? 0) + (filter?.tag?.length ?? 0)
+  }
+  strict(filter: { tag: string | undefined }): string {
+    return filter.tag ?? ''
+  }
+  sinceText(at: string): number {
+    return Date.parse(at)
+  }
   async greet(name: string, times: number): Promise<string> {
     return name.repeat(times)
   }
@@ -64,6 +76,23 @@ describe('ShardContext.call', () => {
       price: string
     }>()
     expectTypeOf<Jsonified<bigint>>().toBeNever()
+  })
+
+  // The arguments pass through JSON too, so a param JSON would change cannot be declared
+  it('takes arguments that arrive as JSON leaves them, and refuses a param JSON would change, naming what to declare', () => {
+    void shards.call(StatsService, 'greet', 'hi', 2)
+    void shards.call(StatsService, 'sinceText', new Date().toJSON())
+    // @ts-expect-error a Date arrives as a string, so since() is declared to take one
+    void shards.call(StatsService, 'since', new Date())
+  })
+
+  // An undefined argument arrives as itself; an undefined property is left out of its object, as JSON does
+  it('takes optional params and undefined arguments, and refuses a property declared undefined rather than optional', () => {
+    void shards.call(StatsService, 'page')
+    void shards.call(StatsService, 'page', undefined, { tag: 'a' })
+    void shards.call(StatsService, 'page', 2, {})
+    // @ts-expect-error JSON leaves an undefined property out, so the param declares it optional
+    void shards.call(StatsService, 'strict', { tag: undefined })
   })
 
   it('refuses a name that is not a method, and arguments the method does not take', () => {
