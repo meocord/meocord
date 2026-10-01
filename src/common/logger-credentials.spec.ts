@@ -1,5 +1,6 @@
 import { type MockInstance, vi } from 'vitest'
 import { stripVTControlCharacters } from 'node:util'
+import { WebSocketManager } from '@discordjs/ws'
 import { ChatInputCommandInteraction, Client, GatewayIntentBits } from 'discord.js'
 import { Container } from 'inversify'
 
@@ -10,10 +11,12 @@ import { Logger } from '@src/common/logger.js'
 import { MeoCordApp } from '@src/core/meocord.app.js'
 import { createMockInteraction, createMockMessage } from '@src/testing/mock-interaction.js'
 
-// Each spec has a value of its own, as a value once registered stays hidden for the process
-const HELD = 'MTA0.a-value-a-client-holds.only-for-this-spec'
-const GIVEN_TO_APP = 'MTA1.a-value-given-to-the-app.only-for-this-spec'
-const CONFIGURED = 'MTA2.a-value-the-config-sets.only-for-this-spec'
+// Values the size of a bot's credential, one per spec, since what is registered stays for the run
+const FROM_CONFIG = 'MTAx.from-the-bots-config.only-for-this-spec'
+const FROM_APP = 'MTAy.given-to-the-app-it-runs.only-for-this-spec'
+const NEVER_REGISTERED = 'MTAz.held-by-a-client-only.only-for-this-spec'
+
+const LEVELS = ['log', 'info', 'warn', 'error', 'debug', 'verbose'] as const
 
 const spies: MockInstance[] = []
 const printed = () =>
@@ -21,6 +24,36 @@ const printed = () =>
     .flatMap(spy => spy.mock.calls.flat())
     .map(part => stripVTControlCharacters(String(part)))
     .join('\n')
+
+/** A client as it stands once login() has begun. */
+function loggedInClient(value: string): Client<true> {
+  const client = new Client<true>({ intents: [GatewayIntentBits.Guilds] })
+  client.token = value
+  // Its gateway manager, the @discordjs/ws class discord.js builds on connect, built here without connecting
+  Reflect.set(
+    client.ws,
+    '_ws',
+    new WebSocketManager({ intents: GatewayIntentBits.Guilds, rest: client.rest, token: value, shardIds: null, shardCount: null }),
+  )
+  return client
+}
+
+class StatsService {
+  constructor(readonly client: Client) {}
+}
+
+/** Everything a bot logs that can carry the value: structures holding the client, text, and an error and its stack. */
+function logEverything(value: string): void {
+  const client = loggedInClient(value)
+  const logger = new Logger('Probe')
+  for (const level of LEVELS) {
+    logger[level]('Client:', client)
+    logger[level]('Gateway:', client.ws)
+    logger[level]('Service:', new StatsService(client))
+    logger[level](`Logging in with ${value}`)
+    logger[level]('Failed:', new Error(`Discord refused ${value}`))
+  }
+}
 
 beforeEach(() => {
   mockLoadConfig.mockReturnValue(undefined)
@@ -33,10 +66,38 @@ afterEach(() => {
   for (const spy of spies) spy.mockRestore()
 })
 
-describe("Logger and the bot's credentials", () => {
-  it('never prints a value a client holds, logged at any level through what a handler holds', () => {
+describe("Logger and the bot's credential", () => {
+  it('never prints the configured value, at any level, whatever carries it', () => {
+    mockLoadConfig.mockReturnValue({ appName: 'TestApp', discordToken: FROM_CONFIG })
+
+    logEverything(FROM_CONFIG)
+
+    expect(spies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(LEVELS.length * 5)
+    expect(printed()).not.toContain(FROM_CONFIG)
+    expect(printed()).toContain('[redacted]')
+  })
+
+  it('never prints the value the app is given, from the moment the app exists', () => {
+    const signals = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') }
+    try {
+      new MeoCordApp([], new Container(), new Client({ intents: [] }), FROM_APP)
+
+      logEverything(FROM_APP)
+    } finally {
+      for (const signal of ['SIGINT', 'SIGTERM'] as const)
+        for (const listener of process.listeners(signal))
+          if (!signals[signal].includes(listener)) process.off(signal, listener)
+    }
+
+    expect(printed()).not.toContain(FROM_APP)
+    expect(printed()).toContain('[redacted]')
+  })
+
+  // Nothing registers this value: only the inspection keeps it out. A logged-in client's gateway manager holds it
+  // enumerable, which is why the cases above register theirs.
+  it('never prints the value discord.js keeps non-enumerable on a client, through anything a handler holds', () => {
     const client = new Client<true>({ intents: [GatewayIntentBits.Guilds] })
-    client.token = HELD
+    client.token = NEVER_REGISTERED
     const held = [
       client,
       { client },
@@ -44,37 +105,10 @@ describe("Logger and the bot's credentials", () => {
       Object.assign(createMockMessage(), { content: 'hi', client }),
     ]
     const logger = new Logger('Probe')
-    for (const level of ['log', 'info', 'warn', 'error', 'debug', 'verbose'] as const)
-      for (const value of held) logger[level]('Seen:', value)
+    for (const level of LEVELS) for (const value of held) logger[level]('Seen:', value)
 
-    expect(spies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(24)
-    expect(printed()).not.toContain(HELD)
-  })
-
-  it('redacts the value the app is given, from the moment it is constructed', () => {
-    const signals = { SIGINT: process.listeners('SIGINT'), SIGTERM: process.listeners('SIGTERM') }
-    const client = new Client({ intents: [GatewayIntentBits.Guilds] })
-    try {
-      new MeoCordApp([], new Container(), client, GIVEN_TO_APP)
-
-      new Logger().error(`Login failed for ${GIVEN_TO_APP}`, new Error(`rejected ${GIVEN_TO_APP}`), { GIVEN_TO_APP })
-    } finally {
-      for (const signal of ['SIGINT', 'SIGTERM'] as const)
-        for (const listener of process.listeners(signal))
-          if (!signals[signal].includes(listener)) process.off(signal, listener)
-    }
-
-    expect(printed()).not.toContain(GIVEN_TO_APP)
-    expect(printed().match(/\[redacted\]/g)?.length).toBeGreaterThanOrEqual(3)
-  })
-
-  it("redacts the config's value in a line logged before any app exists", () => {
-    mockLoadConfig.mockReturnValue({ appName: 'TestApp', discordToken: CONFIGURED })
-
-    new Logger().log(`Starting with ${CONFIGURED}`)
-
-    expect(printed()).not.toContain(CONFIGURED)
-    expect(printed()).toContain('Starting with [redacted]')
+    expect(spies.reduce((count, spy) => count + spy.mock.calls.length, 0)).toBe(LEVELS.length * held.length)
+    expect(printed()).not.toContain(NEVER_REGISTERED)
   })
 })
 
