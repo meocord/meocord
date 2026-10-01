@@ -134,7 +134,7 @@ export async function formatGeneratedFiles(filePaths: readonly string[]): Promis
         if (!error) return resolve(undefined)
         // ESLint exits 1 for problems left after fixing, and 2 when it could not run
         if (error.code === 1) return resolve('ESLint reports problems it could not fix; run it on the files to see them.')
-        resolve(firstLine(stderr) ?? firstLine(error.message))
+        resolve(eslintFailure(stderr) ?? firstLine(error.message))
       })
     } catch (error) {
       resolve(firstLine(error instanceof Error ? error.message : String(error)))
@@ -143,12 +143,26 @@ export async function formatGeneratedFiles(filePaths: readonly string[]): Promis
   if (failure !== undefined) logger.warn(`Could not format the generated files: ${failure}`)
 }
 
-/** The first line of `text` that says anything, which names the cause. */
-const firstLine = (text: string): string | undefined =>
+/** The lines of `text` that say anything, trimmed. */
+const linesOf = (text: string): string[] =>
   text
     .split(/\r?\n/)
     .map(line => line.trim())
-    .find(Boolean)
+    .filter(Boolean)
+
+/** The first line of `text` that says anything, which names the cause. */
+const firstLine = (text: string): string | undefined => linesOf(text)[0]
+
+/**
+ * What ESLint says stopped it. A fatal error prints "Oops! Something went wrong! :(" and "ESLint: <version>" before
+ * the cause, so the cause is the line after the version; other output names it on its first line.
+ */
+function eslintFailure(stderr: string): string | undefined {
+  const lines = linesOf(stderr)
+  const version = lines.findIndex(line => /^ESLint: \S+$/.test(line))
+  if (version !== -1 && version + 1 < lines.length) return lines[version + 1]
+  return lines.find(line => !line.startsWith('Oops! Something went wrong')) ?? lines[0]
+}
 
 /**
  * The project's own ESLint, as the script its package names for `eslint`, run with this runtime rather than through
