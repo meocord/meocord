@@ -18,8 +18,8 @@ import * as p from '@clack/prompts'
 import { detectInstalledPMs, getInstallCommand, type PackageManager } from '@src/util/package-manager.util.js'
 import { configureCommandHelp, ensureReady } from '@src/util/meocord-cli.util.js'
 import { resolveOwnVersion } from '@src/util/package-version.util.js'
-import { buildAppCommand, isBun, resolveRuntime } from '@src/util/runtime.util.js'
-import { envFileValuesFor, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
+import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
+import { envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { FORCE_STOP_GRACE_MS, shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { DEV_RUNNER_ENV, type DevRunnerCommand, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
@@ -214,7 +214,7 @@ copies or substantial portions of the Software.
         await compileAndValidateConfig()
 
         await this.build(mode)
-        await this.compileConfig()
+        await this.compileConfig({ mode })
       })
 
     program
@@ -242,7 +242,7 @@ copies or substantial portions of the Software.
         // Watch mode builds as it starts, so --build would only build twice.
         if (options.build && options.prod) {
           await this.build(mode)
-          await this.compileConfig()
+          await this.compileConfig({ mode })
         }
 
         options.prod ? await this.startProd() : await this.startDev()
@@ -266,7 +266,7 @@ copies or substantial portions of the Software.
 
         if (options.build) {
           await this.build(mode)
-          await this.compileConfig()
+          await this.compileConfig({ mode })
         }
 
         await this.register(options.guild)
@@ -520,7 +520,7 @@ copies or substantial portions of the Software.
    * @param options.exitOnFailure - Exits 1 when it fails; a watch session reloading the config keeps running instead.
    * @returns Whether the config compiled, or there was none to compile.
    */
-  async compileConfig({ exitOnFailure = true } = {}): Promise<boolean> {
+  async compileConfig({ mode, exitOnFailure = true }: { mode: 'production' | 'development'; exitOnFailure?: boolean }): Promise<boolean> {
     const configPath = path.resolve(this.projectRoot, 'meocord.config.ts')
     if (!fs.existsSync(configPath)) return true
 
@@ -533,8 +533,10 @@ copies or substantial portions of the Software.
       // `bundleDependencies`, because the config imports packages (dotenv) a bundled bot has no copy of.
       const meocordConfig = loadMeoCordSourceConfig()
       const bundleDependencies = meocordConfig?.bundleDependencies ?? false
+      // In the build's mode, which the bundler writes in for process.env.NODE_ENV, so the config a production build
+      // runs with reads the production .env files however the bot is started
       const base = createRsbuildConfig({
-        mode: 'development',
+        mode,
         entry: configPath,
         bundleDependencies,
         externals: meocordConfig?.externals,
@@ -756,8 +758,6 @@ copies or substantial portions of the Software.
     return spawn(command, args, {
       cwd: this.projectRoot,
       env: {
-        // The .env files the runtime won't read itself, as they are now; the shell's own values win over them
-        ...envFileValuesFor(isBun(this.runtime), this.projectRoot, process.env.NODE_ENV),
         ...this.inheritedEnv,
         ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
         ...this.appEnv,
@@ -774,7 +774,7 @@ copies or substantial portions of the Software.
     try {
       this.clearScreen()
       this.logger.log('Starting watch mode...')
-      await this.compileConfig()
+      await this.compileConfig({ mode: 'development' })
       let isRunning = false
       let watching: { close: () => Promise<void> } | undefined
 
@@ -823,7 +823,7 @@ copies or substantial portions of the Software.
           for (const file of files) this.logger.log(reloads[file])
           if (!rebuilds(files)) return this.restartApp()
           // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
-          if (files.has('meocord.config.ts') && !(await this.compileConfig({ exitOnFailure: false }))) return
+          if (files.has('meocord.config.ts') && !(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
           isRunning = false
           // What the bot was launched from is no longer what it runs: the new build restarts it, whatever its output
           this.launchedFrom = undefined
