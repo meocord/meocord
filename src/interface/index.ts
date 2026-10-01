@@ -98,6 +98,9 @@ export interface MeoCordApplication {
    * Retrying it after a failed login is deprecated; in the next major version (5.0) it rejects. Use
    * `MeoCordFactory.create` to make a new app instead. A retry after a provider's factory failed stays supported.
    *
+   * A shard whose start fails exits 1 once the rejection is handled, and its manager restarts it. When MeoCord refuses
+   * the app, which it would in every shard, the manager logs why, stops every shard and exits 1 instead.
+   *
    * @returns A promise that resolves once the bot is logged in, or every shard has been spawned.
    * @throws For a bot in one process, the error of a provider's factory that failed, or the login
    *   error, such as an invalid token. A start that `stop()` ends rejects, and so does a start of an app already

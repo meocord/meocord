@@ -47,7 +47,7 @@ class FakeShard extends EventEmitter {
     this.process = { exitCode: null }
     if (this.outcome === 'die') {
       this.die(1)
-      throw new Error(`Shard ${this.id}'s process exited before its Client became ready.`)
+      throw Object.assign(new Error(`Shard ${this.id}'s process exited before its Client became ready.`), { code: 'ShardingReadyDied' })
     }
     return this.process
   }
@@ -240,7 +240,8 @@ describe('ShardManager', () => {
 
     // spawn() rejects on the first attempt; start() must still resolve
     await expect(manager.start()).resolves.toBeUndefined()
-    expect(logged.warn.join('\n')).toContain('did not become ready')
+    // Said once, by the restart, not again as a spawn that failed
+    expect(logged.warn).toEqual([`Shard 0 exited with code 1; restarting it in ${RESPAWN_BASE_MS} ms.`])
 
     shards[0].outcome = 'ready'
     await vi.advanceTimersByTimeAsync(RESPAWN_BASE_MS)
@@ -266,6 +267,22 @@ describe('ShardManager', () => {
     expect(shards.map(shard => shard.spawns)).toEqual([1, 1])
     // The shard's explanation, in the manager's own log line
     expect(logged.error.join('\n')).toContain(`Shard 0 cannot log in (${code}): ${message}`)
+  })
+
+  it('stops every shard and exits 1, without restarting, when a shard reports a refusal', async () => {
+    vi.useFakeTimers()
+    const { manager, shards, exit } = setup({ shards: 2 })
+    await manager.start()
+
+    const message = 'src/app.ts:4: Stats: two classes have this name.'
+    shards[0].emit('message', { meocord: 'fatal', code: 'Refused', message })
+    shards[0].die(1)
+    await vi.advanceTimersByTimeAsync(RESPAWN_CAP_MS)
+
+    expect(exit).toHaveBeenCalledWith(1)
+    expect(shards.every(shard => shard.process === null)).toBe(true)
+    expect(shards.map(shard => shard.spawns)).toEqual([1, 1])
+    expect(logged.error.join('\n')).toContain(`Shard 0 cannot start: ${message} Stopping every shard; fix the app and start again.`)
   })
 
   it('exits 1 before spawning anything when Discord cannot say how many shards to run', async () => {

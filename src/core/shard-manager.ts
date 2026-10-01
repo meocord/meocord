@@ -10,7 +10,7 @@ import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { bundleEntry } from '@src/util/bundle-entry.util.js'
 import { FORCE_REGISTER_ENV } from '@src/util/registration-mode.util.js'
-import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
+import { isShardMessage, REFUSED_CODE, type ShardMessage } from '@src/core/shard-messages.js'
 import { isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { tellDevRunner, underDevRunner } from '@src/util/dev-runner.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
@@ -176,7 +176,9 @@ export class ShardManager implements MeoCordApplication {
     try {
       await shard.spawn(SHARD_READY_TIMEOUT_MS)
     } catch (error) {
-      if (!this.stopping && !this.fatal) this.logger.warn(`Shard ${shard.id} did not become ready:`, error)
+      // A shard that exited is reported, and restarted, by its death
+      const died = (error as { code?: unknown } | null)?.code === 'ShardingReadyDied'
+      if (!this.stopping && !this.fatal && !died) this.logger.warn(`Shard ${shard.id} did not become ready:`, error)
     }
   }
 
@@ -194,13 +196,17 @@ export class ShardManager implements MeoCordApplication {
     }, delay)
   }
 
-  /** A shard that cannot log in never will: stop every shard and exit non-zero instead of restarting. */
+  /**
+   * A shard that cannot log in never will, and an app MeoCord refuses is refused in every shard: stop every shard and
+   * exit non-zero instead of restarting.
+   */
   private stopForFatal(shard: Shard, message: Extract<ShardMessage, { meocord: 'fatal' }>): void {
     if (this.fatal) return
     this.fatal = true
+    const refused = message.code === REFUSED_CODE
     this.logger.error(
-      `Shard ${shard.id} cannot log in (${message.code}): ${message.message} Stopping every shard; fix the ` +
-        `configuration and start again.`,
+      `Shard ${shard.id} ${refused ? 'cannot start' : `cannot log in (${message.code})`}: ${message.message} Stopping ` +
+        `every shard; fix the ${refused ? 'app' : 'configuration'} and start again.`,
     )
     this.killAll()
     void this.exitForLogin()

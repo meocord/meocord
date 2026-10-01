@@ -47,6 +47,7 @@ import { type MeoCordConfig } from '@src/interface/index.js'
 import { claimAmbientAppTheme, registerClientTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
+import { endFailedShard } from '@src/core/shard-exit.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
 
 /**
@@ -143,9 +144,11 @@ export class MeoCordFactory {
     try {
       return this.createApplication(target)
     } catch (error) {
+      // A shard ends, so its manager restarts it, or stops every shard for a refusal, which it logs
+      if (isShardProcess()) endFailedShard(error)
       // Reported here in a built application, so it reads the same whether main.ts catches it or not; main.ts, or the
       // report of an uncaught refusal, exits 1. A test or script gets the error as it is.
-      if (isBuiltApplication() && isRefusal(error) && !isExplainedError(error)) {
+      else if (isBuiltApplication() && isRefusal(error) && !isExplainedError(error)) {
         this.logger.error(describeRefusal(error, process.cwd()))
         markExplained(error)
       }
