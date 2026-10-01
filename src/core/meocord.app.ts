@@ -40,6 +40,7 @@ import { stopRequests } from '@src/util/stop-request.util.js'
 import { tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
+import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import { isShardProcess, managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
@@ -290,13 +291,7 @@ export class MeoCordApp implements MeoCordApplication {
       this.prepared = true
     }
     if (this.loginFailed) {
-      if (!MeoCordApp.warnedRetry) {
-        MeoCordApp.warnedRetry = true
-        this.logger.warn(
-          'Retrying start() after a failed login is deprecated; in the next major version (5.0) it rejects. ' +
-            'Use MeoCordFactory.create to make a new app instead.',
-        )
-      }
+      warnDeprecatedBehaviour(this.logger, 'Retrying start() after a failed login', 'rejects', 'MeoCordFactory.create to make a new app')
       undoFailedLogin(this.bot)
     }
     await this.login()
@@ -304,9 +299,6 @@ export class MeoCordApp implements MeoCordApplication {
 
   /** Whether a login of this app failed, so a retry restores the client discord.js destroyed. */
   private loginFailed = false
-
-  /** Whether the deprecation of a retry after a failed login was logged, once a process. */
-  private static warnedRetry = false
 
   /** Makes the provided values and listed services, and attaches the Discord event handlers. */
   private async prepare(): Promise<void> {
