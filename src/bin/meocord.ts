@@ -19,6 +19,7 @@ import { detectInstalledPMs, getInstallCommand, type PackageManager } from '@src
 import { configureCommandHelp, ensureReady } from '@src/util/meocord-cli.util.js'
 import { resolveOwnVersion } from '@src/util/package-version.util.js'
 import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
+import { inheritedEnvironment } from '@src/util/inherited-env.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { FORCE_STOP_GRACE_MS, shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { DEV_RUNNER_ENV, type DevRunnerCommand, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
@@ -116,6 +117,8 @@ export class MeoCordCLI {
   private readonly appName = 'MeoCord'
   readonly logger = new Logger(this.appName)
   private readonly projectRoot = process.cwd()
+  /** What a bot this CLI starts inherits, taken before any config is loaded; see {@link inheritedEnvironment}. */
+  private readonly inheritedEnv = inheritedEnvironment(process.env, this.projectRoot)
   private readonly mainJSPath = path.join(this.projectRoot, 'dist', 'main.js')
   private readonly generatorCLI = new GeneratorCLI(this.appName)
   private readonly appGeneratorHelper = new AppGeneratorHelper()
@@ -752,7 +755,12 @@ copies or substantial portions of the Software.
 
     return spawn(command, args, {
       cwd: this.projectRoot,
-      env: { ...process.env, ...this.appEnv, ...(devRunner && { [DEV_RUNNER_ENV]: '1' }) },
+      env: {
+        ...this.inheritedEnv,
+        ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
+        ...this.appEnv,
+        ...(devRunner && { [DEV_RUNNER_ENV]: '1' }),
+      },
       stdio: devRunner ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
     })
   }
@@ -768,18 +776,19 @@ copies or substantial portions of the Software.
       let isRunning = false
       let watching: { close: () => Promise<void> } | undefined
 
-      // The new bundler is made before the running build is closed, so a config whose rsbuild hook throws leaves that
-      // build watching the sources, and the bot it started running
+      // The new bundler is made, its plugins set up and its config resolved, before the running build is closed: a
+      // config whose rsbuild hook or plugin throws leaves that build watching the sources, and the bot it started running
       const watch = async () => {
         const { rsbuild } = await this.createBundler('development')
+        await rsbuild.initConfigs({ action: 'build' })
 
-        // Runs after every rebuild, which is where the application is restarted. A failed
-        // rebuild reports its own errors and does not reach here, so the process already
-        // running is left alone rather than being replaced by a broken build.
+        // Runs after every rebuild, which is where the application is restarted. A rebuild that fails reports its own
+        // errors, emits nothing, and leaves the running bot alone rather than replacing it with a broken build.
         rsbuild.onAfterBuild(({ stats }) => {
+          isRunning = true
+          if (stats?.hasErrors()) return
           this.latestBuild = stats ? emittedDigest(stats) : undefined
           this.restartApp(this.latestBuild)
-          isRunning = true
         })
 
         await watching?.close()

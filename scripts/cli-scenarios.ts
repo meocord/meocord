@@ -277,6 +277,24 @@ export class ReadyService implements OnReady, OnShutdown {
 }
 `
 
+/** `readyService` that logs, once ready, two variables the bot reads from .env. */
+const envService = `import { Service } from 'meocord/decorator'
+import { type OnReady } from 'meocord/interface'
+
+@Service()
+export class ReadyService implements OnReady {
+  onReady() {
+    console.log(\`Ready with GREETING=\${process.env.GREETING} GONE=\${process.env.GONE}\`)
+  }
+}
+`
+
+/** A statement that stops a module from compiling, appended to it and taken off again. */
+const BROKEN_STATEMENT = '\nconst broken = (\n'
+
+/** An rsbuild plugin whose setup throws, which the hook adds: it throws once the build sets its plugins up. */
+const PLUGIN_THROWS = "config.plugins = [{ name: 'broken-plugin', setup() { throw new Error('plugin broke') } }]\n    config.tools ??= {}"
+
 /** A line that makes the template config's rsbuild hook throw, in place of its first statement. */
 const HOOK_THROWS = "throw new Error('hook broke')"
 
@@ -1456,6 +1474,57 @@ const scenarios: Scenario[] = [
         counts: { 'Rebuilding failed: hook broke': 1, 'Ready hook ran': 2, 'Bot has shut down': 2 },
         never: ['Unhandled', 'Failed to start'],
       },
+    },
+    // The CLI holds .env's values from the config it loaded, or from bun, which reads .env itself
+    {
+      name: `start --dev on ${runtime} restarts the bot with .env as it is now when it is saved`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': `${INVALID_TOKEN_ENV}GREETING=first\nGONE=here\n`, 'src/app.ts': readyApp, 'src/ready.service.ts': envService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [{ after: 'Ready with GREETING=first GONE=here', files: { '.env': () => `${INVALID_TOKEN_ENV}GREETING=second\n` } }],
+      signal: { name: 'SIGINT', after: 'Ready with GREETING=second' },
+      timeoutMs: 60_000,
+      expect: { code: 0, says: ['Ready with GREETING=first GONE=here', 'Ready with GREETING=second GONE=undefined'] },
+    },
+    // A failed build emits a bundle that throws its errors; the bot keeps running the last good one, which the mended
+    // file builds again, so nothing restarts
+    ...(['src/ready.service.ts', 'src/main.ts'] as const).map(
+      (file): Scenario => ({
+        name: `start --dev on ${runtime} keeps the bot running through a save of ${file} that does not compile`,
+        tier: runtime === 'node' ? 'fast' : 'slow',
+        platforms: ['linux', 'darwin'],
+        runtime,
+        files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+        discord: { readyDelayMs: 0 },
+        argv: ['start', '--dev'],
+        edits: [
+          { after: 'Ready hook ran', files: { [file]: current => `${current}${BROKEN_STATEMENT}` } },
+          { after: 'build failed', files: { [file]: current => current.replace(BROKEN_STATEMENT, '') } },
+        ],
+        // The config's build, the bot's, and the one of the mended file
+        signal: { name: 'SIGINT', after: 'built in', times: 3 },
+        timeoutMs: 60_000,
+        expect: { code: 0, says: ['build failed'], counts: { 'Starting application': 1 }, never: ['exited with code'] },
+      }),
+    ),
+    {
+      name: `start --dev on ${runtime} keeps watching through a config whose rsbuild plugin throws as the build sets it up`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': readyApp, 'src/ready.service.ts': readyService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [
+        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => current.replace('config.tools ??= {}', PLUGIN_THROWS) } },
+        { after: 'Rebuilding failed', files: { 'src/ready.service.ts': touched } },
+      ],
+      signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
+      timeoutMs: 30_000,
+      expect: { code: 0, counts: { 'Rebuilding failed: plugin broke': 1, 'Ready hook ran': 2 } },
     },
     {
       name: `start --prod on ${runtime} stops at once on Ctrl+C while the bot logs in`,

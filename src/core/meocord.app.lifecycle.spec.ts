@@ -714,6 +714,31 @@ describe('lifecycle hooks', () => {
         expect(exit).toHaveBeenCalledWith(1)
       })
 
+      // The dev runner's stop, to restart the bot, is not the user's: their first Ctrl+C during it joins that shutdown
+      it('joins a stop meocord start --dev asked for on the first signal, and forces exit 1 only on a repeat', async () => {
+        let devRunnerStop: (() => void) | undefined
+        vi.doMock('@src/util/dev-runner.util.js', async importOriginal => ({
+          ...(await importOriginal<object>()),
+          onDevRunnerStop: (stop: () => void) => (devRunnerStop = stop),
+        }))
+        try {
+          const loaded = await hangingApp()
+          const now = vi.spyOn(Date, 'now').mockReturnValue(0)
+
+          devRunnerStop?.()
+          now.mockReturnValue(REPEAT_SIGNAL_WINDOW_MS)
+          void loaded.shutdownAndExit()
+          await new Promise(resolve => setTimeout(resolve, 10))
+          expect(exit).not.toHaveBeenCalled()
+
+          now.mockReturnValue(2 * REPEAT_SIGNAL_WINDOW_MS)
+          await loaded.shutdownAndExit()
+          expect(exit).toHaveBeenCalledWith(1)
+        } finally {
+          vi.doUnmock('@src/util/dev-runner.util.js')
+        }
+      })
+
       // One Ctrl+C reaches the bot from the terminal and again from the CLI that runs it
       it('takes a copy of the signal within the window as the same request', async () => {
         const loaded = await hangingApp()

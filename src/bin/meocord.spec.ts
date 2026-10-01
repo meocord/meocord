@@ -315,7 +315,7 @@ describe('spawning the application', () => {
       vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
       vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
       vi.spyOn(cli, 'createBundler').mockResolvedValue({
-        rsbuild: { onAfterBuild: () => {}, build: async () => ({ close: async () => {} }) },
+        rsbuild: { initConfigs: async () => [], onAfterBuild: () => {}, build: async () => ({ close: async () => {} }) },
       })
       await cli.startDev()
     }
@@ -509,7 +509,7 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'relayStopSignals').mockImplementation((_app, stopping) => (stop = stopping))
         vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
         vi.spyOn(cli, 'createBundler').mockResolvedValue({
-          rsbuild: { onAfterBuild: (callback: (params: object) => void) => (afterBuild = () => callback({})), build: async () => ({ close: async () => {} }) },
+          rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => (afterBuild = () => callback({})), build: async () => ({ close: async () => {} }) },
         })
         await cli.startDev()
         afterBuild()
@@ -538,6 +538,7 @@ describe('spawning the application', () => {
       let builds = 0
       const statsOf = (output: string) => ({
         hash: `build ${++builds}`,
+        hasErrors: () => false,
         compilation: { getAssets: () => [{ name: 'main.js', source: { buffer: () => Buffer.from(output) } }] },
       })
       const cli = new MeoCordCLI() as unknown as {
@@ -552,6 +553,7 @@ describe('spawning the application', () => {
       vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
       vi.spyOn(cli, 'createBundler').mockResolvedValue({
         rsbuild: {
+          initConfigs: async () => [],
           onAfterBuild: (callback: (params: object) => void) => (build = output => callback({ stats: statsOf(output) })),
           build: async () => ({ close: async () => {} }),
         },
@@ -744,7 +746,7 @@ describe('spawning the application', () => {
           })
           const cli = devCli({
             bundler: async () => ({
-              rsbuild: { onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
+              rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
             }),
           })
           const child = createChild() as ReturnType<typeof createChild> & { connected: boolean; send: ReturnType<typeof vi.fn> }
@@ -793,7 +795,7 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
         const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
         const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
-          rsbuild: { onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: closeBuild }) },
+          rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: closeBuild }) },
         }))
         await cli.startDev()
         const errors = vi.mocked((cli as unknown as { logger: { error: (text: string) => void } }).logger.error)

@@ -116,6 +116,9 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
         // Hoisting modules into one scope renames a class whose name another module also declares, and
         // MeoCord keys cooldowns and names handlers by class name, so a build keeps each module's own scope
         chain.optimization.concatenateModules(false)
+        // A build with errors emits nothing, so dist keeps the last bundle that compiled rather than one that throws
+        // them, which a bot started from dist, by watch mode or by hand, would run
+        chain.optimization.emitOnErrors(false)
         // Keeps the bundle starting under Node and Bun alike, whatever devtool or dependencies it has.
         chain.plugin('meocord-runnable-bundle').use(RunnableBundlePlugin)
         // Says a missing package a dependency only probes for is harmless, and how to silence it
