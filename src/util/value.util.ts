@@ -7,6 +7,7 @@ export const isConstructor = (value: unknown): value is abstract new (...args: a
 export function describeValue(value: unknown): string {
   if (value === null || value === undefined) return String(value)
   if (typeof value === 'string') return quoteForLog(value)
+  if (Array.isArray(value)) return 'an array'
   return typeof value === 'object' ? 'an object' : `a ${typeof value}`
 }
 

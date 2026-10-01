@@ -130,6 +130,7 @@ describe('a malformed entry', () => {
     const app = (options: object) => () => MeoCord({ controllers: [], clientOptions: { intents: [] }, ...options } as never)(class Bot {})
 
     expect(app({ guards: [null] })).toThrow('Bot: @MeoCord({ guards }): null is not a class. Give a guard class')
+    expect(app({ guards: [[Allow]] })).toThrow('Bot: @MeoCord({ guards }): an array is not a class. Give a guard class')
     expect(app({ interceptors: [{ provide: Around, params: null }] })).toThrow(
       'Bot: @MeoCord({ interceptors }): the params of Around are not an object',
     )
