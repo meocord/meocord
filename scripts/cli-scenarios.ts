@@ -637,7 +637,8 @@ const scenarios: Scenario[] = [
     tier: 'fast',
     files: { '.env': 'DISCORD_TOKEN=\n', 'meocord.config.ts': validConfig, dist: null },
     argv: ['build', '--prod'],
-    expect: { code: 0, creates: ['dist/main.js'] },
+    // Neither the config's staging folder nor a terminal escape belongs in a build's output
+    expect: { code: 0, creates: ['dist/main.js'], never: ['.meocord-config-', '\u001b[2J', '\u001b[3J'] },
   },
   {
     name: 'start --prod without a token says where the token comes from',
