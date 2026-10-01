@@ -418,7 +418,7 @@ describe('@MeoCord({ providers })', () => {
       }
     }
 
-    expect(() => create(loaded, { services: [Helper], cooldownStore: CycleStore })).toThrow('Helper → CycleStore → Helper:')
+    expect(() => create(loaded, { services: [Helper], cooldownStore: CycleStore })).toThrow('CycleStore → Helper → CycleStore:')
   })
 
   it('refuses a provider without exactly one way to provide, one given twice, and one for a token MeoCord binds', async () => {

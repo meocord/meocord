@@ -5,7 +5,8 @@ import { createToken } from '@src/common/token.js'
 import { Logger } from '@src/common/logger.js'
 import { CooldownStore, type CooldownLimit, type CooldownVerdict } from '@src/common/cooldown-store.js'
 import { respond } from '@src/common/response/response-state.js'
-import { Command, Controller, Cooldown, Inject, MeoCord, Observer, Service } from '@src/decorator/index.js'
+import { Command, Controller, Cooldown, Inject, MeoCord, Observer, On, Service } from '@src/decorator/index.js'
+import { ShardContext } from '@src/core/shard-context.js'
 import { CommandType } from '@src/enum/index.js'
 import { type DispatchResult } from '@src/interface/index.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
@@ -433,6 +434,60 @@ describe("a service that injects CooldownStore beside the app's store", () => {
     expect(store).toBeInstanceOf(CountingStore)
     expect(store).toBe(module.get(CooldownStore))
     expect(events).toEqual(['store ready', 'store shutdown'])
+  })
+})
+
+// The app's store is its infrastructure, never one of its classes, whatever injects its token
+describe("the app's cooldown store, as a class of the app", () => {
+  const heard: string[] = []
+
+  @Service()
+  class EventfulStore extends CooldownStore {
+    async consume(): Promise<CooldownVerdict> {
+      return { allowed: true, retryAfterMs: 0 }
+    }
+
+    ping() {
+      return 'pong'
+    }
+
+    @On('guildCreate')
+    joined() {
+      heard.push('store')
+    }
+  }
+
+  @Service()
+  class Caller {
+    constructor(readonly shards: ShardContext) {}
+  }
+
+  @Service()
+  class Injects {
+    constructor(@Inject(CooldownStore) readonly store: CooldownStore) {}
+  }
+
+  it.each([
+    ['no class injects its token', false],
+    ['a service injects its token', true],
+  ])('is out of reach of ShardContext.call and emit when %s', async (_case, injected) => {
+    heard.length = 0
+    @MeoCord({
+      controllers: [],
+      services: injected ? [Caller, Injects] : [Caller],
+      cooldownStore: EventfulStore,
+      clientOptions: { intents: [] },
+    })
+    class StoreApp {}
+    const module = await MeoCordTestingModule.fromApp(StoreApp).compile().init()
+
+    const answers = await module.get(Caller).shards.call(EventfulStore as never, 'ping' as never)
+    const { ran } = await module.emit('guildCreate', {} as never)
+
+    expect(answers).toEqual([
+      { shardIds: [0], ok: false, error: expect.stringContaining('EventfulStore is not a controller, service or provided class') },
+    ])
+    expect([ran, heard]).toEqual([0, []])
   })
 })
 

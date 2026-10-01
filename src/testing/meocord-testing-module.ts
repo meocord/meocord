@@ -1056,7 +1056,9 @@ export class TestingModuleBuilder {
 
     // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
     // controllers, and what they inject; factories resolve in the same order
-    const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(this.options.controllers ?? [])])
+    const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(this.options.controllers ?? [])], {
+      followOwnTokens: false,
+    })
     appClasses.push(
       ...order.filter((token): token is new (...args: any[]) => unknown => {
         const provider = providers.get(token)

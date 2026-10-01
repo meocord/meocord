@@ -222,12 +222,24 @@ export function bindsOwnToken(container: Container, token: unknown, standsFor?: 
   own.set(token, standsFor)
 }
 
-/** A dependency as the graph sees it: the app's class an own token stands for, nothing for another own token. */
-function graphTokens(container: Container, dependency: unknown): unknown[] {
+/**
+ * A dependency as the graph sees it: the app's class an own token stands for, when `follow`, else nothing, as for
+ * another own token.
+ */
+function graphTokens(container: Container, dependency: unknown, follow: boolean): unknown[] {
   const own = ownTokens.get(container)
   if (!own?.has(dependency)) return [dependency]
   const standsFor = own.get(dependency)
-  return standsFor === undefined ? [] : [standsFor]
+  return follow && standsFor !== undefined ? [standsFor] : []
+}
+
+/** How a walk of the graph treats a token MeoCord binds itself. */
+export interface GraphOptions {
+  /**
+   * Whether an injected own token leads to the app's class it stands for, as it does for the order lifecycle hooks
+   * run in; `false` for which classes are the app's own, which an own token never adds to. Defaults to `true`.
+   */
+  followOwnTokens?: boolean
 }
 
 /**
@@ -235,7 +247,12 @@ function graphTokens(container: Container, dependency: unknown): unknown[] {
  * dependencies, nothing for a value. Only the app's classes and provided tokens count; a token MeoCord binds itself
  * counts as the app's class it stands for, if any.
  */
-export function tokenDependencies(container: Container, providers: ProviderMap, token: unknown): unknown[] {
+export function tokenDependencies(
+  container: Container,
+  providers: ProviderMap,
+  token: unknown,
+  { followOwnTokens = true }: GraphOptions = {},
+): unknown[] {
   const provider = providers.get(token)
   const dependencies = provider
     ? isFactoryProvider(provider)
@@ -247,7 +264,7 @@ export function tokenDependencies(container: Container, providers: ProviderMap, 
       ? injectedTokens(token)
       : []
   return dependencies
-    .flatMap(dependency => graphTokens(container, dependency))
+    .flatMap(dependency => graphTokens(container, dependency, followOwnTokens))
     .filter(dependency => (providers.has(dependency) || isAppClassToken(dependency)) && container.isBound(dependency as ServiceIdentifier))
 }
 
@@ -255,7 +272,12 @@ export function tokenDependencies(container: Container, providers: ProviderMap, 
  * The bound tokens reachable from `roots`, each after everything it depends on: the order factories
  * are resolved and lifecycle hooks run in. Tokens with no dependency between them keep the roots' order.
  */
-export function resolutionOrder(container: Container, providers: ProviderMap, roots: readonly unknown[]): unknown[] {
+export function resolutionOrder(
+  container: Container,
+  providers: ProviderMap,
+  roots: readonly unknown[],
+  options: GraphOptions = {},
+): unknown[] {
   const ordered: unknown[] = []
   const seen = new Set<unknown>()
   // The tokens being visited, outermost first: one met again among them closes a cycle
@@ -266,7 +288,7 @@ export function resolutionOrder(container: Container, providers: ProviderMap, ro
     if (seen.has(token)) return
     seen.add(token)
     path.push(token)
-    tokenDependencies(container, providers, token).forEach(visit)
+    tokenDependencies(container, providers, token, options).forEach(visit)
     path.pop()
     ordered.push(token)
   }
