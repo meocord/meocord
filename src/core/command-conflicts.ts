@@ -1,4 +1,5 @@
-import { ApplicationCommandType } from 'discord.js'
+import { ApplicationCommandOptionType, ApplicationCommandType } from 'discord.js'
+import { Logger } from '@src/common/logger.js'
 import { getCommandMap } from '@src/decorator/controller.decorator.js'
 import { registrationKey, serialise } from '@src/core/command-registration.js'
 import { CommandType } from '@src/enum/index.js'
@@ -19,12 +20,15 @@ const where = ({ controllerClass, meta }: Declared) => `${controllerClass.name}.
 /** The context menu kind a handler's builder registers; `undefined` for one without a builder, which takes both. */
 const contextMenuKind = (meta: CommandMeta): unknown => (meta.builder as { type?: unknown } | undefined)?.type
 
-/** A command as an error names it: `slash command "settings notify"`, `user context menu command "Report"`. */
-function describe(type: CommandType, name: string, kind?: unknown): string {
-  if (type !== CommandType.CONTEXT_MENU) return `slash command "${name}"`
-  const label = kind === ApplicationCommandType.User ? 'user ' : kind === ApplicationCommandType.Message ? 'message ' : ''
-  return `${label}context menu command "${name}"`
+/** A kind of command as an error names it: `slash command`, `user context menu command`. */
+function label(type: CommandType, kind?: unknown): string {
+  if (type === CommandType.PRIMARY_ENTRY_POINT) return 'entry point command'
+  if (type !== CommandType.CONTEXT_MENU) return 'slash command'
+  return `${kind === ApplicationCommandType.User ? 'user ' : kind === ApplicationCommandType.Message ? 'message ' : ''}context menu command`
 }
+
+/** A command as an error names it: `slash command "settings notify"`, `user context menu command "Report"`. */
+const describe = (type: CommandType, name: string, kind?: unknown) => `${label(type, kind)} "${name}"`
 
 /** Whether two handlers declared under one name would both be sent the same interactions. */
 function overlap(a: CommandMeta, b: CommandMeta): boolean {
@@ -89,4 +93,122 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
       }
     }
   }
+}
+
+const logger = new Logger('Commands')
+
+/** The application command types Discord sends a handler of each name-routed type. */
+const SENT_AS: Partial<Record<CommandType, readonly ApplicationCommandType[]>> = {
+  [CommandType.SLASH]: [ApplicationCommandType.ChatInput],
+  [CommandType.CONTEXT_MENU]: [ApplicationCommandType.User, ApplicationCommandType.Message],
+  [CommandType.PRIMARY_ENTRY_POINT]: [ApplicationCommandType.PrimaryEntryPoint],
+}
+
+type Body = ReturnType<typeof serialise>
+interface CommandOption {
+  type?: unknown
+  name?: unknown
+  options?: CommandOption[]
+}
+
+/** The subcommand paths a slash command's JSON registers: `settings view`, `settings alerts email`. */
+function subcommandPaths(body: Body): string[] {
+  const paths: string[] = []
+  for (const option of (body.options ?? []) as CommandOption[]) {
+    if (option.type === ApplicationCommandOptionType.Subcommand) paths.push(`${body.name} ${option.name}`)
+    if (option.type !== ApplicationCommandOptionType.SubcommandGroup) continue
+    for (const sub of option.options ?? []) {
+      if (sub.type === ApplicationCommandOptionType.Subcommand) paths.push(`${body.name} ${option.name} ${sub.name}`)
+    }
+  }
+  return paths
+}
+
+const quoted = (names: string[]) =>
+  names.length < 2 ? names.map(name => `"${name}"`).join('') : `${names.slice(0, -1).map(name => `"${name}"`).join(', ')} and "${names.at(-1)}"`
+
+/**
+ * Warns, in one message, about every name-routed handler Discord never sends an interaction to: a subcommand path
+ * the builder of its command does not register, a customId pattern given as a command name, a builder that
+ * registers another name than its `@Command`'s, and a command no builder registers at all.
+ *
+ * @param options - `missingBuilders: false` leaves out the commands no builder registers, as the testing
+ *   module does, where a handler with no builder is how a fixture is written.
+ */
+export function warnUnregisteredCommands(controllerClasses: readonly ControllerClass[], { missingBuilders = true } = {}): void {
+  const declared: (Declared & { name: string })[] = []
+  const built = new Map<CommandMeta, Body>()
+  // Each registered command by type and name, with its JSON; `undefined` for one whose builder cannot be serialised
+  const registered = new Map<string, Body | undefined>()
+
+  for (const controllerClass of new Set(controllerClasses)) {
+    for (const [name, metas] of Object.entries(getCommandMap(controllerClass.prototype) ?? {})) {
+      for (const meta of metas) {
+        if (isCustomIdRouted(meta.type)) continue
+        declared.push({ controllerClass, meta, name })
+        if (!meta.builder) continue
+        try {
+          const body = serialise(meta.builder)
+          built.set(meta, body)
+          registered.set(registrationKey(body, name), body)
+        } catch {
+          // Registration reports it; what it would register is unknown, so nothing under its name is flagged
+          for (const type of SENT_AS[meta.type] ?? []) registered.set(`${type}:${name.split(' ')[0]}`, undefined)
+        }
+      }
+    }
+  }
+
+  const problems: string[] = []
+  for (const here of declared) {
+    const problem = unregistered(here.name, here.meta, built.get(here.meta), registered, missingBuilders)
+    if (problem) problems.push(`  ${where(here)}: ${problem}`)
+  }
+  if (problems.length === 0) return
+
+  const one = problems.length === 1
+  logger.warn(
+    `${problems.length} command ${one ? 'handler handles' : 'handlers handle'} what Discord never sends, so ` +
+      `${one ? 'it never runs' : 'they never run'}:\n${problems.join('\n')}\n` +
+      'The next major version (5.0) refuses to start with these.',
+  )
+}
+
+/** What keeps Discord from sending a handler its command, or `undefined` when a builder registers it. */
+function unregistered(
+  name: string,
+  meta: CommandMeta,
+  body: Body | undefined,
+  registered: ReadonlyMap<string, Body | undefined>,
+  missingBuilders: boolean,
+): string | undefined {
+  if (/[/{]/.test(name)) {
+    return `"${name}" is a customId pattern, and a ${label(meta.type)} is matched by its name. Declare it with the component type that sends that customId, such as CommandType.BUTTON.`
+  }
+
+  // Only a slash command's name is a path; a context menu's may hold spaces
+  const [command, ...rest] = meta.type === CommandType.SLASH ? name.split(' ') : [name]
+  if (body && meta.builderClass && typeof body.name === 'string' && body.name !== command) {
+    return (
+      `its builder ${meta.builderClass.name} registers the ${describe(meta.type, body.name, contextMenuKind(meta))}, not "${command}", so ` +
+      `Discord sends "${body.name}". Declare it as @Command('${[body.name, ...rest].join(' ')}', ${meta.builderClass.name}), or have ` +
+      `the builder use the name build() is given.`
+    )
+  }
+
+  const key = (SENT_AS[meta.type] ?? []).map(type => `${type}:${command}`).find(key => registered.has(key))
+  if (key === undefined) {
+    return missingBuilders
+      ? `no builder registers the ${describe(meta.type, command)}. Correct the name, or declare the command with a builder.`
+      : undefined
+  }
+
+  const json = registered.get(key)
+  if (rest.length === 0 || !json) return undefined
+  const paths = subcommandPaths(json)
+  if (paths.includes(name)) return undefined
+  return (
+    `"${name}" is not a subcommand of the ${describe(meta.type, command)}, whose builder registers ` +
+    `${paths.length ? quoted(paths) : 'no subcommands'}. Correct the path.`
+  )
 }

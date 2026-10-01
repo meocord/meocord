@@ -46,7 +46,7 @@ import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
-import { assertDistinctCommands } from '@src/core/command-conflicts.js'
+import { assertDistinctCommands, warnUnregisteredCommands } from '@src/core/command-conflicts.js'
 import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
@@ -867,6 +867,12 @@ export class TestingModuleBuilder {
   /**
    * Binds the controllers, providers and overrides into a module ready to resolve and run handlers.
    *
+   * It refuses and warns about the controllers' commands as the bot does when it is created, with one difference:
+   * a handler of a command no builder registers is not named, since a handler declared with a `CommandType` and
+   * no builder is how a test fixture is written. A subcommand path its command's builder does not register, a
+   * customId pattern given as a command name, and a builder that registers another name are named, as the bot
+   * names them.
+   *
    * @returns The compiled module.
    */
   compile(): TestingModule {
@@ -990,6 +996,8 @@ export class TestingModuleBuilder {
     buildMessageRoutes(this.options.controllers ?? [], messages)
     // As the app does when it is created, so a test sees the refusal the bot would give
     assertDistinctCommands(this.options.controllers ?? [])
+    // A handler with no builder is how a fixture is written, so only what is always a mistake is named
+    warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
     if (this.options.app) bindAppPresenter(container, this.options.app)
     const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
     assertObservers("the testing module's observers", observers)
