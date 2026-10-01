@@ -15,10 +15,10 @@ vi.mock('@src/common/index.js', () => ({
   ),
 }))
 
-const { mockLoadConfig, mockConfigProblem } = vi.hoisted(() => ({ mockLoadConfig: vi.fn(), mockConfigProblem: vi.fn() }))
+const { mockLoadConfig } = vi.hoisted(() => ({ mockLoadConfig: vi.fn() }))
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({
   loadMeoCordConfig: mockLoadConfig,
-  compiledConfigProblem: mockConfigProblem,
+  compiledConfigMessage: () => 'MeoCord config not found at /srv/bot/dist/meocord.config.mjs',
 }))
 
 const { MeoCordFactory } = await import('@src/core/meocord-factory.js')
@@ -165,37 +165,12 @@ describe('MeoCordFactory.create()', () => {
     })
   })
 
-  it('throws when meocord config is missing', () => {
-    mockLoadConfig.mockReturnValue(null)
-
-    class MyApp {}
-    Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
-
-    expect(() => MeoCordFactory.create(MyApp)).toThrow('MeoCord config not found')
-  })
-
-  // Started from elsewhere, a bot told only to build again had nothing to go on
-  it('names the file it looked for and the working directory when the config is missing', () => {
+  it('refuses with why the compiled config could not be loaded', () => {
     mockLoadConfig.mockReturnValue(undefined)
-    mockConfigProblem.mockReturnValue({ path: '/srv/bot/dist/meocord.config.mjs', missing: true })
     class MyApp {}
     Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
 
-    expect(() => MeoCordFactory.create(MyApp)).toThrow(
-      `MeoCord config not found at /srv/bot/dist/meocord.config.mjs (working directory ${process.cwd()}).`,
-    )
-  })
-
-  it('says a config that is there failed to load, with why, rather than asking for a build', () => {
-    mockLoadConfig.mockReturnValue(undefined)
-    // A reason that ends with a full stop of its own still gives one
-    mockConfigProblem.mockReturnValue({ path: '/srv/bot/dist/meocord.config.mjs', missing: false, error: new Error('dotenv is not installed.') })
-    class MyApp {}
-    Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] } }, MyApp)
-
-    expect(() => MeoCordFactory.create(MyApp)).toThrow(
-      'MeoCord config at /srv/bot/dist/meocord.config.mjs failed to load: dotenv is not installed. Fix meocord.config.ts, then run `meocord build`.',
-    )
+    expect(() => MeoCordFactory.create(MyApp)).toThrow('MeoCord config not found at /srv/bot/dist/meocord.config.mjs')
   })
 
   it('returns a MeoCordApp instance when config and options are valid', () => {

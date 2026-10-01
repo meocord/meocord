@@ -48,10 +48,9 @@ describe('loadMeoCordConfig', () => {
   it('keeps why a compiled config failed to load, prints nothing, and returns undefined', async () => {
     writeCompiledConfig(`throw new Error('broken config')\n`)
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const { compiledConfigProblem, loadMeoCordConfig } = await freshLoader()
+    const { loadMeoCordConfig } = await freshLoader()
 
     expect(loadMeoCordConfig()).toBeUndefined()
-    expect(compiledConfigProblem()).toMatchObject({ missing: false, error: expect.objectContaining({ message: 'broken config' }) })
     expect(error).not.toHaveBeenCalled()
   })
 
@@ -85,20 +84,24 @@ describe('loadMeoCordConfig', () => {
     expect(loadMeoCordConfig()).toEqual({ appName: 'Fallback' })
   })
 
+  // Started from elsewhere, a bot told only to build again had nothing to go on
   it('says whether a config was missing or failed to load, and where it looked', async () => {
+    const compiled = path.join(project, 'dist', 'meocord.config.mjs')
     const missing = await freshLoader()
     expect(missing.loadMeoCordConfig()).toBeUndefined()
-    expect(missing.compiledConfigProblem()).toEqual({ path: path.join(project, 'dist', 'meocord.config.mjs'), missing: true })
+    expect(missing.compiledConfigProblem()).toEqual({ path: compiled, missing: true })
+    expect(missing.compiledConfigMessage()).toBe(
+      `MeoCord config not found at ${compiled} (working directory ${project}). Run \`meocord build\`, and start the bot from the dist it writes.`,
+    )
 
-    writeCompiledConfig(`throw new Error('broken config')\n`)
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // A reason that ends with a full stop of its own still gives one
+    writeCompiledConfig(`throw new Error('dotenv is not installed.')\n`)
     const failed = await freshLoader()
     expect(failed.loadMeoCordConfig()).toBeUndefined()
-    expect(failed.compiledConfigProblem()).toEqual({
-      path: path.join(project, 'dist', 'meocord.config.mjs'),
-      missing: false,
-      error: expect.objectContaining({ message: 'broken config' }),
-    })
+    expect(failed.compiledConfigProblem()).toEqual({ path: compiled, missing: false, error: expect.objectContaining({ message: 'dotenv is not installed.' }) })
+    expect(failed.compiledConfigMessage()).toBe(
+      `MeoCord config at ${compiled} failed to load: dotenv is not installed. Fix meocord.config.ts, then run \`meocord build\`.`,
+    )
   })
 
   // The logger and the factory import this module, so a bot bundled with bundleDependencies

@@ -4,7 +4,7 @@ import { Container, type ServiceIdentifier } from 'inversify'
 import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
 import { MeoCordApp } from '@src/core/meocord.app.js'
-import { compiledConfigProblem, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
+import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { assertBuiltForThisPlatform } from '@src/util/platform.util.js'
 import { MetadataKey } from '@src/enum/index.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
@@ -165,7 +165,7 @@ export class MeoCordFactory {
 
     const meocordConfig = loadMeoCordConfig()
     if (!meocordConfig) {
-      throw refuse(new Error(configMessage()))
+      throw refuse(new Error(compiledConfigMessage()))
     }
 
     // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
@@ -343,16 +343,4 @@ export class MeoCordFactory {
       options.warnUnanswered ?? process.env.NODE_ENV === 'development',
     )
   }
-}
-
-/** Why the bot has no config, naming the file it looked for and, for a missing one, where it was started from. */
-function configMessage(): string {
-  const problem = compiledConfigProblem()
-  if (problem && !problem.missing) {
-    // One full stop, whether or not the reason ends with one
-    const reason = (problem.error instanceof Error ? problem.error.message : String(problem.error)).replace(/\.$/, '')
-    return `MeoCord config at ${problem.path} failed to load: ${reason}. Fix meocord.config.ts, then run \`meocord build\`.`
-  }
-  const where = problem?.path ?? 'meocord.config.mjs'
-  return `MeoCord config not found at ${where} (working directory ${process.cwd()}). Run \`meocord build\`, and start the bot from the dist it writes.`
 }
