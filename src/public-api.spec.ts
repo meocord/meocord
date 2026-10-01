@@ -226,6 +226,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'ReadyInfo',
     'ReservedThemeRole',
     'ResponseContext',
+    'ResponseFile',
     'ResponsePresenter',
     'ResponseView',
     'RootTheme',

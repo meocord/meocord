@@ -8,6 +8,7 @@ import {
   type Interaction,
   type JSONEncodable,
   type APIComponentInContainer,
+  type AttachmentBuilder,
   Message,
   MessageReaction,
   type MessageReplyOptions,
@@ -293,9 +294,37 @@ export interface ResponseView {
   /** An emoji shown before the text, and on the clicked button while it loads. */
   emoji?: string
 
-  /** Further Components V2 content placed in the container, below the text. Ignored in an embed. */
+  /** Further Components V2 content placed in the container, below the text and the view's files. Ignored in an embed. */
   components?: (APIComponentInContainer | JSONEncodable<APIComponentInContainer>)[]
+
+  /**
+   * Files sent with the view, such as an image the presenter drew. MeoCord shows them for you: in an embed, the first
+   * image is the embed's image; in a Components V2 container, images go in a gallery and other files below the text.
+   * A file the view's `components` already show by `attachment://<name>` is not shown again.
+   *
+   * @remarks
+   * Discord takes at most 10 attachments on a message, counting those a message the view is added to keeps, and each
+   * file within the interaction's `attachmentSizeLimit`. A view past either is sent without its files, with a warning.
+   */
+  files?: ResponseFile[]
+
+  /**
+   * The view's image, in place of its first image file: the name of one of its `files`, or a URL. In a container, it
+   * leads the gallery below the text.
+   */
+  image?: string
+
+  /** A small image beside the text: the name of one of its `files`, or a URL. In a container, the text's thumbnail. */
+  thumbnail?: string
 }
+
+/**
+ * A file a {@link ResponseView} carries: a discord.js `AttachmentBuilder`, or the file's name and its bytes.
+ *
+ * @group Responses
+ * @category Presenters
+ */
+export type ResponseFile = AttachmentBuilder | { name: string; data: Buffer | Uint8Array; description?: string }
 
 /**
  * What a presenter knows about the interaction it renders for.
@@ -364,11 +393,17 @@ export interface PresentedError {
  * @category Presenters
  */
 export interface ResponsePresenter {
-  /** The view shown while a handler under `@Defer` works. */
-  loading(context: ResponseContext): ResponseView
+  /**
+   * The view shown while a handler under `@Defer` works. It may draw it asynchronously: MeoCord acknowledges the
+   * interaction first, so a slow drawing never misses Discord's three seconds.
+   */
+  loading(context: ResponseContext): ResponseView | Promise<ResponseView>
 
-  /** The view shown for an error. */
-  error(context: ResponseContext, error: PresentedError): ResponseView
+  /**
+   * The view shown for an error. It may draw it asynchronously: an interaction not yet acknowledged is acknowledged
+   * first, privately, and the view then replaces the acknowledgement.
+   */
+  error(context: ResponseContext, error: PresentedError): ResponseView | Promise<ResponseView>
 
   /**
    * The reply to the built-in `help` message command, from what it found; without this method MeoCord writes it in
