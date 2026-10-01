@@ -182,6 +182,36 @@ function trim(entry: CallTimes, now: number): void {
   }
 }
 
+/** A call a {@link MemoryCooldownStore} recorded: the key, and the time it was recorded at. */
+export interface RecordedCall {
+  key: string
+  at: number
+}
+
+/** Each memory store's calls, for {@link forgetRecorded}, which an undo from another process reaches the store by. */
+const callsOf = new WeakMap<MemoryCooldownStore, Map<string, CallTimes>>()
+
+/** The calls a memory store's allowed verdict recorded, which a shard's undo carries back to its manager. */
+const recordedCalls = new WeakMap<CooldownBatchVerdict, readonly RecordedCall[]>()
+
+/** The calls a memory store recorded for `verdict`, or undefined for any other verdict. */
+export function recordedOf(verdict: CooldownBatchVerdict): readonly RecordedCall[] | undefined {
+  return recordedCalls.get(verdict)
+}
+
+/**
+ * Undoes calls a memory store recorded, by key and time. A key or time it no longer holds, as after a restart or
+ * once the call has left its window, is left as it is.
+ */
+export function forgetRecorded(store: CooldownStore, recorded: readonly RecordedCall[]): void {
+  const calls = callsOf.get(store as MemoryCooldownStore)
+  if (!calls) return
+  for (const { key, at } of recorded) {
+    const entry = calls.get(key)
+    if (entry) forget(entry, at)
+  }
+}
+
 /** Drops one call recorded at `at`, if it is still in the window; any of several at one time counts the same. */
 function forget(entry: CallTimes, at: number): void {
   const index = entry.times.lastIndexOf(at)
@@ -224,6 +254,11 @@ function verdictOf(entry: CallTimes, { uses, windowMs }: CooldownLimit, now: num
  */
 export class MemoryCooldownStore extends CooldownStore {
   private readonly calls = new Map<string, CallTimes>()
+
+  constructor() {
+    super()
+    callsOf.set(this, this.calls)
+  }
   private sweeper?: ReturnType<typeof setInterval>
 
   async consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
@@ -240,19 +275,19 @@ export class MemoryCooldownStore extends CooldownStore {
 
     // Nothing awaited since the check, so no other call can take a use in between. A clock that steps back
     // records the latest time again, keeping the times in order for trim()
-    const recorded = counts.map(({ entry }) => {
+    const recorded = counts.map(({ entry }, index) => {
       const at = Math.max(now, entry.times[entry.times.length - 1] ?? now)
       entry.times.push(at)
-      return { entry, at }
+      return { key: entries[index].key, at }
     })
     let released = false
-    return Promise.resolve(
-      withRelease({ allowed: true, retryAfterMs: 0 }, () => {
-        if (!released) for (const { entry, at } of recorded) forget(entry, at)
-        released = true
-        return Promise.resolve()
-      }),
-    )
+    const verdict = withRelease({ allowed: true, retryAfterMs: 0 }, () => {
+      if (!released) forgetRecorded(this, recorded)
+      released = true
+      return Promise.resolve()
+    })
+    recordedCalls.set(verdict, recorded)
+    return Promise.resolve(verdict)
   }
 
   /** Checks every entry as consumeMany does, recording nothing, and holding nothing for a key not yet counted. */

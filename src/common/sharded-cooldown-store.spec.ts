@@ -139,7 +139,22 @@ describe('answerCooldown', () => {
     await vi.waitFor(() => expect(reply).toHaveBeenCalled())
 
     expect(handled).toBe(true)
-    expect(reply).toHaveBeenCalledWith({ meocord: 'cooldown-verdict', id: 'a:1', verdict: { allowed: true, retryAfterMs: 0 } })
+    // With the calls it recorded, which the shard's release sends back, so the manager keeps nothing for it
+    expect(reply).toHaveBeenCalledWith({
+      meocord: 'cooldown-verdict',
+      id: 'a:1',
+      verdict: { allowed: true, retryAfterMs: 0 },
+      recorded: [{ key: 'k', at: expect.any(Number) }],
+    })
+  })
+
+  // As after the manager restarts, or once the call has left its window
+  it('leaves alone a release of calls the manager does not hold', async () => {
+    const manager = new MemoryCooldownStore()
+    await manager.consumeMany([{ key: 'k', limit }])
+
+    expect(answerCooldown(manager, { meocord: 'cooldown-release', recorded: [{ key: 'k', at: 1 }, { key: 'gone', at: 1 }] }, vi.fn())).toBe(true)
+    expect((await manager.consumeMany([{ key: 'k', limit }])).allowed).toBe(false)
   })
 
   it.each([{ meocord: 'fatal', code: 'x', message: 'y' }, { meocord: 'shutdown' }, 'text', null])('leaves %j alone', message => {

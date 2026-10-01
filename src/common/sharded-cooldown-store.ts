@@ -5,7 +5,10 @@ import {
   type CooldownLimit,
   CooldownStore,
   type CooldownVerdict,
+  forgetRecorded,
   MemoryCooldownStore,
+  type RecordedCall,
+  recordedOf,
   withRelease,
 } from '@src/common/cooldown-store.js'
 import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
@@ -60,7 +63,10 @@ function managerChannel(): CooldownChannel | undefined {
  */
 export class ShardedCooldownStore extends CooldownStore {
   private readonly local = new MemoryCooldownStore()
-  private readonly pending = new Map<string, { resolve: (verdict: CooldownBatchVerdict) => void; reject: (error: Error) => void }>()
+  private readonly pending = new Map<
+    string,
+    { resolve: (verdict: CooldownBatchVerdict, recorded?: RecordedCall[]) => void; reject: (error: Error) => void }
+  >()
   private readonly prefix = randomUUID()
   private channel = managerChannel()
   private next = 0
@@ -118,10 +124,13 @@ export class ShardedCooldownStore extends CooldownStore {
         clearTimeout(abandon)
         this.pending.delete(id)
       }
-      // The manager keeps a counted call's undo under its id, so this one sends the id back
-      const release = () => Promise.resolve(void channel.send({ meocord: 'cooldown-release', id }))
       this.pending.set(id, {
-        resolve: verdict => (settle(), resolve(!peek && verdict.allowed ? withRelease(verdict, release) : verdict)),
+        resolve: (verdict, recorded) => {
+          settle()
+          // The manager's undo is the calls it recorded, sent back to it
+          const release = async () => channel.send({ meocord: 'cooldown-release', recorded: recorded ?? [] })
+          resolve(!peek && verdict.allowed && recorded ? withRelease(verdict, release) : verdict)
+        },
         reject: error => (settle(), reject(error)),
       })
       try {
@@ -140,7 +149,7 @@ export class ShardedCooldownStore extends CooldownStore {
       if (!isShardMessage(message) || message.meocord !== 'cooldown-verdict') return
       const waiting = this.pending.get(message.id)
       if ('error' in message) waiting?.reject(new Error(`The shard manager's cooldown store failed: ${message.error}`))
-      else waiting?.resolve(message.verdict)
+      else waiting?.resolve(message.verdict, message.recorded)
     })
   }
 }
@@ -153,39 +162,22 @@ export function shardedCooldownStoreOn(channel: CooldownChannel | undefined): Sh
 }
 
 /**
- * The undo of each call the manager counted, by the shard's id for it, until the shard can no longer ask: it gives
- * up on an answer after {@link SHARDED_COOLDOWN_ABANDON_MS}, and asks for an undo as soon as it has one.
- */
-const releases = new Map<string, { release: () => Promise<void>; at: number }>()
-
-/** Keeps a counted call's undo, dropping those too old to be asked for; the oldest come first. */
-function keepRelease(id: string, release: () => Promise<void>): void {
-  const now = Date.now()
-  for (const [kept, { at }] of releases) {
-    if (now - at < SHARDED_COOLDOWN_ABANDON_MS) break
-    releases.delete(kept)
-  }
-  releases.set(id, { release, at: now })
-}
-
-/**
  * Answers a shard's `cooldown` message from the manager's store, and ignores any other message.
  *
  * @returns Whether the message was a cooldown call.
  */
 export function answerCooldown(store: CooldownStore, message: unknown, reply: (message: ShardMessage) => unknown): boolean {
   if (!isShardMessage(message)) return false
+  // The undo carries what it undoes, so the manager keeps nothing for the calls it answers
   if (message.meocord === 'cooldown-release') {
-    const kept = releases.get(message.id)
-    releases.delete(message.id)
-    void kept?.release().catch(() => undefined)
+    forgetRecorded(store, message.recorded)
     return true
   }
   if (message.meocord !== 'cooldown') return false
   void (message.peek ? store.peekMany(message.entries) : store.consumeMany(message.entries)).then(
     verdict => {
-      if (verdict.release) keepRelease(message.id, verdict.release)
-      reply({ meocord: 'cooldown-verdict', id: message.id, verdict })
+      const recorded = recordedOf(verdict)
+      reply({ meocord: 'cooldown-verdict', id: message.id, verdict, ...(recorded ? { recorded: [...recorded] } : {}) })
     },
     error => reply({ meocord: 'cooldown-verdict', id: message.id, error: error instanceof Error ? error.message : String(error) }),
   )

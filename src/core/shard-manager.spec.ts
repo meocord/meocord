@@ -370,7 +370,12 @@ describe('ShardManager', () => {
     shards[1].emit('message', { meocord: 'cooldown', id: 'one:0', entries })
     await vi.waitFor(() => expect(shards[1].sent).toHaveLength(1))
 
-    expect(shards[0].sent[0]).toEqual({ meocord: 'cooldown-verdict', id: 'zero:0', verdict: { allowed: true, retryAfterMs: 0 } })
+    expect(shards[0].sent[0]).toEqual({
+      meocord: 'cooldown-verdict',
+      id: 'zero:0',
+      verdict: { allowed: true, retryAfterMs: 0 },
+      recorded: [{ key: 'Ping.run#0:per:user:1', at: expect.any(Number) }],
+    })
     expect(shards[1].sent[0]).toMatchObject({ meocord: 'cooldown-verdict', id: 'one:0', verdict: { allowed: false } })
   })
 
