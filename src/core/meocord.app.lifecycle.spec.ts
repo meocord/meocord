@@ -400,6 +400,29 @@ describe('lifecycle hooks', () => {
       expect(exit).toHaveBeenCalledWith(0)
     })
 
+    // The close under way is the signal's to wait for, not a reason to exit at once
+    it('lets a signal during app.stop() wait for the hooks still running, then exit', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      @loaded.Service()
+      class Slow implements OnShutdown {
+        async onShutdown() {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          events.push('hook done')
+        }
+      }
+      exit.mockImplementation((() => void events.push('exit')) as never)
+      const { app, client } = await startApp(loaded, { controllers: [], services: [Slow] })
+      await becomeReady(client)
+
+      const stopped = app.stop()
+      process.emit('SIGINT')
+      await stopped
+      await vi.waitFor(() => expect(events).toContain('exit'))
+
+      expect(events).toEqual(['hook done', 'exit'])
+    })
+
     it('runs on SIGINT and SIGTERM', async () => {
       for (const signal of ['SIGINT', 'SIGTERM'] as const) {
         const loaded = await load()

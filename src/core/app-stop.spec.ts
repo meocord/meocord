@@ -98,33 +98,6 @@ describe('app.stop()', () => {
     expect(process.exitCode).toBe(after)
   })
 
-  // The close under way is the signal's to wait for, not a reason to exit at once
-  it('lets a signal during stop() wait for the hooks still running, then exit', async () => {
-    const events: string[] = []
-    @Service()
-    class Slow {
-      onReady() {}
-      async onShutdown() {
-        await new Promise(resolve => setTimeout(resolve, 50))
-        events.push('hook done')
-      }
-    }
-    @MeoCord({ controllers: [Ping], services: [Slow], clientOptions: { intents: [] } })
-    class SlowApp {}
-    exit.mockImplementation((() => void events.push('exit')) as never)
-    const { clients } = login('at once')
-    const app = MeoCordFactory.create(SlowApp)
-    await app.start()
-    await ready(clients[0])
-
-    const stopped = app.stop()
-    process.emit('SIGINT')
-    await stopped
-    await vi.waitFor(() => expect(events).toContain('exit'))
-
-    expect(events).toEqual(['hook done', 'exit'])
-  })
-
   it('stops once, however many times it is called', async () => {
     const { clients, destroy } = login('at once')
     const app = MeoCordFactory.create(App)
