@@ -174,9 +174,9 @@ describe('@Cooldown({ by })', () => {
     )
 
     expect(keys).toEqual([
-      'CheckInController.checkIn#1/3600000:user:user:ada:by:800000001',
-      'CheckInController.claim#1/3600000:global:global:by:800000001',
-      'CheckInController.shard#1/60000:user:user:ada:by:3',
+      'CheckInController.checkIn#3600000:user:user:ada:by:800000001',
+      'CheckInController.claim#3600000:global:global:by:800000001',
+      'CheckInController.shard#60000:user:user:ada:by:3',
     ])
   })
 
@@ -188,8 +188,8 @@ describe('@Cooldown({ by })', () => {
     await module.invoke(CheckInController, 'checkIn', press('check-in/ada/a%3Aby%3Ab'))
 
     expect(keys).toEqual([
-      'CheckInController.checkIn#1/3600000:user:user:ada:by:a%3Aby%3Ab',
-      'CheckInController.checkIn#1/3600000:user:user:ada:by:a%253Aby%253Ab',
+      'CheckInController.checkIn#3600000:user:user:ada:by:a%3Aby%3Ab',
+      'CheckInController.checkIn#3600000:user:user:ada:by:a%253Aby%253Ab',
     ])
     expect(new Set(keys).size).toBe(2)
   })
@@ -199,7 +199,7 @@ describe('@Cooldown({ by })', () => {
 
     await module.invoke(CheckInController, 'maybe', press('maybe/800000001'))
 
-    expect(keys).toEqual(['CheckInController.maybe#1/60000:user:user:ada'])
+    expect(keys).toEqual(['CheckInController.maybe#60000:user:user:ada'])
   })
 
   it('sends an error thrown by by through the exception filters, and counts none of the cooldowns', async () => {
@@ -230,8 +230,8 @@ describe('@Cooldown({ by })', () => {
     await module.invoke(CheckInController, 'piped', press('piped/800000001'))
 
     expect(keys).toEqual([
-      'CheckInController.validated#1/60000:user:user:ada:by:800000001',
-      'CheckInController.piped#1/60000:user:user:ada:by:ada%2Faccount-800000001',
+      'CheckInController.validated#60000:user:user:ada:by:800000001',
+      'CheckInController.piped#60000:user:user:ada:by:ada%2Faccount-800000001',
     ])
   })
 
