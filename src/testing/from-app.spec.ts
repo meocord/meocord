@@ -396,6 +396,46 @@ describe('closing a module, as the bot shuts down', () => {
   })
 })
 
+// A class that injects the CooldownStore token gets the app's store, as in the bot, and the store stays one unit
+describe("a service that injects CooldownStore beside the app's store", () => {
+  const events: string[] = []
+
+  @Service()
+  class CountingStore extends CooldownStore {
+    onReady() {
+      events.push('store ready')
+    }
+
+    onShutdown() {
+      events.push('store shutdown')
+    }
+
+    async consume(): Promise<CooldownVerdict> {
+      return { allowed: true, retryAfterMs: 0 }
+    }
+  }
+
+  @Service()
+  class Rewards {
+    constructor(@Inject(CooldownStore) readonly store: CooldownStore) {}
+  }
+
+  @MeoCord({ controllers: [], services: [Rewards], cooldownStore: CountingStore, clientOptions: { intents: [] } })
+  class RewardsApp {}
+
+  it("gets the app's store, whose hooks run once each", async () => {
+    events.length = 0
+    const module = await MeoCordTestingModule.fromApp(RewardsApp).compile().init({ ready: true })
+
+    const store = module.get(Rewards).store
+    await module.close()
+
+    expect(store).toBeInstanceOf(CountingStore)
+    expect(store).toBe(module.get(CooldownStore))
+    expect(events).toEqual(['store ready', 'store shutdown'])
+  })
+})
+
 describe('a class that injects the Discord Client', () => {
   @Service()
   class Presence {

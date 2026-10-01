@@ -19,7 +19,7 @@ import {
   type User,
 } from 'discord.js'
 import { MetadataKey, ReactionHandlerAction } from '@src/enum/index.js'
-import { CooldownStore } from '@src/common/cooldown-store.js'
+import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { missingTranslatorError, Translator } from '@src/common/translator.js'
 import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
@@ -75,6 +75,7 @@ import {
   assertTypedParameters,
   reachableClasses,
   bindProvider,
+  bindsOwnToken,
   isClassProvider,
   providerMap,
   type ProviderMap,
@@ -954,6 +955,8 @@ export class TestingModuleBuilder {
         shardCallHandler(container, () => [...appClasses, ...[...providers.keys()].filter(isAppClassToken)], 'this testing module'),
       ),
     )
+    bindsOwnToken(container, HandlerRegistry)
+    bindsOwnToken(container, ShardContext)
 
     // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them
     // by token, then the overrides, which win
@@ -1008,7 +1011,10 @@ export class TestingModuleBuilder {
 
     // The app's translator, unless a provider stands in for it
     const i18n = this.options.app && (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as { i18n?: Translator })?.i18n
-    if (i18n && !providers.has(Translator)) container.bind(Translator).toConstantValue(i18n)
+    if (i18n && !providers.has(Translator)) {
+      container.bind(Translator).toConstantValue(i18n)
+      bindsOwnToken(container, Translator)
+    }
 
     // Recursively bind controllers and their dependencies, skipping already-bound tokens
     const bindClass = (cls: new (...args: any[]) => any) => {
@@ -1026,6 +1032,18 @@ export class TestingModuleBuilder {
       }
     }
 
+    // The app's own store, resolved like a service, unless the test provides the CooldownStore itself; bound first, as the
+    // app binds it, so a class that injects the token gets the store
+    if (!providers.has(CooldownStore)) {
+      if (store) {
+        bindClass(store)
+        container.bind(CooldownStore).toService(store)
+      } else {
+        container.bind(CooldownStore).toConstantValue(new MemoryCooldownStore())
+      }
+      bindsOwnToken(container, CooldownStore, store)
+    }
+
     // Before the controllers, so a class token that is provided is not also bound as itself
     for (const provider of providers.values()) bindProvider(container, provider, bindClass)
 
@@ -1035,11 +1053,6 @@ export class TestingModuleBuilder {
       Reflect.defineMetadata(MetadataKey.Container, container, ctrl)
     }
     for (const service of services) bindClass(service)
-    // The app's own store, resolved like a service, unless the test provides the CooldownStore itself
-    if (store) {
-      bindClass(store)
-      container.bind(CooldownStore).toService(store)
-    }
 
     // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
     // controllers, and what they inject; factories resolve in the same order
