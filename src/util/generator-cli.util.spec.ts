@@ -298,7 +298,16 @@ describe('formatGeneratedFiles', () => {
   // The files are written either way: what went wrong is said, and the command's code is left alone
   it.each([
     ['rules it could not fix', () => eslintExits(Object.assign(new Error('Command failed'), { code: 1 })), 'ESLint reports problems it could not fix'],
-    ['eslint that could not run', () => eslintExits(Object.assign(new Error('Command failed'), { code: 2 }), '\nOops! Something went wrong!\n'), 'Oops! Something went wrong!'],
+    [
+      'eslint that could not run, naming the cause after its banner',
+      () =>
+        eslintExits(
+          Object.assign(new Error('Command failed'), { code: 2 }),
+          "\nOops! Something went wrong! :(\n\nESLint: 10.11.0\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module './missing.mjs'\n    at finalizeResolution\n",
+        ),
+      "Error \\[ERR_MODULE_NOT_FOUND\\]: Cannot find module './missing.mjs'",
+    ],
+    ['eslint that could not run, with only its first line', () => eslintExits(Object.assign(new Error('Command failed'), { code: 2 }), 'Invalid option --fixx\n'), 'Invalid option --fixx'],
     ['a spawn that throws', () => mockExecFile.mockImplementation(() => { throw new Error('spawn EINVAL') }), 'spawn EINVAL'],
   ])('says it could not format, and keeps a success code, for %s', async (_case, fail, reason) => {
     fail()
