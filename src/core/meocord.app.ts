@@ -214,8 +214,9 @@ export class MeoCordApp implements MeoCordApplication {
    * again with them, a call while one is under way waits for it, and a call once the bot is online
    * does nothing.
    *
-   * Deprecated: calling `start()` again after a failed login. Since 4.1; it rejects in 5.0. Create the app
-   * again with `MeoCordFactory.create` instead.
+   * Retrying `start()` after a failed login is deprecated; in the next major version (5.0) it rejects. Use
+   * `MeoCordFactory.create` to make a new app instead. A retry after a provider's factory failed stays supported:
+   * no login ran, so there is nothing to undo.
    *
    * @returns A promise that resolves once the bot is logged in.
    * @throws The error of a factory that failed, already logged and naming its token, or the login
@@ -254,8 +255,8 @@ export class MeoCordApp implements MeoCordApplication {
       if (!MeoCordApp.warnedRetry) {
         MeoCordApp.warnedRetry = true
         this.logger.warn(
-          'Retrying start() after a failed login is deprecated and will be removed in the next major version (5.0). ' +
-            'Create the app again with MeoCordFactory.create instead.',
+          'Retrying start() after a failed login is deprecated; in the next major version (5.0) it rejects. ' +
+            'Use MeoCordFactory.create to make a new app instead.',
         )
       }
       undoFailedLogin(this.bot)
