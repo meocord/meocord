@@ -34,6 +34,7 @@ const {
 const { MAX_SHUTDOWN_TIMEOUT_MS, SHUTDOWN_MARGIN_MS } = await import('@src/util/shutdown-timeout.util.js')
 const { BUNDLE_ENTRY_KEY } = await import('@src/util/bundle-entry.util.js')
 const { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } = await import('@src/util/dev-runner.util.js')
+const { describeRefusal } = await import('@src/util/refusal.util.js')
 
 /** A shard as the manager uses it: spawn, send, kill, and the events discord.js emits. */
 class FakeShard extends EventEmitter {
@@ -160,16 +161,19 @@ describe('ShardManager', () => {
   })
 
   // Code outside a built bundle, run with `node -e`: no recorded bundle and no script to spawn
-  it('exits 1 before spawning anything when it cannot find the bundle to start the shards from', async () => {
+  it('exits 1 before registering or spawning anything when it cannot find the bundle to start the shards from', async () => {
     Reflect.deleteProperty(globalThis, BUNDLE_ENTRY_KEY)
     const argv = vi.spyOn(process, 'argv', 'get').mockReturnValue([process.execPath])
-    const { manager, shards, exit } = setup({ shards: 1 })
+    const recommendedShardCount = vi.fn(async () => 3)
+    const { manager, shards, exit, puts } = setup({ shards: 'auto', recommendedShardCount })
 
     await manager.start()
     argv.mockRestore()
 
     expect(exit).toHaveBeenCalledWith(1)
     expect(shards).toEqual([])
+    expect(puts).toEqual([])
+    expect(recommendedShardCount).not.toHaveBeenCalled()
     expect(logged.error).toEqual([expect.stringMatching(/^Could not find the built bundle to start the shards from/)])
   })
 
@@ -295,7 +299,11 @@ describe('ShardManager', () => {
     const { manager, shards, exit } = setup({ shards: 2 })
     await manager.start()
 
-    const message = 'src/app.ts:4: Stats: two classes have this name.'
+    // As the shard sends it: the refusal, then where it is, on a line of its own
+    const refusal = Object.assign(new Error('Stats: two classes have this name; with process sharding, …'), {
+      stack: 'Error: Stats: two classes have this name\n    at Object.<anonymous> (/app/src/stats.service.ts:4:7)',
+    })
+    const message = describeRefusal(refusal, '/app', false)
     shards[0].emit('message', { meocord: 'fatal', code: 'Refused', message })
     shards[0].die(1)
     await vi.advanceTimersByTimeAsync(RESPAWN_CAP_MS)
@@ -303,7 +311,9 @@ describe('ShardManager', () => {
     expect(exit).toHaveBeenCalledWith(1)
     expect(shards.every(shard => shard.process === null)).toBe(true)
     expect(shards.map(shard => shard.spawns)).toEqual([1, 1])
-    expect(logged.error.join('\n')).toContain(`Shard 0 cannot start: ${message} Stopping every shard; fix the app and start again.`)
+    expect(logged.error).toContainEqual(
+      'Shard 0 cannot start; stopping every shard.\nStats: two classes have this name; with process sharding, …\n    in src/stats.service.ts',
+    )
   })
 
   it('exits 1 before spawning anything when Discord cannot say how many shards to run', async () => {
@@ -379,6 +389,17 @@ describe('ShardManager', () => {
     expect(shards[1].sent[0]).toMatchObject({ meocord: 'cooldown-verdict', id: 'one:0', verdict: { allowed: false } })
   })
 
+  // As MeoCordApp's start() does: one start, however often it is called
+  it('registers and spawns once, however often start() is called', async () => {
+    const { manager, shards, puts } = setup({ shards: 2 })
+
+    await Promise.all([manager.start(), manager.start()])
+    await manager.start()
+
+    expect(shards).toHaveLength(2)
+    expect(puts).toHaveLength(1)
+  })
+
   it('ignores messages that are not its own', async () => {
     const { manager, shards, exit } = setup({ shards: 1 })
     await manager.start()
@@ -398,6 +419,20 @@ describe('ShardManager', () => {
 
       expect(exit).not.toHaveBeenCalled()
       await expect(manager.start()).rejects.toThrow('This app was stopped; use MeoCordFactory.create to make a new one.')
+    })
+
+    // A shard's app.stop() stops the bot, as the manager's own stop() does
+    it('stops every shard when one of them asks, without ending its own process', async () => {
+      const { manager, shards, exit } = setup({ shards: 2 })
+      await manager.start()
+
+      shards[1].emit('message', { meocord: 'stop' })
+
+      expect(shards.map(shard => shard.sent)).toEqual([[{ meocord: 'shutdown' }], [{ meocord: 'shutdown' }]])
+      shards.forEach(shard => shard.die(0))
+      await manager.stop()
+      expect(exit).not.toHaveBeenCalled()
+      await expect(manager.start()).rejects.toThrow('This app was stopped')
     })
 
     it('asks every shard to shut down, waits for them, and exits 0', async () => {
@@ -562,6 +597,19 @@ describe('ShardManager', () => {
       await vi.waitFor(() => expect(exit).toHaveBeenCalled())
 
       expect(order).toEqual([{ meocord: 'login-failed' }, 1])
+    })
+
+    // A refusal is no failed login, so `meocord start --dev` is not told the bot could not log in
+    it('tells it nothing when a shard reports a refusal, and exits 1', async () => {
+      const { manager, shards, exit } = setup({ shards: 1 })
+      await manager.start()
+      exit.mockImplementation(code => void order.push(code))
+
+      shards[0].emit('message', { meocord: 'fatal', code: 'Refused', message: 'Stats: two classes have this name.' })
+      await vi.waitFor(() => expect(exit).toHaveBeenCalled())
+
+      expect(order).toEqual([1])
+      expect(logged.error.join('\n')).not.toContain('log in')
     })
 
     it('tells it nothing when the shards stop on a signal', async () => {

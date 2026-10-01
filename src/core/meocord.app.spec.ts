@@ -239,16 +239,20 @@ describe('MeoCordApp', () => {
       })
     })
 
-    it('shows an activity once ready, then rotates them every 10 seconds', async () => {
-      const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token', [{ name: 'Playing' }])
+    it('shows the first activity once ready, then the next every 10 seconds, in order and round again', async () => {
+      const activities = [{ name: 'Playing' }, { name: 'Watching' }, { name: 'Listening' }]
+      const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token', activities)
       await app.start()
 
       await Promise.all(mockClient.listenersFor('clientReady').map(listener => listener()))
+      vi.advanceTimersByTime(30_000)
 
-      expect(mockClient.user.setActivity).toHaveBeenCalledTimes(1)
-      expect(mockClient.user.setActivity).toHaveBeenLastCalledWith({ name: 'Playing' })
-      vi.advanceTimersByTime(10000)
-      expect(mockClient.user.setActivity).toHaveBeenCalledTimes(2)
+      expect(mockClient.user.setActivity.mock.calls.map(([activity]) => (activity as { name: string }).name)).toEqual([
+        'Playing',
+        'Watching',
+        'Listening',
+        'Playing',
+      ])
     })
 
     // A status the app sets itself, in onReady or clientOptions.presence, is the app's to keep

@@ -66,8 +66,8 @@ export interface MeoCordOptions<
   clientOptions: ClientOptions
 
   /**
-   * Activities the bot rotates through: one is shown once the bot is ready, and another every 10 seconds. Without
-   * them MeoCord leaves the bot's presence as the app sets it.
+   * Activities the bot rotates through, in order: the first is shown once the bot is ready, and the next every 10
+   * seconds, starting again after the last. Without them MeoCord leaves the bot's presence as the app sets it.
    */
   activities?: ActivityOptions[]
 

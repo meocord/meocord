@@ -80,10 +80,24 @@ export class ShardManager implements MeoCordApplication {
    */
   async start(): Promise<void> {
     if (this.shuttingDown) throw new Error('This app was stopped; use MeoCordFactory.create to make a new one.')
+    // Once: a second call, at once or later, waits for the first rather than registering and spawning again
+    return (this.starting ??= this.startOnce())
+  }
+
+  /** The start under way or done, which a later call waits for. */
+  private starting?: Promise<void>
+
+  private async startOnce(): Promise<void> {
     const { token, config } = this.options
     if (!token?.trim()) {
       this.logger.error(tokenMessage(token))
       return this.exitForLogin()
+    }
+    // First, so a bot that cannot spawn a shard registers no commands and asks Discord nothing
+    const file = bundleEntry()
+    if (!file) {
+      this.logger.error('Could not find the built bundle to start the shards from. Start the bot with its file, such as `node dist/main.js`.')
+      return this.exit(1)
     }
     this.logger.log('Starting shards in separate processes...')
     if (!(await this.register())) return this.exitForLogin()
@@ -106,11 +120,6 @@ export class ShardManager implements MeoCordApplication {
       return this.exitForLogin()
     }
 
-    const file = bundleEntry()
-    if (!file) {
-      this.logger.error('Could not find the built bundle to start the shards from. Start the bot with its file, such as `node dist/main.js`.')
-      return this.exit(1)
-    }
     const manager = (this.options.createManager ?? ((path, opts) => new ShardingManager(path, opts)))(file, {
       token,
       totalShards: total,
@@ -171,6 +180,7 @@ export class ShardManager implements MeoCordApplication {
     shard.on('message', (message: unknown) => {
       if (answerCooldown(this.cooldowns, message, reply => shard.send(reply).catch(() => undefined))) return
       if (isShardMessage(message) && message.meocord === 'fatal') this.stopForFatal(shard, message)
+      if (isShardMessage(message) && message.meocord === 'stop') void this.stop()
     })
     shard.on('death', child => this.handleDeath(shard, child as ChildProcess))
   }
@@ -209,12 +219,16 @@ export class ShardManager implements MeoCordApplication {
   private stopForFatal(shard: Shard, message: Extract<ShardMessage, { meocord: 'fatal' }>): void {
     if (this.fatal) return
     this.fatal = true
-    const refused = message.code === REFUSED_CODE
-    this.logger.error(
-      `Shard ${shard.id} ${refused ? 'cannot start' : `cannot log in (${message.code})`}: ${message.message} Stopping ` +
-        `every shard; fix the ${refused ? 'app' : 'configuration'} and start again.`,
-    )
     this.killAll()
+    // A refusal names what is wrong and where, and how to fix it, on lines of its own; it is no failed login
+    if (message.code === REFUSED_CODE) {
+      this.logger.error(`Shard ${shard.id} cannot start; stopping every shard.\n${message.message}`)
+      return this.exit(1)
+    }
+    this.logger.error(
+      `Shard ${shard.id} cannot log in (${message.code}): ${message.message} Stopping every shard; fix the configuration ` +
+        'and start again.',
+    )
     void this.exitForLogin()
   }
 

@@ -49,7 +49,7 @@ import {
   shardingRole,
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { claimAmbientAppTheme, registerClientTheme } from '@src/core/theme-runtime.js'
+import { registerClientTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
 import { endFailedShard } from '@src/core/shard-exit.js'
@@ -188,6 +188,10 @@ export class MeoCordFactory {
       return new MeoCordApp(options.controllers, new Container(), new Client(options.clientOptions), meocordConfig.discordToken)
     }
 
+    // Before anything is resolved: a controller or service is what first loads a native addon, and one built for another
+    // platform would otherwise fail there with a linker error. A manager checks too, before it registers or spawns.
+    assertBuiltForThisPlatform()
+
     // A process-sharding manager only spawns shards, so it binds, constructs and connects nothing itself.
     if (shardingRole(meocordConfig) === 'manager') {
       return new ShardManager({
@@ -196,10 +200,6 @@ export class MeoCordFactory {
         config: meocordConfig,
       })
     }
-
-    // Before anything is resolved: a controller or service is what first loads a native addon, and
-    // one built for another platform would otherwise fail there with a linker error.
-    assertBuiltForThisPlatform()
 
     const providers = providerMap(options.providers ?? [], '@MeoCord({ providers })')
     // Before binding, where inversify would otherwise fail first with an error about compiler options
@@ -328,8 +328,6 @@ export class MeoCordFactory {
         warnPerShardCooldowns(options.controllers, logger)
       }
       bindAppPresenter(container, target as object, discordClient)
-      // A bot runs one app, whose theme code outside any call then reads
-      claimAmbientAppTheme(container)
       registerClientTheme(discordClient, container)
       registerClientTranslator(discordClient, options.i18n)
     }
