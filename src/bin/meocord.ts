@@ -40,7 +40,8 @@ import {
   type NativePackage,
 } from '@src/build/native-addons.js'
 import { PLATFORM_MANIFEST, writePlatformManifest } from '@src/util/platform.util.js'
-import { loadMeoCordCliConfig, loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
+import { loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
+import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { FORCE_REGISTER_ENV, REGISTER_GUILD_ENV, REGISTER_ONLY_ENV } from '@src/util/registration-mode.util.js'
 
@@ -230,16 +231,12 @@ copies or substantial portions of the Software.
         const mode = options.prod ? 'production' : 'development'
         setEnvironment(mode)
 
-        if (options.build || !options.prod) {
-          await compileAndValidateConfig()
-        } else {
-          // The compiled config, when there is one, is what the bot will run with
-          await validateRunConfig()
-        }
+        // The config the bot will run with: the source a build compiles, else the compiled config already in dist
+        const config = options.build || !options.prod ? await compileAndValidateConfig() : await validateRunConfig()
 
         // Checked for every start, including one that skips the build: this is the point
         // where the application actually needs to log in.
-        await validateDiscordToken()
+        await validateDiscordToken(config)
 
         // Watch mode builds as it starts, so --build would only build twice.
         if (options.build && options.prod) {
@@ -262,8 +259,9 @@ copies or substantial portions of the Software.
         const mode = options.dev ? 'development' : 'production'
         setEnvironment(mode)
 
-        await compileAndValidateConfig()
-        await validateDiscordToken()
+        // As for start: the source a build compiles, else the compiled config the bundle registers with
+        const config = options.build ? await compileAndValidateConfig() : await validateRunConfig()
+        await validateDiscordToken(config)
 
         if (options.build) {
           await this.build(mode)
@@ -564,6 +562,7 @@ copies or substantial portions of the Software.
       await rsbuild.build()
       fs.renameSync(path.join(staging, 'meocord.config.mjs'), path.join(dist, 'meocord.config.mjs'))
       fs.rmSync(staging, { recursive: true, force: true })
+      this.compiledConfig = meocordConfig
       this.logger.info('Config compiled to dist/meocord.config.mjs')
       return true
     } catch (error) {
@@ -580,6 +579,17 @@ copies or substantial portions of the Software.
 
   /** Environment added to the application's own when it is spawned. */
   private readonly appEnv: NodeJS.ProcessEnv = {}
+
+  /** The config this process last compiled into dist, which a bot it starts from then runs with. */
+  private compiledConfig?: MeoCordConfig
+
+  /**
+   * The config the bot this process runs reads: the one it compiled, as watch mode and `--build` do, each reload
+   * included, else the compiled config the command found in dist.
+   */
+  private runConfig(): MeoCordConfig | undefined {
+    return this.compiledConfig ?? loadMeoCordConfig()
+  }
 
   /**
    * Runs the built application in register-only mode: it collects the commands from the bundle, sends
@@ -691,7 +701,7 @@ copies or substantial portions of the Software.
    * @param then - What the stop is for, as the warning about killing it says.
    */
   private stopApp(app: ChildProcess, then: string, exited: () => void): void {
-    const shutdownTimeout = loadMeoCordCliConfig()?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
+    const shutdownTimeout = this.runConfig()?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
     const overdue = setTimeout(() => {
       if (!stillRunning(app)) return
       this.logger.warn(
@@ -739,7 +749,7 @@ copies or substantial portions of the Software.
    * @param options.devRunner - Gives the application a channel to tell watch mode whether the bot could log in.
    */
   private spawnApp({ devRunner = false } = {}): ChildProcess {
-    const sourceMaps = loadMeoCordCliConfig()?.sourceMappedStacks !== false
+    const sourceMaps = this.runConfig()?.sourceMappedStacks !== false
     const { command, args } = buildAppCommand(this.runtime, this.mainJSPath, { sourceMaps })
 
     return spawn(command, args, {

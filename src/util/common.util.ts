@@ -1,10 +1,11 @@
 import fs from 'fs'
 import path from 'path'
-import { loadMeoCordCliConfig, readMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
+import { readMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
 import { compiledConfigMessage, compiledConfigProblem, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { configProblems } from '@src/util/meocord-config-validation.util.js'
 import wait from '@src/util/wait.util.js'
 import chalk from 'chalk'
+import { type MeoCordConfig } from '@src/interface/index.js'
 
 /** The directory of an installed package, searching `node_modules` upward from `baseDir`, or null. */
 export const findModulePackageDir = (moduleName: string, baseDir: string = process.cwd()): string | null => {
@@ -38,8 +39,10 @@ export const findModulePackageDir = (moduleName: string, baseDir: string = proce
 /**
  * Loads `meocord.config.ts` and checks its shape, exiting when it is missing, fails to load, or has
  * options of the wrong type; options it does not know are reported and left alone.
+ *
+ * @returns The config, which a build compiles and the bot then runs with.
  */
-export async function compileAndValidateConfig() {
+export async function compileAndValidateConfig(): Promise<MeoCordConfig | undefined> {
   const meocordConfigPath = path.resolve(process.cwd(), 'meocord.config.ts')
   if (!fs.existsSync(meocordConfigPath)) {
     console.error(chalk.red('Configuration file "meocord.config.ts" is missing!'))
@@ -57,15 +60,21 @@ export async function compileAndValidateConfig() {
   }
 
   await assertConfigShape(loaded.config)
+  return loaded.config
 }
 
 /**
- * Checks the configuration a start that skips the build runs with: the compiled config when a build
+ * Checks the configuration a command that skips the build runs with: the compiled config when a build
  * made one, else `meocord.config.ts`, reported as {@link compileAndValidateConfig} reports it.
+ *
+ * @returns The config the bot will run with.
  */
-export async function validateRunConfig() {
+export async function validateRunConfig(): Promise<MeoCordConfig | undefined> {
   const compiled = loadMeoCordConfig()
-  if (compiled) return assertConfigShape(compiled)
+  if (compiled) {
+    await assertConfigShape(compiled)
+    return compiled
+  }
   // Only a missing one falls back: a broken one is what the bot would run, so it stops here as the bot would
   if (compiledConfigProblem()?.missing === false) {
     console.error(chalk.red(compiledConfigMessage()))
@@ -88,14 +97,15 @@ export async function assertConfigShape(config: unknown) {
 }
 
 /**
- * Ensures a Discord token is configured.
+ * Ensures the config a command runs the bot with has a Discord token: the one {@link compileAndValidateConfig} or
+ * {@link validateRunConfig} returned for it.
  *
  * Kept apart from {@link compileAndValidateConfig} because producing a bundle needs no
  * credentials — only connecting to the gateway does. Requiring one to build would stop a
  * freshly created application from building until it has a token.
  */
-export async function validateDiscordToken() {
-  if (!loadMeoCordCliConfig()?.discordToken) {
+export async function validateDiscordToken(config: MeoCordConfig | undefined) {
+  if (!config?.discordToken) {
     console.error(
       chalk.red(
         'Discord token is missing: meocord.config.ts sets discordToken, and a new app reads it from DISCORD_TOKEN in .env.',

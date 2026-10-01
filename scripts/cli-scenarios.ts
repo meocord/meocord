@@ -243,6 +243,22 @@ export class ReadyService implements OnReady, OnShutdown {
 }
 `
 
+/** `readyService` with an onShutdown hook that never settles, so a stop lasts the bot's whole shutdownTimeout. */
+const stuckStopService = `import { Service } from 'meocord/decorator'
+import { type OnReady, type OnShutdown } from 'meocord/interface'
+
+@Service()
+export class ReadyService implements OnReady, OnShutdown {
+  onReady() {
+    console.log('Ready hook ran')
+  }
+
+  async onShutdown() {
+    await new Promise(() => {})
+  }
+}
+`
+
 /** A line that makes the template config's rsbuild hook throw, in place of its first statement. */
 const HOOK_THROWS = "throw new Error('hook broke')"
 
@@ -757,12 +773,13 @@ const scenarios: Scenario[] = [
     expect: { code: 1, says: ['Starting bot', REFUSED_TOKEN], never: ['MeoCord config not found'] },
   },
   // One failure, one report: the reason, with what to do about it
-  // Without a token, start --prod stops before the bot: the CLI is what says the config is broken
+  // Without a token, start --prod and register stop before the bot: the CLI is what says the config is broken
   ...([
-    ['a built bot', ['node', 'dist/main.js'], 'not-a-real-token'],
-    ['start --prod', undefined, 'not-a-real-token'],
-    ['start --prod without a token', undefined, ''],
-  ] as const).map(([what, command, token]): Scenario => ({
+    ['a built bot', { command: ['node', 'dist/main.js'] }, 'not-a-real-token'],
+    ['start --prod', { argv: ['start', '--prod'] }, 'not-a-real-token'],
+    ['start --prod without a token', { argv: ['start', '--prod'] }, ''],
+    ['register without a token', { argv: ['register'] }, ''],
+  ] as const).map(([what, run, token]): Scenario => ({
     name: `${what} reports a compiled config that fails to load once`,
     tier: 'fast',
     // Listed so the config the scenario breaks is put back afterwards
@@ -770,7 +787,7 @@ const scenarios: Scenario[] = [
     before: [['build', '--prod']],
     thenEdits: { 'dist/meocord.config.mjs': () => 'export default {{{\n' },
     env: { DISCORD_TOKEN: token },
-    ...(command ? { command: [...command] } : { argv: ['start', '--prod'] }),
+    ...('command' in run ? { command: [...run.command] } : { argv: [...run.argv] }),
     expect: { code: 1, says: ['failed to load', 'Fix meocord.config.ts'], counts: { 'Unexpected token': 1 } },
   })),
   {
@@ -1627,6 +1644,35 @@ const scenarios: Scenario[] = [
     timeoutMs: 60_000,
     expect: { code: 0, says: ['Starting watch mode', 'The application exited with code 3; waiting for changes.'] },
   },
+  // The dev runner waits the bot's shutdownTimeout, plus a grace, before it kills one that has not stopped. Raised
+  // mid-session, a value the runner had read before then would kill the bot before its own timeout.
+  ...(
+    [
+      ['after a build', 'fast', { before: [['build', '--dev']] }],
+      ['with no build yet', 'slow', { files: { dist: null } }],
+    ] as [string, Tier, Pick<Scenario, 'before' | 'files'>][]
+  ).map(([when, tier, start]): Scenario => ({
+    name: `start --dev ${when} waits the shutdownTimeout the config has now, not the one it started with`,
+    tier,
+    platforms: ['linux', 'darwin'],
+    before: start.before,
+    files: {
+      ...start.files,
+      '.env': INVALID_TOKEN_ENV,
+      'meocord.config.ts': configWith('shutdownTimeout: 1_000,'),
+      'src/app.ts': readyApp,
+      'src/ready.service.ts': stuckStopService,
+    },
+    discord: { readyDelayMs: 0 },
+    argv: ['start', '--dev'],
+    edits: [
+      { after: 'Ready hook ran', files: { 'meocord.config.ts': current => current.replace('shutdownTimeout: 1_000', 'shutdownTimeout: 6_000') } },
+      { after: 'Ready hook ran', times: 2, files: { 'src/ready.service.ts': touched } },
+    ],
+    signal: { name: 'SIGINT', after: 'Ready hook ran', times: 3 },
+    timeoutMs: 90_000,
+    expect: { code: 0, says: ['did not finish within 6000 ms'], never: ['did not exit within'] },
+  })),
   {
     name: 'start --dev exits 1 when its first build cannot start, as build does',
     tier: 'fast',

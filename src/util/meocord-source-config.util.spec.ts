@@ -21,7 +21,7 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
   loadMeoCordConfig: mockLoadMeoCordConfig,
 }))
 
-const { loadMeoCordCliConfig, loadMeoCordSourceConfig } = await import('@src/util/meocord-source-config.util.js')
+const { loadMeoCordSourceConfig } = await import('@src/util/meocord-source-config.util.js')
 const { createJiti } = await import('jiti')
 
 describe('loadMeoCordSourceConfig', () => {
@@ -53,27 +53,5 @@ describe('loadMeoCordSourceConfig', () => {
     mockExistsSync.mockReturnValue(false)
 
     expect(loadMeoCordSourceConfig()).toBeUndefined()
-  })
-})
-
-describe('loadMeoCordCliConfig', () => {
-  afterEach(() => {
-    mockLoadMeoCordConfig.mockReset()
-  })
-
-  it('uses the compiled config when a build has produced one', () => {
-    mockLoadMeoCordConfig.mockReturnValue({ discordToken: 'compiled' })
-
-    expect(loadMeoCordCliConfig()?.discordToken).toBe('compiled')
-  })
-
-  // `meocord start` checks the token before the first build.
-  it('falls back to the source before anything is built', () => {
-    mockLoadMeoCordConfig.mockReturnValue(undefined)
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue('{}')
-    vi.mocked(createJiti).mockReturnValue(vi.fn().mockReturnValue({ discordToken: 'source' }) as unknown as ReturnType<typeof createJiti>)
-
-    expect(loadMeoCordCliConfig()?.discordToken).toBe('source')
   })
 })
