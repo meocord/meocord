@@ -1144,7 +1144,7 @@ const scenarios: Scenario[] = [
           'Ready hook ran': 1,
           'Bot has shut down': 2,
         },
-        never: ['modified-tsconfig.json'],
+        never: ['modified-tsconfig'],
       },
     },
     {
@@ -1181,7 +1181,7 @@ const scenarios: Scenario[] = [
       expect: {
         code: 0,
         counts: { 'tsconfig.json change detected': 1, 'Starting bot': 2, 'Ready hook ran': 2 },
-        never: ['modified-tsconfig.json'],
+        never: ['modified-tsconfig'],
       },
     },
     {

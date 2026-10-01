@@ -28,6 +28,12 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
 
 const { prepareModifiedTsConfig } = await import('@src/util/tsconfig.util.js')
 
+// The module as a new process loads it, before it has made its directory
+async function freshModule() {
+  vi.resetModules()
+  return import('@src/util/tsconfig.util.js')
+}
+
 function mockTsConfig(config: object) {
   mockExistsSync.mockReturnValue(true)
   mockReadFileSync.mockReturnValue(JSON.stringify(config) as any)
@@ -90,6 +96,16 @@ describe('prepareModifiedTsConfig', () => {
     expect(path.isAbsolute(written.compilerOptions.paths['@src/*'][0])).toBe(true)
   })
 
+  // TypeScript reads a paths target from baseUrl when one is set, so the bundler must too
+  it('resolves path aliases from baseUrl when one is set', () => {
+    mockTsConfig({ compilerOptions: { baseUrl: './src', paths: { '@lib/*': ['lib/*'] } } })
+
+    prepareModifiedTsConfig()
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
+    expect(written.compilerOptions.paths['@lib/*']).toEqual([path.resolve(process.cwd(), 'src', 'lib/*')])
+  })
+
   // The copy lives in the temp directory, where a relative extends would name a file that is not there
   it('makes a relative extends absolute, from the project', () => {
     mockTsConfig({ extends: './tsconfig.base.json', compilerOptions: {} })
@@ -133,7 +149,7 @@ describe('prepareModifiedTsConfig', () => {
     const result = prepareModifiedTsConfig()
 
     expect(result).toContain(tmpdir())
-    expect(result).toContain('modified-tsconfig.json')
+    expect(path.basename(result)).toMatch(/^modified-tsconfig-\d+\.json$/)
     expect(mockWriteFileSync).toHaveBeenCalledWith(result, expect.any(String))
   })
 
@@ -148,8 +164,22 @@ describe('prepareModifiedTsConfig', () => {
     expect(path.dirname(first)).toContain(path.join(tmpdir(), 'meocord-tsconfig-'))
   })
 
-  it('removes its directory when the process exits', () => {
+  // A watch session copies the file on every reload, and each exit hook would hold a directory until it ends
+  it('writes every copy in one directory, removed by one exit hook', async () => {
     mockTsConfig({ compilerOptions: {} })
+    const { prepareModifiedTsConfig } = await freshModule()
+    const exitListeners = process.listeners('exit')
+
+    const files = Array.from({ length: 12 }, () => prepareModifiedTsConfig())
+
+    expect(new Set(files).size).toBe(12)
+    expect(new Set(files.map(file => path.dirname(file))).size).toBe(1)
+    expect(process.listeners('exit').filter(listener => !exitListeners.includes(listener))).toHaveLength(1)
+  })
+
+  it('removes its directory when the process exits', async () => {
+    mockTsConfig({ compilerOptions: {} })
+    const { prepareModifiedTsConfig } = await freshModule()
     const exitListeners = process.listeners('exit')
 
     const file = prepareModifiedTsConfig()

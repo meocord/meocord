@@ -21,11 +21,29 @@ function resolveExtends(value: string | string[], cwd: string): string | string[
   return Array.isArray(value) ? value.map(resolve) : resolve(value)
 }
 
+// The directory this process writes its copies in, and how many it has written there
+let copiesDir: string | undefined
+let copies = 0
+
+/**
+ * The directory this process writes its tsconfig copies in: one for the process, removed as it exits, so a watch
+ * session that copies the file on every reload leaves one directory and one exit hook, not one per copy. Another
+ * process, such as a second build at once, has a directory of its own.
+ */
+function copiesDirectory(): string {
+  if (copiesDir) return copiesDir
+  const dir = mkdtempSync(path.join(tmpdir(), 'meocord-tsconfig-'))
+  process.once('exit', () => rmSync(dir, { recursive: true, force: true }))
+  copiesDir = dir
+  return dir
+}
+
 /**
  * Writes a copy of the project's `tsconfig.json` for the bundler to a temporary file, with comments
- * and trailing commas removed, paths made absolute and `noEmit` removed. The project's file is never
- * changed. Each call gets a directory of its own,
- * removed when the process exits, so builds running at once never share or overwrite the file.
+ * and trailing commas removed, paths made absolute as TypeScript reads them (a `paths` target from
+ * `baseUrl` when there is one) and `noEmit` removed. The project's file is never changed. Each call
+ * gets a file of its own in this process's directory, removed when the process exits, so builds
+ * running at once never share or overwrite the file.
  * @returns The absolute path to the temporary tsconfig.
  * @throws When `tsconfig.json` is missing or cannot be parsed.
  */
@@ -72,11 +90,12 @@ export function prepareModifiedTsConfig(): string {
       parsedConfig.compilerOptions.typeRoots = parsedConfig.compilerOptions.typeRoots.map((p: string) => path.resolve(cwd, p))
     }
 
-    // Resolve path mappings in `paths` if present
+    // A `paths` target is relative to baseUrl when there is one, made absolute above, and else to the project
     if (parsedConfig.compilerOptions.paths) {
+      const base: string = parsedConfig.compilerOptions.baseUrl ?? cwd
       Object.keys(parsedConfig.compilerOptions.paths).forEach(alias => {
         parsedConfig.compilerOptions.paths[alias] = parsedConfig.compilerOptions.paths[alias].map((p: string) =>
-          path.resolve(process.cwd(), p),
+          path.resolve(base, p),
         )
       })
     }
@@ -87,11 +106,7 @@ export function prepareModifiedTsConfig(): string {
     }
   }
 
-  // Kept until the process exits: a development build reads it again on every rebuild
-  const tempDir = mkdtempSync(path.join(tmpdir(), 'meocord-tsconfig-'))
-  process.once('exit', () => rmSync(tempDir, { recursive: true, force: true }))
-
-  const tempTsConfigPath = path.join(tempDir, 'modified-tsconfig.json')
+  const tempTsConfigPath = path.join(copiesDirectory(), `modified-tsconfig-${++copies}.json`)
   writeFileSync(tempTsConfigPath, JSON.stringify(parsedConfig, null, 2))
   return tempTsConfigPath
 }
