@@ -126,6 +126,17 @@ describe('RedisCooldownStore', () => {
     ])
   })
 
+  it("gives a refusal the end of the wait the script reports, by the server's clock", async () => {
+    const evaluate = createMockFn<RedisEval>(() => Promise.resolve([0, 2_000, 0, 1_700_000_002_000]))
+
+    expect(await new RedisCooldownStore(evaluate).consumeMany([{ key: 'k', limit }])).toEqual({
+      allowed: false,
+      retryAfterMs: 2_000,
+      blocked: 0,
+      retryTimestamp: 1_700_000_002_000,
+    })
+  })
+
   it('sends the script by its SHA1 when given evalsha, and in full only when the server answers NOSCRIPT', async () => {
     const evaluate = createMockFn<RedisEval>(() => Promise.resolve([1, 0, -1]))
     let loaded = false

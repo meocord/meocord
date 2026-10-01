@@ -20,6 +20,13 @@ export interface CooldownVerdict {
   allowed: boolean
   /** `0` when allowed; otherwise how long until the oldest call in the window leaves it. */
   retryAfterMs: number
+  /**
+   * With a refusal, when the next call is allowed, as a Unix timestamp in milliseconds on the store's own clock. Every
+   * refusal in one wait gives the same one, so `messages.dmOnCooldown` tells one wait from the next by it, across
+   * processes and however late the answer arrives. The built-in stores give it; a store without it is told apart by
+   * `retryAfterMs` and the bot's clock instead.
+   */
+  retryTimestamp?: number
 }
 
 /**
@@ -224,7 +231,9 @@ function verdictOf(entry: CallTimes, { uses, windowMs }: CooldownLimit, now: num
   trim(entry, now)
   const { times, head } = entry
   // A refused call is never recorded, so at most `uses` calls are ever in the window
-  return times.length - head < uses ? { allowed: true, retryAfterMs: 0 } : { allowed: false, retryAfterMs: times[times.length - uses] + windowMs - now }
+  if (times.length - head < uses) return { allowed: true, retryAfterMs: 0 }
+  const retryTimestamp = times[times.length - uses] + windowMs
+  return { allowed: false, retryAfterMs: retryTimestamp - now, retryTimestamp }
 }
 
 /**

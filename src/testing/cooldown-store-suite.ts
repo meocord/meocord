@@ -194,6 +194,22 @@ export function testCooldownStore(
       expect(refused.release).toBe(undefined)
     })
 
+    // dmOnCooldown tells one wait from the next by it, so every refusal in a wait has to give the same one
+    test('gives every refusal in one wait the same retryTimestamp, retryAfterMs from its own clock, when it gives one', async store => {
+      const limit = { uses: 1, windowMs: 5_000 }
+      const entries = [{ key: key('ends'), limit }]
+      expect((await store.consumeMany(entries)).allowed).toBe(true)
+      const first = await store.consumeMany(entries)
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const second = await store.consumeMany(entries)
+      expect([first.allowed, second.allowed]).toEqual([false, false])
+      if (first.retryTimestamp === undefined) return
+
+      expect(second.retryTimestamp).toBe(first.retryTimestamp)
+      // The store's clock may differ from this one, but not by the window
+      expect(Math.abs(first.retryTimestamp - Date.now() - first.retryAfterMs)).toBeLessThanOrEqual(limit.windowMs)
+    })
+
     // The default peekMany allows every call and records nothing, leaving the check to consumeMany
     test('peeks without recording: allowed below the limit, however often', async store => {
       const limit = { uses: 2, windowMs: 2_000 }

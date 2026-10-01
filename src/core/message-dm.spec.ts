@@ -2,7 +2,15 @@ import { vi } from 'vitest'
 import { Client, type Guild, type Message } from 'discord.js'
 import { Catch, Controller, Cooldown, Guard, MeoCord, MessageHandler, UseFilter, UseGuard } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { CooldownStore, createTranslator, GuardDeniedError, UserError } from '@src/common/index.js'
+import {
+  type CooldownBatchVerdict,
+  type CooldownEntry,
+  CooldownStore,
+  createTranslator,
+  GuardDeniedError,
+  MemoryCooldownStore,
+  UserError,
+} from '@src/common/index.js'
 import { Logger } from '@src/common/logger.js'
 import { type ExceptionFilter, type GuardInterface } from '@src/interface/index.js'
 import { createDiscordError, createMockGuild, createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
@@ -322,6 +330,53 @@ describe('dmOnCooldown', () => {
     for (const ms of [100_000, 101_000, 102_000, 103_000, 160_000, 160_500]) dmedAt.push(...(await sendAt(ms)))
 
     expect(dmedAt).toEqual([103_000, 160_500])
+  })
+
+  // An answer comes back a moment after the store read its clock; the store's own end of the wait does not move with it
+  it('DMs once in a wait however late each answer comes back', async () => {
+    let lag = 0
+    class LaggyStore extends MemoryCooldownStore {
+      async consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
+        const verdict = await super.consumeMany(entries)
+        if (!entries[0]!.key.includes(':notice:')) vi.setSystemTime(Date.now() + lag)
+        return verdict
+      }
+    }
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.create({ app: TellingApp, controllers: [Commands], providers: [{ provide: CooldownStore, useValue: new LaggyStore() }] }).compile()
+    const sendAt = async (ms: number, late: number) => {
+      vi.setSystemTime(ms)
+      lag = late
+      const message = messageOf('!roll 6')
+      await module.dispatch(message)
+      return vi.mocked(message.author.send).mock.calls.length
+    }
+
+    await sendAt(0, 0)
+
+    expect([await sendAt(1_000, 0), await sendAt(2_000, 250)]).toEqual([1, 0])
+  })
+
+  // A store of its own may answer only how long is left, so the wait's end is worked out on the bot's clock
+  it('DMs once in a wait with a store that gives no end of the wait', async () => {
+    class PlainStore extends MemoryCooldownStore {
+      async consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
+        const { retryTimestamp: _end, ...verdict } = await super.consumeMany(entries)
+        return verdict
+      }
+    }
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.create({ app: TellingApp, controllers: [Commands], providers: [{ provide: CooldownStore, useValue: new PlainStore() }] }).compile()
+    const sendAt = async (ms: number) => {
+      vi.setSystemTime(ms)
+      const message = messageOf('!roll 6')
+      await module.dispatch(message)
+      return vi.mocked(message.author.send).mock.calls.length
+    }
+
+    await sendAt(0)
+
+    expect([await sendAt(1_000), await sendAt(30_000), await sendAt(61_000), await sendAt(62_000)]).toEqual([1, 0, 0, 1])
   })
 
   it('keeps each author’s wait to themselves', async () => {

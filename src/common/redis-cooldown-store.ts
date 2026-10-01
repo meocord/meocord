@@ -56,12 +56,13 @@ export interface RedisCooldownStoreOptions {
  * among the keys that refused, and which key that is.
  *
  * KEYS the keys; ARGV[1] a nonce for this call, then uses and windowMs for each key in turn.
- * Replies {1, 0, -1} when allowed, {0, retryAfterMs, index} when refused.
+ * Replies {1, 0, -1} when allowed, {0, retryAfterMs, index, retryTimestamp} when refused: the refusing key's
+ * oldest call in the window, by the server's clock, plus its window.
  */
 const SCRIPT = `local time = redis.call('TIME')
 local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 local member = ARGV[1]
-local blocked, wait = 0, 0
+local blocked, wait, ends = 0, 0, 0
 for i, key in ipairs(KEYS) do
   local uses = tonumber(ARGV[i * 2])
   local window = tonumber(ARGV[i * 2 + 1])
@@ -71,13 +72,13 @@ for i, key in ipairs(KEYS) do
     local oldest = redis.call('ZRANGE', key, count - uses, count - uses, 'WITHSCORES')
     local retry = math.max(tonumber(oldest[2]) + window - now, 1)
     if retry > wait then
-      blocked, wait = i, retry
+      blocked, wait, ends = i, retry, tonumber(oldest[2]) + window
     end
     redis.call('PEXPIRE', key, window)
   end
 end
 if blocked > 0 then
-  return {0, wait, blocked - 1}
+  return {0, wait, blocked - 1, ends}
 end
 for i, key in ipairs(KEYS) do
   redis.call('ZADD', key, now, member)
@@ -94,7 +95,7 @@ return {1, 0, -1}
  */
 const PEEK_SCRIPT = `local time = redis.call('TIME')
 local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
-local blocked, wait = 0, 0
+local blocked, wait, ends = 0, 0, 0
 for i, key in ipairs(KEYS) do
   local uses = tonumber(ARGV[i * 2 - 1])
   local window = tonumber(ARGV[i * 2])
@@ -104,12 +105,12 @@ for i, key in ipairs(KEYS) do
     local oldest = redis.call('ZRANGE', key, total - uses, total - uses, 'WITHSCORES')
     local retry = math.max(tonumber(oldest[2]) + window - now, 1)
     if retry > wait then
-      blocked, wait = i, retry
+      blocked, wait, ends = i, retry, tonumber(oldest[2]) + window
     end
   end
 end
 if blocked > 0 then
-  return {0, wait, blocked - 1}
+  return {0, wait, blocked - 1, ends}
 end
 return {1, 0, -1}
 `
@@ -307,7 +308,7 @@ const messageOf = (error: unknown): string => String((error as Error | undefined
 
 /** The script's `{allowed, retryAfterMs, index}` reply, as a verdict. */
 function verdictOf(reply: unknown, count: number): CooldownBatchVerdict {
-  const [allowed, retryAfterMs, blocked] = Array.isArray(reply) ? reply.map(Number) : []
+  const [allowed, retryAfterMs, blocked, retryTimestamp] = Array.isArray(reply) ? reply.map(Number) : []
   const valid =
     (allowed === 1 && blocked === -1) || (allowed === 0 && Number.isInteger(blocked) && blocked >= 0 && blocked < count)
   if (!valid || !Number.isFinite(retryAfterMs)) {
@@ -316,5 +317,7 @@ function verdictOf(reply: unknown, count: number): CooldownBatchVerdict {
         'Check that the function given to RedisCooldownStore.using resolves to what the client’s eval returns.',
     )
   }
-  return allowed === 1 ? { allowed: true, retryAfterMs: 0 } : { allowed: false, retryAfterMs, blocked }
+  if (allowed === 1) return { allowed: true, retryAfterMs: 0 }
+  // A reply without the end of the wait leaves it out
+  return Number.isFinite(retryTimestamp) ? { allowed: false, retryAfterMs, blocked, retryTimestamp } : { allowed: false, retryAfterMs, blocked }
 }
