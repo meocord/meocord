@@ -189,6 +189,26 @@ describe('peekCooldowns', () => {
     expect(await sell()).toBe('ran')
   })
 
+  // The peek and the consume each ask the failing store, for one call
+  it("under 'allow', counts a call whose peek and consume both fail as one failed call", async () => {
+    const store = new Recording()
+    const call = app(store, 'allow')
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+
+    store.failing = 'reject'
+    const sale = call('sell')
+    await sale.peek()
+    await sale.consume({ item: 'sword' })
+    store.failing = undefined
+    vi.setSystemTime(30_000)
+    await call('sell').consume({ item: 'shield' })
+    vi.useRealTimers()
+
+    expect(vi.mocked(Logger.prototype.log).mock.calls.map(([line]) => String(line))).toContainEqual(
+      expect.stringContaining('answers again, after 1 failed call(s)'),
+    )
+  })
+
   it('refuses a peek the store does not answer within the timeout', async () => {
     const store = new Recording()
     store.failing = 'hang'
