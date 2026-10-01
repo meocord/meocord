@@ -16,7 +16,7 @@ import {
 } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CheckedParams, type MessageHandlerOptions, type ReactionEvent, type ReactionHandlerSettings } from '@src/interface/index.js'
-import { type IsPiped, type Unpiped } from '@src/interface/standard-schema.interface.js'
+import { type IsPiped, type Unpiped } from '@src/decorator/piped.js'
 import {
   type AutocompleteMeta,
   type BuildableCommandType,

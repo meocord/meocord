@@ -101,17 +101,3 @@ export declare const PIPED_BRAND: unique symbol
  */
 export type Piped<T> = T & { readonly [PIPED_BRAND]?: true }
 
-/**
- * Whether a handler's param is marked {@link Piped}, so the checks of what a call gives leave it to its pipe.
- *
- * @internal
- */
-export type IsPiped<T> = typeof PIPED_BRAND extends keyof T ? true : false
-
-/**
- * A handler's params with each key marked {@link Piped} left to its pipe, as `unknown`, for a check of what a call
- * gives.
- *
- * @internal
- */
-export type Unpiped<P> = { [K in keyof P]: IsPiped<P[K]> extends true ? unknown : P[K] }
