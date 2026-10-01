@@ -375,7 +375,8 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
     )
   } catch (error) {
     const failure = error as CooldownStoreError
-    reportFailure(store, failure, policy)
+    // Once a call: one whose peek found the store failing has been counted in the outage already
+    if (!call?.storeFailed) reportFailure(store, failure, policy)
     if (call) call.storeFailed = true
     if (policy.failure === 'allow') return
     throw failure
@@ -468,5 +469,5 @@ export async function consumeCooldowns(
   if (cooldowns.length === 0 || !isCounted(contextOf)) return
   const counted = await keyed(controller, methodName, cooldowns, contextOf, params, false)
   if (counted.length === 0) return
-  await ask(container, counted, false, undefined)
+  await ask(container, counted, false, peeked.get(contextOf()))
 }
