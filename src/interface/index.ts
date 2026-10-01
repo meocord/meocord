@@ -398,6 +398,9 @@ export interface PresentedError {
  * @remarks
  * It is resolved once from the container, so it can inject services such as a `Translator`.
  *
+ * Should a method throw or reject, or draw a view MeoCord cannot render, MeoCord's own view takes its place and the
+ * failure is logged with the presenter's name, so the user is still answered.
+ *
  * @example
  * ```ts
  * @Service()
@@ -435,13 +438,15 @@ export interface PresentedError {
 export interface ResponsePresenter {
   /**
    * The view shown while a handler under `@Defer` works. It may draw it asynchronously: MeoCord acknowledges the
-   * interaction first, so a slow drawing never misses Discord's three seconds.
+   * interaction first, so a slow drawing never misses Discord's three seconds. The handler waits for it, so a drawing
+   * that takes longer than a second is given up on, with a warning, and MeoCord's own loading view is shown.
    */
   loading(context: ResponseContext): ResponseView | Promise<ResponseView>
 
   /**
    * The view shown for an error. It may draw it asynchronously: an interaction not yet acknowledged is acknowledged
-   * first, privately, and the view then replaces the acknowledgement.
+   * first, privately, and the view then replaces the acknowledgement. Discord refusing that acknowledgement, such as
+   * for an interaction past its three seconds, is logged as the send it is, never as the presenter failing.
    */
   error(context: ResponseContext, error: PresentedError): ResponseView | Promise<ResponseView>
 

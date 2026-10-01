@@ -136,6 +136,22 @@ describe("a view's image and thumbnail", () => {
   })
 })
 
+// Discord refuses a gallery of more than 10, and the image beside the most files a message takes makes 11
+describe('a view with more images than one gallery holds', () => {
+  it('shows them in galleries of 10, in order, the image first', () => {
+    const files = Array.from({ length: 10 }, (_, index) => ({ name: `shot-${index}.png`, data: Buffer.from('') }))
+
+    const container = renderContainer({ text: 't', files, image: 'https://example.com/banner.png' })
+
+    const galleries = container.components.filter(component => component.type === ComponentType.MediaGallery)
+    expect(galleries.map(gallery => gallery.items.length)).toEqual([10, 1])
+    expect(galleries.flatMap(gallery => gallery.items.map(item => item.media.url))).toEqual([
+      'https://example.com/banner.png',
+      ...files.map(file => `attachment://${file.name}`),
+    ])
+  })
+})
+
 describe("a view's files its components show", () => {
   it('are told apart by their whole URL, so a longer name that starts the same shows nothing of the view', () => {
     const container = renderContainer({
