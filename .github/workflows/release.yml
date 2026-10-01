@@ -305,6 +305,10 @@ jobs:
       - name: Build package
         run: bun run build
 
+      # The declarations for import and for require export exactly what the source entry points declare
+      - name: Check the built declarations
+        run: bun run check:dist-types
+
       # Every JSDoc example that follows the standard in CONTRIBUTING.md, compiled against the build
       - name: Compile the JSDoc examples
         run: bun run check:jsdoc-examples
