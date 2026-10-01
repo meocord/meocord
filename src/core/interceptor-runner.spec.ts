@@ -366,3 +366,142 @@ describe('interceptors shared across calls', () => {
     )
   })
 })
+
+const slow = () => new Promise(resolve => setTimeout(resolve, 20))
+
+// Each starts the rest of the call with next.handle() and returns before it ends
+@Interceptor()
+class DropsHandle implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    void next.handle()
+  }
+}
+
+@Interceptor()
+class ChainsHandle implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    void next.handle().then(() => log.push('then'))
+  }
+}
+
+@Interceptor()
+class FinallyHandle implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    void next.handle().finally(() => log.push('finally'))
+  }
+}
+
+@Interceptor()
+class CatchesHandle implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    void next.handle().catch((error: Error) => log.push(`caught ${error.message}`))
+  }
+}
+
+@Interceptor()
+class SwallowsHandle implements InterceptorInterface {
+  async intercept(_context: ExecutionContext, next: CallHandler) {
+    try {
+      await next.handle()
+    } catch (error) {
+      log.push(`swallowed ${(error as Error).message}`)
+    }
+  }
+}
+
+@Controller()
+class UnawaitedController {
+  @Command('drops', CommandType.SLASH)
+  @UseInterceptor(DropsHandle)
+  async drops() {
+    await slow()
+    throw new Error('database down')
+  }
+
+  @Command('dropsOk', CommandType.SLASH)
+  @UseInterceptor(DropsHandle)
+  async dropsOk() {
+    await slow()
+    log.push('handler done')
+  }
+
+  @Command('chains', CommandType.SLASH)
+  @UseInterceptor(ChainsHandle)
+  async chains() {
+    await slow()
+    throw new Error('database down')
+  }
+
+  @Command('finally', CommandType.SLASH)
+  @UseInterceptor(FinallyHandle)
+  async finally() {
+    await slow()
+    throw new Error('database down')
+  }
+
+  @Command('catches', CommandType.SLASH)
+  @UseInterceptor(CatchesHandle)
+  async catches() {
+    await slow()
+    throw new Error('database down')
+  }
+
+  @Command('swallows', CommandType.SLASH)
+  @UseInterceptor(SwallowsHandle)
+  async swallows() {
+    await slow()
+    throw new Error('database down')
+  }
+}
+
+describe('an interceptor that returns before the call it started ends', () => {
+  const module = () => MeoCordTestingModule.create({ controllers: [UnawaitedController] }).compile()
+  beforeEach(() => {
+    log.length = 0
+  })
+
+  it('leaves the call to end when the handler does', async () => {
+    const { ran } = await module().invoke(UnawaitedController, 'dropsOk', slash('dropsOk'))
+
+    expect(ran).toBe(true)
+    expect(log).toEqual(['handler done'])
+  })
+
+  it.each(['drops', 'chains', 'finally'] as const)(
+    'fails the call with what the handler throws when %s leaves it uncaught',
+    async name => {
+      await expect(module().invoke(UnawaitedController, name, slash(name))).rejects.toThrow('database down')
+      expect(log).toEqual({ drops: [], chains: [], finally: ['finally'] }[name])
+    },
+  )
+
+  it('leaves an error it catches, awaited or not, to it', async () => {
+    const results = [
+      await module().invoke(UnawaitedController, 'catches', slash('catches')),
+      await module().invoke(UnawaitedController, 'swallows', slash('swallows')),
+    ]
+
+    expect(results.map(({ ran }) => ran)).toEqual([true, true])
+    expect(log).toEqual(['caught database down', 'swallowed database down'])
+  })
+
+  it('reaches the fallback with an error it leaves uncaught at runtime, which answers the user', async () => {
+    const container = new Container()
+    container.bind(UnawaitedController).toSelf().inSingletonScope()
+    Reflect.defineMetadata(MetadataKey.Container, container, UnawaitedController)
+    prepareHandlerStages(container, [UnawaitedController])
+    const listeners = new Map<string, (...args: unknown[]) => Promise<void>>()
+    const client = {
+      on: vi.fn((event: string, handler: (...args: unknown[]) => Promise<void>) => listeners.set(event, handler)),
+      login: vi.fn().mockResolvedValue('token'),
+      user: { setActivity: vi.fn() },
+      application: null,
+    }
+    await new MeoCordApp([UnawaitedController], container, client as never, 'token').start()
+    const interaction = slash('drops')
+
+    await listeners.get('interactionCreate')?.(interaction)
+
+    expect(interaction.reply).toHaveBeenCalledOnce()
+  })
+})
