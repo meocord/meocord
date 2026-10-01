@@ -7,15 +7,18 @@ import { makeInitialCommit } from '@src/bin/helper/initial-commit.helper.js'
 const roots: string[] = []
 afterAll(() => roots.forEach(root => fs.rmSync(root, { recursive: true, force: true })))
 
+/** The variables git needs to start, on Windows too. */
+const RUNS_GIT = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC', 'TEMP', 'TMP', 'TMPDIR'])
+
 /** A directory of its own, with git configured only by `gitconfig`: no other user, system or ambient identity. */
 function sandbox(gitconfig: string) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-initial-commit-')))
   roots.push(root)
-  // The user's config is the sandbox's home's; without the GIT_* variables of the shell running the suite, some of
-  // which simple-git refuses
+  // The user's config is the sandbox's home's. Only what git needs to run passes from the suite's environment: the
+  // rest, such as the EDITOR npm exports or the shell's GIT_* variables, could configure git, and simple-git refuses it
   fs.writeFileSync(path.join(root, '.gitconfig'), gitconfig)
   const env: Record<string, string | undefined> = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_') && name !== 'EMAIL'),
+    Object.entries(process.env).filter(([name]) => RUNS_GIT.has(name.toUpperCase())),
   )
   Object.assign(env, { HOME: root, USERPROFILE: root, XDG_CONFIG_HOME: root, GIT_CONFIG_NOSYSTEM: '1' })
   const gitAt = (dir: string) => simpleGit(dir).env(env)
@@ -35,7 +38,8 @@ const IDENTITY = '[user]\n  name = Test\n  email = test@example.com\n[init]\n  d
 // As on a machine where git cannot guess an email, such as a fresh Linux container
 const NO_IDENTITY = '[user]\n  useConfigOnly = true\n[init]\n  defaultBranch = main\n'
 
-describe('makeInitialCommit', () => {
+// Each case runs git four to six times, and a loaded Windows runner has taken over 2 s for a case
+describe('makeInitialCommit', { timeout: 20_000 }, () => {
   it('commits every file the app keeps, its lockfile included, and nothing it ignores', async () => {
     const { root, gitAt, app } = sandbox(IDENTITY)
     const dir = app(path.join(root, 'bot'))
