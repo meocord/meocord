@@ -166,7 +166,7 @@ function eslintFailure(stderr: string): string | undefined {
 
 /**
  * The project's own ESLint, as the script its package names for `eslint`, run with this runtime rather than through
- * `node_modules/.bin`: a Windows `.cmd` shim can't be spawned without a shell, so it failed there with EINVAL.
+ * `node_modules/.bin`, whose Windows `.cmd` shim can't be spawned without a shell.
  */
 function localESLintScript(): string | undefined {
   const manifest = path.resolve(process.cwd(), 'node_modules', 'eslint', 'package.json')

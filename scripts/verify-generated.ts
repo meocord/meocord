@@ -390,7 +390,7 @@ function verifyCycleWarning(): void {
 
 /**
  * Plants an interceptor that calls `next.handle()` without awaiting or returning it, and checks the application's
- * lint fails it there, and only there: the handler's rejection would otherwise escape every filter.
+ * lint fails it there, and only there: the code after it would run before the handler, and its result reach nobody.
  */
 function verifyDroppedHandle(): void {
   const dir = path.join(appDir, 'src', 'interceptors', 'dropped')

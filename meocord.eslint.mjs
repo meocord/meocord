@@ -66,7 +66,8 @@ export const typescriptConfig = {
     '@typescript-eslint/ban-ts-comment': 'off',
     '@typescript-eslint/no-var-requires': 'warn',
     '@typescript-eslint/no-unused-expressions': 'off',
-    // A call whose promise nothing awaits, such as an interceptor's `next.handle()`, rejects outside every handler
+    // A promise nothing awaits, such as an unawaited respond().send() or database write, rejects where no filter sees it;
+    // an interceptor awaits or returns next.handle() so the code after it sees the handler's result
     '@typescript-eslint/no-floating-promises': 'error',
     '@typescript-eslint/no-unused-vars': [
       'error',
