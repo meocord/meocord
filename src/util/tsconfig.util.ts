@@ -1,5 +1,5 @@
 import path from 'path'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'fs'
 import { hostname, tmpdir } from 'os'
 import { createRequire } from 'module'
 import { parseJsonc } from '@src/util/json.util.js'
@@ -28,7 +28,20 @@ let copies = 0
 // A copies directory is named `meocord-tsconfig-<host>-<pid>-<random>`, for the process that made it. The host is
 // cut short, as a full domain name would take the name past what a file system allows.
 const COPIES_DIR = /^meocord-tsconfig-([^-]+)-(\d+)-/
-const thisHost = () => hostname().replace(/[^A-Za-z0-9.]/g, '_').slice(0, 64) || '_'
+
+/**
+ * Where a process id means this process's: the host name, and on Linux the PID namespace too, since two containers
+ * can share a host name and a temp directory while each numbers its processes on its own.
+ */
+function thisHost(): string {
+  const host = hostname().replace(/[^A-Za-z0-9.]/g, '_').slice(0, 64) || '_'
+  try {
+    const namespace = /\[(\d+)\]/.exec(readlinkSync('/proc/self/ns/pid'))?.[1]
+    return namespace ? `${host}_${namespace}` : host
+  } catch {
+    return host
+  }
+}
 
 // Only "no such process" is dead: a process another user owns refuses the signal with EPERM, and is alive
 function isRunning(pid: number): boolean {
@@ -131,7 +144,8 @@ export function prepareModifiedTsConfig(): string {
       parsedConfig.compilerOptions.typeRoots = parsedConfig.compilerOptions.typeRoots.map((p: string) => path.resolve(cwd, p))
     }
 
-    // A `paths` target is relative to baseUrl when there is one, made absolute above, and else to the project
+    // A `paths` target is relative to baseUrl when there is one, made absolute above, and else to the project. Only
+    // this file's own baseUrl counts: one inherited through `extends` isn't read.
     if (parsedConfig.compilerOptions.paths) {
       const base: string = parsedConfig.compilerOptions.baseUrl ?? cwd
       Object.keys(parsedConfig.compilerOptions.paths).forEach(alias => {
