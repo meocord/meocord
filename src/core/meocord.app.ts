@@ -355,6 +355,9 @@ export class MeoCordApp implements MeoCordApplication {
 
   /** Logs the bot in, setting the exit code when that fails and clearing it when a later attempt succeeds. */
   private async login(): Promise<void> {
+    // Checked here as well, after the last await before the login: from here to setting abortLogin runs in one turn,
+    // so a stop either comes before and ends the start, or comes after and ends the login
+    if (this.closing) throw stoppedBeforeOnline()
     const login = this.bot.login(this.discordToken)
     const stopped = new Promise<never>((_, reject) => {
       this.abortLogin = () => {
