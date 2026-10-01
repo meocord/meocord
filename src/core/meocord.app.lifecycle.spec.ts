@@ -998,5 +998,45 @@ describe('lifecycle hooks', () => {
 
       expect(events.slice(-2)).toEqual(['store answered', 'store shutdown'])
     })
+
+    // Under 'deny' the late answer's count is given back, and that release is a store call of its own
+    it('runs its onShutdown once a call it counted after the timeout has been given back', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const answer = Promise.withResolvers<void>()
+      class SlowStore extends loaded.MemoryCooldownStore implements OnShutdown {
+        onShutdown() {
+          events.push('store shutdown')
+        }
+        override async consumeMany(...args: Parameters<InstanceType<typeof loaded.MemoryCooldownStore>['consumeMany']>) {
+          await answer.promise
+          events.push('store answered')
+          const verdict = await super.consumeMany(...args)
+          const release = verdict.release!
+          return Object.defineProperty(verdict, 'release', {
+            value: async () => {
+              await new Promise(resolve => setTimeout(resolve, 20))
+              await release()
+              events.push('store released')
+            },
+          })
+        }
+      }
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events)],
+        cooldownStore: SlowStore,
+        cooldownStoreTimeoutMs: 20,
+      })
+      await becomeReady(client)
+      await call(client, slash(loaded))
+
+      const stopped = loaded.shutdownAndExit()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      answer.resolve()
+      await stopped
+
+      expect(events.slice(-3)).toEqual(['store answered', 'store released', 'store shutdown'])
+    })
   })
 })
