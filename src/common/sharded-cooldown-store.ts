@@ -6,6 +6,7 @@ import {
   CooldownStore,
   type CooldownVerdict,
   MemoryCooldownStore,
+  withRelease,
 } from '@src/common/cooldown-store.js'
 import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
 import { isShardProcess } from '@src/util/sharding-mode.util.js'
@@ -117,8 +118,10 @@ export class ShardedCooldownStore extends CooldownStore {
         clearTimeout(abandon)
         this.pending.delete(id)
       }
+      // The manager keeps a counted call's undo under its id, so this one sends the id back
+      const release = () => Promise.resolve(void channel.send({ meocord: 'cooldown-release', id }))
       this.pending.set(id, {
-        resolve: verdict => (settle(), resolve(verdict)),
+        resolve: verdict => (settle(), resolve(!peek && verdict.allowed ? withRelease(verdict, release) : verdict)),
         reject: error => (settle(), reject(error)),
       })
       try {
@@ -150,14 +153,40 @@ export function shardedCooldownStoreOn(channel: CooldownChannel | undefined): Sh
 }
 
 /**
+ * The undo of each call the manager counted, by the shard's id for it, until the shard can no longer ask: it gives
+ * up on an answer after {@link SHARDED_COOLDOWN_ABANDON_MS}, and asks for an undo as soon as it has one.
+ */
+const releases = new Map<string, { release: () => Promise<void>; at: number }>()
+
+/** Keeps a counted call's undo, dropping those too old to be asked for; the oldest come first. */
+function keepRelease(id: string, release: () => Promise<void>): void {
+  const now = Date.now()
+  for (const [kept, { at }] of releases) {
+    if (now - at < SHARDED_COOLDOWN_ABANDON_MS) break
+    releases.delete(kept)
+  }
+  releases.set(id, { release, at: now })
+}
+
+/**
  * Answers a shard's `cooldown` message from the manager's store, and ignores any other message.
  *
  * @returns Whether the message was a cooldown call.
  */
 export function answerCooldown(store: CooldownStore, message: unknown, reply: (message: ShardMessage) => unknown): boolean {
-  if (!isShardMessage(message) || message.meocord !== 'cooldown') return false
+  if (!isShardMessage(message)) return false
+  if (message.meocord === 'cooldown-release') {
+    const kept = releases.get(message.id)
+    releases.delete(message.id)
+    void kept?.release().catch(() => undefined)
+    return true
+  }
+  if (message.meocord !== 'cooldown') return false
   void (message.peek ? store.peekMany(message.entries) : store.consumeMany(message.entries)).then(
-    verdict => reply({ meocord: 'cooldown-verdict', id: message.id, verdict }),
+    verdict => {
+      if (verdict.release) keepRelease(message.id, verdict.release)
+      reply({ meocord: 'cooldown-verdict', id: message.id, verdict })
+    },
     error => reply({ meocord: 'cooldown-verdict', id: message.id, error: error instanceof Error ? error.message : String(error) }),
   )
   return true

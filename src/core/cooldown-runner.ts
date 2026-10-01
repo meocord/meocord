@@ -239,8 +239,9 @@ export function claimStoreDownNotice(container: Container, who: string): boolean
 /**
  * Asks the store once, for every entry, to count the call or with `peek` only to check it, and fails with
  * {@link CooldownStoreError} when it throws, rejects or does not answer within `timeoutMs`, counted from the
- * call, so a store still getting ready takes from it. An answer that comes later is dropped: nothing counts the
- * call a second time.
+ * call, so a store still getting ready takes from it. An answer that comes later is dropped, and a call it counted
+ * is released through the verdict's `release`, so a call treated as not counted costs no use. With `keepLate`, as
+ * for a call run uncounted, that late count is the call's own and stays.
  */
 async function askWithin(
   container: Container,
@@ -248,6 +249,7 @@ async function askWithin(
   entries: CooldownEntry[],
   timeoutMs: number,
   peek: boolean,
+  keepLate = false,
 ): Promise<CooldownBatchVerdict> {
   // A store given as a value, rather than a class extending CooldownStore, may have only consume()
   const ask = peek
@@ -266,6 +268,13 @@ async function askWithin(
   try {
     return await Promise.race([attempt, timeout])
   } catch (error) {
+    if (error instanceof CooldownStoreError && error.timedOut && !peek && !keepLate) {
+      // Under way from now, so the store does not shut down before the call it counted is given back
+      const release = attempt
+        .then(verdict => (verdict.allowed ? verdict.release?.() : undefined))
+        .catch((failure: unknown) => logger.debug(`Could not release a call the cooldown store counted too late: ${String(failure)}`))
+      trackStoreOperation(container, release)
+    }
     throw error instanceof CooldownStoreError ? error : new CooldownStoreError(error, false)
   } finally {
     clearTimeout(timer)
@@ -341,6 +350,8 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
       counted.map(({ key, windowMs, uses }) => ({ key, limit: { uses, windowMs } })),
       policy.timeoutMs,
       peek,
+      // A call run uncounted is counted by the late answer, rightly
+      policy.failure === 'allow',
     )
   } catch (error) {
     const failure = error as CooldownStoreError

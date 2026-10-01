@@ -109,7 +109,9 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  * @param options.cooldownStoreFailure - What a call with a cooldown gets when the store throws, rejects or
  *   does not answer in time: `'deny'`, the default, refuses it with `CooldownStoreError`, which the fallback
  *   answers privately; `'allow'` runs it uncounted. Either way the failure is logged once per outage, which ends
- *   when the store answers 30 seconds or more after its last failure.
+ *   when the store answers 30 seconds or more after its last failure. Under `'deny'`, a call the store counts after
+ *   the timeout is given back through its verdict's `release`, so the refused caller loses no use; under `'allow'`
+ *   that late count is the call's own.
  * @param options.cooldownStoreTimeoutMs - How long a call waits for the cooldown store before it counts as
  *   a failure, in milliseconds, at most `2147483647`. Defaults to `1000`.
  * @param options.i18n - The translator `createTranslator` made, injected as `Translator` wherever a class
