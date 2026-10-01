@@ -35,7 +35,7 @@ import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
-import { assertDistinctCommands } from '@src/core/command-conflicts.js'
+import { assertDistinctCommands, warnUnregisteredCommands } from '@src/core/command-conflicts.js'
 import { SHARD_CALL_KEY, type ShardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import {
   clientOptionsWithSharding,
@@ -167,6 +167,7 @@ export class MeoCordFactory {
 
     // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
     assertDistinctCommands(options.controllers)
+    warnUnregisteredCommands(options.controllers)
 
     // `meocord register` reads the commands from the controllers' prototypes and sends them over REST,
     // so nothing is bound or constructed, and nothing that needs the platform's native addons runs.
