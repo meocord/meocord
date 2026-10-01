@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { type Client } from 'discord.js'
+import { type Container } from 'inversify'
 import { Logger } from '@src/common/index.js'
 
 /** Where each shard's client keeps the function that runs a `ShardContext.call` in that shard. */
@@ -13,6 +15,32 @@ export type ShardCallHandler = (
   method: string,
   args: unknown[],
 ) => Promise<unknown>
+
+type ClassToken = abstract new (...args: any[]) => unknown
+
+/**
+ * Runs a {@link ShardContext.call} in this process, on a controller, a service or a class a provider stands in for: the
+ * class itself for a call made here, its name for one from another shard. `classes` is read on each call, so it can be
+ * filled after this is made. A name two of them share is refused, since another shard cannot say which it means.
+ */
+export function shardCallHandler(container: Container, classes: () => readonly ClassToken[], owner: string): ShardCallHandler {
+  return async (service, method, args) => {
+    const name = typeof service === 'function' ? service.name : service
+    const matching = [...new Set(classes())].filter(cls => (typeof service === 'function' ? cls === service : cls.name === service))
+    if (matching.length === 0) throw new Error(`${name} is not a controller, service or provided class of ${owner}.`)
+    if (matching.length > 1) {
+      throw new Error(`${name}: two classes of ${owner} have this name, so a call from another shard cannot say which. Give them distinct names.`)
+    }
+    const instance = container.get(matching[0]) as Record<string, (...args: unknown[]) => unknown>
+    if (typeof instance[method] !== 'function') throw new Error(`${name}.${method} is not a method.`)
+    return instance[method](...args)
+  }
+}
+
+/** A value as JSON carries it between processes: dates become strings, maps empty objects, `undefined` in a list `null`. */
+function asJson<T>(value: T): T {
+  return value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T)
+}
 
 /** How long `ShardContext.call` waits for a shard to answer. */
 export const SHARD_CALL_TIMEOUT_MS = 10_000
@@ -128,9 +156,9 @@ export class ShardContext {
    * collects one result per process.
    *
    * With process sharding that is one result per shard; with one process, a single result listing every
-   * shard. Only JSON crosses between processes, so the arguments and the result must be JSON. A process
-   * that throws, lacks the service, or does not answer within 10 seconds gives an error result instead
-   * of failing the others.
+   * shard. The arguments and the result pass as JSON in every mode, one process and tests included, so a
+   * `Date` arrives as a string and a `Map` as `{}` wherever it runs. A process that throws, lacks the
+   * service, or does not answer within 10 seconds gives an error result instead of failing the others.
    *
    * @param service - The service or controller class; each process resolves its own instance.
    * @param method - The method to call.
@@ -145,14 +173,17 @@ export class ShardContext {
     const shard = this.client?.shard
     if (!shard) {
       try {
-        const value = await withTimeout(this.runHere(service, method, args), SHARD_CALL_TIMEOUT_MS, service.name)
-        return [{ shardIds: this.ids, ok: true, value: value as MethodResult<T, M> }]
+        // As JSON, as between processes, so one process and a test see what a process-sharded bot does
+        const value = await withTimeout(this.runHere(service, method, asJson(args)), SHARD_CALL_TIMEOUT_MS, service.name)
+        return [{ shardIds: this.ids, ok: true, value: asJson(value) as MethodResult<T, M> }]
       } catch (error) {
         return [{ shardIds: this.ids, ok: false, error: describe(error) }]
       }
     }
 
-    const context = { service: service.name, method, args }
+    // discord.js matches a shard's answer to the script it sent, and shares one in flight among identical scripts, so
+    // the id gives each call a script of its own
+    const context = { id: randomUUID(), service: service.name, method, args }
     const ids = [...Array(shard.count).keys()]
     return Promise.all(
       ids.map(async id => {
