@@ -10,6 +10,8 @@ describe('SampleContextMenuController', () => {
 
     await module.invoke(SampleContextMenuController, 'handleContextMenu', interaction)
 
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+    const [answer] = getResponse(interaction).calls
+    expect(answer?.method).toBe('reply')
+    expect(answer?.payload).toMatchObject({ content: 'This is sample reply of context menu command.' })
   })
 })

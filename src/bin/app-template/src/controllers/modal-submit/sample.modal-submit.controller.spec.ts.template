@@ -10,6 +10,8 @@ describe('SampleModalSubmitController', () => {
 
     await module.invoke(SampleModalSubmitController, 'handleModal', interaction)
 
-    expect(getResponse(interaction)).toMatchObject({ state: 'replied', sent: true })
+    const { calls } = getResponse(interaction)
+    expect(calls.map(call => call.method)).toEqual(['deferReply', 'editReply'])
+    expect(calls.at(-1)?.payload).toMatchObject({ content: 'Modal submitted!' })
   })
 })

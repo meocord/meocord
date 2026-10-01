@@ -16,7 +16,9 @@ describe('SampleSlashController', () => {
 
     await module.invoke(SampleSlashController, 'handleSampleSlash', interaction)
 
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+    const [answer] = getResponse(interaction).calls
+    expect(answer?.method).toBe('reply')
+    expect(answer?.payload).toMatchObject({ content: 'This is sample reply of slash command.' })
   })
 
   it('defers privately, then edits the reply', async () => {
@@ -24,6 +26,8 @@ describe('SampleSlashController', () => {
 
     await module.invoke(SampleSlashController, 'handleSampleSlashTwo', interaction)
 
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['deferReply', 'editReply'])
+    const { calls } = getResponse(interaction)
+    expect(calls.map(call => call.method)).toEqual(['deferReply', 'editReply'])
+    expect(calls.at(-1)?.payload).toMatchObject({ content: 'This is a private reply, sent after a deferred start.' })
   })
 })

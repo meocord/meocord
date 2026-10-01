@@ -23,18 +23,18 @@ describe('SampleButtonController', () => {
 
     await module.invoke(SampleButtonController, 'handleButton', interaction)
 
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['deferUpdate', 'editReply', 'editReply'])
+    const { calls } = getResponse(interaction)
+    expect(calls.map(call => call.method)).toEqual(['deferUpdate', 'editReply', 'editReply'])
+    expect(calls.at(-1)?.payload).toMatchObject({ content: 'Button clicked!' })
   })
 
   it('answers the owner of the button', async () => {
-    // The customId's route gives the handler its ownerId
-    const { ran } = await module.invoke(
-      SampleButtonController,
-      'handleButtonWithId',
-      clickBy('owner', 'button-with/owner'),
-    )
+    const interaction = clickBy('owner', 'button-with/owner')
 
-    expect(ran).toBe(true)
+    // The customId's route gives the handler its ownerId
+    await module.invoke(SampleButtonController, 'handleButtonWithId', interaction)
+
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'Button of <@owner> clicked!' })
   })
 
   it('denies anyone else before touching the message', async () => {

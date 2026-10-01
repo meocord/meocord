@@ -5,11 +5,13 @@ import { {{className}}ContextMenuController } from './{{kebabCaseName}}.context-
 describe('{{className}}ContextMenuController', () => {
   const module = MeoCordTestingModule.create({ controllers: [{{className}}ContextMenuController] }).compile()
 
-  it('replies', async () => {
+  it('replies with its greeting', async () => {
     const interaction = createMockInteraction({{contextMenuInteraction}}, { commandName: '{{commandName}}' })
 
     await module.invoke({{className}}ContextMenuController, 'handle{{className}}', interaction)
 
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+    const [answer] = getResponse(interaction).calls
+    expect(answer?.method).toBe('reply')
+    expect(answer?.payload).toMatchObject({ content: 'Hello from {{commandName}}!' })
   })
 })
