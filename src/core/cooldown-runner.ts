@@ -19,7 +19,10 @@ export type CooldownKey = string | number
  * @see {@link Cooldown}
  */
 export interface CooldownOptions<P = Record<string, unknown>> {
-  /** The window's length, in seconds. */
+  /**
+   * The window's length, in seconds: from `0.001` (a millisecond) to `9007199254740`, counted in whole
+   * milliseconds, rounded. `@Cooldown` refuses anything else where it applies.
+   */
   seconds: number
   /**
    * Calls allowed within the window.
@@ -45,8 +48,8 @@ export interface CooldownOptions<P = Record<string, unknown>> {
   by?: (context: ExecutionContext, params: P) => CooldownKey | undefined | Promise<CooldownKey | undefined>
 }
 
-/** A `@Cooldown` as the decorator stores it, with its defaults filled in. */
-export type StoredCooldown = CooldownOptions<any> & { uses: number; per: CooldownScope }
+/** A `@Cooldown` as the decorator stores it, with its defaults filled in and its window in whole milliseconds. */
+export type StoredCooldown = CooldownOptions<any> & { uses: number; per: CooldownScope; windowMs: number }
 
 /** Private metadata: a controller's class-level `@Cooldown`s. */
 export const CLASS_COOLDOWNS = Symbol('class_cooldowns')
@@ -195,7 +198,7 @@ interface Peeked {
 /** Keyed by the call's context, which the peek and the consume of one call share. */
 const peeked = new WeakMap<HandlerExecutionContext, Peeked>()
 
-interface Counted { key: string; seconds: number; uses: number; per: CooldownScope }
+interface Counted { key: string; windowMs: number; uses: number; per: CooldownScope }
 
 /**
  * The cooldowns a call counts against, keyed. With `peek`, those with `by` are left out, since their key
@@ -217,7 +220,7 @@ async function keyed(
   if (peek) peeked.set(context, { bypassed, storeFailed: false })
 
   const counted: Counted[] = []
-  for (const [index, { seconds, uses, per, bypass, by }] of cooldowns.entries()) {
+  for (const [index, { windowMs, uses, per, bypass, by }] of cooldowns.entries()) {
     if (peek && by) continue
     if (earlier?.storeFailed && !by) continue
     if (bypass) {
@@ -228,7 +231,7 @@ async function keyed(
     const value = by ? await by(context, params) : undefined
     // Encoded, so a value holding a colon cannot count under another value's key
     const suffix = value === undefined ? '' : `:by:${encodeURIComponent(String(value))}`
-    counted.push({ key: `${controller.name}.${methodName}#${index}:${per}:${scopeId(per, first)}${suffix}`, seconds, uses, per })
+    counted.push({ key: `${controller.name}.${methodName}#${index}:${per}:${scopeId(per, first)}${suffix}`, windowMs, uses, per })
   }
   return counted
 }
@@ -244,7 +247,7 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
   try {
     verdict = await askWithin(
       store,
-      counted.map(({ key, seconds, uses }) => ({ key, limit: { uses, windowMs: seconds * 1000 } })),
+      counted.map(({ key, windowMs, uses }) => ({ key, limit: { uses, windowMs } })),
       policy.timeoutMs,
       peek,
     )

@@ -110,7 +110,7 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  *   does not answer in time: `'deny'`, the default, refuses it with `CooldownStoreError`, which the fallback
  *   answers privately; `'allow'` runs it uncounted. Either way the failure is logged once per outage.
  * @param options.cooldownStoreTimeoutMs - How long a call waits for the cooldown store before it counts as
- *   a failure. Defaults to `1000`.
+ *   a failure, in milliseconds, at most `2147483647`. Defaults to `1000`.
  * @param options.i18n - The translator `createTranslator` made, injected as `Translator` wherever a class
  *   asks for one.
  * @param options.presenter - The `ResponsePresenter` that styles loading and error views, resolved once
@@ -243,6 +243,9 @@ function assertThemeFor(
   }
 }
 
+/** The longest delay a timer keeps; a longer one fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1
+
 /** Refuses a cooldown policy the runner cannot follow, where the app is declared. */
 function assertCooldownPolicy(
   appName: string,
@@ -253,10 +256,11 @@ function assertCooldownPolicy(
   }
   if (
     cooldownStoreTimeoutMs !== undefined &&
-    !(typeof cooldownStoreTimeoutMs === 'number' && Number.isFinite(cooldownStoreTimeoutMs) && cooldownStoreTimeoutMs > 0)
+    !(typeof cooldownStoreTimeoutMs === 'number' && cooldownStoreTimeoutMs > 0 && cooldownStoreTimeoutMs <= MAX_TIMER_MS)
   ) {
     throw refuse(new TypeError(
-      `${appName}: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0 (got ${JSON.stringify(cooldownStoreTimeoutMs)}).`,
+      `${appName}: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0, at most ${MAX_TIMER_MS} ` +
+        `(got ${JSON.stringify(cooldownStoreTimeoutMs)}).`,
     ))
   }
 }

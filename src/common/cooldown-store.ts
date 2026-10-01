@@ -6,7 +6,7 @@
 export interface CooldownLimit {
   /** Calls allowed within the window. */
   uses: number
-  /** The window's length, in milliseconds. */
+  /** The window's length, in milliseconds: a whole number, at least `1`, as `@Cooldown` gives it. */
   windowMs: number
 }
 

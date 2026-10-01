@@ -199,8 +199,10 @@ describe('a store given as a value with only consume()', () => {
 describe('@MeoCord({ cooldownStoreFailure, cooldownStoreTimeoutMs })', () => {
   it.each([
     [{ cooldownStoreFailure: 'retry' }, "App: @MeoCord({ cooldownStoreFailure }) must be 'deny' or 'allow' (got \"retry\")"],
-    [{ cooldownStoreTimeoutMs: 0 }, 'App: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0 (got 0)'],
-    [{ cooldownStoreTimeoutMs: '1s' }, 'must be a number of milliseconds above 0 (got "1s")'],
+    [{ cooldownStoreTimeoutMs: 0 }, 'App: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0, at most 2147483647 (got 0)'],
+    [{ cooldownStoreTimeoutMs: '1s' }, 'must be a number of milliseconds above 0, at most 2147483647 (got "1s")'],
+    // The longest delay a timer keeps; a longer one fires at once, so every call would time out
+    [{ cooldownStoreTimeoutMs: 3_000_000_000 }, 'must be a number of milliseconds above 0, at most 2147483647 (got 3000000000)'],
   ])('refuses %j where the app is declared', (options, message) => {
     const declare = () => {
       @MeoCord({ controllers: [], clientOptions: { intents: [] }, ...(options as object) })
