@@ -696,7 +696,11 @@ describe('@MeoCord\'s theme options', () => {
     expect(declare({ themeCache: { ttl: 5 } })).toThrow("Checked: @MeoCord({ themeCache }) has no option 'ttl'")
     expect(declare({ themeForTimeoutMs: -1 })).toThrow('Checked: @MeoCord({ themeForTimeoutMs }) must be a number of milliseconds above 0')
     // Past setTimeout's limit, Node would wait 1 ms and time every lookup out at once
-    expect(declare({ themeForTimeoutMs: 3_000_000_000 })).toThrow('and at most 2147483647 (got 3000000000)')
+    expect(declare({ themeForTimeoutMs: 3_000_000_000 })).toThrow(', at most 2147483647 (got 3000000000)')
+    // Quoted as a number, as cooldownStoreTimeoutMs is, never as JSON's null
+    expect(declare({ themeForTimeoutMs: Infinity })).toThrow(
+      'Checked: @MeoCord({ themeForTimeoutMs }) must be a number of milliseconds above 0, at most 2147483647 (got Infinity).',
+    )
     expect(declare({ themeForTimeoutMs: 2_147_483_647 })).not.toThrow()
   })
 })

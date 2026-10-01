@@ -1,4 +1,5 @@
 import { type CommandRegistrationConfig, type MeoCordConfig, type ShardingConfig } from '@src/interface/index.js'
+import { timeoutProblem } from '@src/util/timer-limit.util.js'
 
 /** What is wrong with a configuration: errors stop the command, warnings are only reported. */
 export interface ConfigProblems {
@@ -98,11 +99,10 @@ function configShape(problems: ConfigProblems): Record<keyof MeoCordConfig, Chec
     optionalExternals: optional(stringList('package names')),
     rsbuild: optional(func),
     sourceMappedStacks: optional(boolean),
-    shutdownTimeout: optional((value, key) =>
-      typeof value === 'number' && Number.isFinite(value) && value >= 0
-        ? undefined
-        : `${key} must be a number of milliseconds, 0 or more (got ${describe(value)})`,
-    ),
+    shutdownTimeout: optional((value, key) => {
+      const problem = timeoutProblem(value, { allowZero: true })
+      return problem && `${key} ${problem}`
+    }),
     logLevel: optional(oneOf('debug', 'log', 'warn', 'error', 'silent')),
     commands: optional(objectOf(commandsShape, problems)),
     sharding: optional(objectOf(shardingShape, problems)),

@@ -1,14 +1,29 @@
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { type Client } from 'discord.js'
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
+import { storeOperationsSettled } from '@src/core/cooldown-runner.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 
 /** A unit whose `onReady` stage was reached, so its `onShutdown` runs when the app closes. */
 export interface LifecycleEntry {
   name: string
   instance: Partial<OnReady & OnShutdown>
-  /** The app's cooldown store, which shuts down after the last call. */
+  /** The unit's token, and the tokens it injects. */
+  token: unknown
+  dependencies: readonly unknown[]
+  /** The app's cooldown store, which shuts down, with what it injects, after the last call. */
   cooldownStore?: boolean
+}
+
+/** The entry of a unit whose instance is `instance`. */
+export function lifecycleEntry(unit: LifecycleUnit, instance: Partial<OnReady & OnShutdown>): LifecycleEntry {
+  return {
+    name: unit.name,
+    instance,
+    token: unit.token,
+    dependencies: unit.dependencies,
+    ...(unit.cooldownStore && { cooldownStore: true }),
+  }
 }
 
 /** What the ready hooks report as they run; the app logs each, a testing module collects the failures. */
@@ -71,7 +86,7 @@ export async function runReadyHooks(
       settled?.(unit)
       continue
     }
-    const entry: LifecycleEntry = { name: unit.name, instance, ...(unit.cooldownStore && { cooldownStore: true }) }
+    const entry = lifecycleEntry(unit, instance)
     // Only a unit whose onReady has settled, or that has none, is shut down: a stop mid-ready skips
     // the one still starting, and those not reached yet
     if (typeof instance.onReady !== 'function') {
@@ -109,4 +124,66 @@ export async function runShutdownHooks(entries: readonly LifecycleEntry[], hookF
       hookFailed(name, error)
     }
   }
+}
+
+/** How a shutdown sequence reaches the calls it outlasts and reports what happened; the bot and a testing module each give theirs. */
+export interface ShutdownSequence {
+  /** Lets no new call start, and settles once the calls under way have. */
+  drainCalls(): Promise<void>
+  /** How long the whole sequence is waited for. */
+  timeoutMs: number
+  /** A unit's `onShutdown` threw or rejected. */
+  hookFailed(name: string, error: unknown): void
+  /** The sequence is still running after `timeoutMs`; shutdown goes on without it. */
+  warn(message: string): void
+}
+
+/**
+ * Shuts the entries down, as a bot and a testing module both do. When the cooldown store, or anything it injects
+ * directly or through another, has an `onShutdown`, the calls under way finish first, then the store operations they
+ * started, so the store's last writes and releases still reach it. The other hooks then run in reverse dependency
+ * order, and the store and what it injects last. The whole sequence is waited for at most `timeoutMs`.
+ */
+export async function runShutdownSequence(
+  container: Container,
+  entries: readonly LifecycleEntry[],
+  { drainCalls, timeoutMs, hookFailed, warn }: ShutdownSequence,
+): Promise<void> {
+  const byToken = new Map(entries.map(entry => [entry.token, entry]))
+  // The store and everything it reaches through what it injects
+  const storeSide = new Set<LifecycleEntry>()
+  const reach = (entry: LifecycleEntry | undefined) => {
+    if (!entry || storeSide.has(entry)) return
+    storeSide.add(entry)
+    for (const dependency of entry.dependencies) reach(byToken.get(dependency))
+  }
+  for (const entry of entries) if (entry.cooldownStore) reach(entry)
+  const needsStore = [...storeSide].some(entry => typeof entry.instance.onShutdown === 'function')
+
+  const sequence = (async () => {
+    if (needsStore) {
+      await drainCalls()
+      await storeOperationsSettled(container)
+    }
+    // Nothing on the store's side injects anything outside it, so running it last keeps the reverse dependency order
+    await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), hookFailed)
+    await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), hookFailed)
+  })()
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<'timeout'>(resolve => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs)
+  })
+  try {
+    if ((await Promise.race([sequence, timedOut])) === 'timeout') {
+      warn(`onShutdown hooks did not finish within ${timeoutMs} ms; shutting down anyway.`)
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Settles once every promise in `calls` has, those added while waiting included. */
+export async function callsSettled(calls: ReadonlySet<Promise<unknown>>): Promise<void> {
+  while (calls.size > 0) await Promise.allSettled([...calls])
 }

@@ -8,5 +8,7 @@ The order suits a store that connects:
 
 - Its `onReady` runs before the services'. A call that comes while it runs waits for it, within `cooldownStoreTimeoutMs`. One that would wait longer meets your `cooldownStoreFailure` policy, as a store that doesn't answer does.
 - Its `onShutdown` runs after the services'. The bot first stops taking new calls and lets the ones under way finish, along with every store operation they started, even an answer that came after its call stopped waiting. So the store closes after the last write it is asked for.
+- What the store injects, such as the queries it runs, is ready before it and shuts down after it, so it is there for the store's last write.
+- A store with no `onShutdown`, and nothing it injects with one, doesn't hold shutdown up: the bot waits for the calls under way only when a hook needs the store.
 
 `MeoCordTestingModule` runs the store's hooks in the same order, in `init({ ready: true })` and `close()`, for the app's store or the `CooldownStore` a test provides in its place.

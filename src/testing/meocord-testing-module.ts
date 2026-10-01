@@ -6,7 +6,6 @@ import {
   COOLDOWN_POLICY,
   cooldownPolicyFrom,
   type CooldownStoreFailure,
-  storeOperationsSettled,
 } from '@src/core/cooldown-runner.js'
 import {
   BaseInteraction,
@@ -60,12 +59,13 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
-import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
+import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { createMockClient } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
+import { timeoutProblem } from '@src/util/timer-limit.util.js'
 import {
   assertProvided,
   assertTypedParameters,
@@ -110,9 +110,9 @@ export interface TestingModuleOptions {
   observers?: (new (...args: any[]) => DispatchObserver)[]
 
   /**
-   * How long `close()` waits, in milliseconds, for the `onShutdown` hooks and the cooldown store's operations under
-   * way, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown. Defaults to 10000. A test whose fake
-   * store never answers, or whose `onShutdown` never settles, sets it short.
+   * How long `close()` waits, in milliseconds, for the calls under way, the cooldown store's operations and the
+   * `onShutdown` hooks, as `shutdownTimeout` in `meocord.config.ts` bounds the bot's shutdown: from 0 to 2147483647,
+   * and 10000 unless set. A test whose fake store never answers, or whose `onShutdown` never settles, sets it short.
    */
   shutdownTimeout?: number
 }
@@ -350,9 +350,10 @@ export class TestingModule {
    * It first gives up the theme read outside calls, if `init({ ready: true })` made it this module's;
    * reads outside calls then return MeoCord's defaults until another module or app is ready.
    *
-   * The cooldown store shuts down last, as the bot's does: after every other hook, and once the store operations its
-   * calls started have settled. As the bot does, it stops waiting for the whole sequence after the module's
-   * `shutdownTimeout`, 10 seconds unless set, and logs that it did. Give a test whose fake store never answers, or
+   * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
+   * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
+   * they started, so the store's last writes still reach it. The module stops waiting for the whole sequence after
+   * its `shutdownTimeout`, 10 seconds unless set, and logs that it did. Give a test whose fake store never answers, or
    * whose `onShutdown` never settles, a short `shutdownTimeout`.
    *
    * @returns Once every hook has run. Rejects with the error of a hook that failed, or an
@@ -378,44 +379,17 @@ export class TestingModule {
       const entries: LifecycleEntry[] = this.lifecycle
         .filter(unit => this.constructed.has(unit.token))
         // Already made, so this returns the instance; a provided value may be anything, null included
-        .map(unit => ({
-          name: unit.name,
-          instance: (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {},
-          cooldownStore: unit.cooldownStore,
-        }))
+        .map(unit => lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}))
       const failures: { name: string; error: unknown }[] = []
-      const failed = (name: string, error: unknown) => failures.push({ name, error })
-      // As the bot does: the store shuts down last, once the store operations its calls started have settled, and the
-      // whole sequence stops being waited for after shutdownTimeout
-      await this.withinShutdownTimeout(async () => {
-        await runShutdownHooks(
-          entries.filter(entry => !entry.cooldownStore),
-          failed,
-        )
-        await storeOperationsSettled(this.container)
-        await runShutdownHooks(
-          entries.filter(entry => entry.cooldownStore),
-          failed,
-        )
+      await runShutdownSequence(this.container, entries, {
+        drainCalls: () => callsSettled(this.calls),
+        timeoutMs: this.shutdownTimeout,
+        hookFailed: (name, error) => failures.push({ name, error }),
+        warn: message => new Logger('TestingModule').warn(message),
       })
       throwFailures('onShutdown', failures)
     })()
     await this.closing
-  }
-
-  /** Waits for `hooks` up to `shutdownTimeout`, as the bot does, and says so when they are still running then. */
-  private async withinShutdownTimeout(hooks: () => Promise<void>): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timedOut = new Promise<'timeout'>(resolve => {
-      timer = setTimeout(() => resolve('timeout'), this.shutdownTimeout)
-    })
-    try {
-      if ((await Promise.race([hooks(), timedOut])) === 'timeout') {
-        new Logger('TestingModule').warn(`onShutdown hooks did not finish within ${this.shutdownTimeout} ms; shutting down anyway.`)
-      }
-    } finally {
-      clearTimeout(timer)
-    }
   }
 
   private async runReady(client: Client<true>, primary: boolean): Promise<void> {
@@ -564,8 +538,21 @@ export class TestingModule {
     const client = first instanceof BaseInteraction || first instanceof Message ? first.client : undefined
     if (presenter && client) setPresenter(client, presenter)
     this.registerClient(first)
-    const { ran, error } = await runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks })
+    const { ran, error } = await this.track(runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
+  }
+
+  /** The calls under way, each removed once it settles: what `close()` lets finish before the cooldown store stops. */
+  private readonly calls = new Set<Promise<unknown>>()
+
+  /** Counts `call` as under way until it settles. */
+  private track<T>(call: Promise<T>): Promise<T> {
+    this.calls.add(call)
+    void call.then(
+      () => this.calls.delete(call),
+      () => this.calls.delete(call),
+    )
+    return call
   }
 
   /**
@@ -664,15 +651,15 @@ export class TestingModule {
     }
 
     if (options) {
-      await dispatcher.reaction(input as MessageReaction, { user: options.user, action: options.action ?? ReactionHandlerAction.ADD }, record)
+      await this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action: options.action ?? ReactionHandlerAction.ADD }, record))
     } else if (input instanceof BaseInteraction) {
       const presenter = appPresenterOf(this.container)
       if (presenter) setPresenter(input.client, presenter)
-      await dispatcher.interaction(input as Interaction, record)
+      await this.track(dispatcher.interaction(input as Interaction, record))
     } else if (input instanceof Message) {
       const presenter = appPresenterOf(this.container)
       if (presenter) setPresenter(input.client, presenter)
-      await dispatcher.message(input, record)
+      await this.track(dispatcher.message(input, record))
     } else {
       throw new TypeError('dispatch takes an interaction, a message, or a reaction with { user }.')
     }
@@ -723,7 +710,7 @@ export class TestingModule {
           const { ran } = await runHandler(this.container, instance, handler.method, args, { type: 'event', awaitObservers: true })
           return ran
         }
-        calls.push(run())
+        calls.push(this.track(run()))
       }
     }
 
@@ -946,6 +933,9 @@ export class TestingModuleBuilder {
    * @returns The compiled module.
    */
   compile(): TestingModule {
+    // The bound the bot's config gives it, with the same words
+    const shutdownTimeout = this.options.shutdownTimeout === undefined ? undefined : timeoutProblem(this.options.shutdownTimeout, { allowZero: true })
+    if (shutdownTimeout) throw new TypeError(`shutdownTimeout ${shutdownTimeout}.`)
     const container = new Container()
     const stages = this.globalStages()
     if (stages) bindGlobalStages(container, stages)
@@ -1111,10 +1101,7 @@ export class TestingModuleBuilder {
       constructed,
       warnUnanswered,
       services,
-      // As the app takes its config's: a number of milliseconds, zero or more
-      typeof this.options.shutdownTimeout === 'number' && this.options.shutdownTimeout >= 0
-        ? this.options.shutdownTimeout
-        : DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     )
   }
 }

@@ -13,6 +13,7 @@ import { assertObservers } from '@src/core/observer-runner.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { timeoutProblem } from '@src/util/timer-limit.util.js'
 
 /** Refuses a `messages` option of the wrong type where the app is declared, rather than at the first message. */
 function assertMessageOptions(appName: string, messages: MessageCommandOptions | undefined, i18n: Translator<any> | undefined): void {
@@ -125,9 +126,6 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
   }
 }
 
-/** The longest delay setTimeout takes: 2^31 - 1 ms, about 24.8 days. */
-const MAX_TIMEOUT_MS = 2_147_483_647
-
 /** Refuses theme resolvers and cache options the runtime cannot follow, where the app is declared. */
 function assertThemeFor(
   appName: string,
@@ -158,19 +156,10 @@ function assertThemeFor(
       }
     }
   }
-  // Above setTimeout's limit, Node waits 1 ms instead, so every lookup would time out at once
-  if (
-    themeForTimeoutMs !== undefined &&
-    !(typeof themeForTimeoutMs === 'number' && Number.isFinite(themeForTimeoutMs) && themeForTimeoutMs > 0 && themeForTimeoutMs <= MAX_TIMEOUT_MS)
-  ) {
-    throw refuse(new TypeError(
-      `${appName}: @MeoCord({ themeForTimeoutMs }) must be a number of milliseconds above 0 and at most ${MAX_TIMEOUT_MS} (got ${JSON.stringify(themeForTimeoutMs)}).`,
-    ))
-  }
+  // Above a timer's limit, Node waits 1 ms instead, so every lookup would time out at once
+  const timeout = themeForTimeoutMs === undefined ? undefined : timeoutProblem(themeForTimeoutMs)
+  if (timeout) throw refuse(new TypeError(`${appName}: @MeoCord({ themeForTimeoutMs }) ${timeout}.`))
 }
-
-/** The longest delay a timer keeps; a longer one fires at once. */
-const MAX_TIMER_MS = 2 ** 31 - 1
 
 /** Refuses a cooldown policy the runner cannot follow, where the app is declared. */
 function assertCooldownPolicy(
@@ -180,13 +169,6 @@ function assertCooldownPolicy(
   if (cooldownStoreFailure !== undefined && cooldownStoreFailure !== 'deny' && cooldownStoreFailure !== 'allow') {
     throw refuse(new TypeError(`${appName}: @MeoCord({ cooldownStoreFailure }) must be 'deny' or 'allow' (got ${JSON.stringify(cooldownStoreFailure)}).`))
   }
-  if (
-    cooldownStoreTimeoutMs !== undefined &&
-    !(typeof cooldownStoreTimeoutMs === 'number' && cooldownStoreTimeoutMs > 0 && cooldownStoreTimeoutMs <= MAX_TIMER_MS)
-  ) {
-    throw refuse(new TypeError(
-      `${appName}: @MeoCord({ cooldownStoreTimeoutMs }) must be a number of milliseconds above 0, at most ${MAX_TIMER_MS} ` +
-        `(got ${typeof cooldownStoreTimeoutMs === 'number' ? cooldownStoreTimeoutMs : JSON.stringify(cooldownStoreTimeoutMs)}).`,
-    ))
-  }
+  const timeout = cooldownStoreTimeoutMs === undefined ? undefined : timeoutProblem(cooldownStoreTimeoutMs)
+  if (timeout) throw refuse(new TypeError(`${appName}: @MeoCord({ cooldownStoreTimeoutMs }) ${timeout}.`))
 }

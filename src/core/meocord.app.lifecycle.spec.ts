@@ -1001,6 +1001,72 @@ describe('lifecycle hooks', () => {
       expect(events.slice(-2)).toEqual(['call done', 'store shutdown'])
     })
 
+    // What the store injects is the store's to use until it stops, so it shuts down after the store and the last call
+    it('runs the onShutdown of what it injects after its own, once the calls under way have finished', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const finish = Promise.withResolvers<void>()
+      const running = Promise.withResolvers<void>()
+
+      @loaded.Service()
+      class Queries implements OnShutdown {
+        onShutdown() {
+          events.push('queries shutdown')
+        }
+      }
+      class QueryStore extends loaded.MemoryCooldownStore implements OnShutdown {
+        constructor(@loaded.inject(Queries) readonly queries: Queries) {
+          super()
+        }
+        onShutdown() {
+          events.push('store shutdown')
+        }
+      }
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events, finish.promise, running)],
+        cooldownStore: QueryStore,
+      })
+      await becomeReady(client)
+      const handled = call(client, slash(loaded))
+      await running.promise
+
+      const stopped = loaded.shutdownAndExit()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).toEqual(['call runs'])
+
+      finish.resolve()
+      await Promise.all([handled, stopped])
+
+      expect(events).toEqual(['call runs', 'call done', 'store shutdown', 'queries shutdown'])
+    })
+
+    // With no hook on the store's side there is nothing for a lingering call to protect
+    it('does not wait for a call under way when neither it nor what it injects has an onShutdown', async () => {
+      config.shutdownTimeout = 5_000
+      const loaded = await load()
+      const events: string[] = []
+      const finish = Promise.withResolvers<void>()
+      const running = Promise.withResolvers<void>()
+      class PlainStore extends loaded.MemoryCooldownStore {}
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events, finish.promise, running)],
+        cooldownStore: PlainStore,
+      })
+      await becomeReady(client)
+      const handled = call(client, slash(loaded))
+      await running.promise
+
+      const stopped = loaded.shutdownAndExit().then(() => 'stopped')
+      const first = await Promise.race([stopped, new Promise(resolve => setTimeout(resolve, 200, 'still waiting'))])
+
+      expect(first).toBe('stopped')
+      expect(logged.warn.flat().join(' ')).not.toContain('did not finish')
+      finish.resolve()
+      await handled
+    })
+
     // An answer that comes after its call stopped waiting still writes to the store, so the store closes after it
     it('runs its onShutdown once a store answer its call stopped waiting for has come', async () => {
       const loaded = await load()

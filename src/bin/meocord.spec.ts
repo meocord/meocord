@@ -603,6 +603,14 @@ describe('spawning the application', () => {
         expect(warned()).toContainEqual(expect.stringContaining('its shutdownTimeout of 3000 ms'))
       })
 
+      // The grace period on top would pass a timer's limit, and Node fires such a timer at once
+      it('waits as long as a timer keeps when the shutdownTimeout is the longest allowed', () => {
+        const { first } = restartOnce(2_147_483_647)
+
+        vi.advanceTimersByTime(60_000)
+        expect(first.kill).not.toHaveBeenCalledWith('SIGKILL')
+      })
+
       it('waits the default shutdownTimeout when none is configured', () => {
         const { first } = restartOnce()
 

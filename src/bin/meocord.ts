@@ -21,6 +21,7 @@ import { resolveOwnVersion } from '@src/util/package-version.util.js'
 import { buildAppCommand, resolveRuntime } from '@src/util/runtime.util.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
+import { MAX_TIMER_MS } from '@src/util/timer-limit.util.js'
 import { DEV_RUNNER_ENV, type DevRunnerCommand, isDevRunnerMessage } from '@src/util/dev-runner.util.js'
 import packageJson from '../../package.json' with { type: 'json' }
 import { fileURLToPath } from 'url'
@@ -702,14 +703,16 @@ copies or substantial portions of the Software.
    */
   private stopApp(app: ChildProcess, then: string, exited: () => void): void {
     const shutdownTimeout = this.runConfig()?.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
+    // Within what a timer keeps, so a shutdownTimeout near the limit does not kill the application at once
+    const wait = Math.min(shutdownTimeout + FORCE_STOP_GRACE_MS, MAX_TIMER_MS)
     const overdue = setTimeout(() => {
       if (!stillRunning(app)) return
       this.logger.warn(
-        `The application did not exit within ${shutdownTimeout + FORCE_STOP_GRACE_MS} ms of being asked to stop, ` +
-          `its shutdownTimeout of ${shutdownTimeout} ms and ${FORCE_STOP_GRACE_MS} ms more; killing it ${then}.`,
+        `The application did not exit within ${wait} ms of being asked to stop, ` +
+          `its shutdownTimeout of ${shutdownTimeout} ms and ${wait - shutdownTimeout} ms more; killing it ${then}.`,
       )
       app.kill('SIGKILL')
-    }, shutdownTimeout + FORCE_STOP_GRACE_MS)
+    }, wait)
     overdue.unref()
     app.once('exit', () => {
       clearTimeout(overdue)

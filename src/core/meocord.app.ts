@@ -34,8 +34,8 @@ import {
   type RequiringHandler,
 } from '@src/core/event-requirements.js'
 import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
-import { storeOperationsSettled, waitForCooldownStore } from '@src/core/cooldown-runner.js'
-import { type LifecycleEntry, runReadyHooks, runShutdownHooks } from '@src/core/lifecycle-hooks.js'
+import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
+import { callsSettled, type LifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
@@ -626,39 +626,18 @@ export class MeoCordApp implements MeoCordApplication {
     this.storeReady?.resolve()
   }
 
-  /**
-   * Runs the `onShutdown` hooks one at a time in reverse dependency order, each isolated, the cooldown store's
-   * last, once no call is left that may ask it, and stops waiting once the whole sequence has run for the
-   * configured `shutdownTimeout`.
-   */
+  /** Runs the `onShutdown` hooks through the shutdown sequence, within the configured `shutdownTimeout`. */
   private async runShutdownHooks(entries: LifecycleEntry[]): Promise<void> {
-    const failed = (name: string, error: unknown) => this.logger.error(`onShutdown failed in ${name}:`, error)
-    const hooks = (async () => {
-      await runShutdownHooks(
-        entries.filter(entry => !entry.cooldownStore),
-        failed,
-      )
-      const store = entries.filter(entry => entry.cooldownStore)
-      if (store.length === 0) return
-      // The store shuts down after the last call that may ask it: no new one starts, those under way finish, and so do
-      // the store operations they started, an answer that came after a call stopped waiting included
-      this.bot.removeAllListeners()
-      await Promise.all(this.calls)
-      await storeOperationsSettled(this.container)
-      await runShutdownHooks(store, failed)
-    })()
-
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timedOut = new Promise<'timeout'>(resolve => {
-      timer = setTimeout(() => resolve('timeout'), this.shutdownTimeout)
+    await runShutdownSequence(this.container, entries, {
+      // No new call starts once the listeners are gone
+      drainCalls: () => {
+        this.bot.removeAllListeners()
+        return callsSettled(this.calls)
+      },
+      timeoutMs: this.shutdownTimeout,
+      hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
+      warn: message => this.logger.warn(message),
     })
-    try {
-      if ((await Promise.race([hooks, timedOut])) === 'timeout') {
-        this.logger.warn(`onShutdown hooks did not finish within ${this.shutdownTimeout} ms; shutting down anyway.`)
-      }
-    } finally {
-      clearTimeout(timer)
-    }
   }
 
   /**

@@ -7,6 +7,7 @@ import { answerCooldown } from '@src/common/sharded-cooldown-store.js'
 import { registerCommands, type RegistrationRest } from '@src/core/command-registration.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
+import { MAX_TIMER_MS } from '@src/util/timer-limit.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { bundleEntry } from '@src/util/bundle-entry.util.js'
 import { FORCE_REGISTER_ENV } from '@src/util/registration-mode.util.js'
@@ -271,7 +272,8 @@ export class ShardManager implements MeoCordApplication {
       })
     }
 
-    const wait = (this.options.config.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS) + SHUTDOWN_MARGIN_MS
+    // Within what a timer keeps, so a shutdownTimeout near the limit does not fire this at once
+    const wait = Math.min((this.options.config.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS) + SHUTDOWN_MARGIN_MS, MAX_TIMER_MS)
     let timer: ReturnType<typeof setTimeout> | undefined
     const timedOut = new Promise<'timeout'>(resolve => {
       timer = setTimeout(() => resolve('timeout'), wait)

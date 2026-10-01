@@ -39,7 +39,7 @@ describe('configProblems', () => {
       "commands.guilds must be an array of guild ids (got 'one')",
       "commands.register must be true or false (got 'yes')",
       "optionalExternals must be an array of package names (got 'sharp')",
-      'shutdownTimeout must be a number of milliseconds, 0 or more (got -1)',
+      'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got -1)',
       'rsbuild must be a function (got object)',
     ])
   })
@@ -47,8 +47,19 @@ describe('configProblems', () => {
   it('shows the number it got, so a shard count or timeout that is out of range says which', () => {
     expect(configProblems({ sharding: { shards: 2.5 }, shutdownTimeout: Number.NaN }).errors).toEqual([
       "sharding.shards must be 'auto' or a whole number of shards, 1 or more (got 2.5)",
-      'shutdownTimeout must be a number of milliseconds, 0 or more (got NaN)',
+      'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got NaN)',
     ])
+  })
+
+  // Node fires a longer timer at once, so shutdown would give up on the hooks immediately
+  it.each([2_147_483_648, Infinity])('refuses a shutdownTimeout a timer cannot keep (%s)', shutdownTimeout => {
+    expect(configProblems({ shutdownTimeout }).errors).toEqual([
+      `shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got ${shutdownTimeout})`,
+    ])
+  })
+
+  it.each([0, 2_147_483_647])('takes a shutdownTimeout of %s', shutdownTimeout => {
+    expect(configProblems({ discordToken: 't', shutdownTimeout }).errors).toEqual([])
   })
 
   // `[process.env.GUILD_ID]` with the variable unset; registration drops the blank ids and warns
