@@ -1009,13 +1009,20 @@ export class TestingModuleBuilder {
     const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
     assertObservers("the testing module's observers", observers)
     bindObservers(container, observers)
-    // The order the app runs lifecycle hooks in: providers, then controllers, then observers, each after what it injects
+    // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
+    // after what it injects
     const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
+      ...(store ? [store] : []),
       ...providers.keys(),
       ...services,
       ...(this.options.controllers ?? []),
       ...observers,
-    ]).map(token => ({ token, name: tokenName(token), dependencies: tokenDependencies(container, providers, token) }))
+    ]).map(token => ({
+      token,
+      name: tokenName(token),
+      dependencies: tokenDependencies(container, providers, token),
+      ...(token === store && { cooldownStore: true }),
+    }))
     // Recorded as the container makes each one, so close() shuts down exactly what exists
     const constructed = new Set<unknown>()
     for (const { token } of lifecycle) {

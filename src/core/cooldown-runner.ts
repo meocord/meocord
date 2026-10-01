@@ -163,17 +163,36 @@ function reportRecovery(store: CooldownStore): void {
   logger.log(`The cooldown store ${store.constructor.name} answers again, after ${outage.failures} failed call(s) over ${seconds}s.`)
 }
 
+/** What a container's calls wait for before asking its store: the store's own `onReady`, which may connect it. */
+const storesReady = new WeakMap<Container, Promise<void>>()
+
+/**
+ * Has the calls of `container` wait until `ready` settles before asking the store, within the store's timeout: a call
+ * that comes while the store's `onReady` still runs is counted once it is ready, or meets the store-failure policy
+ * when that takes longer than the timeout.
+ */
+export function waitForCooldownStore(container: Container, ready: Promise<void>): void {
+  storesReady.set(container, ready)
+}
+
 /**
  * Asks the store once, for every entry, to count the call or with `peek` only to check it, and fails with
- * {@link CooldownStoreError} when it throws, rejects or does not answer within `timeoutMs`. An answer that
- * comes later is dropped: nothing counts the call a second time.
+ * {@link CooldownStoreError} when it throws, rejects or does not answer within `timeoutMs`, counted from the
+ * call, so a store still getting ready takes from it. An answer that comes later is dropped: nothing counts the
+ * call a second time.
  */
-async function askWithin(store: CooldownStore, entries: CooldownEntry[], timeoutMs: number, peek: boolean): Promise<CooldownBatchVerdict> {
+async function askWithin(
+  container: Container,
+  store: CooldownStore,
+  entries: CooldownEntry[],
+  timeoutMs: number,
+  peek: boolean,
+): Promise<CooldownBatchVerdict> {
   // A store given as a value, rather than a class extending CooldownStore, may have only consume()
   const ask = peek
     ? typeof store.peekMany === 'function' ? store.peekMany : CooldownStore.prototype.peekMany
     : typeof store.consumeMany === 'function' ? store.consumeMany : CooldownStore.prototype.consumeMany
-  const attempt = Promise.resolve().then(() => ask.call(store, entries))
+  const attempt = (storesReady.get(container) ?? Promise.resolve()).then(() => ask.call(store, entries))
   // A rejection after the timeout has nobody left to hear it
   attempt.catch(() => undefined)
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -253,6 +272,7 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
   let verdict: CooldownBatchVerdict
   try {
     verdict = await askWithin(
+      container,
       store,
       counted.map(({ key, windowMs, uses }) => ({ key, limit: { uses, windowMs } })),
       policy.timeoutMs,
@@ -293,7 +313,7 @@ export async function claimCooldownNotice(container: Container, refusal: Cooldow
   const endsAt = Math.floor((Date.now() + refusal.retryAfterMs) / NOTICE_BUCKET_MS)
   const notices = [endsAt, endsAt - 1].map(bucket => ({ key: `${refused.key}:notice:${bucket}`, limit }))
   try {
-    return (await askWithin(cooldownStoreOf(container), notices, cooldownPolicyOf(container).timeoutMs, false)).allowed
+    return (await askWithin(container, cooldownStoreOf(container), notices, cooldownPolicyOf(container).timeoutMs, false)).allowed
   } catch (error) {
     logger.debug(`Could not ask the cooldown store whether to tell a refused caller: ${String((error as Error).cause ?? error)}`)
     return false

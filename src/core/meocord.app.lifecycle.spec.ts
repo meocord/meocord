@@ -43,13 +43,16 @@ async function load() {
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
   const decorators: typeof DecoratorModule = await import('@src/decorator/index.js')
   const { inject } = await import('inversify')
-  return { discord, inject, ...app, ...factory, ...decorators }
+  const { CooldownStore, MemoryCooldownStore } = await import('@src/common/index.js')
+  const { CommandType } = await import('@src/enum/index.js')
+  const { createMockInteraction } = await import('@src/testing/index.js')
+  return { discord, inject, CooldownStore, MemoryCooldownStore, CommandType, createMockInteraction, ...app, ...factory, ...decorators }
 }
 
 type Loaded = Awaited<ReturnType<typeof load>>
 
 /** Starts an app built by the factory, with a client that logs in without a network. */
-async function startApp(loaded: Loaded, options: { controllers: any[]; services?: any[] }) {
+async function startApp(loaded: Loaded, options: { controllers: any[]; services?: any[]; cooldownStore?: any }) {
   const clients: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
     clients.push(this)
@@ -57,7 +60,12 @@ async function startApp(loaded: Loaded, options: { controllers: any[]; services?
   })
   vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
 
-  @loaded.MeoCord({ controllers: options.controllers, services: options.services, clientOptions: { intents: [] } })
+  @loaded.MeoCord({
+    controllers: options.controllers,
+    services: options.services,
+    cooldownStore: options.cooldownStore,
+    clientOptions: { intents: [] },
+  })
   class App {}
 
   const app = loaded.MeoCordFactory.create(App)
@@ -846,5 +854,111 @@ describe('lifecycle hooks', () => {
 
     expect(process.listenerCount('SIGINT')).toBe(before + 1)
     expect(process.listenerCount('SIGTERM')).toBe(signalListeners.SIGTERM.length + 1)
+  })
+
+  // MeoCord asks the store on every call with a cooldown, so it opens before the first and closes after the last
+  describe('of a cooldownStore class', () => {
+    /** A store that records its hooks and calls in `events`, whose onReady waits for `connect`. */
+    function storeWith(loaded: Loaded, events: string[], connect: Promise<void> = Promise.resolve()) {
+      return class AppStore extends loaded.MemoryCooldownStore implements OnReady, OnShutdown {
+        async onReady() {
+          events.push('store ready begins')
+          await connect
+          events.push('store ready')
+        }
+        onShutdown() {
+          events.push('store shutdown')
+        }
+        override consumeMany(...args: Parameters<InstanceType<typeof loaded.MemoryCooldownStore>['consumeMany']>) {
+          events.push('store asked')
+          return super.consumeMany(...args)
+        }
+      }
+    }
+
+    /** A controller whose slash command counts a cooldown, and waits for `finish` once it runs. */
+    function dailyController(loaded: Loaded, events: string[], finish: Promise<void> = Promise.resolve()) {
+      @loaded.Controller()
+      class Daily {
+        @loaded.Command('daily', loaded.CommandType.SLASH)
+        @loaded.Cooldown({ seconds: 60 })
+        async claim() {
+          events.push('call runs')
+          await finish
+          events.push('call done')
+        }
+      }
+      return Daily
+    }
+
+    const slash = (loaded: Loaded) => loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'daily' })
+    const call = (client: Client, interaction: unknown) =>
+      Promise.all(client.listeners('interactionCreate').map(listener => listener(interaction)))
+
+    it('runs its onReady before the services and its onShutdown after them', async () => {
+      const loaded = await load()
+      const events: string[] = []
+
+      @loaded.Service()
+      class Rewards implements OnReady, OnShutdown {
+        onReady() {
+          events.push('service ready')
+        }
+        onShutdown() {
+          events.push('service shutdown')
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [], services: [Rewards], cooldownStore: storeWith(loaded, events) })
+      await becomeReady(client)
+      await loaded.shutdownAndExit()
+
+      expect(events).toEqual(['store ready begins', 'store ready', 'service ready', 'service shutdown', 'store shutdown'])
+    })
+
+    it('holds a call that comes while its onReady runs until the store is ready', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const connect = Promise.withResolvers<void>()
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events)],
+        cooldownStore: storeWith(loaded, events, connect.promise),
+      })
+      const ready = becomeReady(client)
+      await vi.waitFor(() => expect(events).toContain('store ready begins'))
+      const handled = call(client, slash(loaded))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).toEqual(['store ready begins'])
+
+      connect.resolve()
+      await Promise.all([ready, handled])
+
+      expect(events).toEqual(['store ready begins', 'store ready', 'store asked', 'call runs', 'call done'])
+    })
+
+    it('runs its onShutdown once the calls under way have finished, and takes no new one', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const finish = Promise.withResolvers<void>()
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events, finish.promise)],
+        cooldownStore: storeWith(loaded, events),
+      })
+      await becomeReady(client)
+      const handled = call(client, slash(loaded))
+      await vi.waitFor(() => expect(events).toContain('call runs'))
+
+      const stopped = loaded.shutdownAndExit()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).not.toContain('store shutdown')
+      expect(client.listenerCount('interactionCreate')).toBe(0)
+
+      finish.resolve()
+      await Promise.all([handled, stopped])
+
+      expect(events.slice(-2)).toEqual(['call done', 'store shutdown'])
+    })
   })
 })

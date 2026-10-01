@@ -706,6 +706,43 @@ describe('gateway event handlers', () => {
       expect(warning).toContain("only messages that mention the bot and direct messages carry their text; messages: { mention: 'only' } needs none.")
     })
 
+    // A direct message arrives only with DirectMessages, and only with Partials.Channel, since no DM channel is cached
+    it("asks a scope: 'dm' command for what lets direct messages arrive, and a server command for none of it", async () => {
+      @Controller()
+      class Rewards {
+        @MessageHandler('daily', { scope: 'dm' })
+        daily(_message: Message) {}
+        @MessageHandler('rank')
+        rank(_message: Message) {}
+      }
+      const dmWarnings = () =>
+        logged.warn.map(args => String(args[0])).filter(text => text.includes('DirectMessages') || text.includes('Partials.Channel'))
+
+      // The generated app's intents and partials
+      await startApp(
+        { controllers: [Rewards], messages: { prefix: '!' } },
+        {
+          intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+          partials: [Partials.Message, Partials.Reaction],
+        },
+      )
+      expect(dmWarnings()).toEqual([
+        "The DirectMessages intent is not in clientOptions.intents, so Discord will not send what @MessageHandler('daily') in Rewards.daily handles.",
+        "Partials.Channel is not in clientOptions.partials, so @MessageHandler('daily') in Rewards.daily will miss direct messages: no DM " +
+          'channel is cached after the bot starts, and discord.js drops a message from a channel it has not cached.',
+      ])
+
+      logged.warn.length = 0
+      await startApp(
+        { controllers: [Rewards], messages: { prefix: '!' } },
+        {
+          intents: [GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
+          partials: [Partials.Channel],
+        },
+      )
+      expect(dmWarnings()).toEqual([])
+    })
+
     it("leaves mention: 'only' out of the MessageContent warning when only a listener needs the intent", async () => {
       @Controller()
       class Listening {

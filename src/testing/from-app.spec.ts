@@ -18,6 +18,7 @@ const DATABASE = createToken<Database>('Database')
 const connect = vi.fn(async (): Promise<Database> => ({ count: async () => 42 }))
 
 const made: string[] = []
+const hooks: string[] = []
 
 @Service()
 class Notes {
@@ -34,12 +35,26 @@ class Warmup {
   constructor() {
     made.push('Warmup')
   }
+  onReady() {
+    hooks.push('Warmup ready')
+  }
+  onShutdown() {
+    hooks.push('Warmup shutdown')
+  }
 }
 
 const consumed: string[] = []
 
 @Service()
 class RecordingStore extends CooldownStore {
+  onReady() {
+    hooks.push('store ready')
+  }
+
+  onShutdown() {
+    hooks.push('store shutdown')
+  }
+
   async consume(key: string, _limit: CooldownLimit): Promise<CooldownVerdict> {
     consumed.push(key)
     return { allowed: true, retryAfterMs: 0 }
@@ -71,20 +86,24 @@ const slash = (commandName: string) => createMockInteraction(ChatInputCommandInt
 beforeEach(() => {
   connect.mockClear()
   made.length = 0
+  hooks.length = 0
   consumed.length = 0
 })
 
 describe('MeoCordTestingModule.fromApp', () => {
   it('builds the app as the bot does: its controllers, services, providers and cooldown store, none listed again', async () => {
-    const module = await MeoCordTestingModule.fromApp(NotesApp).compile().init()
+    const module = await MeoCordTestingModule.fromApp(NotesApp).compile().init({ ready: true })
     const interaction = slash('notes')
 
     await module.dispatch(interaction)
+    await module.close()
 
     expect(getResponse(interaction).calls[0].payload).toMatchObject({ content: '42 notes' })
     expect(connect).toHaveBeenCalledOnce()
     expect(consumed).toHaveLength(1)
     expect(made).toEqual(['Warmup'])
+    // The store's hooks run as the bot runs them: ready first, shut down last
+    expect(hooks).toEqual(['store ready', 'Warmup ready', 'Warmup shutdown', 'store shutdown'])
   })
 
   it('never runs a factory the test replaces', async () => {

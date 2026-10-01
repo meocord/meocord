@@ -54,6 +54,11 @@ export interface CooldownBatchVerdict extends CooldownVerdict {
  * `consume` must check and record a call as one step: two calls at the limit must not both pass. Check a store of your
  * own with `testCooldownStore` from `meocord/testing`.
  *
+ * A store class bound with `cooldownStore` gets lifecycle hooks as a service does. Its `onReady` runs before the
+ * services' and its `onShutdown` after theirs. A call that comes while `onReady` runs waits for it, within the store's
+ * timeout. Its `onShutdown` runs once no call is left to ask it, so it can open a connection in one and close it in
+ * the other.
+ *
  * @example
  * ```ts
  * // Your database's query: trims, counts and records a key's calls in one transaction that locks the key
