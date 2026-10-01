@@ -3,6 +3,7 @@ import { type ExceptionFilter } from '@src/interface/index.js'
 import { CATCH_TYPES, CLASS_FILTERS, type FilterEntry, METHOD_FILTERS } from '@src/core/filter-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
+import { Logger } from '@src/common/logger.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 
 /**
@@ -38,9 +39,20 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
   return function (target: new (...args: any[]) => ExceptionFilter<any>) {
     makeInjectable(target)
+    errorTypes.forEach((type, index) => {
+      if (typeof type === 'function') return
+      logger.warn(
+        `${target.name}: @Catch takes error classes, and its ${ORDINALS[index] ?? `entry ${index + 1}`} is ${shown(type)}, so it ` +
+          'matches no error. In the next major version (5.0) this is refused. Give the class, such as @Catch(CooldownError).',
+      )
+    })
     Reflect.defineMetadata(CATCH_TYPES, errorTypes, target)
   }
 }
+
+const logger = new Logger('Catch')
+const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth']
+const shown = (value: unknown) => (typeof value === 'string' ? JSON.stringify(value) : value === null || value === undefined ? String(value) : typeof value)
 
 /**
  * Applies exception filters to a handler, or to every handler of a controller.
