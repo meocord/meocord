@@ -11,7 +11,16 @@ import { errorText } from '@src/common/translate-error.js'
 import { interactionLocale, messageLocale, renderText, translatorOfClient } from '@src/common/meocord-text.js'
 import { type MessageCommandOptions } from '@src/interface/index.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
-import { attachmentsOf, DEFAULT_ATTACHMENT_SIZE_LIMIT, presenterFor, renderEmbed, withSendableFiles } from '@src/common/response/presenter.js'
+import {
+  attachmentsOf,
+  DEFAULT_ATTACHMENT_SIZE_LIMIT,
+  isTooLarge,
+  presenterFor,
+  REFUSED_AS_TOO_LARGE,
+  renderEmbed,
+  withoutFiles,
+  withSendableFiles,
+} from '@src/common/response/presenter.js'
 import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
 
 /** The app's message options the fallback's replies to messages follow. */
@@ -124,7 +133,26 @@ class Answering {
 }
 
 /** A reply to a message: plain text, or an app presenter's embed and the files it shows. */
-type PresentedReply = { content: string } | { embeds: APIEmbed[]; files?: AttachmentBuilder[] }
+type ReplyBody = { content: string } | { embeds: APIEmbed[]; files?: AttachmentBuilder[] }
+
+/** A reply as drawn, and, when it carries files, the same reply without them, for Discord refusing them as too large. */
+interface PresentedReply {
+  body: ReplyBody
+  withoutFiles?: ReplyBody
+  /** Warns that the reply goes without its files, and why. */
+  warn?: (problem: string) => void
+}
+
+/** Sends a drawn reply with `send`, and again without its files should Discord refuse them as too large. */
+async function sendReply<T>(reply: PresentedReply, send: (body: ReplyBody) => Promise<T>): Promise<T> {
+  try {
+    return await send(reply.body)
+  } catch (error) {
+    if (!reply.withoutFiles || !isTooLarge(error)) throw error
+    reply.warn?.(REFUSED_AS_TOO_LARGE)
+    return send(reply.withoutFiles)
+  }
+}
 
 /** The text of a reply to a message, after the call's `emojis.warning` when `withEmoji`. */
 const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ? `${useTheme().emojis.warning} ${text}` : text)
@@ -136,7 +164,7 @@ const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ?
  */
 async function presentedReply(message: Message, error: unknown, text: string, withEmoji: boolean | undefined, logger: Logger): Promise<PresentedReply> {
   const presenter = presenterFor(message.client)
-  if (!presenter.messageError) return { content: replyText(text, withEmoji) }
+  if (!presenter.messageError) return { body: { content: replyText(text, withEmoji) } }
   const theme = await themeForInteraction(message)
   const translator = translatorOfClient(message.client)
   const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
@@ -144,11 +172,12 @@ async function presentedReply(message: Message, error: unknown, text: string, wi
   const drawn = await presenter.messageError({ message, locale, mode: 'embed', theme }, { message: text, error, tone })
   let view = drawn.color === undefined ? { ...drawn, color: theme.colors.primary } : drawn
   if (withEmoji && view.emoji === undefined) view = { ...view, emoji: theme.emojis.warning }
-  view = withSendableFiles(view, { sizeLimit: DEFAULT_ATTACHMENT_SIZE_LIMIT }, problem =>
-    logger.warn(`The view for message ${quoteForLog(String(message.content))} is sent without its files: ${problem}.`),
-  )
+  const warn = (problem: string) =>
+    logger.warn(`The view for message ${quoteForLog(String(message.content))} is sent without its files: ${problem}.`)
+  view = withSendableFiles(view, { sizeLimit: DEFAULT_ATTACHMENT_SIZE_LIMIT }, warn)
   const files = attachmentsOf(view)
-  return files.length > 0 ? { embeds: [renderEmbed(view)], files } : { embeds: [renderEmbed(view)] }
+  if (files.length === 0) return { body: { embeds: [renderEmbed(view)] } }
+  return { body: { embeds: [renderEmbed(view)], files }, withoutFiles: { embeds: [renderEmbed(withoutFiles(view))] }, warn }
 }
 
 /**
@@ -173,7 +202,7 @@ async function replyToMessage(message: Message, error: UserError, logger: Logger
   )
   if (reply === undefined) return
   try {
-    await message.reply({ ...reply, allowedMentions: { repliedUser: false } })
+    await sendReply(reply, body => message.reply({ ...body, allowedMentions: { repliedUser: false } }))
   } catch (replyError) {
     logFailedSend(logger, 'reply to the message', replyError)
   }
@@ -215,8 +244,8 @@ async function tellPrivately(
   })
   if (reply === undefined) return
   try {
-    if (message.guild) await message.author.send({ ...reply, allowedMentions: { parse: [] } })
-    else await message.reply({ ...reply, allowedMentions: { repliedUser: false, parse: [] } })
+    if (message.guild) await sendReply(reply, body => message.author.send({ ...body, allowedMentions: { parse: [] } }))
+    else await sendReply(reply, body => message.reply({ ...body, allowedMentions: { repliedUser: false, parse: [] } }))
   } catch (failure) {
     if (errorCode(failure) === CANNOT_MESSAGE_USER) logger.debug(`Could not tell ${message.author.id} about ${call}: they take no direct messages`)
     else logFailedSend(logger, 'send a direct message about a command', failure)
@@ -261,7 +290,7 @@ async function answerUsage(
   )
   if (body === undefined) return
   try {
-    const reply = await message.reply({ ...body, allowedMentions: { repliedUser: false, parse: [] } })
+    const reply = await sendReply(body, drawn => message.reply({ ...drawn, allowedMentions: { repliedUser: false, parse: [] } }))
     if (seconds > 0) {
       setTimeout(() => {
         reply.delete().catch(failure => logFailedSend(logger, 'delete a reply to a command', failure))

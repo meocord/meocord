@@ -34,9 +34,12 @@ import {
   attachmentsOf,
   DEFAULT_ATTACHMENT_SIZE_LIMIT,
   defaultPresenter,
+  isTooLarge,
   presenterFor,
+  REFUSED_AS_TOO_LARGE,
   renderContainer,
   renderEmbed,
+  withoutFiles,
   withSendableFiles,
 } from '@src/common/response/presenter.js'
 import {
@@ -631,7 +634,14 @@ export class InteractionResponse implements ResponseState {
     this.held = { key, entry }
     this.lockEntry = entry
     this.loadingView = view
-    await this.editMessage(this.heldBody(entry, entry.original, view), { restoring: true })
+    try {
+      await this.editMessage(this.heldBody(entry, entry.original, view), { restoring: true })
+    } catch (error) {
+      if (!view.files?.length || !isTooLarge(error)) throw error
+      this.warnFilesDropped(REFUSED_AS_TOO_LARGE)
+      this.loadingView = withoutFiles(view)
+      await this.editMessage(this.heldBody(entry, entry.original, this.loadingView), { restoring: true })
+    }
     this.settled = false
   }
 
@@ -958,11 +968,28 @@ export class InteractionResponse implements ResponseState {
   private sendable(view: ResponseView, kept = 0): ResponseView {
     const limit = (this.interaction as { attachmentSizeLimit?: unknown }).attachmentSizeLimit
     const sizeLimit = typeof limit === 'number' && limit > 0 ? limit : DEFAULT_ATTACHMENT_SIZE_LIMIT
-    return withSendableFiles(view, { kept, sizeLimit }, problem => {
-      const presenter = presenterFor(this.interaction.client)
-      const named = presenter.constructor?.name && presenter.constructor !== Object ? ` of ${presenter.constructor.name}` : ''
-      logger.warn(`The view${named} for ${describeInteraction(this.interaction as Interaction)} is sent without its files: ${problem}.`)
-    })
+    return withSendableFiles(view, { kept, sizeLimit }, problem => this.warnFilesDropped(problem))
+  }
+
+  /** Warns that a view goes without its files, and why. */
+  private warnFilesDropped(problem: string): void {
+    const presenter = presenterFor(this.interaction.client)
+    const named = presenter.constructor?.name && presenter.constructor !== Object ? ` of ${presenter.constructor.name}` : ''
+    logger.warn(`The view${named} for ${describeInteraction(this.interaction as Interaction)} is sent without its files: ${problem}.`)
+  }
+
+  /**
+   * Sends `view` with `send`, and again without its files should Discord refuse them as too large, as for a file whose
+   * size could not be checked before, so the answer still reaches the user.
+   */
+  private async withFilesFallback(view: ResponseView, send: (view: ResponseView) => Promise<void>): Promise<void> {
+    try {
+      await send(view)
+    } catch (error) {
+      if (!view.files?.length || !isTooLarge(error)) throw error
+      this.warnFilesDropped(REFUSED_AS_TOO_LARGE)
+      await send(withoutFiles(view))
+    }
   }
 
   /**
@@ -993,7 +1020,7 @@ export class InteractionResponse implements ResponseState {
     // Built before anything is sent, so a presenter that fails throws to the caller rather than passing for a refusal
     const view = await this.drawnView(error, message, theme)
     try {
-      await this.presentError(view, visibility, ifUnanswered)
+      await this.withFilesFallback(view, shown => this.presentError(shown, visibility, ifUnanswered))
     } catch (deliveryError) {
       if (errorCode(deliveryError) !== ALREADY_ACKNOWLEDGED) {
         logFailedSend(logger, 'deliver the error reply', deliveryError)
@@ -1004,7 +1031,7 @@ export class InteractionResponse implements ResponseState {
       this.answeredElsewhere()
       if (ifUnanswered) return
       try {
-        await this.followUpNow(this.privateError(view))
+        await this.withFilesFallback(view, async shown => void (await this.followUpNow(this.privateError(shown))))
       } catch (retryError) {
         logFailedSend(logger, 'deliver the error reply', retryError)
       }
@@ -1067,8 +1094,8 @@ export class InteractionResponse implements ResponseState {
     this.sync()
     // The private deferral made for a drawn view is that view's reply
     if (this.privateDeferral && this.phase === 'deferred') {
-      this.privateDeferral = false
       await this.editMessage(this.render(view, this.v2))
+      this.privateDeferral = false
       return
     }
     if (this.phase === 'unanswered') {
