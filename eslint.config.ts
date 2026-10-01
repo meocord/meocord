@@ -89,6 +89,12 @@ const javaScriptConfig = {
   },
 }
 
+// The pre-entry is bundled into the application, where Rspack rewrites this free variable to its public path
+const preEntryConfig = {
+  files: ['src/build/load-config.pre-entry.js'],
+  languageOptions: { globals: { __webpack_public_path__: 'writable' } },
+}
+
 const webpackConfig = {
   files: ['webpack.config.js'],
   plugins: {
@@ -162,5 +168,6 @@ export default [
   specConfig,
   nodeCompatibleConfig,
   javaScriptConfig,
+  preEntryConfig,
   webpackConfig,
 ]

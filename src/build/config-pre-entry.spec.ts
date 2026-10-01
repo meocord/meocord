@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process'
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { cpSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import { createRsbuild, type RsbuildConfig } from '@rsbuild/core'
 import { vi } from 'vitest'
@@ -37,6 +37,7 @@ export const greeting: string | null = Reflect.get(App, 'options').greeting ?? n
 // Imports the application first, then loads the config the way MeoCordFactory.create does.
 const MAIN = `
 import { greeting } from './app'
+import logo from './logo.png'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
@@ -48,6 +49,7 @@ console.log(
     greeting,
     evaluations: Reflect.get(globalThis, 'configEvaluations'),
     bundleEntry: Reflect.get(globalThis, Symbol.for('meocord.bundleEntry')),
+    asset: logo,
   }),
 )
 `
@@ -56,7 +58,13 @@ interface RunResult {
   greeting: string | null
   evaluations: number
   bundleEntry: string
+  asset: string
+  /** The same build, its dist copied elsewhere and run from there, as a deploy does. */
+  copied?: RunResult
 }
+
+/** Where a mode's dist is copied to: inside the fixture, which git ignores, and outside its dist. */
+const copyOf = (mode: string) => path.join(fixture, `${mode}-copy`)
 
 async function buildAndRun(mode: 'production' | 'development', adjust = (config: RsbuildConfig) => config): Promise<RunResult> {
   const cwd = vi.spyOn(process, 'cwd').mockReturnValue(fixture)
@@ -72,8 +80,14 @@ async function buildAndRun(mode: 'production' | 'development', adjust = (config:
 
   const env = { ...process.env }
   delete env.GREETING
-  const output = execFileSync('node', [path.join(fixture, 'dist', 'main.js')], { cwd: fixture, env, encoding: 'utf8' })
-  return JSON.parse(output.trim().split('\n').at(-1)!) as RunResult
+  const run = (dist: string) => {
+    const output = execFileSync('node', [path.join(dist, 'main.js')], { cwd: fixture, env, encoding: 'utf8' })
+    return JSON.parse(output.trim().split('\n').at(-1)!) as RunResult
+  }
+  // Copied before the other mode's build replaces dist
+  rmSync(copyOf(mode), { recursive: true, force: true })
+  cpSync(path.join(fixture, 'dist'), copyOf(mode), { recursive: true })
+  return { ...run(path.join(fixture, 'dist')), copied: run(copyOf(mode)) }
 }
 
 beforeAll(() => {
@@ -89,6 +103,7 @@ beforeAll(() => {
   writeFileSync(path.join(fixture, 'dist', 'meocord.config.mjs'), COMPILED_CONFIG)
   writeFileSync(path.join(fixture, 'src', 'app.ts'), APP)
   writeFileSync(path.join(fixture, 'src', 'main.ts'), MAIN)
+  writeFileSync(path.join(fixture, 'src', 'logo.png'), 'not really a png')
 })
 
 afterAll(() => {
@@ -111,6 +126,14 @@ describe('the config pre-entry, built and run with node', () => {
     const result = await runFor(mode)
 
     expect(result.evaluations).toBe(1)
+  })
+
+  // CI, a laptop then rsync, or an image stage with another WORKDIR: the bundle runs from somewhere other than where it was built
+  it.each(['production', 'development'] as const)('resolves an asset import beside the bundle, wherever dist was copied to, in a %s build', async mode => {
+    const { asset, copied } = await runFor(mode)
+
+    expect(path.normalize(asset)).toBe(path.join(fixture, 'dist', 'assets', 'logo.png'))
+    expect(path.normalize(copied!.asset)).toBe(path.join(copyOf(mode), 'assets', 'logo.png'))
   })
 
   // A shard manager spawns this path; process.argv[1] may be a process manager's wrapper instead
