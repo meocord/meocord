@@ -306,7 +306,61 @@ describe('@Cooldown', () => {
     }).compile()
 
     await expect(stubbed.invoke(DailyController, 'daily', slash())).rejects.toMatchObject({ retryAfterMs: 2_500 })
-    expect(consume).toHaveBeenCalledWith('DailyController.daily#0:user:user:ada', { uses: 1, windowMs: 10_000 })
+    expect(consume).toHaveBeenCalledWith('DailyController.daily#1/10000:user:user:ada', { uses: 1, windowMs: 10_000 })
+  })
+})
+
+describe('a cooldown key', () => {
+  // A store such as Redis outlives a deploy, so a release that adds a cooldown keeps the counts of the ones it had
+  it('keeps its count when a later release adds a cooldown before it', async () => {
+    const store = new MemoryCooldownStore()
+    const release1 = (() => {
+      @Controller()
+      class Rewards {
+        @Command('claim', CommandType.SLASH)
+        @Cooldown({ seconds: 86_400 })
+        async claim(_interaction: ChatInputCommandInteraction) {}
+      }
+      return Rewards
+    })()
+    const release2 = (() => {
+      @Controller()
+      class Rewards {
+        @Command('claim', CommandType.SLASH)
+        @Cooldown({ seconds: 3 })
+        @Cooldown({ seconds: 86_400 })
+        async claim(_interaction: ChatInputCommandInteraction) {}
+      }
+      return Rewards
+    })()
+    const run = (controller: typeof release1) =>
+      MeoCordTestingModule.create({ controllers: [controller], providers: [{ provide: CooldownStore, useValue: store }] })
+        .compile()
+        .invoke(controller, 'claim', slash())
+
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    await run(release1)
+    // Past the new cooldown's window, so only the day-long one can refuse
+    vi.setSystemTime(10_000)
+
+    await expect(run(release2)).rejects.toMatchObject({ retryAfterMs: 86_390_000 })
+  })
+
+  it('tells apart two cooldowns with the same limit', async () => {
+    @Controller()
+    class Twice {
+      @Command('twice', CommandType.SLASH)
+      @Cooldown({ seconds: 60, uses: 2 })
+      @Cooldown({ seconds: 60, uses: 2 })
+      async twice(_interaction: ChatInputCommandInteraction) {}
+    }
+    const consumeMany = vi.fn(async (_entries: readonly { key: string; limit: CooldownLimit }[]) => ({ allowed: true, retryAfterMs: 0 }))
+
+    await MeoCordTestingModule.create({ controllers: [Twice], providers: [{ provide: CooldownStore, useValue: { consumeMany } }] })
+      .compile()
+      .invoke(Twice, 'twice', slash())
+
+    expect(consumeMany.mock.calls[0][0].map(({ key }) => key)).toEqual(['Twice.twice#2/60000:user:user:ada', 'Twice.twice#2/60000~2:user:user:ada'])
   })
 })
 
@@ -506,7 +560,7 @@ describe('@Cooldown, rule by rule', () => {
     await scoped.invoke(Scoped, 'everyone', slash())
     await scoped.invoke(Scoped, 'who', anonymous)
 
-    expect(keys).toEqual(['Scoped.server#0:guild:guild:g1', 'Scoped.everyone#0:global:global', 'Scoped.who#0:user:user:unknown'])
+    expect(keys).toEqual(['Scoped.server#1/5000:guild:guild:g1', 'Scoped.everyone#1/5000:global:global', 'Scoped.who#1/5000:user:user:unknown'])
   })
 
   it("counts each message author separately by default", async () => {
