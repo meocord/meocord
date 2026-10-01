@@ -423,3 +423,89 @@ describe('a messageError that fails', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${name}.messageError`), expect.objectContaining({ message: 'canvas broke' }))
   })
 })
+
+describe('a messageError view MeoCord cannot render', () => {
+  let drawn: ResponseView = { text: '' }
+
+  @Service()
+  class UnrenderablePresenter implements ResponsePresenter {
+    loading() {
+      return { text: 'Drawing…' }
+    }
+
+    error(_context: unknown, { message }: PresentedError) {
+      return { text: message }
+    }
+
+    messageError(): ResponseView {
+      return drawn
+    }
+  }
+
+  const plainMessages = { prefix: '!', dmOnError: true }
+
+  @MeoCord({ controllers: [DiceController], presenter: UnrenderablePresenter, messages: plainMessages, clientOptions: { intents: [] } })
+  class UnrenderableApp {}
+
+  @MeoCord({ controllers: [DiceController], messages: plainMessages, clientOptions: { intents: [] } })
+  class PlainTextApp {}
+
+  /** What a message gets back under an app. */
+  async function replyTo(App: new () => unknown, content: string) {
+    const module = MeoCordTestingModule.create({ app: App, controllers: [DiceController] }).compile()
+    const message = createMockMessage({ content })
+    await module.dispatch(message).catch(() => undefined)
+    return [message.reply.mock.calls, message.author.send.mock.calls]
+  }
+
+  it.each([
+    ['a colour that is no colour', { text: 'hi', color: 'notacolor' }, '!roll many'],
+    ['an empty text, which an embed cannot hold', { text: '' }, '!refuse'],
+  ])("answers in MeoCord's plain text for %s, warning with the presenter's name", async (_case, view, content) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    drawn = view as ResponseView
+
+    const answered = await replyTo(UnrenderableApp, content)
+
+    expect(answered).toEqual(await replyTo(PlainTextApp, content))
+    expect(answered.flat(2).length).toBe(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('UnrenderablePresenter.messageError'), expect.anything())
+  })
+})
+
+describe("an interaction presenter's view that fails", () => {
+  const failing = (fail: () => ResponseView | Promise<ResponseView>) => ({ loading: fail, error: fail }) as ResponsePresenter
+
+  it.each([
+    ['throws', () => {
+      throw new Error('canvas broke')
+    }],
+    ['returns a colour that is no colour', () => ({ text: 'hi', color: 'notacolor' }) as unknown as ResponseView],
+    ['returns an empty text, which an embed cannot hold', () => ({ text: '' })],
+  ])("answers an error with MeoCord's own view when it %s, and reports the fault", async (_case, fail) => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+    const interaction = command(failing(fail))
+
+    await respond(interaction).error(new Error('x'), { message: 'Broken.' })
+
+    expect(sent(interaction.reply).embeds?.[0]).toMatchObject({ title: 'Oops!', description: 'Broken.' })
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining('Could not write the error answer'), expect.anything())
+  })
+
+  it.each([
+    ['throws', () => {
+      throw new Error('canvas broke')
+    }],
+    ['rejects', () => Promise.reject(new Error('canvas broke'))],
+    ['returns a colour that is no colour', () => ({ text: 'hi', color: 'notacolor' }) as unknown as ResponseView],
+  ])("locks with MeoCord's own loading view when the presenter's %s, warning with its name", async (_case, fail) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const interaction = button(failing(fail))
+
+    await respond(interaction).lock()
+
+    expect(interaction.deferUpdate).toHaveBeenCalled()
+    expect(sent(interaction.editReply).embeds?.at(-1)).toMatchObject({ description: expect.stringContaining('Working on it…') })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('loading'), expect.anything())
+  })
+})

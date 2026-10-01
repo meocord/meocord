@@ -610,8 +610,7 @@ export class InteractionResponse implements ResponseState {
 
     const theme = await themeForInteraction(this.interaction)
     // Drawn only now, after the acknowledgement, so a slow drawing never misses Discord's three seconds
-    const drawn = await presenterFor(this.interaction.client).loading(this.presenterContext(this.v2, theme))
-    const view = this.sendable(themedView(drawn, theme), attachmentList(message).length)
+    const view = await this.drawnLoading(theme, attachmentList(message).length)
     const loadingEmbed = renderEmbed(view)
     const key = typeof message.id === 'string' ? message.id : message
     // A message another call holds is snapshotted as it was before any lock, not as that call's lock shows it
@@ -1017,8 +1016,15 @@ export class InteractionResponse implements ResponseState {
     const own = error instanceof UserError
     const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
     const theme = await themeForInteraction(this.interaction)
-    // Built before anything is sent, so a presenter that fails throws to the caller rather than passing for a refusal
-    const view = await this.drawnView(error, message, theme)
+    // Drawn before anything is sent; a presenter that fails is answered for with MeoCord's own view, then thrown to
+    // the caller, which reports it as the call's fault rather than passing it for a refusal
+    const { view, failure } = await this.drawnView(error, message, theme)
+    await this.deliverError(view, visibility, ifUnanswered)
+    if (failure !== undefined) throw failure
+  }
+
+  /** Sends an error's view where the interaction stands; a delivery Discord refuses is logged, never thrown. */
+  private async deliverError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered: boolean): Promise<void> {
     try {
       await this.withFilesFallback(view, shown => this.presentError(shown, visibility, ifUnanswered))
     } catch (deliveryError) {
@@ -1043,25 +1049,52 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
-   * The presenter's error view. One it draws asynchronously has the interaction acknowledged privately first, so the
-   * drawing never misses Discord's three seconds; should that drawing then fail, the acknowledgement is answered with
-   * MeoCord's own view before the failure is thrown, so the user is never left with it.
+   * The presenter's error view, drawn and rendered as one step. One it draws asynchronously has the interaction
+   * acknowledged privately first, so the drawing never misses Discord's three seconds. Should the presenter throw or
+   * reject, or its view be one MeoCord cannot render, MeoCord's own view takes its place, and the failure is returned
+   * for the caller to report once the user is answered.
    */
-  private async drawnView(error: unknown, message: string, theme: ResolvedTheme): Promise<ResponseView> {
+  private async drawnView(error: unknown, message: string, theme: ResolvedTheme): Promise<{ view: ResponseView; failure?: unknown }> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
     const presented = { message, error, tone } as const
-    const produced = presenterFor(this.interaction.client).error(this.presenterContext(this.v2, theme), presented)
-    if (!isDrawing(produced)) return this.sendable(themedView(produced, theme), this.keptBeside())
-    this.sync()
-    if (this.phase === 'unanswered') await this.acknowledgePrivately()
+    const context = this.presenterContext(this.v2, theme)
+    const ready = (view: ResponseView) => {
+      const sendable = this.sendable(themedView(view, theme), this.keptBeside())
+      // Rendered once here, so a view MeoCord cannot render fails before anything is sent
+      this.render(sendable, this.v2)
+      return sendable
+    }
     try {
-      return this.sendable(themedView(await produced, theme), this.keptBeside())
-    } catch (failure) {
-      if (this.privateDeferral) {
-        const fallback = themedView(defaultPresenter.error(this.presenterContext(this.v2, theme), presented), theme)
-        await this.editMessage(this.render(fallback, this.v2)).catch(sendError => logFailedSend(logger, 'deliver the error reply', sendError))
+      const produced = presenterFor(this.interaction.client).error(context, presented)
+      if (isDrawing(produced)) {
+        this.sync()
+        if (this.phase === 'unanswered') await this.acknowledgePrivately()
       }
-      throw failure
+      return { view: ready(await produced) }
+    } catch (failure) {
+      return { view: ready(defaultPresenter.error(context, presented)), failure }
+    }
+  }
+
+  /**
+   * The presenter's loading view, drawn and rendered as one step after the lock acknowledged the click. Should the
+   * presenter throw or reject, or its view be one MeoCord cannot render, it is warned about and MeoCord's own loading
+   * view is shown, so the lock, and the handler after it, still go ahead.
+   */
+  private async drawnLoading(theme: ResolvedTheme, kept: number): Promise<ResponseView> {
+    const context = this.presenterContext(this.v2, theme)
+    const ready = (view: ResponseView) => {
+      const sendable = this.sendable(themedView(view, theme), kept)
+      this.render(sendable, this.v2)
+      return sendable
+    }
+    const presenter = presenterFor(this.interaction.client)
+    try {
+      return ready(await presenter.loading(context))
+    } catch (failure) {
+      const named = presenter.constructor !== Object ? presenter.constructor.name : 'The presenter'
+      logger.warn(`${named}.loading could not draw the loading view for ${describeInteraction(this.interaction as Interaction)}; MeoCord's own is shown:`, failure)
+      return ready(defaultPresenter.loading(context))
     }
   }
 
