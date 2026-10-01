@@ -295,6 +295,26 @@ const BROKEN_STATEMENT = '\nconst broken = (\n'
 /** An rsbuild plugin whose setup throws, which the hook adds: it throws once the build sets its plugins up. */
 const PLUGIN_THROWS = "config.plugins = [{ name: 'broken-plugin', setup() { throw new Error('plugin broke') } }]\n    config.tools ??= {}"
 
+/** `readyService` that logs, once ready, a variable each from .env.local and the mode's .env file. */
+const envFilesService = `import { Service } from 'meocord/decorator'
+import { type OnReady } from 'meocord/interface'
+
+@Service()
+export class ReadyService implements OnReady {
+  onReady() {
+    console.log(\`Ready with FROM_LOCAL=\${process.env.FROM_LOCAL} FROM_MODE=\${process.env.FROM_MODE}\`)
+  }
+}
+`
+
+/** A new app's .env files, each giving what the bot logs from it. */
+const ENV_FILES = {
+  '.env': INVALID_TOKEN_ENV,
+  '.env.local': 'FROM_LOCAL=local\n',
+  '.env.development': 'FROM_MODE=development\n',
+  '.env.production': 'FROM_MODE=production\n',
+}
+
 /** A line that makes the template config's rsbuild hook throw, in place of its first statement. */
 const HOOK_THROWS = "throw new Error('hook broke')"
 
@@ -1814,6 +1834,32 @@ const scenarios: Scenario[] = [
     timeoutMs: 90_000,
     expect: { code: 0, says: ['did not finish within 6000 ms'], never: ['did not exit within'] },
   })),
+  // A new app's config reads the .env files Bun reads, so the bot gets the same values however it is started, and a
+  // production build the production ones, NODE_ENV set or not
+  ...(
+    [
+      ['start --dev', 'development', { argv: ['start', '--dev'] }],
+      ['start --prod --build', 'production', { argv: ['start', '--prod', '--build'] }],
+      ['a production build started with node', 'production', { before: [['build', '--prod']], command: ['node', 'dist/main.js'] }],
+      [
+        'a production build started with node and NODE_ENV=production',
+        'production',
+        { before: [['build', '--prod']], command: ['node', 'dist/main.js'], env: { NODE_ENV: 'production' } },
+      ],
+    ] as [string, string, Pick<Scenario, 'argv' | 'before' | 'command' | 'env'>][]
+  ).map(
+    ([how, mode, run]): Scenario => ({
+      name: `${how} reads .env.local and the ${mode} .env file`,
+      tier: 'fast',
+      platforms: ['linux', 'darwin'],
+      ...run,
+      files: { ...ENV_FILES, 'src/app.ts': readyApp, 'src/ready.service.ts': envFilesService },
+      discord: { readyDelayMs: 0 },
+      signal: { name: 'SIGINT', after: 'Ready with' },
+      timeoutMs: 60_000,
+      expect: { code: 0, says: [`Ready with FROM_LOCAL=local FROM_MODE=${mode}`] },
+    }),
+  ),
   {
     name: 'start --dev exits 1 when its first build cannot start, as build does',
     tier: 'fast',

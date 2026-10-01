@@ -788,7 +788,7 @@ describe('spawning the application', () => {
           startDev: () => Promise<void>
           clearScreen: () => void
           relayStopSignals: () => void
-          compileConfig: (options?: { exitOnFailure?: boolean }) => Promise<boolean>
+          compileConfig: (options: { mode: 'production' | 'development'; exitOnFailure?: boolean }) => Promise<boolean>
           createBundler: () => Promise<unknown>
         }
         vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
@@ -878,7 +878,7 @@ describe('spawning the application', () => {
         dev.change('meocord.config.ts')
         await vi.waitFor(() => expect(dev.compileConfig).toHaveBeenCalledTimes(2))
         await new Promise(resolve => setTimeout(resolve, 50))
-        expect(dev.compileConfig).toHaveBeenLastCalledWith({ exitOnFailure: false })
+        expect(dev.compileConfig).toHaveBeenLastCalledWith({ mode: 'development', exitOnFailure: false })
         expect(dev.closeBuild).not.toHaveBeenCalled()
         expect(dev.createBundler).toHaveBeenCalledTimes(1)
 

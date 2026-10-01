@@ -56,7 +56,7 @@ describe('compileConfig', () => {
   const until = async (count: number) => vi.waitFor(() => expect(builds.length).toBe(count))
 
   it('moves the compiled config into dist and leaves no staging behind', async () => {
-    const compile = new MeoCordCLI().compileConfig()
+    const compile = new MeoCordCLI().compileConfig({ mode: 'development' })
     await until(1)
     builds[0].release()
     await compile
@@ -68,9 +68,9 @@ describe('compileConfig', () => {
 
   // Such as the development watcher rebuilding while `meocord build` runs
   it('lets two overlapping compiles each finish, without clobbering each other', async () => {
-    const first = new MeoCordCLI().compileConfig()
+    const first = new MeoCordCLI().compileConfig({ mode: 'development' })
     await until(1)
-    const second = new MeoCordCLI().compileConfig()
+    const second = new MeoCordCLI().compileConfig({ mode: 'development' })
     await until(2)
 
     builds[0].release()
@@ -88,7 +88,7 @@ describe('compileConfig', () => {
     mkdirSync(dist())
     writeFileSync(path.join(dist(), 'meocord.config.mjs'), 'last good')
     const cli = new MeoCordCLI()
-    const compile = cli.compileConfig()
+    const compile = cli.compileConfig({ mode: 'development' })
     await until(1)
     rmSync(path.join(dist(), readdirSync(dist()).find(name => name.startsWith('.meocord-config'))!), { recursive: true })
     builds[0].release()
