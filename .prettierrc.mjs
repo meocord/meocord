@@ -20,5 +20,6 @@ export default {
     { files: 'src/bin/app-template/**/*.json.template', options: { parser: 'json' } },
     { files: 'src/bin/app-template/**/*.mjs.template', options: { parser: 'babel' } },
     { files: 'src/bin/app-template/**/*.ts.template', options: { parser: 'typescript' } },
+    { files: 'src/bin/app-template/**/*.yaml.template', options: { parser: 'yaml' } },
   ],
 }

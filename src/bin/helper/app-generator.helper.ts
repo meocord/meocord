@@ -46,6 +46,11 @@ const RUNTIME_PREFIXES: Record<string, string> = {
   bun: 'bun --bun ',
 }
 
+/** Files only one package manager reads, by the path they are written to, which an app made with another goes without. */
+const PACKAGE_MANAGER_FILES: Record<string, string> = {
+  'pnpm-workspace.yaml': 'pnpm',
+}
+
 /** The script prefix for a package manager, such as `bun ` for bun. */
 export function runtimePrefixFor(packageManager: string): string {
   return RUNTIME_PREFIXES[packageManager] ?? ''
@@ -97,20 +102,25 @@ function outputName(templateName: string): string {
 export class AppGeneratorHelper {
   private readonly templateDir = path.resolve(__dirname, '..', 'app-template')
 
-  /** Renders every packaged template file into `targetDir`, returning the written paths relative to it. */
+  /**
+   * Renders every packaged template file into `targetDir`, but one that only another package manager reads, returning
+   * the written paths relative to it.
+   */
   generateApp(targetDir: string, variables: AppTemplateVariables): string[] {
-    return this.templateFiles(this.templateDir).map(templatePath => {
+    return this.templateFiles(this.templateDir).flatMap(templatePath => {
       const relative = path
         .relative(this.templateDir, templatePath)
         .split(path.sep)
         .map(segment => outputName(segment))
         .join(path.sep)
+      const readBy = PACKAGE_MANAGER_FILES[relative]
+      if (readBy !== undefined && readBy !== variables.packageManager) return []
 
       const destination = path.join(targetDir, relative)
       fs.mkdirSync(path.dirname(destination), { recursive: true })
       fs.writeFileSync(destination, renderTemplate(templatePath, variables))
 
-      return relative
+      return [relative]
     })
   }
 
