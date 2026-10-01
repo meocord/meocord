@@ -1,8 +1,9 @@
 import { vi } from 'vitest'
 import path from 'path'
 import { tmpdir } from 'os'
+import { spawnSync } from 'child_process'
 
-const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mockRmSync } = vi.hoisted(() => {
+const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mockReaddirSync, mockRmSync, mockHostname } = vi.hoisted(() => {
   let made = 0
   return {
     mockExistsSync: vi.fn(),
@@ -10,7 +11,10 @@ const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mo
     mockWriteFileSync: vi.fn(),
     // A fresh directory per call, as the real one makes
     mockMkdtempSync: vi.fn((prefix: string) => `${prefix}${++made}`),
+    mockReaddirSync: vi.fn((): string[] => []),
     mockRmSync: vi.fn(),
+    // A '-' in the name, which a directory name can't carry between its fields
+    mockHostname: vi.fn(() => 'build-01.local'),
   }
 })
 
@@ -19,8 +23,11 @@ vi.mock('fs', () => ({
   readFileSync: mockReadFileSync,
   writeFileSync: mockWriteFileSync,
   mkdtempSync: mockMkdtempSync,
+  readdirSync: mockReaddirSync,
   rmSync: mockRmSync,
 }))
+
+vi.mock('os', async importOriginal => ({ ...(await importOriginal<typeof import('os')>()), hostname: mockHostname }))
 
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({
   loadMeoCordConfig: vi.fn().mockReturnValue(null),
@@ -188,6 +195,47 @@ describe('prepareModifiedTsConfig', () => {
     cleanup(0)
 
     expect(mockRmSync).toHaveBeenCalledWith(path.dirname(file), { recursive: true, force: true })
+  })
+
+  it('names its directory for this host and process', async () => {
+    mockTsConfig({ compilerOptions: {} })
+    const { prepareModifiedTsConfig } = await freshModule()
+
+    const dir = path.basename(path.dirname(prepareModifiedTsConfig()))
+
+    expect(dir).toMatch(new RegExp(`^meocord-tsconfig-build_01\\.local-${process.pid}-`))
+  })
+
+  it("keeps a long host's directory name within what a file system allows", async () => {
+    mockTsConfig({ compilerOptions: {} })
+    mockHostname.mockReturnValueOnce(`${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}`)
+    const { prepareModifiedTsConfig } = await freshModule()
+
+    const dir = path.basename(path.dirname(prepareModifiedTsConfig()))
+
+    expect(dir).toMatch(new RegExp(`^meocord-tsconfig-a{63}\\.-${process.pid}-`))
+  })
+
+  // A process killed, or one that crashes, never runs its exit hook, and its directory would stay forever
+  it("removes a directory this host's ended process left, and keeps the rest", async () => {
+    mockTsConfig({ compilerOptions: {} })
+    const host = 'build_01.local'
+    const ended = spawnSync(process.execPath, ['-e', '0']).pid!
+    const left = `meocord-tsconfig-${host}-${ended}-a1b2c3`
+    const kept = [
+      `meocord-tsconfig-${host}-${process.ppid}-d4e5f6`,
+      `meocord-tsconfig-another.host-${ended}-g7h8i9`,
+      'meocord-tsconfig-j0k1l2',
+      'unrelated',
+    ]
+    mockReaddirSync.mockReturnValueOnce([left, ...kept])
+    mockRmSync.mockClear()
+
+    const { prepareModifiedTsConfig } = await freshModule()
+    prepareModifiedTsConfig()
+
+    expect(mockRmSync.mock.calls).toEqual([[path.join(tmpdir(), left), { recursive: true, force: true }]])
+    expect(mockReaddirSync).toHaveBeenLastCalledWith(tmpdir())
   })
 
   it('reads the comments, trailing commas and $schema URL tsconfig.json allows', () => {
