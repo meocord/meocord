@@ -552,7 +552,7 @@ describe('respond()', () => {
       interaction.followUp.mockRejectedValueOnce(createDiscordError(10062))
 
       await expect(respond(interaction).error(new Error('x'))).resolves.toBeUndefined()
-      expect(interaction.followUp).toHaveBeenCalledTimes(1)
+      expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply', 'followUp'])
     })
 
     it('never throws when the presenter itself fails', async () => {
@@ -568,6 +568,47 @@ describe('respond()', () => {
 
       await expect(respond(interaction).error(new Error('x'))).resolves.toBeUndefined()
       expect(logged).toHaveBeenCalledWith(expect.stringContaining('Could not write the error answer for'), expect.objectContaining({ message: 'presenter broke' }))
+      logged.mockRestore()
+    })
+
+    // An interaction past Discord's three seconds refuses the acknowledgement; that is no fault of the presenter
+    it('logs a refused acknowledgement before a drawn error view as the send it is, not as the presenter failing', async () => {
+      const interaction = command()
+      interaction.deferReply.mockRejectedValueOnce(createDiscordError(10062))
+      setPresenter(interaction.client, { loading: () => ({ text: 'x' }), error: async () => ({ text: 'Drawn.' }) })
+      const debug = vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+
+      await respond(interaction).error(new Error('x'))
+
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining('Could not acknowledge the interaction privately'))
+      expect(logged).not.toHaveBeenCalledWith(expect.stringContaining('Could not write the error answer for'), expect.anything())
+      debug.mockRestore()
+      logged.mockRestore()
+    })
+
+    it('reports a drawing that rejects while a refused acknowledgement is awaited, and leaves no rejection unhandled', async () => {
+      const interaction = command()
+      const acknowledgement = Promise.withResolvers<never>()
+      interaction.deferReply.mockReturnValueOnce(acknowledgement.promise)
+      const drawing = Promise.withResolvers<never>()
+      setPresenter(interaction.client, { loading: () => ({ text: 'x' }), error: () => drawing.promise })
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      const debug = vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+      const unhandled = vi.fn()
+      process.on('unhandledRejection', unhandled)
+
+      const answered = respond(interaction).error(new Error('x'))
+      drawing.reject(new Error('drawing broke'))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      acknowledgement.reject(createDiscordError(10062))
+      await answered
+      await new Promise(resolve => setTimeout(resolve, 0))
+      process.off('unhandledRejection', unhandled)
+
+      expect(unhandled).not.toHaveBeenCalled()
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('Could not write the error answer for'), expect.objectContaining({ message: 'drawing broke' }))
+      debug.mockRestore()
       logged.mockRestore()
     })
 
@@ -1320,6 +1361,17 @@ describe('respond(), answers asked for together', () => {
 
     expect(sent(replied.editReply)).toMatchObject({ content: 'second' })
     expect(sent(updated.editReply)).toMatchObject({ content: 'second' })
+  })
+
+  it('takes a modal refused with 40060 as answered elsewhere too, so the next send edits rather than failing the same way', async () => {
+    const interaction = command()
+    interaction.showModal.mockRejectedValueOnce(createDiscordError(40060))
+
+    await expect(respond(interaction).modal(modal)).rejects.toMatchObject({ code: 40060 })
+    expect(respond(interaction).state).toBe('replied')
+    await respond(interaction).send('answer')
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['showModal', 'editReply'])
   })
 
   it('reaches Discord with the follow-up and the edit it makes after a 40060, which discord.js did not see', async () => {

@@ -16,6 +16,7 @@ import { setPresenter } from '@src/common/response/presenter.js'
 import { type MessageResponseContext, type PresentedError, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
 import { Controller, Cooldown, MeoCord, MessageHandler, Service } from '@src/decorator/index.js'
 import { UserError } from '@src/common/errors.js'
+import { LOADING_DRAW_TIMEOUT_MS } from '@src/core/theme-resolvers.js'
 import { createDiscordError, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 const { Ephemeral, IsComponentsV2 } = MessageFlags
@@ -519,5 +520,66 @@ describe("an interaction presenter's view that fails", () => {
     expect(interaction.deferUpdate).toHaveBeenCalled()
     expect(sent(interaction.editReply).embeds?.at(-1)).toMatchObject({ description: expect.stringContaining('Working on it…') })
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('loading'), expect.anything())
+  })
+})
+
+// A loading view that never comes would hold the lock, and the handler after it, forever
+describe('a loading view the presenter is slow to draw', () => {
+  afterEach(() => vi.useRealTimers())
+
+  function drawing() {
+    const pending = Promise.withResolvers<ResponseView>()
+    return { pending, presenter: { loading: () => pending.promise, error: () => ({ text: 'x' }) } as ResponsePresenter }
+  }
+
+  it('is shown when it comes within the deadline, and leaves no timer behind', async () => {
+    vi.useFakeTimers()
+    const { pending, presenter } = drawing()
+    const interaction = button(presenter)
+
+    const locked = respond(interaction).lock()
+    await vi.advanceTimersByTimeAsync(LOADING_DRAW_TIMEOUT_MS - 1)
+    pending.resolve({ text: 'Brewing…' })
+    await locked
+
+    expect(sent(interaction.editReply).embeds?.at(-1)).toMatchObject({ description: 'Brewing…' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("shows MeoCord's own after the deadline, warns once, and never puts the late view over it", async () => {
+    vi.useFakeTimers()
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { pending, presenter } = drawing()
+    const interaction = button(presenter)
+
+    const locked = respond(interaction).lock()
+    await vi.advanceTimersByTimeAsync(LOADING_DRAW_TIMEOUT_MS)
+    await locked
+    pending.resolve({ text: 'Brewing…' })
+    await vi.advanceTimersByTimeAsync(LOADING_DRAW_TIMEOUT_MS)
+
+    expect(interaction.editReply).toHaveBeenCalledTimes(1)
+    expect(sent(interaction.editReply).embeds?.at(-1)).toMatchObject({ description: expect.stringContaining('Working on it…') })
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`The presenter's loading view did not come within ${LOADING_DRAW_TIMEOUT_MS} ms`))
+  })
+
+  it('leaves no rejection unhandled when a drawing that missed the deadline fails later', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { pending, presenter } = drawing()
+    const interaction = button(presenter)
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+
+    const locked = respond(interaction).lock()
+    await vi.advanceTimersByTimeAsync(LOADING_DRAW_TIMEOUT_MS)
+    await locked
+    pending.reject(new Error('canvas broke late'))
+    vi.useRealTimers()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    process.off('unhandledRejection', unhandled)
+
+    expect(unhandled).not.toHaveBeenCalled()
   })
 })

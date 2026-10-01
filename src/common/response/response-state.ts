@@ -52,9 +52,10 @@ import {
   withoutRenderedViews,
 } from '@src/common/response/components.js'
 import { stampCall } from '@src/common/response/call-order.js'
-import { type ResponseContext, type ResponseView } from '@src/interface/index.js'
+import { type ResponseContext, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { type ResolvedTheme, themeForInteraction } from '@src/core/theme-scope.js'
+import { LOADING_DRAW_TIMEOUT_MS } from '@src/core/theme-resolvers.js'
 
 /**
  * The flags a message sent through `respond()` can ask for.
@@ -292,6 +293,15 @@ function attachmentList(message: { attachments?: unknown } | null | undefined): 
 }
 
 /** Whether a presenter's result is a view still being drawn. */
+/** What a loading drawing that missed its deadline is taken as. */
+const LATE = Symbol('late')
+
+/** How a log names the presenter: its class, or "The presenter" for one written as an object. */
+function presenterName(presenter: ResponsePresenter): string {
+  const cls = (presenter as { constructor?: unknown }).constructor
+  return typeof cls === 'function' && cls !== Object && cls.name ? cls.name : 'The presenter'
+}
+
 function isDrawing(view: ResponseView | Promise<ResponseView>): view is Promise<ResponseView> {
   return typeof (view as { then?: unknown }).then === 'function'
 }
@@ -831,7 +841,8 @@ export class InteractionResponse implements ResponseState {
     if (!('showModal' in this.interaction)) throw new Error('This interaction cannot show a modal.')
     const target = this.interaction
     return this.queued(async () => {
-      await this.call('showModal', modal, () => target.showModal(modal))
+      // A first answer like a reply: one refused as already acknowledged leaves the interaction answered elsewhere
+      await this.firstAnswer(() => this.call('showModal', modal, () => target.showModal(modal)))
       this.phase = 'replied'
       this.modalShown = true
     })
@@ -973,9 +984,8 @@ export class InteractionResponse implements ResponseState {
 
   /** Warns that a view goes without its files, and why. */
   private warnFilesDropped(problem: string): void {
-    const presenter = presenterFor(this.interaction.client)
-    const named = presenter.constructor?.name && presenter.constructor !== Object ? ` of ${presenter.constructor.name}` : ''
-    logger.warn(`The view${named} for ${describeInteraction(this.interaction as Interaction)} is sent without its files: ${problem}.`)
+    const named = presenterName(presenterFor(this.interaction.client))
+    logger.warn(`${named}'s view for ${describeInteraction(this.interaction as Interaction)} is sent without its files: ${problem}.`)
   }
 
   /**
@@ -1065,22 +1075,39 @@ export class InteractionResponse implements ResponseState {
       this.render(sendable, this.v2)
       return sendable
     }
+    const fallback = (failure: unknown) => ({ view: ready(defaultPresenter.error(context, presented)), failure })
+    let produced: ResponseView | Promise<ResponseView>
     try {
-      const produced = presenterFor(this.interaction.client).error(context, presented)
-      if (isDrawing(produced)) {
-        this.sync()
-        if (this.phase === 'unanswered') await this.acknowledgePrivately()
-      }
-      return { view: ready(await produced) }
+      produced = presenterFor(this.interaction.client).error(context, presented)
     } catch (failure) {
-      return { view: ready(defaultPresenter.error(context, presented)), failure }
+      return fallback(failure)
+    }
+    if (isDrawing(produced)) {
+      // Settled into a value now, so a drawing that rejects while the acknowledgement is awaited is still handled
+      const drawing = Promise.resolve(produced).then(
+        view => ({ view }),
+        (failure: unknown) => ({ failure }),
+      )
+      this.sync()
+      // Discord's refusal is the acknowledgement's, never the presenter's: logged, and the view is still delivered
+      if (this.phase === 'unanswered') {
+        await this.acknowledgePrivately().catch((refusal: unknown) => logFailedSend(logger, 'acknowledge the interaction privately', refusal))
+      }
+      const drawn = await drawing
+      if ('failure' in drawn) return fallback(drawn.failure)
+      produced = drawn.view
+    }
+    try {
+      return { view: ready(produced) }
+    } catch (failure) {
+      return fallback(failure)
     }
   }
 
   /**
    * The presenter's loading view, drawn and rendered as one step after the lock acknowledged the click. Should the
-   * presenter throw or reject, or its view be one MeoCord cannot render, it is warned about and MeoCord's own loading
-   * view is shown, so the lock, and the handler after it, still go ahead.
+   * presenter throw or reject, take longer than {@link LOADING_DRAW_TIMEOUT_MS}, or draw a view MeoCord cannot render,
+   * it is warned about and MeoCord's own loading view is shown, so the lock, and the handler after it, still go ahead.
    */
   private async drawnLoading(theme: ResolvedTheme, kept: number): Promise<ResponseView> {
     const context = this.presenterContext(this.v2, theme)
@@ -1090,12 +1117,28 @@ export class InteractionResponse implements ResponseState {
       return sendable
     }
     const presenter = presenterFor(this.interaction.client)
-    try {
-      return ready(await presenter.loading(context))
-    } catch (failure) {
-      const named = presenter.constructor !== Object ? presenter.constructor.name : 'The presenter'
-      logger.warn(`${named}.loading could not draw the loading view for ${describeInteraction(this.interaction as Interaction)}; MeoCord's own is shown:`, failure)
+    const shownInstead = (problem: string, failure?: unknown) => {
+      const named = `${presenterName(presenter)}'s loading view ${problem} for ${describeInteraction(this.interaction as Interaction)}`
+      if (failure === undefined) logger.warn(`${named}; MeoCord's own is shown.`)
+      else logger.warn(`${named}; MeoCord's own is shown:`, failure)
       return ready(defaultPresenter.loading(context))
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const produced = presenter.loading(context)
+      if (!isDrawing(produced)) return ready(produced)
+      const late = new Promise<typeof LATE>(resolve => {
+        timer = setTimeout(() => resolve(LATE), LOADING_DRAW_TIMEOUT_MS)
+      })
+      const drawn = await Promise.race([produced, late])
+      if (drawn !== LATE) return ready(drawn)
+      // Never applied over MeoCord's view, and a late failure is no unhandled rejection
+      produced.then(undefined, () => undefined)
+      return shownInstead(`did not come within ${LOADING_DRAW_TIMEOUT_MS} ms`)
+    } catch (failure) {
+      return shownInstead('could not be drawn', failure)
+    } finally {
+      clearTimeout(timer)
     }
   }
 

@@ -65,6 +65,9 @@ function textOf(view: ResponseView): string {
 /** Discord's limit of attachments on one message. */
 export const ATTACHMENT_LIMIT = 10
 
+/** The most items Discord shows in one media gallery. */
+const MEDIA_GALLERY_LIMIT = 10
+
 /**
  * Discord's default size limit of each uploaded file, for a send without an interaction's `attachmentSizeLimit`:
  * "The default limit is `20 MiB` for all users", in discord-api-docs' Uploading Files (developers/reference.mdx).
@@ -190,8 +193,12 @@ export function renderContainer(view: ResponseView): APIContainerComponent {
     )
   } else container.addTextDisplayComponents(text)
   const files = unshownFiles(view).map(nameOf)
-  const gallery = [...(view.image ? [urlOf(view, view.image)] : []), ...files.filter(name => IMAGE.test(name)).map(name => `attachment://${name}`)]
-  if (gallery.length > 0) container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(...gallery.map(url => ({ media: { url } }))))
+  const images = [...(view.image ? [urlOf(view, view.image)] : []), ...files.filter(name => IMAGE.test(name)).map(name => `attachment://${name}`)]
+  // A gallery holds at most 10, and the image beside 10 image files makes 11, so they fill as many as they need
+  for (let start = 0; start < images.length; start += MEDIA_GALLERY_LIMIT) {
+    const gallery = images.slice(start, start + MEDIA_GALLERY_LIMIT)
+    container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(...gallery.map(url => ({ media: { url } }))))
+  }
   for (const name of files.filter(name => !IMAGE.test(name))) container.addFileComponents(new FileBuilder().setURL(`attachment://${name}`))
   const json = container.toJSON()
   const extra = (view.components ?? []).map(component =>
