@@ -61,8 +61,36 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
     }
   }
 
+  // Starts the handler only after it has returned, outside the call
+  @loaded.Interceptor()
+  class Late {
+    intercept(_context: unknown, next: { handle(): Promise<unknown> }) {
+      setTimeout(() => void next.handle(), 0)
+      return 'later'
+    }
+  }
+
+  // Starts the handler without waiting for it, which the call still waits for
+  @loaded.Interceptor()
+  class Unawaited {
+    intercept(_context: unknown, next: { handle(): Promise<unknown> }) {
+      void next.handle()
+    }
+  }
+
   @loaded.Controller()
   class Shop {
+    @loaded.Command('late', loaded.CommandType.SLASH)
+    @loaded.UseInterceptor(Late)
+    async late() {}
+
+    @loaded.Command('unawaited', loaded.CommandType.SLASH)
+    @loaded.UseInterceptor(Unawaited)
+    async unawaited(interaction: any) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+      await loaded.respond(interaction).send('ok')
+    }
+
     @loaded.Command('cached', loaded.CommandType.SLASH)
     @loaded.Defer()
     @loaded.UseInterceptor(Cached)
@@ -140,12 +168,26 @@ describe('the warning for an interaction left unanswered', () => {
     for (const command of ['cached', 'cachedForgets', 'cachedAnswers']) await run(command)
 
     expect(warned.filter(message => message.startsWith('Shop.cached'))).toEqual([
-      'Shop.cached: its interceptor Cached returned without running it, and the interaction it deferred was never ' +
+      'Shop.cached: its interceptor Cached returned before the handler ran, and the deferred interaction was never ' +
         'followed up, so the user saw it thinking until Discord gave up. Follow up in Cached with ' +
-        'respond(interaction).send(), or call next.handle(). Shown once per handler; @MeoCord({ warnUnanswered: false }) ' +
+        'respond(interaction).send(), or await next.handle(). Shown once per handler; @MeoCord({ warnUnanswered: false }) ' +
         'turns it off.',
-      'Shop.cachedForgets: its interceptor Cached returned without running it or answering the interaction, so the user ' +
-        'saw "The application did not respond". Answer it in Cached, or call next.handle(). Shown once per handler; ' +
+      'Shop.cachedForgets: its interceptor Cached returned before the handler ran, without answering the interaction, so the ' +
+        'user saw "The application did not respond". Answer it in Cached, or await next.handle(). Shown once per handler; ' +
+        '@MeoCord({ warnUnanswered: false }) turns it off.',
+    ])
+  })
+
+  it('names an interceptor that starts the handler only once it has returned, and not one that starts it without waiting', async () => {
+    process.env.NODE_ENV = 'development'
+    const run = await startApp(await load())
+
+    for (const command of ['late', 'unawaited']) await run(command)
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    expect(warned.filter(message => /^Shop\.(late|unawaited)\b/.test(message))).toEqual([
+      'Shop.late: its interceptor Late returned before the handler ran, without answering the interaction, so the user ' +
+        'saw "The application did not respond". Answer it in Late, or await next.handle(). Shown once per handler; ' +
         '@MeoCord({ warnUnanswered: false }) turns it off.',
     ])
   })

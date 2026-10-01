@@ -467,11 +467,11 @@ export class Dispatcher {
     this.warnedUnanswered.add(handler)
     const what = interceptor
       ? phase === 'unanswered'
-        ? `${handler}: its interceptor ${interceptor} returned without running it or answering the interaction, so the user ` +
-          `saw "The application did not respond". Answer it in ${interceptor}, or call next.handle().`
-        : `${handler}: its interceptor ${interceptor} returned without running it, and the interaction it deferred was never ` +
+        ? `${handler}: its interceptor ${interceptor} returned before the handler ran, without answering the interaction, so the user ` +
+          `saw "The application did not respond". Answer it in ${interceptor}, or await next.handle().`
+        : `${handler}: its interceptor ${interceptor} returned before the handler ran, and the deferred interaction was never ` +
           `followed up, so the user saw it thinking until Discord gave up. Follow up in ${interceptor} with ` +
-          'respond(interaction).send(), or call next.handle().'
+          'respond(interaction).send(), or await next.handle().'
       : phase === 'unanswered'
         ? `${handler} finished without answering its interaction, so the user saw "The application did not respond". ` +
           'Answer it with respond(interaction).send(), or acknowledge it first with @Defer().'
