@@ -1041,6 +1041,63 @@ describe('lifecycle hooks', () => {
       expect(events).toEqual(['call runs', 'call done', 'store shutdown', 'queries shutdown'])
     })
 
+    // The store's side reaches through everything it injects, and takes a unit a service shares with it
+    it.each([
+      ['a chain of what it injects', 'chain', ['Other', 'store', 'A', 'B']],
+      ['what it shares with a service', 'shared', ['S', 'store', 'Q']],
+    ] as const)('shuts %s down after the store', async (_case, shape, expected) => {
+      const loaded = await load()
+      const events: string[] = []
+
+      @loaded.Service()
+      class B implements OnShutdown {
+        onShutdown() {
+          events.push('B')
+        }
+      }
+      @loaded.Service()
+      class A implements OnShutdown {
+        constructor(@loaded.inject(B) readonly b: B) {}
+        onShutdown() {
+          events.push('A')
+        }
+      }
+      @loaded.Service()
+      class Other implements OnShutdown {
+        onShutdown() {
+          events.push('Other')
+        }
+      }
+      @loaded.Service()
+      class Q implements OnShutdown {
+        onShutdown() {
+          events.push('Q')
+        }
+      }
+      @loaded.Service()
+      class S implements OnShutdown {
+        constructor(@loaded.inject(Q) readonly q: Q) {}
+        onShutdown() {
+          events.push('S')
+        }
+      }
+      const injected = shape === 'chain' ? A : Q
+      class SideStore extends loaded.MemoryCooldownStore implements OnShutdown {
+        constructor(@loaded.inject(injected) readonly dependency: unknown) {
+          super()
+        }
+        onShutdown() {
+          events.push('store')
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [], services: shape === 'chain' ? [Other] : [S], cooldownStore: SideStore })
+      await becomeReady(client)
+      await loaded.shutdownAndExit()
+
+      expect(events).toEqual(expected)
+    })
+
     // With no hook on the store's side there is nothing for a lingering call to protect
     it('does not wait for a call under way when neither it nor what it injects has an onShutdown', async () => {
       config.shutdownTimeout = 5_000

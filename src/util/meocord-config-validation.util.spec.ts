@@ -39,7 +39,7 @@ describe('configProblems', () => {
       "commands.guilds must be an array of guild ids (got 'one')",
       "commands.register must be true or false (got 'yes')",
       "optionalExternals must be an array of package names (got 'sharp')",
-      'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got -1)',
+      'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147478647 (got -1)',
       'rsbuild must be a function (got object)',
     ])
   })
@@ -47,18 +47,18 @@ describe('configProblems', () => {
   it('shows the number it got, so a shard count or timeout that is out of range says which', () => {
     expect(configProblems({ sharding: { shards: 2.5 }, shutdownTimeout: Number.NaN }).errors).toEqual([
       "sharding.shards must be 'auto' or a whole number of shards, 1 or more (got 2.5)",
-      'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got NaN)',
+      'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147478647 (got NaN)',
     ])
   })
 
-  // Node fires a longer timer at once, so shutdown would give up on the hooks immediately
-  it.each([2_147_483_648, Infinity])('refuses a shutdownTimeout a timer cannot keep (%s)', shutdownTimeout => {
+  // The shard manager and the CLI wait a margin on top, and Node fires a timer past its limit at once
+  it.each([2_147_478_648, Infinity])('refuses a shutdownTimeout that leaves no room for the margins on top (%s)', shutdownTimeout => {
     expect(configProblems({ shutdownTimeout }).errors).toEqual([
-      `shutdownTimeout must be a number of milliseconds 0 or more, at most 2147483647 (got ${shutdownTimeout})`,
+      `shutdownTimeout must be a number of milliseconds 0 or more, at most 2147478647 (got ${shutdownTimeout})`,
     ])
   })
 
-  it.each([0, 2_147_483_647])('takes a shutdownTimeout of %s', shutdownTimeout => {
+  it.each([0, 2_147_478_647])('takes a shutdownTimeout of %s', shutdownTimeout => {
     expect(configProblems({ discordToken: 't', shutdownTimeout }).errors).toEqual([])
   })
 

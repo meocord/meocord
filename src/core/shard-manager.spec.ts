@@ -29,9 +29,9 @@ const {
   RESPAWN_CAP_MS,
   RESPAWN_RESET_MS,
   SHARD_SPAWN_DELAY_MS,
-  SHUTDOWN_MARGIN_MS,
   ShardManager,
 } = await import('@src/core/shard-manager.js')
+const { MAX_SHUTDOWN_TIMEOUT_MS, SHUTDOWN_MARGIN_MS } = await import('@src/util/shutdown-timeout.util.js')
 const { BUNDLE_ENTRY_KEY } = await import('@src/util/bundle-entry.util.js')
 const { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } = await import('@src/util/dev-runner.util.js')
 
@@ -426,19 +426,20 @@ describe('ShardManager', () => {
       expect(exit).toHaveBeenCalledWith(1)
     })
 
-    // The margin on top would pass a timer's limit, and Node fires such a timer at once
-    it('waits as long as a timer keeps when the shutdownTimeout is the longest allowed', async () => {
+    // The margin on top still fits a timer, which Node would fire at once past its limit
+    it('keeps the whole margin after the longest shutdownTimeout', async () => {
       vi.useFakeTimers()
-      const { manager, shards, exit } = setup({ shards: 1, shutdownTimeout: 2_147_483_647 })
+      const { manager, shards, exit } = setup({ shards: 1, shutdownTimeout: MAX_SHUTDOWN_TIMEOUT_MS })
       await manager.start()
 
       const stopped = manager.stopAndExit()
-      await vi.advanceTimersByTimeAsync(60_000)
+      await vi.advanceTimersByTimeAsync(MAX_SHUTDOWN_TIMEOUT_MS + SHUTDOWN_MARGIN_MS - 1)
       expect(shards[0].process).not.toBeNull()
-
-      shards[0].die(0)
+      await vi.advanceTimersByTimeAsync(1)
       await stopped
-      expect(exit).toHaveBeenCalledWith(0)
+
+      expect(shards[0].process).toBeNull()
+      expect(exit).toHaveBeenCalledWith(1)
     })
 
     it('kills every shard at once on a signal repeated after the window', async () => {
