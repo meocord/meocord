@@ -229,6 +229,41 @@ describe('MeoCordTestingModule.create({ app })', () => {
   })
 })
 
+// A fake store that never answers must not hang close(): it waits up to shutdownTimeout, as the bot's shutdown does
+describe("closing a module whose store never answers", () => {
+  @MeoCord({ controllers: [NotesController], cooldownStoreTimeoutMs: 20, clientOptions: { intents: [] } })
+  class QuickApp {}
+
+  it('shuts the store down once its shutdownTimeout passes, though an answer is still under way', async () => {
+    const hooks: string[] = []
+    class SilentStore extends CooldownStore {
+      consume(): Promise<CooldownVerdict> {
+        return new Promise(() => {})
+      }
+
+      onShutdown() {
+        hooks.push('store shutdown')
+      }
+    }
+    const module = MeoCordTestingModule.create({
+      app: QuickApp,
+      controllers: [NotesController],
+      providers: [
+        { provide: DATABASE, useValue: { count: async () => 1 } },
+        { provide: CooldownStore, useValue: new SilentStore() },
+      ],
+      shutdownTimeout: 50,
+    }).compile()
+    await module.dispatch(slash('notes'))
+
+    const started = Date.now()
+    await module.close()
+
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(hooks).toEqual(['store shutdown'])
+  })
+})
+
 describe('a class that injects the Discord Client', () => {
   @Service()
   class Presence {
