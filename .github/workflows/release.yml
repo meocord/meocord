@@ -5,10 +5,13 @@ on:
     branches:
       - main
       - beta
+      # The 4.0 maintenance line: patch releases of 4.0, published from this branch.
+      - release/4.0
   pull_request:
     branches:
       - main
       - beta
+      - release/4.0
   # Publishing is gated by merging the release pull request, so this is not how a
   # release is started. It is here to re-run the job after a publish fails partway.
   workflow_dispatch:
@@ -28,10 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -60,15 +63,15 @@ jobs:
         node: ['22.13', 'lts/*']
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -95,15 +98,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -119,15 +122,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -169,10 +172,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -186,6 +189,9 @@ jobs:
       - name: Verify generated applications build
         run: bun run verify:generated
 
+  # Publishes, and only that: it installs nothing beyond the repository's frozen lockfile and runs
+  # no generated application, since any step here can request the token npm publishes with. The
+  # generated applications are verified by the build job above.
   release:
     name: Release
     if: github.event_name != 'pull_request'
@@ -211,22 +217,24 @@ jobs:
       # credentials left in the checkout — and the commits and tags it creates are signed
       # with GitHub's key instead of landing unverified.
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: lts/*
           registry-url: https://registry.npmjs.org
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
+      # The lockfile's exact packages, with no install scripts: the build needs none, and each one
+      # would be code from a dependency running beside the publishing identity.
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Verify provenance attestations
         run: npm audit signatures
@@ -234,11 +242,35 @@ jobs:
       - name: Build package
         run: bun run build
 
-      # Runs against dist rather than src, so it covers the package exports map and
-      # the template copy as well as the templates themselves. Rendering a template
-      # says nothing about whether the code it produces compiles.
-      - name: Verify generated applications build
-        run: bun run verify:generated
+      # A release from this branch is a 4.0 patch: a version of another line, a prerelease, or one below
+      # what npm tags `latest` would move that tag backwards or onto the wrong line, so the job stops first.
+      # The version already published, as on the first push after a release, passes: changesets skips it.
+      - name: Refuse a version this branch does not release
+        if: github.ref == 'refs/heads/release/4.0'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          latest=$(npm view meocord dist-tags.latest)
+          # The ${…} in this script are JavaScript template literals, not shell expansions
+          # shellcheck disable=SC2016
+          node -e '
+            const [version, latest] = process.argv.slice(1)
+            const parts = v => v.split(".").map(Number)
+            const below = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false }
+            const plain = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+            const problem = !plain.test(latest)
+              ? `npm returned "${latest}" for latest, which is not a release version; refusing to publish without it`
+              : version.includes("-")
+                ? `${version} is a prerelease; release/4.0 publishes 4.0 patches to latest`
+                : !plain.test(version)
+                  ? `${version} is not a plain release version (major.minor.patch, no leading zeros or build metadata)`
+                  : !version.startsWith("4.0.")
+                    ? `${version} is not a 4.0 version; release/4.0 publishes the 4.0 line only`
+                    : below(parts(version), parts(latest))
+                      ? `${version} is below ${latest}, which npm tags latest; publishing it would move latest backwards`
+                      : ""
+            if (problem) { console.error(`::error title=Not a 4.0 release::${problem}`); process.exit(1) }
+            console.log(`${version} may be released from release/4.0 (npm latest is ${latest}).`)
+          ' "$version" "$latest"
 
       # With pending changesets, this opens or updates the release pull request and
       # stops. With none — which is the state right after that pull request merges —
@@ -249,7 +281,11 @@ jobs:
       # opens the release pull request as that identity instead, so its checks start like any
       # other. Without it, the workflow's token is used and the runs wait for approval.
       - name: Open the release pull request, or publish
-        uses: changesets/action@v2
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        env:
+          # npm publish runs the package's own lifecycle scripts (prepare is husky); the build is done, so none runs
+          # beside the publishing identity
+          npm_config_ignore_scripts: 'true'
         with:
           github-token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           version-script: bun run release:version
