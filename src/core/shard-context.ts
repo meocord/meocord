@@ -72,6 +72,9 @@ export type ShardCallResult<T> =
   | { shardIds: number[]; ok: true; value: T }
   | { shardIds: number[]; ok: false; error: string }
 
+/** A value JSON writes and reads back unchanged, which {@link Jsonified} gives back as itself. */
+type JsonSafe = string | number | boolean | null | readonly JsonSafe[] | { readonly [key: string]: JsonSafe }
+
 /** What JSON leaves out of an object, and writes as `null` in a list. */
 type JsonDropped = undefined | void | symbol | ((...args: any[]) => unknown)
 
@@ -100,7 +103,10 @@ type JsonObject<T> = {
  */
 export type Jsonified<T> = unknown extends T
   ? unknown
-  : T extends { toJSON(...args: any[]): infer R }
+  : // Before the mapping, which a recursive JSON type such as type-fest's JsonValue would take too deep
+    [T] extends [JsonSafe]
+    ? T
+    : T extends { toJSON(...args: any[]): infer R }
     ? Jsonified<R>
     : T extends string | number | boolean | null
       ? T

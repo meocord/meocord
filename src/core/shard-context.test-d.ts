@@ -24,6 +24,9 @@ interface Report {
   price: Money
 }
 
+// The shape type-fest and hand-written JSON types share
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+
 class StatsService {
   guildCount(): number {
     return 0
@@ -51,6 +54,9 @@ class StatsService {
   }
   async greet(name: string, times: number): Promise<string> {
     return name.repeat(times)
+  }
+  echo(value: JsonValue): JsonValue {
+    return value
   }
   readonly label = 'stats'
 }
@@ -84,6 +90,11 @@ describe('ShardContext.call', () => {
     void shards.call(StatsService, 'sinceText', new Date().toJSON())
     // @ts-expect-error a Date arrives as a string, so since() is declared to take one
     void shards.call(StatsService, 'since', new Date())
+  })
+
+  it('takes and gives back a recursive JSON type as itself', () => {
+    const value: JsonValue = { tags: ['a', 1, null], nested: { ok: true } }
+    expectTypeOf(shards.call(StatsService, 'echo', value)).resolves.toEqualTypeOf<ShardCallResult<JsonValue>[]>()
   })
 
   // An undefined argument arrives as itself; an undefined property is left out of its object, as JSON does
