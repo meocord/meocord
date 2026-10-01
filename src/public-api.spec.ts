@@ -207,6 +207,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'MessageParamType',
     'MessageParamTypes',
     'MessagePrefix',
+    'MessageResponseContext',
     'MessageScope',
     'ObserverOptions',
     'OnReady',

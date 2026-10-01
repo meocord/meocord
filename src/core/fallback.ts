@@ -1,4 +1,4 @@
-import { type AutocompleteInteraction, Message } from 'discord.js'
+import { type APIEmbed, type AttachmentBuilder, type AutocompleteInteraction, Message } from 'discord.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
 import { CommandNotFoundError, CooldownError, cooldownText, CooldownStoreError, GuardDeniedError, MessageUsageError, UserError, ValidationError } from '@src/common/errors.js'
 import { type Logger } from '@src/common/logger.js'
@@ -6,11 +6,12 @@ import { responseOf } from '@src/common/response/response-state.js'
 import { describeInteraction } from '@src/util/interaction.util.js'
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
-import { useTheme } from '@src/core/theme-scope.js'
+import { themeForInteraction, useTheme } from '@src/core/theme-scope.js'
 import { errorText } from '@src/common/translate-error.js'
 import { interactionLocale, messageLocale, renderText, translatorOfClient } from '@src/common/meocord-text.js'
 import { type MessageCommandOptions } from '@src/interface/index.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
+import { attachmentsOf, DEFAULT_ATTACHMENT_SIZE_LIMIT, presenterFor, renderEmbed, withSendableFiles } from '@src/common/response/presenter.js'
 import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
 
 /** The app's message options the fallback's replies to messages follow. */
@@ -104,6 +105,16 @@ class Answering {
     }
   }
 
+  /** What `draw` resolves to, or `undefined` when it threw or rejected. */
+  async draw<T>(what: string, call: string, draw: () => Promise<T>): Promise<T | undefined> {
+    try {
+      return await draw()
+    } catch (error) {
+      this.fail(what, call, error)
+      return undefined
+    }
+  }
+
   /** Records that `what` could not be written for `call`, and rethrows when strict. */
   fail(what: string, call: string, error: unknown): void {
     this.logger.error(`Could not write ${what} for ${call}:`, error)
@@ -112,8 +123,33 @@ class Answering {
   }
 }
 
+/** A reply to a message: plain text, or an app presenter's embed and the files it shows. */
+type PresentedReply = { content: string } | { embeds: APIEmbed[]; files?: AttachmentBuilder[] }
+
 /** The text of a reply to a message, after the call's `emojis.warning` when `withEmoji`. */
 const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ? `${useTheme().emojis.warning} ${text}` : text)
+
+/**
+ * `text`, answering `error` for `message`: plain text, after the call's `emojis.warning` when `withEmoji`, unless the
+ * app's presenter has `messageError`, which draws it instead: an embed, coloured as an interaction's view is, with that
+ * emoji when the view has none of its own, and the view's files when Discord takes them.
+ */
+async function presentedReply(message: Message, error: unknown, text: string, withEmoji: boolean | undefined, logger: Logger): Promise<PresentedReply> {
+  const presenter = presenterFor(message.client)
+  if (!presenter.messageError) return { content: replyText(text, withEmoji) }
+  const theme = await themeForInteraction(message)
+  const translator = translatorOfClient(message.client)
+  const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
+  const tone = isUserOutcome(error, message) ? 'warning' : 'danger'
+  const drawn = await presenter.messageError({ message, locale, mode: 'embed', theme }, { message: text, error, tone })
+  let view = drawn.color === undefined ? { ...drawn, color: theme.colors.primary } : drawn
+  if (withEmoji && view.emoji === undefined) view = { ...view, emoji: theme.emojis.warning }
+  view = withSendableFiles(view, { sizeLimit: DEFAULT_ATTACHMENT_SIZE_LIMIT }, problem =>
+    logger.warn(`The view for message ${quoteForLog(String(message.content))} is sent without its files: ${problem}.`),
+  )
+  const files = attachmentsOf(view)
+  return files.length > 0 ? { embeds: [renderEmbed(view)], files } : { embeds: [renderEmbed(view)] }
+}
 
 /**
  * Replies to a message with a `UserError`'s message, without pinging, after the call's `emojis.warning` when
@@ -132,10 +168,12 @@ export async function replyWithUserError(
 }
 
 async function replyToMessage(message: Message, error: UserError, logger: Logger, withEmoji: boolean | undefined, answering: Answering): Promise<void> {
-  const content = answering.build('the reply', `message ${quoteForLog(String(message.content))}`, () => replyText(error.message, withEmoji))
-  if (content === undefined) return
+  const reply = await answering.draw('the reply', `message ${quoteForLog(String(message.content))}`, () =>
+    presentedReply(message, error, error.message, withEmoji, logger),
+  )
+  if (reply === undefined) return
   try {
-    await message.reply({ content, allowedMentions: { repliedUser: false } })
+    await message.reply({ ...reply, allowedMentions: { repliedUser: false } })
   } catch (replyError) {
     logFailedSend(logger, 'reply to the message', replyError)
   }
@@ -163,22 +201,22 @@ async function tellPrivately(
   const message = context.getMessage()
   if (!message) return
   const call = describeCall(context)
-  const content = answering.build('the direct message', call, () => {
+  const reply = await answering.draw('the direct message', call, () => {
     const translator = translatorOfClient(message.client)
     const locale = messageLocale(message)
-    if (!message.guild) return replyText(errorText(error, translator, locale), withEmoji)
+    if (!message.guild) return presentedReply(message, error, errorText(error, translator, locale), withEmoji, logger)
     const channel = 'name' in message.channel && message.channel.name ? `#${message.channel.name}` : `<#${message.channelId}>`
     const place = { command: invocations.get(message) ?? message.content.split(/\s+/)[0]!, channel, server: message.guild.name }
     const text =
       error instanceof CooldownError
         ? { key: 'meocord.dm.cooldown', params: { ...place, wait: cooldownText(error.retryAfterMs) } }
         : { key: 'meocord.dm.error', params: place }
-    return replyText(renderText(translator, locale, text), withEmoji)
+    return presentedReply(message, error, renderText(translator, locale, text), withEmoji, logger)
   })
-  if (content === undefined) return
+  if (reply === undefined) return
   try {
-    if (message.guild) await message.author.send({ content, allowedMentions: { parse: [] } })
-    else await message.reply({ content, allowedMentions: { repliedUser: false, parse: [] } })
+    if (message.guild) await message.author.send({ ...reply, allowedMentions: { parse: [] } })
+    else await message.reply({ ...reply, allowedMentions: { repliedUser: false, parse: [] } })
   } catch (failure) {
     if (errorCode(failure) === CANNOT_MESSAGE_USER) logger.debug(`Could not tell ${message.author.id} about ${call}: they take no direct messages`)
     else logFailedSend(logger, 'send a direct message about a command', failure)
@@ -218,12 +256,12 @@ async function answerUsage(
   const message = context.getMessage()
   if (!message) return
   const seconds = options?.deleteUsageRepliesAfter ?? DEFAULT_USAGE_REPLY_SECONDS
-  const content = answering.build('the usage reply', describeCall(context), () =>
-    replyText(errorText(error, translatorOfClient(message.client), messageLocale(message)), options?.replyEmoji),
+  const body = await answering.draw('the usage reply', describeCall(context), () =>
+    presentedReply(message, error, errorText(error, translatorOfClient(message.client), messageLocale(message)), options?.replyEmoji, logger),
   )
-  if (content === undefined) return
+  if (body === undefined) return
   try {
-    const reply = await message.reply({ content, allowedMentions: { repliedUser: false, parse: [] } })
+    const reply = await message.reply({ ...body, allowedMentions: { repliedUser: false, parse: [] } })
     if (seconds > 0) {
       setTimeout(() => {
         reply.delete().catch(failure => logFailedSend(logger, 'delete a reply to a command', failure))
