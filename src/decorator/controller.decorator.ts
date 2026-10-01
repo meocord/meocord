@@ -24,13 +24,22 @@ import {
   type CommandInteractionType,
   type CommandMeta,
 } from '@src/interface/command-decorator.interface.js'
-import { isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
+import { interactionClassName, isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
+import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse } from '@src/util/refusal.util.js'
+
+/** What a handler was given in place of its interaction: another interaction's class, or what the value is. */
+function givenInstead(value: unknown): string {
+  const name = typeof value === 'object' && value !== null ? value.constructor?.name : undefined
+  if (name && name !== 'Object') return `, not a ${name}`
+  const what = value === null || value === undefined ? String(value) : typeof value === 'object' ? 'an object' : `a ${typeof value}`
+  return `; it was given ${what}`
+}
 
 const COMMAND_METADATA_KEY = Symbol('commands')
 const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
@@ -126,7 +135,8 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
  * {@link MessageUsageError}. The params the handler declares are checked against the pattern when the code
  * compiles.
  *
- * @param pattern - The words to match, such as `'roll {sides:int} {note...?}'`.
+ * @param pattern - The words to match, such as `'roll {sides:int} {note...?}'`. An empty pattern runs for every
+ *   message, as `@MessageHandler()` does, and logs a warning: it is deprecated, and refused in 5.0.
  * @param options - The handler's own start, case, aliases, description and scope; see {@link MessageHandlerOptions}.
  * @throws Error at startup for a pattern that cannot be read, and for two patterns that match the same messages.
  *
@@ -155,6 +165,9 @@ export function MessageHandler(pattern?: string, options: MessageHandlerOptions 
   return function (target: object, propertyKey: string) {
     const handlers = ownHandlerList<MessageHandlerMetadata>(MESSAGE_HANDLER_METADATA_KEY, target)
     // An empty pattern means every message, as no pattern does
+    if (pattern === '') {
+      warnDeprecatedBehaviour(logger, `@MessageHandler('') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
+    }
     handlers.push({ pattern: pattern || undefined, method: propertyKey.toString(), options })
     Reflect.defineMetadata(MESSAGE_HANDLER_METADATA_KEY, handlers, target)
   }
@@ -479,8 +492,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
  *   `CommandType` for a handler that registers nothing: a component, or a subcommand its command's builder
  *   describes.
- * @throws Error when the builder throws, naming the builder and the command, and on a subcommand path the handler,
- *   since the builder of the path's command describes it.
+ * @throws Error when the builder throws as it is made or as it builds, naming the handler, the builder and the
+ *   command, and on a subcommand path saying the builder of the path's command describes it.
  *
  * @example
  * ```ts
@@ -529,7 +542,10 @@ export function Command<
     // Wrap original method for interaction type validation
     _descriptor.value = function (interaction, params) {
       if (!matchesCommandType(commandType, interaction)) {
-        throw new Error(`Invalid interaction type passed to @Command for method: ${propertyKey}`)
+        throw new Error(
+          `${target.constructor.name}.${propertyKey}: @Command('${commandName}', CommandType.${commandType}) takes a ` +
+            `${interactionClassName(commandType)}${givenInstead(interaction)}.`,
+        )
       }
 
       return (originalMethod as (...args: unknown[]) => R).apply(this, [interaction, params])
@@ -555,11 +571,18 @@ export function Command<
       const declareInstead =
         `Declare the handler with @Command('${commandName}', CommandType.SLASH), and give the builder to ` +
         `@Command('${command}').`
-      const builderObj = new builderOrType() as CommandBuilderBase
+      // One sentence of the error, without its own full stop, as the refusal ends with one
+      const detailOf = (error: unknown) => (error instanceof Error ? error.message.split('\n')[0] : String(error)).replace(/\.$/, '')
+      let builderObj: CommandBuilderBase
+      try {
+        builderObj = new builderOrType() as CommandBuilderBase
+      } catch (error) {
+        throw refuse(new Error(`${where}: ${builderOrType.name} could not be made for "${commandName}": ${detailOf(error)}.`, { cause: error }))
+      }
       try {
         builderInstance = builderObj.build(commandName)
       } catch (error) {
-        const detail = error instanceof Error ? error.message.split('\n')[0] : String(error)
+        const detail = detailOf(error)
         if (subcommandPath) {
           throw refuse(new Error(
             `${where}: the builder ${builderOrType.name} is declared on "${commandName}", which is a subcommand path: the ` +
