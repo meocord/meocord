@@ -1,5 +1,15 @@
 # meocord
 
+## 4.0.1
+
+### Patch Changes
+
+- [#290](https://github.com/meocord/meocord/pull/290) [`6e6e68e`](https://github.com/meocord/meocord/commit/6e6e68eff696481b40810b2bf713f2bec769b564) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `Logger` prints objects as `console.log` does, and redacts the bot's credentials from everything it prints: non-enumerable properties no longer appear, and objects print four levels deep.
+
+  - Nested data a bot logs, such as a payload or its settings, still shows in full, and a discord.js structure prints a few hundred lines instead of everything it reaches.
+  - An error prints as before: its stack, its own properties such as `code`, its `cause`, and an `AggregateError`'s errors. Its message and stack are no longer printed a second time below it.
+  - Nothing to change in your code.
+
 ## 4.0.0
 
 MeoCord 4 builds with Rsbuild instead of webpack, requires Node.js 22.13 and dotenv 18, and can
