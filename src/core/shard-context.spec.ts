@@ -68,6 +68,18 @@ describe('ShardContext', () => {
       ])
     })
 
+    it('gives a param an undefined argument its default, as a direct call does', async () => {
+      @Controller()
+      class Pages {
+        page(at = 1, size = 20) {
+          return { at, size }
+        }
+      }
+      const shards = MeoCordTestingModule.create({ controllers: [Pages] }).compile().get(ShardContext)
+
+      expect(await shards.call(Pages, 'page', undefined, undefined)).toEqual([{ shardIds: [0], ok: true, value: { at: 1, size: 20 } }])
+    })
+
     // JSON drops a value it cannot write, as discord.js's reply between processes does
     it('gives a result JSON cannot write, such as a function or a Symbol, as undefined', async () => {
       @Controller()
