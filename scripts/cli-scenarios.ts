@@ -4,7 +4,8 @@
  * left running. Run after `bun run build`.
  * `--tier fast` (the default) needs no network after one install. `--tier slow` adds an npm install,
  * the bun runtime, bundled builds, sharding and signals; it reaches Discord, where an invalid token
- * is refused. `--windows` runs the subset whose paths and shims differ there; `--only <text>` filters by name.
+ * is refused. `--windows` runs the subset whose paths and shims differ there, from both tiers; `--only <text>`
+ * filters by name.
  */
 
 import { spawn, spawnSync } from 'child_process'
@@ -38,7 +39,7 @@ type Runtime = 'node' | 'bun'
 interface Scenario {
   name: string
   tier: Tier
-  /** Also run by `--windows`, the subset where Windows paths and shims differ. */
+  /** Also run by `--windows`, the subset where Windows paths and shims differ, from either tier. */
   windows?: boolean
   /** Runs only on these platforms. */
   platforms?: NodeJS.Platform[]
@@ -796,6 +797,21 @@ const scenarios: Scenario[] = [
       expect: { code: 0, creates: [`src/${kind}s/admin/probe.${kind}.ts`] },
     },
   ]),
+  // npm writes node_modules/.bin/eslint.cmd on Windows, which can't be spawned without a shell
+  {
+    name: 'generate in an app npm installed reports the file created, with no failure from formatting it',
+    // An npm install and its ESLint run: the Windows job, where the shim is a .cmd, and the slow tier
+    tier: 'slow',
+    windows: true,
+    cwd: 'npm-app',
+    argv: ['generate', 'service', 'Formatted'],
+    expect: {
+      code: 0,
+      says: ['Created'],
+      never: ['Failed to create', 'EINVAL'],
+      creates: ['src/services/formatted.service.ts', 'src/services/formatted.service.spec.ts'],
+    },
+  },
   {
     name: 'g co slash writes the controller, its spec and its builder',
     tier: 'fast',
@@ -1504,10 +1520,12 @@ async function main(): Promise<void> {
   if (tierArg !== undefined && !['fast', 'slow', 'all'].includes(tierArg)) {
     refuse(`Unknown tier "${tierArg}": use --tier fast, slow or all.`)
   }
-  const tiers: Tier[] = tierArg === 'all' ? ['fast', 'slow'] : [(tierArg as Tier | undefined) ?? 'fast']
+  const windowsOnly = process.argv.includes('--windows')
+  // The Windows subset is small, so --windows runs it from both tiers unless a tier is named
+  const tiers: Tier[] =
+    tierArg === 'all' || (windowsOnly && tierArg === undefined) ? ['fast', 'slow'] : [(tierArg as Tier | undefined) ?? 'fast']
   const only = valueOf('--only')
   if (only === '') refuse('--only needs part of a scenario name.')
-  const windowsOnly = process.argv.includes('--windows')
   const runnable = scenarios.filter(
     scenario =>
       tiers.includes(scenario.tier) &&

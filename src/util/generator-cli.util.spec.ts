@@ -232,17 +232,47 @@ describe('generateFile', () => {
     process.exitCode = exitCode
   })
 
+  const ESLINT_MANIFEST = JSON.stringify({ name: 'eslint', bin: { eslint: './bin/eslint.js' } })
+  const eslintScript = () => path.resolve(process.cwd(), 'node_modules', 'eslint', 'bin', 'eslint.js')
+
   // A project with its own rules still gets them applied to what was generated.
-  it('formats with the project\'s own eslint when it has one', () => {
+  it("formats with the project's own eslint when it has one, run by this runtime", () => {
     mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(ESLINT_MANIFEST as any)
 
     generateFile('/some/file.ts', 'content')
 
-    expect(mockExecFile).toHaveBeenCalledWith(
-      expect.stringContaining('eslint'),
-      ['--fix', '/some/file.ts'],
-      expect.any(Function),
-    )
+    expect(mockExecFile).toHaveBeenCalledWith(process.execPath, [eslintScript(), '--fix', '/some/file.ts'], expect.any(Function))
+  })
+
+  // A .cmd shim can't be spawned without a shell, so on Windows it threw EINVAL
+  it('never spawns a .cmd shim, on Windows either', () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(ESLINT_MANIFEST as any)
+
+    generateFile('/some/file.ts', 'content')
+    platform.mockRestore()
+
+    expect(mockExecFile).toHaveBeenCalledWith(process.execPath, [eslintScript(), '--fix', '/some/file.ts'], expect.any(Function))
+  })
+
+  // The file is written by then: a format that cannot even start must not report it as failed
+  it('reports the file created, and keeps a success code, when formatting throws', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(ESLINT_MANIFEST as any)
+    mockExecFile.mockImplementationOnce(() => {
+      throw Object.assign(new Error('spawn EINVAL'), { code: 'EINVAL' })
+    })
+    const exitCode = process.exitCode
+    process.exitCode = undefined
+
+    generateFile('/some/file.ts', 'content')
+
+    expect(process.exitCode).toBeUndefined()
+    expect(mockLoggerLog).toHaveBeenCalledWith(`Created ${path.relative(process.cwd(), '/some/file.ts')}`)
+    expect(mockLoggerError).not.toHaveBeenCalled()
+    process.exitCode = exitCode
   })
 
   // Reaching for npx would start downloading eslint into a project that deliberately
