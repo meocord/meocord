@@ -101,7 +101,7 @@ export interface PatternedMessageHandlerDecorator<T, R, Pattern extends string> 
  * @see {@link ReactionHandler}
  * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
  */
-export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boolean>>, R extends void | Promise<void>>(): (
+export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boolean>>, R>(): (
   target: object,
   propertyKey: string,
   // A handler may take fewer parameters than dispatch passes; the descriptor type is invariant, so each arity is listed.
@@ -143,7 +143,7 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
  */
 export function MessageHandler<
   T extends OmitPartialGroupDMChannel<Message<boolean>>,
-  R extends void | Promise<void>,
+  R,
   const Pattern extends string = string,
 >(pattern: Pattern, options?: MessageHandlerOptions): PatternedMessageHandlerDecorator<T, R, Pattern>
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
@@ -163,7 +163,7 @@ export interface ReactionHandlerMetadata {
   settings: ReactionHandlerSettings
 }
 
-type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>> = (
+type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction, R> = (
   target: object,
   propertyKey: string,
   descriptor:
@@ -201,7 +201,7 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * @see {@link ReactionEvent}
  * @see {@link https://meocord.dev/docs/4.1/reactions | Reactions}
  */
-export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>>(
+export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R>(
   emoji?: string,
   settings?: ReactionHandlerSettings,
 ): ReactionHandlerDecorator<T, R>
@@ -211,13 +211,13 @@ export function ReactionHandler<T extends MessageReaction | PartialMessageReacti
  *
  * @param settings - Whether bots' reactions reach it too; see {@link ReactionHandlerSettings}.
  */
-export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R extends void | Promise<void>>(
+export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R>(
   settings: ReactionHandlerSettings,
 ): ReactionHandlerDecorator<T, R>
 export function ReactionHandler(
   emojiOrSettings?: string | ReactionHandlerSettings,
   settings: ReactionHandlerSettings = {},
-): ReactionHandlerDecorator<MessageReaction | PartialMessageReaction, void | Promise<void>> {
+): ReactionHandlerDecorator<MessageReaction | PartialMessageReaction, unknown> {
   const [emoji, own] = typeof emojiOrSettings === 'object' ? [undefined, emojiOrSettings] : [emojiOrSettings, settings]
   return function (target: object, propertyKey: string) {
     const handlers = ownHandlerList<ReactionHandlerMetadata>(REACTION_HANDLER_METADATA_KEY, target)
@@ -477,7 +477,7 @@ export function Command<
   N extends string | Route = string,
 >(name: N, builderOrType: T) {
   const commandName = typeof name === 'string' ? name : (name as Route).pattern
-  return function <P extends Record<string, any>, R extends Promise<void> | void>(
+  return function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,
     _descriptor: (
@@ -640,6 +640,8 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
  * @param optionName - The option to complete. Leave it out to handle every option, branching on
  *   `interaction.options.getFocused(true)`.
+ * @typeParam _R - Not used: the handler's return type is inferred. It stays so that code written for 4.0 as
+ *   `@Autocomplete<void>(…)` still compiles, and goes in 5.0.
  *
  * @example
  * ```ts
@@ -657,8 +659,8 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @see {@link Command}
  * @see {@link https://meocord.dev/docs/4.1/autocomplete | Autocomplete}
  */
-export function Autocomplete<R extends void | Promise<void>>(commandPath: string, optionName?: string) {
-  return function <P extends Record<string, any>>(
+export function Autocomplete<_R = unknown>(commandPath: string, optionName?: string) {
+  return function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,
     _descriptor:
