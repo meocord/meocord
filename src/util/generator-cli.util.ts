@@ -91,14 +91,13 @@ export function createDirectoryIfNotExists(directory: string) {
 
 /**
  * Creates a file and formats it with the project's ESLint. The write is exclusive, so an existing file
- * is never replaced; a failed write sets a non-zero exit code.
+ * is never replaced; a failed write sets a non-zero exit code, and formatting, which comes after it,
+ * never does.
  */
 export function generateFile(filePath: string, content: string): void {
   const relative = path.relative(process.cwd(), filePath)
   try {
     fs.writeFileSync(filePath, content, { flag: 'wx' })
-    logger.log(`Created ${relative}`)
-    formatWithLocalESLint(filePath)
   } catch (error) {
     process.exitCode = 1
     if ((error as NodeJS.ErrnoException)?.code === 'EEXIST') {
@@ -106,7 +105,10 @@ export function generateFile(filePath: string, content: string): void {
       return
     }
     logger.error(`Failed to create ${relative}`, error)
+    return
   }
+  logger.log(`Created ${relative}`)
+  formatWithLocalESLint(filePath)
 }
 
 /**
@@ -117,13 +119,33 @@ export function generateFile(filePath: string, content: string): void {
  * the call is not awaited. A project with its own rules still gets them applied.
  */
 function formatWithLocalESLint(filePath: string): void {
-  const binary = path.resolve(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'eslint.cmd' : 'eslint')
-  if (!fs.existsSync(binary)) return
+  const script = localESLintScript()
+  if (!script) return
 
-  execFile(binary, ['--fix', filePath], () => {
-    // Formatting is a courtesy; a project whose rules reject the template should still
-    // end up with the file it asked for.
-  })
+  try {
+    execFile(process.execPath, [script, '--fix', filePath], () => {
+      // Formatting is a courtesy; a project whose rules reject the template should still
+      // end up with the file it asked for.
+    })
+  } catch {
+    // Nor one that cannot start: the file is written either way
+  }
+}
+
+/**
+ * The project's own ESLint, as the script its package names for `eslint`, run with this runtime rather than through
+ * `node_modules/.bin`: a Windows `.cmd` shim can't be spawned without a shell, so it failed there with EINVAL.
+ */
+function localESLintScript(): string | undefined {
+  const manifest = path.resolve(process.cwd(), 'node_modules', 'eslint', 'package.json')
+  if (!fs.existsSync(manifest)) return undefined
+  try {
+    const { bin } = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { bin?: string | Record<string, string> }
+    const script = typeof bin === 'string' ? bin : bin?.eslint
+    return script ? path.resolve(path.dirname(manifest), script) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Renders a builder template, replacing `{{className}}` and any `extra` placeholders. */
