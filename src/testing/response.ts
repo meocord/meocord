@@ -1,8 +1,10 @@
 import { DiscordAPIError, type Interaction } from 'discord.js'
 import { existingResponse, type ResponseCall, type ResponsePhase } from '@src/common/response/response-state.js'
+import { callOrder } from '@src/common/response/call-order.js'
+import { RESPONSE_LOG } from './mock-interaction.js'
 
 /**
- * What `respond()` did for an interaction, as {@link getResponse} reports it.
+ * How an interaction was answered, as {@link getResponse} reports it.
  *
  * @group Testing
  * @category Inspection
@@ -14,17 +16,22 @@ export interface ResponseReport {
   /** Whether anything the user can see was sent: a reply, an update, an edit or a follow-up that Discord accepted. */
   sent: boolean
 
-  /** Every Discord call made through `respond()`, in order, with the payload it sent, and the `error` of one Discord refused. */
+  /**
+   * Every answer call the interaction got, through `respond()` or discord.js directly, in order: the payload it sent,
+   * without `withResponse`, and the `error` of one Discord refused.
+   */
   calls: readonly ResponseCall[]
 }
 
 const VISIBLE = new Set<ResponseCall['method']>(['reply', 'update', 'editReply', 'followUp', 'message.edit'])
 
 /**
- * Reports what `respond()` did for an interaction: where its answer stands, and each Discord call it made.
+ * Reports how an interaction was answered: where its answer stands, and every answer call it got, in order.
  *
- * Use it after `invoke` or `dispatch` to check what the member sees. An interaction `respond()` was never used for
- * reports what discord.js shows on it, with no calls; for a message or a reaction, read the mock's own methods.
+ * Use it after `invoke` or `dispatch` to check what the member sees. A mock interaction records each `reply`,
+ * `deferReply`, `editReply`, `followUp`, `deleteReply`, `update`, `deferUpdate` and `showModal`, whether the handler
+ * made it through `respond()` or with discord.js directly, so both are reported, each once. For a message or a
+ * reaction, read the mock's own methods.
  *
  * @param interaction - The interaction a handler answered.
  * @returns The state, whether anything the member can see was sent, and the calls, in order.
@@ -54,13 +61,15 @@ const VISIBLE = new Set<ResponseCall['method']>(['reply', 'update', 'editReply',
  */
 export function getResponse(interaction: Interaction): ResponseReport {
   const state = existingResponse(interaction)
-  if (state) {
-    const calls = [...state.history]
-    return { state: state.state, sent: calls.some(call => VISIBLE.has(call.method) && !('error' in call)), calls }
-  }
+  // A mock records every answer it gets; respond()'s edits through the channel are its own, so they are merged in
+  const log = (interaction as { [RESPONSE_LOG]?: readonly ResponseCall[] })[RESPONSE_LOG]
+  const viaChannel = state?.history.filter(call => call.method === 'message.edit') ?? []
+  const calls = log ? [...log, ...viaChannel].sort((a, b) => callOrder(a) - callOrder(b)) : [...(state?.history ?? [])]
+  const sent = calls.some(call => VISIBLE.has(call.method) && !('error' in call))
+  if (state) return { state: state.state, sent, calls }
   const answered = interaction.isRepliable() ? interaction.replied : false
   const deferred = interaction.isRepliable() ? interaction.deferred : false
-  return { state: answered ? 'replied' : deferred ? 'deferred' : 'unanswered', sent: answered, calls: [] }
+  return { state: answered ? 'replied' : deferred ? 'deferred' : 'unanswered', sent: log ? sent : answered, calls }
 }
 
 /**

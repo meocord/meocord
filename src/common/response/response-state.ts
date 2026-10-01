@@ -40,6 +40,7 @@ import {
   V2_COMPONENT_LIMIT,
   withoutRenderedViews,
 } from '@src/common/response/components.js'
+import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseContext, type ResponseView } from '@src/interface/index.js'
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { type ResolvedTheme, themeForInteraction } from '@src/core/theme-scope.js'
@@ -449,6 +450,7 @@ export class InteractionResponse implements ResponseState {
   /** Makes a Discord call, recorded as it is made so the order stays as issued, and marked with its error if it rejects. */
   private async call<T>(method: ResponseCall['method'], payload: unknown, run: () => Promise<T>): Promise<T> {
     const call: ResponseCall = { method, payload }
+    stampCall(call)
     this.calls.push(call)
     try {
       return await run()

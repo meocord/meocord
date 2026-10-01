@@ -82,7 +82,7 @@ describe('UserError', () => {
 
     await respond(interaction).error(notEnough())
 
-    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['deleteReply', 'followUp'])
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['deferReply', 'deleteReply', 'followUp'])
     expect(description(interaction.followUp.mock.calls[0][0])).toBe('You need 10 coins.')
   })
 

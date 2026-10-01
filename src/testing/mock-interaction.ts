@@ -61,6 +61,8 @@ import {
   SnowflakeUtil,
 } from 'discord.js'
 import { createDiscordError } from './response.js'
+import { stampCall } from '@src/common/response/call-order.js'
+import { type ResponseCall } from '@src/common/response/response-state.js'
 import { discordDefault, REAL_GETTER } from './discord-defaults.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 
@@ -459,6 +461,44 @@ function defineCreatedTime(instance: object, generatedId: string | undefined): v
   }
 }
 
+/** Where a mock interaction keeps every answer it got, through respond() or discord.js directly, in order. */
+export const RESPONSE_LOG: unique symbol = Symbol('response log')
+
+const ANSWER_METHODS = ['reply', 'deferReply', 'editReply', 'followUp', 'deleteReply', 'update', 'deferUpdate', 'showModal'] as const
+
+/**
+ * `mock`, recording each call in `log` as it is made, with what it sent and, once it settles, what it rejected with.
+ * `withResponse` is how a call asks discord.js for the message back, not part of what it sends, so it is left out.
+ */
+function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[]): Mock {
+  return new Proxy(mock, {
+    apply(target, self, args: unknown[]) {
+      const [payload] = args
+      const sent =
+        payload && typeof payload === 'object' && 'withResponse' in payload
+          ? Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'withResponse'))
+          : payload
+      const call: ResponseCall = { method, payload: sent }
+      stampCall(call)
+      log.push(call)
+      try {
+        const result: unknown = Reflect.apply(target, self, args)
+        // Recorded and passed on, so a rejection nobody awaits is unhandled in the test, as it is on a bot
+        if (result instanceof Promise) {
+          return result.then(undefined, (error: unknown) => {
+            call.error = error
+            throw error
+          })
+        }
+        return result
+      } catch (error) {
+        call.error = error
+        throw error
+      }
+    },
+  })
+}
+
 /** The interaction a mock options resolver was given to, for the server a user option's member is in. */
 const optionOwners = new WeakMap<object, { guildId?: unknown; guild?: unknown }>()
 
@@ -665,6 +705,14 @@ export function createMockInteraction<T extends object>(
           instance.deferred = true
         }),
       )
+    }
+
+    // Every answer the interaction gets, through respond() or discord.js directly, in order, for getResponse
+    const log: ResponseCall[] = []
+    Object.defineProperty(instance, RESPONSE_LOG, { value: log })
+    for (const method of ANSWER_METHODS) {
+      const stub = stubs.get(method)
+      if (stub) stubs.set(method, recorded(method, stub as Mock, log))
     }
   }
 
