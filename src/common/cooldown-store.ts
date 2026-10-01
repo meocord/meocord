@@ -42,6 +42,18 @@ export interface CooldownEntry {
 export interface CooldownBatchVerdict extends CooldownVerdict {
   /** The index of the entry that refused the call; with several, the one with the longest wait. */
   blocked?: number
+  /**
+   * Undoes the call this verdict recorded, on a store that can. `@Cooldown` calls it for a call it has already
+   * refused because the store answered after `cooldownStoreTimeoutMs`, so a refused call costs no use. Absent on a
+   * refusal. The built-in stores give it as a non-enumerable property, so a verdict compares and serialises as its
+   * data. A store without it keeps such a call counted.
+   */
+  release?: () => Promise<void>
+}
+
+/** `verdict` with `release` added as a non-enumerable property, as the built-in stores give it. */
+export function withRelease(verdict: CooldownBatchVerdict, release: () => Promise<void>): CooldownBatchVerdict {
+  return Object.defineProperty(verdict, 'release', { value: release, enumerable: false, configurable: true })
 }
 
 /**
@@ -170,6 +182,12 @@ function trim(entry: CallTimes, now: number): void {
   }
 }
 
+/** Drops one call recorded at `at`, if it is still in the window; any of several at one time counts the same. */
+function forget(entry: CallTimes, at: number): void {
+  const index = entry.times.lastIndexOf(at)
+  if (index >= entry.head) entry.times.splice(index, 1)
+}
+
 /** Whether a key allows one more call now, after trimming the calls that have left its window. */
 function verdictOf(entry: CallTimes, { uses, windowMs }: CooldownLimit, now: number): CooldownVerdict {
   entry.windowMs = windowMs
@@ -222,8 +240,19 @@ export class MemoryCooldownStore extends CooldownStore {
 
     // Nothing awaited since the check, so no other call can take a use in between. A clock that steps back
     // records the latest time again, keeping the times in order for trim()
-    for (const { entry } of counts) entry.times.push(Math.max(now, entry.times[entry.times.length - 1] ?? now))
-    return Promise.resolve({ allowed: true, retryAfterMs: 0 })
+    const recorded = counts.map(({ entry }) => {
+      const at = Math.max(now, entry.times[entry.times.length - 1] ?? now)
+      entry.times.push(at)
+      return { entry, at }
+    })
+    let released = false
+    return Promise.resolve(
+      withRelease({ allowed: true, retryAfterMs: 0 }, () => {
+        if (!released) for (const { entry, at } of recorded) forget(entry, at)
+        released = true
+        return Promise.resolve()
+      }),
+    )
   }
 
   /** Checks every entry as consumeMany does, recording nothing, and holding nothing for a key not yet counted. */

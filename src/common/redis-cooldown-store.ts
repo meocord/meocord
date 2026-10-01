@@ -6,6 +6,7 @@ import {
   CooldownStore,
   type CooldownVerdict,
   longestRefusal,
+  withRelease,
 } from '@src/common/cooldown-store.js'
 
 /**
@@ -51,7 +52,7 @@ export interface RedisCooldownStoreOptions {
  * sorted set per key holds the time of each call in the window: calls that have left it are trimmed and the
  * rest counted, and only when every key allows the call is it added to all of them, each key set to expire
  * when its window would be empty. Time is the server's, so every process counts by one clock, and each
- * member carries a nonce, so calls in the same microsecond stay apart. A refusal reports the longest wait
+ * member is the call's nonce, so calls in the same microsecond stay apart and a call can be released. A refusal reports the longest wait
  * among the keys that refused, and which key that is.
  *
  * KEYS the keys; ARGV[1] a nonce for this call, then uses and windowMs for each key in turn.
@@ -59,7 +60,7 @@ export interface RedisCooldownStoreOptions {
  */
 const SCRIPT = `local time = redis.call('TIME')
 local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
-local member = time[1] .. '.' .. time[2] .. ':' .. ARGV[1]
+local member = ARGV[1]
 local blocked, wait = 0, 0
 for i, key in ipairs(KEYS) do
   local uses = tonumber(ARGV[i * 2])
@@ -111,6 +112,13 @@ if blocked > 0 then
   return {0, wait, blocked - 1}
 end
 return {1, 0, -1}
+`
+
+/** Undoes a call SCRIPT recorded: KEYS its keys, ARGV[1] the call's nonce, which is its member in each. */
+const RELEASE_SCRIPT = `for _, key in ipairs(KEYS) do
+  redis.call('ZREM', key, ARGV[1])
+end
+return 1
 `
 
 const shas = new Map<string, string>()
@@ -222,9 +230,11 @@ export class RedisCooldownStore extends CooldownStore {
    */
   async consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
     if (entries.length === 0) return { allowed: true, retryAfterMs: 0 }
-    const args = [randomUUID(), ...limitsOf(entries)]
+    const call = randomUUID()
+    const keys = this.keysOf(entries)
     try {
-      return verdictOf(await this.run(SCRIPT, this.keysOf(entries), args), entries.length)
+      const verdict = verdictOf(await this.run(SCRIPT, keys, [call, ...limitsOf(entries)]), entries.length)
+      return verdict.allowed ? withRelease(verdict, async () => void (await this.run(RELEASE_SCRIPT, keys, [call]))) : verdict
     } catch (error) {
       if (entries.length === 1 || !messageOf(error).includes('CROSSSLOT')) throw error
       return super.consumeMany(entries)

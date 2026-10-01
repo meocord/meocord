@@ -187,6 +187,29 @@ describe("cooldownStoreFailure: 'allow'", () => {
 })
 
 describe('a store that answers after the timeout', () => {
+  // Under 'deny' the call was refused, so the use the late answer recorded is given back
+  it("releases the call it counted late under 'deny', so the refused caller's next call runs", async () => {
+    const memory = new MemoryCooldownStore()
+    let delay = 60
+    const late = new (class extends CooldownStore {
+      consume(key: string, limit: CooldownLimit) {
+        return memory.consume(key, limit)
+      }
+      async consumeMany(entries: readonly CooldownEntry[]) {
+        await new Promise(resolve => setTimeout(resolve, delay))
+        return memory.consumeMany(entries)
+      }
+    })()
+    const module = moduleWith(late, { cooldownStoreTimeoutMs: 20 })
+
+    await expect(module.invoke(DailyController, 'daily', call())).rejects.toBeInstanceOf(CooldownStoreError)
+    await new Promise(resolve => setTimeout(resolve, 80))
+    delay = 0
+
+    await expect(module.invoke(DailyController, 'daily', call())).resolves.toEqual({ ran: true })
+    expect(module.get(DailyController).runs).toBe(1)
+  })
+
   it('counts the call once, in the store, and MeoCord not at all', async () => {
     const memory = new MemoryCooldownStore()
     const late = new (class extends CooldownStore {

@@ -175,6 +175,25 @@ export function testCooldownStore(
       expect(verdicts.filter(verdict => verdict.allowed).length).toBe(1)
     })
 
+    // A store without release keeps a counted call counted, as the default consumeMany does
+    test('releases a call it counted when the verdict gives release, or keeps it counted without one', async store => {
+      const limit = { uses: 1, windowMs: 2_000 }
+      const entries = [{ key: key('release-a'), limit }, { key: key('release-b'), limit }]
+      const counted = await store.consumeMany(entries)
+      expect(counted.allowed).toBe(true)
+      if (!counted.release) {
+        expect((await store.consumeMany(entries)).allowed).toBe(false)
+        return
+      }
+
+      await counted.release()
+      const again = await store.consumeMany(entries)
+      expect(again.allowed).toBe(true)
+      const refused = await store.consumeMany(entries)
+      expect(refused.allowed).toBe(false)
+      expect(refused.release).toBe(undefined)
+    })
+
     // The default peekMany allows every call and records nothing, leaving the check to consumeMany
     test('peeks without recording: allowed below the limit, however often', async store => {
       const limit = { uses: 2, windowMs: 2_000 }

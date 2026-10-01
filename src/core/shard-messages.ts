@@ -9,6 +9,8 @@ export type ShardMessage =
   /** The manager's answer to the call with the same `id`: its verdict, or why its store failed. */
   | { meocord: 'cooldown-verdict'; id: string; verdict: CooldownBatchVerdict }
   | { meocord: 'cooldown-verdict'; id: string; error: string }
+  /** A shard's request to undo the call it counted with that `id`, which it refused after all. */
+  | { meocord: 'cooldown-release'; id: string }
 
 /** The `fatal` code of a shard whose app MeoCord refused, which every shard would refuse alike. */
 export const REFUSED_CODE = 'Refused'
