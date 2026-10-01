@@ -313,6 +313,61 @@ describe('@MeoCord({ providers })', () => {
     )
   })
 
+  it('refuses a factory that injects ExecutionContext, which a value made once would keep from its first call', async () => {
+    const loaded = await load()
+
+    expect(() =>
+      create(loaded, { providers: [{ provide: 'audit', useFactory: (context: unknown) => ({ context }), inject: [loaded.ExecutionContext] }] }),
+    ).toThrow(
+      "App: @MeoCord({ providers }): the provider for 'audit' injects ExecutionContext, but its factory runs once and its " +
+        "value is shared, so it would keep the first call's context for every later call. Inject ExecutionContext only into guards.",
+    )
+  })
+
+  it('injects a class whose own source mentions [native code], as any other of the app', async () => {
+    const loaded = await load()
+    @loaded.Service()
+    class FunctionInspector {
+      isNative(fn: () => unknown): boolean {
+        return Function.prototype.toString.call(fn).includes('[native code]')
+      }
+    }
+    @loaded.Service()
+    class UsesInspector {
+      constructor(readonly inspector: FunctionInspector) {}
+    }
+
+    const { container } = create(loaded, { services: [UsesInspector] })
+
+    expect(container.get(UsesInspector).inspector).toBeInstanceOf(FunctionInspector)
+  })
+
+  it('names a cycle of providers that inject each other, rather than failing as one is made', async () => {
+    const loaded = await load()
+    @loaded.Service()
+    class Ledger {
+      constructor(@loaded.Inject('accounts') readonly accounts: unknown) {}
+    }
+
+    expect(() =>
+      create(loaded, {
+        providers: [
+          { provide: 'a', useFactory: (b: unknown) => ({ b }), inject: ['b'] },
+          { provide: 'b', useFactory: (a: unknown) => ({ a }), inject: ['a'] },
+        ],
+      }),
+    ).toThrow(
+      "'a' → 'b' → 'a': each is made before what injects it, so none of them can be made. Move what they share into a " +
+        'provider of its own.',
+    )
+    expect(() =>
+      create(loaded, {
+        services: [Ledger],
+        providers: [{ provide: 'accounts', useFactory: (ledger: unknown) => ({ ledger }), inject: [Ledger] }],
+      }),
+    ).toThrow("'accounts' → Ledger → 'accounts':")
+  })
+
   it('refuses a provider without exactly one way to provide, one given twice, and one for a token MeoCord binds', async () => {
     const loaded = await load()
 

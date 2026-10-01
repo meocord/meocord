@@ -68,6 +68,12 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
       if (entry.inject !== undefined && !(Array.isArray(entry.inject) && entry.inject.every(isToken))) {
         throw refuse(new Error(`${where}: the provider for ${name} has an inject that is not a list of tokens.`))
       }
+      if (entry.inject?.includes(ExecutionContext)) {
+        throw refuse(new Error(
+          `${where}: the provider for ${name} injects ExecutionContext, but its factory runs once and its value is ` +
+            "shared, so it would keep the first call's context for every later call. Inject ExecutionContext only into guards.",
+        ))
+      }
     }
     if (map.has(entry.provide)) throw refuse(new Error(`${where}: ${name} is provided twice.`))
     map.set(entry.provide, provider)
@@ -224,14 +230,28 @@ export function tokenDependencies(container: Container, providers: ProviderMap, 
 export function resolutionOrder(container: Container, providers: ProviderMap, roots: readonly unknown[]): unknown[] {
   const ordered: unknown[] = []
   const seen = new Set<unknown>()
+  // The tokens being visited, outermost first: one met again among them closes a cycle
+  const path: unknown[] = []
   const visit = (token: unknown) => {
+    const back = path.indexOf(token)
+    if (back !== -1) throw refuse(cycleError([...path.slice(back), token]))
     if (seen.has(token)) return
     seen.add(token)
+    path.push(token)
     tokenDependencies(container, providers, token).forEach(visit)
+    path.pop()
     ordered.push(token)
   }
   roots.forEach(visit)
   return ordered
+}
+
+/** The error for tokens that inject each other, naming the cycle from where it was entered back to it. */
+function cycleError(cycle: readonly unknown[]): Error {
+  return new Error(
+    `${cycle.map(tokenName).join(' → ')}: each is made before what injects it, so none of them can be made. Move what ` +
+      'they share into a provider of its own.',
+  )
 }
 
 /** The error for a factory that threw or rejected, naming its token and carrying the original as `cause`. */

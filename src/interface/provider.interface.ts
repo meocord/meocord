@@ -103,7 +103,10 @@ export interface FactoryProvider<T = any> {
   provide: ProviderToken<T>
   /** Makes the value, from the values of `inject` in order; it may return a promise. */
   useFactory: (...args: any[]) => T | Promise<T>
-  /** The tokens whose values the factory receives, in order. */
+  /**
+   * The tokens whose values the factory receives, in order. Not `ExecutionContext`: the factory runs once, so its
+   * value would keep the first call's context. Two providers that inject each other are refused, naming the cycle.
+   */
   inject?: ProviderToken[]
 }
 
