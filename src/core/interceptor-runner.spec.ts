@@ -409,8 +409,44 @@ class SwallowsHandle implements InterceptorInterface {
   }
 }
 
+// Answers after 20 ms if the handler has not, leaving the handler to finish on its own
+@Interceptor()
+class TimesOut implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    return Promise.race([next.handle(), new Promise(resolve => setTimeout(() => resolve('timed out'), 20))])
+  }
+}
+
+@Interceptor()
+class CatchesCallback implements InterceptorInterface {
+  async intercept(_context: ExecutionContext, next: CallHandler) {
+    await next
+      .handle()
+      .then(() => {
+        throw new Error('callback failed')
+      })
+      .catch((error: Error) => log.push(`caught ${error.message}`))
+  }
+}
+
 @Controller()
 class UnawaitedController {
+  @Command('slowTimesOut', CommandType.SLASH)
+  @UseInterceptor(TimesOut)
+  async slowTimesOut() {
+    await new Promise(resolve => setTimeout(resolve, 300))
+  }
+
+  @Command('hangTimesOut', CommandType.SLASH)
+  @UseInterceptor(TimesOut)
+  async hangTimesOut() {
+    await new Promise(() => {})
+  }
+
+  @Command('catchesCallback', CommandType.SLASH)
+  @UseInterceptor(CatchesCallback)
+  async catchesCallback() {}
+
   @Command('drops', CommandType.SLASH)
   @UseInterceptor(DropsHandle)
   async drops() {
@@ -483,6 +519,30 @@ describe('an interceptor that returns before the call it started ends', () => {
 
     expect(results.map(({ ran }) => ran)).toEqual([true, true])
     expect(log).toEqual(['caught database down', 'swallowed database down'])
+  })
+
+  it.each(['slowTimesOut', 'hangTimesOut'] as const)('leaves a call to end with the interceptor when it took the run on: %s', async name => {
+    const startedAt = performance.now()
+
+    const { ran } = await module().invoke(UnawaitedController, name, slash(name))
+
+    expect(ran).toBe(true)
+    expect(performance.now() - startedAt).toBeLessThan(200)
+  })
+
+  it('leaves an error a callback in its chain throws to the chain that catches it', async () => {
+    const unhandled: unknown[] = []
+    const collect = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', collect)
+    try {
+      await module().invoke(UnawaitedController, 'catchesCallback', slash('catchesCallback'))
+      await new Promise(resolve => setTimeout(resolve, 20))
+    } finally {
+      process.off('unhandledRejection', collect)
+    }
+
+    expect(log).toEqual(['caught callback failed'])
+    expect(unhandled).toEqual([])
   })
 
   it('reaches the fallback with an error it leaves uncaught at runtime, which answers the user', async () => {
