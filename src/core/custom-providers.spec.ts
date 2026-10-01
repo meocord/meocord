@@ -342,6 +342,28 @@ describe('@MeoCord({ providers })', () => {
     expect(container.get(UsesInspector).inspector).toBeInstanceOf(FunctionInspector)
   })
 
+  it('takes a namespaced built-in for one, and a class set on globalThis for an app class', async () => {
+    @Reflect.metadata('meocord:probe', true)
+    class Polyfilled {}
+    Reflect.set(globalThis, 'Polyfilled', Polyfilled)
+    try {
+      const loaded = await load()
+      const { isAppClassToken } = await import('@src/core/lifecycle-order.js')
+      loaded.Service()(Polyfilled)
+      @loaded.Service()
+      class UsesPolyfilled {
+        constructor(readonly polyfilled: Polyfilled) {}
+      }
+
+      const { container } = create(loaded, { services: [UsesPolyfilled] })
+
+      expect(container.get(UsesPolyfilled).polyfilled).toBeInstanceOf(Polyfilled)
+      expect([Intl.NumberFormat, WebAssembly.Module, Map, Object].map(isAppClassToken)).toEqual([false, false, false, false])
+    } finally {
+      Reflect.deleteProperty(globalThis, 'Polyfilled')
+    }
+  })
+
   it('names a cycle of providers that inject each other, rather than failing as one is made', async () => {
     const loaded = await load()
     @loaded.Service()
