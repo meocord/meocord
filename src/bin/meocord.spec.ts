@@ -581,15 +581,23 @@ describe('spawning the application', () => {
         (child[method].mock.calls.find(([name]) => name === event)?.[1] ?? (() => {})) as (...args: unknown[]) => void
       const warned = (cli: unknown) => vi.mocked((cli as { logger: { warn: (text: string) => void } }).logger.warn).mock.calls.flat()
 
-      // Discord refused the login, so no change to the code can bring the bot online: watching on would hide it
-      it('ends the watch session with its code when the bot could not log in', () => {
+      const failed = (cli: unknown) => vi.mocked((cli as { logger: { error: (text: string) => void } }).logger.error).mock.calls.flat()
+
+      // A login is fixed in the code, such as its intents, or in .env, and the session watches both
+      it('keeps watching when the bot could not log in, says what starts it again, and runs the next change', () => {
         const cli = watcher()
         const child = launch(cli)
 
         handler(child, 'on', 'message')({ meocord: 'login-failed' })
         handler(child, 'once', 'exit')(1)
+        child.exitCode = 1
 
-        expect(exitSpy).toHaveBeenCalledWith(1)
+        expect(exitSpy).not.toHaveBeenCalled()
+        expect(failed(cli)).toContainEqual('The bot could not log in; watch mode starts it again on the next change, in src or .env.')
+        expect(warned(cli)).toEqual([])
+        spawnMock.mockClear()
+        cli.restartApp()
+        expect(spawnMock).toHaveBeenCalledTimes(1)
       })
 
       it('keeps watching after an exit a code change can fix, says so, and runs the next build', () => {
@@ -606,7 +614,7 @@ describe('spawning the application', () => {
         expect(spawnMock).toHaveBeenCalledTimes(1)
       })
 
-      it('keeps watching when a retry logged in after a failed login', () => {
+      it('says it waits for changes when a retry logged in after a failed login', () => {
         const cli = watcher()
         const child = launch(cli)
 
@@ -615,13 +623,12 @@ describe('spawning the application', () => {
         handler(child, 'once', 'exit')(1)
 
         expect(exitSpy).not.toHaveBeenCalled()
+        expect(warned(cli)).toContainEqual(expect.stringContaining('The application exited with code 1; waiting for changes'))
       })
+    })
 
-      it("ends the session through startDev's own ending, which closes the watchers before exiting", async () => {
-        const fsWatcher = { close: vi.fn() }
-        vi.mocked(watch).mockReturnValueOnce(fsWatcher as never)
-        const closeBuild = vi.fn(async () => {})
-        let afterBuild = () => {}
+    describe('when watch mode fails to start', () => {
+      function devCli({ bundler }: { bundler: () => Promise<unknown> }) {
         const cli = new MeoCordCLI() as unknown as {
           startDev: () => Promise<void>
           clearScreen: () => void
@@ -632,20 +639,37 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
         vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
-        vi.spyOn(cli, 'createBundler').mockResolvedValue({
-          rsbuild: { onAfterBuild: (callback: () => void) => (afterBuild = callback), build: async () => ({ close: closeBuild }) },
+        vi.spyOn(cli, 'createBundler').mockImplementation(bundler)
+        return cli
+      }
+
+      // As `meocord build` does, so a script or process manager around it sees the failure
+      it('exits 1 when the first build cannot start, such as from a config hook that throws', async () => {
+        const cli = devCli({ bundler: async () => Promise.reject(new Error('hook broke')) })
+
+        await cli.startDev()
+
+        expect(exitSpy).toHaveBeenCalledWith(1)
+        expect(spawnMock).not.toHaveBeenCalled()
+      })
+
+      it('stops the bot it started and exits 1 when it cannot watch the project, which would leave the bot unwatched', async () => {
+        vi.mocked(watch).mockImplementationOnce(() => {
+          throw new Error('ENOSPC: System limit for number of file watchers reached')
+        })
+        const cli = devCli({
+          bundler: async () => ({
+            rsbuild: { onAfterBuild: (callback: () => void) => callback(), build: async () => ({ close: async () => {} }) },
+          }),
         })
 
         await cli.startDev()
-        afterBuild()
-        const child = spawnMock.mock.results.at(-1)?.value as Child
-        handler(child, 'on', 'message')({ meocord: 'login-failed' })
-        handler(child, 'once', 'exit')(1)
 
-        await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1))
-        expect(fsWatcher.close).toHaveBeenCalled()
-        expect(closeBuild.mock.invocationCallOrder[0]).toBeLessThan(exitSpy.mock.invocationCallOrder[0])
+        const child = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild>
+        expect(child.kill).toHaveBeenCalled()
+        expect(exitSpy).toHaveBeenCalledWith(1)
       })
+    })
 
     describe('reloading from the files the bundler does not watch', () => {
       async function startWatching() {
@@ -693,6 +717,19 @@ describe('spawning the application', () => {
         expect(dev.compileConfig.mock.invocationCallOrder[1]).toBeLessThan(dev.createBundler.mock.invocationCallOrder[1])
       })
 
+      // The bot reads .env as it starts, so the build it runs needs no rebuild
+      it('restarts the application from a changed .env without rebuilding', async () => {
+        const dev = await startWatching()
+        const running = spawnMock.mock.results.at(-1)?.value as ReturnType<typeof createChild>
+
+        dev.change('.env')
+
+        await vi.waitFor(() => expect(running.kill).toHaveBeenCalled())
+        expect(dev.createBundler).toHaveBeenCalledTimes(1)
+        expect(dev.closeBuild).not.toHaveBeenCalled()
+        expect(dev.compileConfig).toHaveBeenCalledTimes(1)
+      })
+
       it.each(['package.json', 'constructor', 'toString'])('ignores %s, which it does not reload from', async file => {
         const dev = await startWatching()
 
@@ -728,7 +765,6 @@ describe('spawning the application', () => {
         expect(lastSpawn().options.stdio).toBe('inherit')
         expect((lastSpawn().options.env as NodeJS.ProcessEnv).MEOCORD_DEV_RUNNER).toBeUndefined()
       })
-    })
   })
 })
 

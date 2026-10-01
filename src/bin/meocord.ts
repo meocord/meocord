@@ -674,9 +674,9 @@ copies or substantial portions of the Software.
   }
 
   /**
-   * Runs the application for a watch session, as the one `appProcess` tracks. When it exits on its own because the bot
-   * could not log in, which no code change fixes, the session ends with its code; after any other exit, the next build
-   * starts it again.
+   * Runs the application for a watch session, as the one `appProcess` tracks. After it exits on its own, the session
+   * keeps watching, and the next change starts it again; a failed login is fixed in the code or in `.env`, and both
+   * are watched.
    */
   private launchDevApp(): void {
     const child = this.spawnApp({ devRunner: true })
@@ -689,8 +689,8 @@ copies or substantial portions of the Software.
       // An exit the session asked for, to restart or to stop, is not the application's own
       if (this.appProcess !== child || this.stopping) return
       if (loginFailed) {
-        this.logger.error('The bot could not log in, and no code change fixes that; stopping watch mode.')
-        return this.endDevSession(code ?? 1)
+        this.logger.error('The bot could not log in; watch mode starts it again on the next change, in src or .env.')
+        return
       }
       this.logger.warn(`The application exited with ${code === null ? signal : `code ${code}`}; waiting for changes.`)
     })
@@ -740,10 +740,13 @@ copies or substantial portions of the Software.
 
       // Inputs the bundler does not see: the config, and tsconfig.json, which the build reads through a copy MeoCord
       // writes and the bundler never watches. A change rebuilds from them, and the rebuild restarts the application.
+      // .env needs no build: the bot reads it as it starts, so a change restarts it.
       const reloads: Record<string, string> = {
         'meocord.config.ts': 'MeoCord config change detected, reloading config...',
         'tsconfig.json': 'tsconfig.json change detected, rebuilding...',
+        '.env': '.env change detected, restarting...',
       }
+      const rebuilds = (files: Set<string>) => [...files].some(file => file !== '.env')
       let debounceWatcher: NodeJS.Timeout
       let changed = new Set<string>()
 
@@ -757,6 +760,7 @@ copies or substantial portions of the Software.
           const files = changed
           changed = new Set()
           for (const file of files) this.logger.log(reloads[file])
+          if (!rebuilds(files)) return this.restartApp()
           // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
           if (files.has('meocord.config.ts') && !(await this.compileConfig({ exitOnFailure: false }))) return
           isRunning = false
@@ -790,6 +794,10 @@ copies or substantial portions of the Software.
       )
     } catch (error: any) {
       this.logger.error(`Failed to start: ${error.message}`)
+      // The session ends with 1, as a failed build does, and stops a bot it started, which would outlive it
+      this.stopping = true
+      this.appProcess?.kill()
+      this.endDevSession(1)
     }
   }
 
