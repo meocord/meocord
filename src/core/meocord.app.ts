@@ -49,6 +49,7 @@ import { releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerCommands } from '@src/core/command-registration.js'
 import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
+import { deliverUncachedDmReactions } from '@src/core/dm-reactions.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
@@ -354,6 +355,8 @@ export class MeoCordApp implements MeoCordApplication {
         this.dispatcher.reaction(reaction, { user, action: ReactionHandlerAction.REMOVE }),
       ),
     )
+    // discord.js drops a reaction in a DM channel it has not cached; this fetches the channel and delivers it
+    deliverUncachedDmReactions(this.bot, this.logger)
 
     this.attachEventHandlers()
     this.warnAboutMissingRequirements()
