@@ -16,6 +16,7 @@ import {
 } from 'discord.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CheckedParams, type MessageHandlerOptions, type ReactionEvent, type ReactionHandlerSettings } from '@src/interface/index.js'
+import { type IsPiped } from '@src/interface/standard-schema.interface.js'
 import {
   type AutocompleteMeta,
   type BuildableCommandType,
@@ -532,7 +533,7 @@ type RouteAccepts<N, T, P> = string extends PatternOf<N> | keyof P
   : T extends RouteCheckedType
     ? [Exclude<RequiredKeys<P>, RouteParams<PatternOf<N>> | ChoiceKeys<T>>] extends [never]
       ? unknown
-      : { "The handler's params name keys its route does not capture": Exclude<RequiredKeys<P>, RouteParams<PatternOf<N>> | ChoiceKeys<T>> }
+      : { "The handler's params name keys its pattern does not capture": Exclude<RequiredKeys<P>, RouteParams<PatternOf<N>> | ChoiceKeys<T>> }
     : unknown
 
 /** A readonly array as the array it reads, so `readonly Role[]` is compared as `Role[]`. */
@@ -541,21 +542,24 @@ type AsArray<T> = T extends readonly (infer E)[] ? E[] : T
 /**
  * Allows the handler when each select menu choice it declares can hold what discord.js gives: the type itself, a
  * wider one, or one of a union, such as `GuildMember[]` for members that may be raw API members outside a cached
- * server. A type no choice can have, such as `values: number`, is refused.
+ * server. A type no choice can have, such as `values: number`, is refused. One marked `Piped<T>`, which a pipe
+ * produces, is left to the pipe.
  */
 type ChoicesAccept<N, T, P> = string extends keyof P
   ? unknown
   : {
         // A route param of a choice's name takes its place, as the handler's input gives the param
-        [K in Exclude<keyof ChoiceTypes<T>, RouteParams<PatternOf<N>>> & keyof P as ChoiceTypes<T>[K] extends P[K]
+        [K in Exclude<keyof ChoiceTypes<T>, RouteParams<PatternOf<N>>> & keyof P as IsPiped<P[K]> extends true
           ? never
-          : AsArray<NonNullable<P[K]>> extends ChoiceTypes<T>[K]
+          : ChoiceTypes<T>[K] extends P[K]
             ? never
-            : K]: ChoiceTypes<T>[K]
+            : AsArray<NonNullable<P[K]>> extends ChoiceTypes<T>[K]
+              ? never
+              : K]: ChoiceTypes<T>[K]
       } extends infer Mismatch
     ? [keyof Mismatch] extends [never]
       ? unknown
-      : { "The handler's params give a select menu's choices a type their values do not fit": Mismatch }
+      : { "The handler's params give a select menu's choices a type their values do not fit; mark one a pipe produces Piped<T>": Mismatch }
     : unknown
 
 /** A pattern's typed params, each with the value its segment gives; an untyped param builds from any `RouteValue`. */
@@ -565,17 +569,22 @@ type TypedValues<Pattern extends string> = {
 
 /**
  * Allows the handler when each typed customId param it declares takes the value its segment gives, such as a
- * number for `{count:int}`. Untyped params, params with an index signature, and commands are unchecked.
+ * number for `{count:int}`. Untyped params, params marked `Piped<T>`, params with an index signature, and commands
+ * are unchecked.
  */
 type TypedParamsAccept<N, T, P> = T extends CommandType
   ? string extends PatternOf<N> | keyof P
     ? unknown
     : {
-          [K in keyof TypedValues<PatternOf<N>> & keyof P as TypedValues<PatternOf<N>>[K] extends P[K] ? never : K]: TypedValues<PatternOf<N>>[K]
+          [K in keyof TypedValues<PatternOf<N>> & keyof P as IsPiped<P[K]> extends true
+            ? never
+            : TypedValues<PatternOf<N>>[K] extends P[K]
+              ? never
+              : K]: TypedValues<PatternOf<N>>[K]
         } extends infer Mismatch
       ? [keyof Mismatch] extends [never]
         ? unknown
-        : { "The handler's params give a typed customId param a type its value does not fit": Mismatch }
+        : { "The handler's params give a typed customId param a type its value does not fit; mark one a pipe produces Piped<T>": Mismatch }
       : unknown
   : unknown
 
@@ -590,7 +599,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * A subcommand's path is its parts separated by a space, as Discord shows it: `settings notify email`. In a
  * customId pattern, `{name}` captures one `/`-separated segment into the handler's params. When the code compiles,
  * the keys the handler's params require are checked against the pattern or route, a typed segment's value against
- * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives. Two component
+ * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives; a key a pipe
+ * produces is declared `Piped<T>`, and left to the pipe. Two component
  * handlers of one type whose patterns match exactly the same ids stop the bot at startup; patterns that only overlap
  * are warned about, naming the one that runs: the more specific, or between equally specific ones, the one listed first. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the

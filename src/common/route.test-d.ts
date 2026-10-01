@@ -169,22 +169,6 @@ describe('@Command(route) and the handler params', () => {
     }
     expectTypeOf(Commands).toBeConstructibleWith()
   })
-
-  it('checks a plain string pattern as it checks a route', () => {
-    class Tickets {
-      // @ts-expect-error the pattern captures id, not ticketId
-      @Command('ticket/{id}', CommandType.BUTTON)
-      open(_interaction: ButtonInteraction, _params: { ticketId: string }) {
-        return undefined
-      }
-
-      @Command('ticket/{id}/close', CommandType.BUTTON)
-      close(_interaction: ButtonInteraction, _params: { id: string }) {
-        return undefined
-      }
-    }
-    expectTypeOf(Tickets).toBeConstructibleWith()
-  })
 })
 
 describe('typed customId params', () => {

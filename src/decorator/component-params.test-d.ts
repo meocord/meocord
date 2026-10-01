@@ -12,8 +12,9 @@ import {
   type UserSelectMenuInteraction,
 } from 'discord.js'
 import { route } from '@src/common/route.js'
-import { Command } from '@src/decorator/index.js'
+import { Command, Pipe, UsePipe } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
+import { type PipeInterface, type Piped } from '@src/interface/index.js'
 
 /** Runs under `vitest --typecheck`: the params a component handler declares, checked against what a call gets. */
 describe("a select menu's choices", () => {
@@ -122,5 +123,62 @@ describe("a plain-string pattern's params", () => {
       }
     }
     void Buttons
+  })
+})
+
+@Pipe()
+class ToQuantities implements PipeInterface<string[], number[]> {
+  transform(values: string[]): number[] {
+    return values.map(Number)
+  }
+}
+
+class Account {
+  constructor(readonly id: number) {}
+}
+
+@Pipe()
+class ToAccount implements PipeInterface<number, Account> {
+  transform(id: number): Account {
+    return new Account(id)
+  }
+}
+
+// The check sees the handler's own type alone, so a key a pipe produces says so with Piped<T>, as with @Validate
+describe('a key a pipe produces', () => {
+  it('compiles marked Piped<T>, for a select menu choice and for a typed customId param', () => {
+    class Shop {
+      @Command('qty', CommandType.SELECT_MENU)
+      @UsePipe('values', ToQuantities)
+      quantity(_interaction: StringSelectMenuInteraction, { values }: { values: Piped<number[]> }) {
+        void values
+      }
+
+      @Command('account/{id:int}', CommandType.BUTTON)
+      @UsePipe('id', ToAccount)
+      account(_interaction: ButtonInteraction, { id }: { id: Piped<Account> }) {
+        void id
+      }
+    }
+    void Shop
+  })
+
+  it('is refused unmarked, as a choice or a typed param of another type is', () => {
+    class Shop {
+      // @ts-expect-error values a pipe produces are marked Piped<number[]>
+      @Command('qty', CommandType.SELECT_MENU)
+      @UsePipe('values', ToQuantities)
+      quantity(_interaction: StringSelectMenuInteraction, { values }: { values: number[] }) {
+        void values
+      }
+
+      // @ts-expect-error an id a pipe produces is marked Piped<Account>
+      @Command('account/{id:int}', CommandType.BUTTON)
+      @UsePipe('id', ToAccount)
+      account(_interaction: ButtonInteraction, { id }: { id: Account }) {
+        void id
+      }
+    }
+    void Shop
   })
 })
