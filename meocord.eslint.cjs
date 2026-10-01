@@ -66,6 +66,8 @@ const typescriptConfig = {
     '@typescript-eslint/ban-ts-comment': 'off',
     '@typescript-eslint/no-var-requires': 'warn',
     '@typescript-eslint/no-unused-expressions': 'off',
+    // A call whose promise nothing awaits, such as an interceptor's `next.handle()`, rejects outside every handler
+    '@typescript-eslint/no-floating-promises': 'error',
     '@typescript-eslint/no-unused-vars': [
       'error',
       {

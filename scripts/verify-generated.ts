@@ -389,6 +389,47 @@ function verifyCycleWarning(): void {
 }
 
 /**
+ * Plants an interceptor that calls `next.handle()` without awaiting or returning it, and checks the application's
+ * lint fails it there, and only there: the handler's rejection would otherwise escape every filter.
+ */
+function verifyDroppedHandle(): void {
+  const dir = path.join(appDir, 'src', 'interceptors', 'dropped')
+  const interceptor =
+    "import { Interceptor } from 'meocord/decorator'\n" +
+    "import { type CallHandler, type InterceptorInterface } from 'meocord/interface'\n" +
+    "import { type ExecutionContext } from 'meocord/common'\n\n" +
+    '@Interceptor()\nexport class DroppedInterceptor implements InterceptorInterface {\n' +
+    '  async intercept(_context: ExecutionContext, next: CallHandler): Promise<unknown> {\n' +
+    '    next.handle()\n    return undefined\n  }\n}\n'
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(path.join(dir, 'dropped.interceptor.ts'), interceptor)
+  try {
+    const result = spawnSync(process.execPath, ['run', 'eslint', '--format', 'json', 'src/interceptors/dropped'], {
+      cwd: appDir,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      env: stepEnv,
+    })
+    const messages = (
+      JSON.parse(result.stdout) as { messages: { ruleId: string | null; severity: number; line: number; message: string }[] }[]
+    ).flatMap(report => report.messages)
+    const floating = messages.filter(
+      message => message.ruleId === '@typescript-eslint/no-floating-promises' && message.severity === 2 && message.line === 8,
+    )
+    const others = messages.filter(message => !floating.includes(message))
+    if (floating.length !== 1 || others.length > 0) {
+      throw new Error(
+        `eslint should fail once on an interceptor that drops next.handle(), and report nothing else:\n` +
+          messages.map(message => `  ${message.ruleId} (line ${message.line}): ${message.message}`).join('\n'),
+      )
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  console.log('  ok  eslint fails an interceptor that drops next.handle()')
+}
+
+/**
  * Checks the CLI's interpreter line is `#!/usr/bin/env <prog>`, the only form npm's `cmd-shim`
  * turns into a `.cmd` that Windows can run.
  */
@@ -436,6 +477,7 @@ function main(): void {
     verifyContextMenuKinds()
     verifyDeprecatedWarning()
     verifyCycleWarning()
+    verifyDroppedHandle()
     console.log('')
     // A nested name moves the controller and its builder together, so the import
     // between them has to move with them.
