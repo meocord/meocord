@@ -165,17 +165,29 @@ type ParamsAccept<P, Pattern extends string> = NonNullable<P> extends Record<str
   ? ParamsFit<NonNullable<P>, CheckedParams<Pattern, NonNullable<P>>>
   : { "The handler's params are an object of the pattern's params": P }
 
+/** The declared params that do not take what the pattern gives, a key marked `Piped<T>` being left to its pipe. */
+type Misfits<P, Given> = {
+  [K in keyof Given & keyof P as IsPiped<P[K]> extends true ? never : [Given[K]] extends [P[K]] ? never : K]: Given[K]
+}
+
 /**
- * Unknown when the declared params take what the pattern gives, a key marked `Piped<T>` being left to its pipe, else
- * the keys that do not, with what they get.
+ * Unknown when the declared params take what the pattern gives, else the keys that do not, with what they get, written
+ * out so an editor shows them. Only a key the pattern has, of another type, could be one a pipe produces, so only then
+ * does the refusal name `Piped<T>`.
  */
 type ParamsFit<P, Given> = [Given] extends [Unpiped<P>]
   ? unknown
-  : {
-      "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>": {
-        [K in keyof Given & keyof P as IsPiped<P[K]> extends true ? never : [Given[K]] extends [P[K]] ? never : K]: Given[K]
+  : [Misfits<P, Given>[keyof Misfits<P, Given>]] extends [{ readonly 'not a param of the pattern': unknown }]
+    ? {
+        "The handler's params do not fit the pattern": {
+          [K in keyof Given & keyof P as IsPiped<P[K]> extends true ? never : [Given[K]] extends [P[K]] ? never : K]: Given[K]
+        }
       }
-    }
+    : {
+        "The handler's params do not fit the pattern; a key a pipe produces is marked Piped<T>": {
+          [K in keyof Given & keyof P as IsPiped<P[K]> extends true ? never : [Given[K]] extends [P[K]] ? never : K]: Given[K]
+        }
+      }
 
 /**
  * Runs the method it decorates for every message a user sends, whatever it says.
