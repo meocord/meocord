@@ -458,6 +458,33 @@ describe('sharding', () => {
       expect(client.destroy).toHaveBeenCalledTimes(1)
     })
 
+    // The manager answers a shard's stop() by asking every shard, this one included, to shut down
+    it('finishes its own stop() when the manager asks it to shut down meanwhile', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+        callback()
+        // As the manager's answer comes: once the shard's own close is under way
+        if ((message as { meocord?: string }).meocord === 'stop') setTimeout(() => process.emit('message', { meocord: 'shutdown' }, undefined), 10)
+        return true
+      })
+      exit.mockImplementation((() => void events.push('exit')) as never)
+      @loaded.Service()
+      class Slow {
+        async onShutdown() {
+          await new Promise(resolve => setTimeout(resolve, 50))
+          events.push('hook done')
+        }
+      }
+      const { app, client } = await startApp(loaded, { services: [Slow] })
+      for (const listener of client.listeners('clientReady')) await (listener as (c: unknown) => Promise<void>)(client)
+
+      await app.stop()
+      await vi.waitFor(() => expect(events).toContain('exit'))
+
+      expect(events).toEqual(['hook done', 'exit'])
+    })
+
     it('shuts down when the manager goes away', async () => {
       const loaded = await load()
       await startApp(loaded)
