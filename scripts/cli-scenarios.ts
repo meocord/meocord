@@ -99,7 +99,7 @@ const workDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'meocord-cli-')))
 const appDir = path.join(workDir, 'app')
 const npmAppDir = path.join(workDir, 'npm-app')
 const pnpmAppDir = path.join(workDir, 'pnpm-app')
-/** pnpm as an app created for it installs with it: the newest release, from the registry, as npx runs it. */
+/** pnpm as npx runs it: a pinned pnpm 12, the line that refuses unsettled build scripts and day-old releases. */
 const PNPM = 'npx --yes pnpm@12.8.1'
 const emptyDir = path.join(workDir, 'empty')
 const hiddenDir = path.join(workDir, 'hidden')
@@ -1037,7 +1037,8 @@ const scenarios: Scenario[] = [
   },
 
   // pnpm links only what package.json declares, and from pnpm 11 refuses to install while a dependency's build script
-  // is neither allowed nor denied; the app installs and passes its own checks there
+  // is neither allowed nor denied. It also refuses a range with no release a day old, so this install of the
+  // template's real pins keeps each pin's floor at least a day old.
   {
     name: 'an app created for pnpm installs with pnpm, and passes its lint, tests and build',
     tier: 'slow',
