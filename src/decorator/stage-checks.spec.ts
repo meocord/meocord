@@ -68,6 +68,16 @@ describe('@Catch given something that is not an error class', () => {
     ])
   })
 
+  it('names an entry past the fifth by its number', () => {
+    @Catch(Error, Error, Error, Error, Error, undefined as never)
+    class Sixth implements ExceptionFilter {
+      catch() {}
+    }
+    void Sixth
+
+    expect(warnings()).toEqual([expect.stringMatching(/^Sixth: @Catch's entry 6, undefined, which matches no error, is deprecated/)])
+  })
+
   it('matches by the classes it was given, so the handler error is reported as thrown', async () => {
     class StockError extends Error {}
     const caught: unknown[] = []
