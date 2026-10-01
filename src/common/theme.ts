@@ -1,4 +1,5 @@
 import { type ColorResolvable } from 'discord.js'
+import { forgetDeprecationWarnings, warnDeprecated } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { setLegacyThemeLayer, useTheme } from '@src/core/theme-scope.js'
 import { themeProblems } from '@src/core/theme-validation.js'
@@ -19,17 +20,17 @@ const ROLES: Readonly<Record<LegacyColor, LegacyRole>> = {
 
 const logger = new Logger('Theme')
 const assigned: Partial<Record<LegacyRole, ColorResolvable>> = {}
-const warned = new Set<LegacyColor>()
 
-const read = (name: LegacyColor): ColorResolvable => useTheme().colors[ROLES[name]] as ColorResolvable
+/** Reads a role of the theme where it is read, warning once a run for each static read. */
+function read(name: LegacyColor): ColorResolvable {
+  warnDeprecated(logger, `Theme.${name}`, `useTheme().colors.${ROLES[name]}`)
+  return useTheme().colors[ROLES[name]] as ColorResolvable
+}
 
 /** Sets a role beneath every theme an app sets, as the static once did; a value that is no colour is reported instead. */
 function assign(name: LegacyColor, value: ColorResolvable): void {
   const role = ROLES[name]
-  if (!warned.has(name)) {
-    warned.add(name)
-    logger.warn(`Theme.${name} is deprecated: set colors.${role} in @MeoCord({ theme }) instead. Assigning it still works until MeoCord 5.`)
-  }
+  warnDeprecated(logger, `Assigning Theme.${name}`, `colors.${role} in @MeoCord({ theme })`)
   const [problem] = themeProblems({ colors: { [role]: value } }, `Theme.${name}`)
   if (problem) {
     logger.warn(`${problem}. It was left unset.`)
@@ -44,9 +45,10 @@ function assign(name: LegacyColor, value: ColorResolvable): void {
  *
  * Each one reads the matching role of the theme where it is read, `useTheme().colors`, so code written against it
  * follows `@MeoCord({ theme })` and `@UseTheme` with no change. Assigning one still recolours MeoCord's views, as a
- * role beneath every theme an app sets, and logs a warning once. It goes in MeoCord 5.
+ * role beneath every theme an app sets. Reading or assigning each one logs a warning once.
  *
- * @deprecated Read `useTheme().colors`, and set the colours in `@MeoCord({ theme })`: `primaryColor` is
+ * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors` instead. Themes
+ * follow the app, a controller and a server; set the colours in `@MeoCord({ theme })`: `primaryColor` is
  * `colors.primary`, `successColor` `colors.success`, `infoColor` `colors.info`, `errorColor` `colors.danger` and
  * `warningColor` `colors.warning`.
  *
@@ -60,7 +62,10 @@ function assign(name: LegacyColor, value: ColorResolvable): void {
  * @group Responses
  */
 export class Theme {
-  /** @deprecated Read `useTheme().colors.primary`; set `colors.primary` in `@MeoCord({ theme })`. */
+  /**
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors.primary` instead. It
+   * reads the theme where it is read; set `colors.primary` in `@MeoCord({ theme })`.
+   */
   static get primaryColor(): ColorResolvable {
     return read('primaryColor')
   }
@@ -68,7 +73,10 @@ export class Theme {
     assign('primaryColor', value)
   }
 
-  /** @deprecated Read `useTheme().colors.success`; set `colors.success` in `@MeoCord({ theme })`. */
+  /**
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors.success` instead. It
+   * reads the theme where it is read; set `colors.success` in `@MeoCord({ theme })`.
+   */
   static get successColor(): ColorResolvable {
     return read('successColor')
   }
@@ -76,7 +84,10 @@ export class Theme {
     assign('successColor', value)
   }
 
-  /** @deprecated Read `useTheme().colors.info`; set `colors.info` in `@MeoCord({ theme })`. */
+  /**
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors.info` instead. It
+   * reads the theme where it is read; set `colors.info` in `@MeoCord({ theme })`.
+   */
   static get infoColor(): ColorResolvable {
     return read('infoColor')
   }
@@ -84,7 +95,10 @@ export class Theme {
     assign('infoColor', value)
   }
 
-  /** @deprecated Read `useTheme().colors.danger`; set `colors.danger` in `@MeoCord({ theme })`. */
+  /**
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors.danger` instead. It
+   * reads the theme where it is read; set `colors.danger` in `@MeoCord({ theme })`.
+   */
   static get errorColor(): ColorResolvable {
     return read('errorColor')
   }
@@ -92,7 +106,10 @@ export class Theme {
     assign('errorColor', value)
   }
 
-  /** @deprecated Read `useTheme().colors.warning`; set `colors.warning` in `@MeoCord({ theme })`. */
+  /**
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors.warning` instead. It
+   * reads the theme where it is read; set `colors.warning` in `@MeoCord({ theme })`.
+   */
   static get warningColor(): ColorResolvable {
     return read('warningColor')
   }
@@ -104,6 +121,6 @@ export class Theme {
 /** Forgets what the statics were set to, and which have warned: for specs. */
 export function resetThemeStatics(): void {
   for (const role of Object.keys(assigned) as LegacyRole[]) delete assigned[role]
-  warned.clear()
+  forgetDeprecationWarnings()
   setLegacyThemeLayer(undefined)
 }

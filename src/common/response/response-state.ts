@@ -15,6 +15,7 @@ import {
   type RepliableInteraction,
   resolveColor,
 } from 'discord.js'
+import { warnDeprecated } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { UserError } from '@src/common/errors.js'
 import { textFor } from '@src/common/meocord-text.js'
@@ -75,7 +76,8 @@ export type ResponsePayload =
       /**
        * Whether the message is private, read as the `MessageFlags.Ephemeral` flag.
        *
-       * @deprecated Use `flags: MessageFlags.Ephemeral`.
+       * @deprecated Since 4.1, and removed in the next major version (5.0). Use `flags: MessageFlags.Ephemeral`
+       * instead. discord.js deprecates the option it mirrors.
        */
       ephemeral?: boolean
     })
@@ -190,6 +192,7 @@ function toBody(payload: ResponsePayload | ResponseEditPayload): Body {
   // discord.js's deprecated option, read as the flag it stands for before anything decides on flags, and
   // kept out of the call, where discord.js would add Ephemeral back to an edit or an update
   const { ephemeral, ...body } = payload as Body & { ephemeral?: boolean }
+  if (ephemeral !== undefined) warnDeprecated(logger, 'The ephemeral option of respond()', 'flags: MessageFlags.Ephemeral')
   if (ephemeral) body.flags = Number(MessageFlagsBitField.resolve(body.flags ?? 0)) | MessageFlags.Ephemeral
   return body
 }

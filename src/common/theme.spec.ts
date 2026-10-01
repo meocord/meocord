@@ -111,15 +111,17 @@ describe('Theme, deprecated', () => {
     ])
   })
 
-  it('warns once for each property set, and never when one is read', () => {
+  it('warns once for each property set and each property read, naming what replaces it', () => {
     Theme.primaryColor = '#111111'
     Theme.primaryColor = '#222222'
     Theme.errorColor = '#333333'
-    void [Theme.primaryColor, Theme.successColor, Theme.infoColor]
+    void [Theme.primaryColor, Theme.primaryColor, Theme.successColor]
 
     expect(warnings()).toEqual([
-      expect.stringContaining('Theme.primaryColor is deprecated: set colors.primary in @MeoCord({ theme })'),
-      expect.stringContaining('Theme.errorColor is deprecated: set colors.danger in @MeoCord({ theme })'),
+      'Assigning Theme.primaryColor is deprecated and will be removed in the next major version (5.0). Use colors.primary in @MeoCord({ theme }) instead.',
+      'Assigning Theme.errorColor is deprecated and will be removed in the next major version (5.0). Use colors.danger in @MeoCord({ theme }) instead.',
+      'Theme.primaryColor is deprecated and will be removed in the next major version (5.0). Use useTheme().colors.primary instead.',
+      'Theme.successColor is deprecated and will be removed in the next major version (5.0). Use useTheme().colors.success instead.',
     ])
   })
 

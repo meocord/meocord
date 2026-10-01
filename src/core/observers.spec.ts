@@ -35,7 +35,7 @@ import {
   type ExceptionFilter,
   type GuardInterface,
   type InterceptorInterface,
-  type ReactionHandlerOptions,
+  type ReactionEvent,
   type StandardSchemaV1,
 } from '@src/interface/index.js'
 import { createChatInputOptions, createMockInteraction, createModalFields, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
@@ -176,7 +176,7 @@ class ShopController {
   async shop(_message: Message) {}
 
   @ReactionHandler('⭐')
-  async star(_reaction: MessageReaction, _options: ReactionHandlerOptions) {}
+  async star(_reaction: MessageReaction, _options: ReactionEvent) {}
 
   @On('guildMemberAdd')
   async welcome(_member: GuildMember) {}

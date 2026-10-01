@@ -7,6 +7,8 @@ import {
   MessageReaction,
   type PartialMessageReaction,
 } from 'discord.js'
+import { warnDeprecated } from '@src/common/deprecation.js'
+import { Logger } from '@src/common/logger.js'
 import { type MetadataDecorator } from '@src/common/metadata.js'
 import { respond, type ResponseState } from '@src/common/response/response-state.js'
 import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.interface.js'
@@ -67,19 +69,31 @@ export abstract class ExecutionContext {
    * Values resolve through the prototype chain, so an inherited handler reads its base class's
    * method value before the subclass's class value.
    *
-   * @param metadata - A decorator made by `createMetadata`, or a `SetMetadata` key.
+   * @param metadata - A decorator made by `createMetadata`.
    * @returns The value, or `undefined` when neither the method nor the controller declares one.
    */
   abstract get<T>(metadata: MetadataDecorator<T>): T | undefined
+  /**
+   * Reads a metadata value stored under a key, such as one `SetMetadata` set.
+   *
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `get(metadata)` instead. Its
+   * `metadata` is a decorator made by `createMetadata`, whose value is typed and whose key cannot collide with another.
+   */
   abstract get<T = unknown>(key: string | symbol): T | undefined
 
   /**
    * Reads every declared value for the running handler, method first, then controller.
    *
-   * @param metadata - A decorator made by `createMetadata`, or a `SetMetadata` key.
+   * @param metadata - A decorator made by `createMetadata`.
    * @returns The declared values; empty when none is declared.
    */
   abstract getAll<T>(metadata: MetadataDecorator<T>): T[]
+  /**
+   * Reads every value stored under a key, such as one `SetMetadata` set.
+   *
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `getAll(metadata)` instead. Its
+   * `metadata` is a decorator made by `createMetadata`, whose values are typed and whose key cannot collide with another.
+   */
   abstract getAll<T = unknown>(key: string | symbol): T[]
 
   /**
@@ -193,8 +207,12 @@ export function inferContextType(first: unknown): ExecutionContextType {
 }
 
 function metadataKey(metadata: MetadataDecorator<unknown> | string | symbol): string | symbol {
-  return typeof metadata === 'function' ? metadata.key : metadata
+  if (typeof metadata === 'function') return metadata.key
+  warnDeprecated(logger, 'Reading metadata by a key with ExecutionContext.get() or getAll()', 'a decorator made by createMetadata')
+  return metadata
 }
+
+const logger = new Logger('ExecutionContext')
 
 /** The context of one handler call. */
 export class HandlerExecutionContext extends ExecutionContext {

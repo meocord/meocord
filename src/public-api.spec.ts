@@ -213,6 +213,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'PresentedError',
     'Provider',
     'ProviderToken',
+    'ReactionEvent',
     'ReactionHandlerOptions',
     'ReactionHandlerSettings',
     'ReadyInfo',
@@ -279,6 +280,29 @@ const TYPE_NAMES: Record<string, string[]> = {
   ],
 }
 
+// What goes in the next major version: each name here is removed, or for an internal one stops being exported. A
+// behaviour deprecated without a name, such as retrying start() after a failed login, warns at runtime instead.
+const DEPRECATED = [
+  'AutocompleteMetadata',
+  'CommandMetadata',
+  'ExecutionContext.get',
+  'ExecutionContext.getAll',
+  'MetadataKey',
+  'ReactionHandlerOptions',
+  'ResponsePayload.ephemeral',
+  'SetMetadata',
+  'Theme',
+  'Theme.errorColor',
+  'Theme.infoColor',
+  'Theme.primaryColor',
+  'Theme.successColor',
+  'Theme.warningColor',
+]
+
+// A tag names its replacement and why, or says the name is internal
+const DEPRECATION_TAG =
+  /^Since 4\.1, and removed in the next major version \(5\.0\)\. (Use `[^`]+` instead\. \S.*|Internal: nothing replaces it\.( \S.*)?)$/
+
 const ENTRY_FILES: Record<string, string> = {
   'meocord/core': 'src/core/index.ts',
   'meocord/decorator': 'src/decorator/index.ts',
@@ -290,17 +314,24 @@ const ENTRY_FILES: Record<string, string> = {
   'meocord/eslint (require)': 'meocord.eslint.d.cts',
 }
 
-/** Every name each entry's declarations export, read by the compiler as a consumer's would read them. */
-function declaredNames(): Record<string, string[]> {
-  const root = path.resolve(import.meta.dirname, '..')
-  const { config } = ts.readConfigFile(path.join(root, 'tsconfig.json'), ts.sys.readFile)
-  const { options } = ts.parseJsonConfigFileContent(config, ts.sys, root)
-  const files = Object.values(ENTRY_FILES).map(file => path.join(root, file))
-  const program = ts.createProgram(files, { ...options, noEmit: true })
+const ROOT = path.resolve(import.meta.dirname, '..')
+
+/** One program over every entry point, read by the compiler as a consumer's would read it. */
+function entryProgram(): ts.Program {
+  const { config } = ts.readConfigFile(path.join(ROOT, 'tsconfig.json'), ts.sys.readFile)
+  const { options } = ts.parseJsonConfigFileContent(config, ts.sys, ROOT)
+  const host = ts.createCompilerHost({ ...options, noEmit: true }, true)
+  // Comments are parsed in full, as an editor parses them, so `@deprecated` tags can be read
+  host.jsDocParsingMode = ts.JSDocParsingMode.ParseAll
+  return ts.createProgram({ rootNames: Object.values(ENTRY_FILES).map(file => path.join(ROOT, file)), options: { ...options, noEmit: true }, host })
+}
+
+/** Every name each entry's declarations export. */
+function declaredNames(program: ts.Program): Record<string, string[]> {
   const checker = program.getTypeChecker()
   return Object.fromEntries(
     Object.entries(ENTRY_FILES).map(([entry, file]) => {
-      const module = checker.getSymbolAtLocation(program.getSourceFile(path.join(root, file))!)!
+      const module = checker.getSymbolAtLocation(program.getSourceFile(path.join(ROOT, file))!)!
       const exported = checker.getExportsOfModule(module)
       // `export =` declares no names of its own: the value require() returns carries them as properties
       const names = exported.length
@@ -312,6 +343,33 @@ function declaredNames(): Record<string, string[]> {
       return [entry, names.map(symbol => symbol.name).sort()]
     }),
   )
+}
+
+/** A declaration's name with those of the declarations it sits in, such as `Theme.primaryColor`. */
+function qualifiedName(node: ts.Node): string {
+  const names: string[] = []
+  for (let at: ts.Node | undefined = node; at && !ts.isSourceFile(at); at = at.parent) {
+    // A `const`'s comment is on its statement, and its name on the declaration inside
+    const named = ts.isVariableStatement(at) ? at.declarationList.declarations[0] : (at as ts.NamedDeclaration)
+    if (named.name && (ts.isIdentifier(named.name) || ts.isStringLiteral(named.name))) names.unshift(named.name.text)
+  }
+  return names.join('.')
+}
+
+/** Every `@deprecated` tag in the shipped source, by the name it is on, with its text on one line. */
+function deprecatedTags(program: ts.Program): Record<string, string> {
+  const tags: Record<string, string> = {}
+  const visit = (node: ts.Node): void => {
+    const tag = ts.getJSDocDeprecatedTag(node)
+    if (tag && tag.parent.parent === node) {
+      tags[qualifiedName(node)] = (ts.getTextOfJSDocComment(tag.comment) ?? '').replace(/\s+/g, ' ').trim()
+    }
+    ts.forEachChild(node, visit)
+  }
+  for (const file of program.getSourceFiles()) {
+    if (!path.relative(ROOT, file.fileName).split(path.sep).includes('node_modules')) visit(file)
+  }
+  return tags
 }
 
 const modules: Record<string, object> = {
@@ -328,20 +386,30 @@ describe('public API', () => {
   })
 
   describe('declarations', () => {
+    let program: ts.Program
     let declared: Record<string, string[]>
-    // One program over every entry point, so the checker runs once
-    beforeAll(() => {
-      declared = declaredNames()
+    let esm: object
+    let cjs: object
+    // One program over every entry point, so the checker runs once; the ESLint configs load every plugin they name
+    beforeAll(async () => {
+      program = entryProgram()
+      declared = declaredNames(program)
+      esm = await import('../meocord.eslint.mjs')
+      cjs = createRequire(import.meta.url)('../meocord.eslint.cjs') as object
     }, 60_000)
 
     it.each(Object.keys(TYPE_NAMES))('%s declares exactly its runtime exports and its public types', entry => {
       expect(declared[entry]).toEqual([...(PUBLIC_API[entry] ?? []), ...TYPE_NAMES[entry]].sort())
     })
 
-    it('meocord/eslint declares, for import and require, the names it exports at runtime', async () => {
-      const esm = await import('../meocord.eslint.mjs')
-      const cjs = createRequire(import.meta.url)('../meocord.eslint.cjs') as object
+    it('deprecates exactly the names listed, each tagged with when it goes and what replaces it', () => {
+      const tags = deprecatedTags(program)
 
+      expect(Object.keys(tags).sort()).toEqual([...DEPRECATED].sort())
+      for (const [name, text] of Object.entries(tags)) expect({ name, text }).toEqual({ name, text: expect.stringMatching(DEPRECATION_TAG) })
+    })
+
+    it('meocord/eslint declares, for import and require, the names it exports at runtime', () => {
       expect(Object.keys(esm).sort()).toEqual(['default', 'typescriptConfig'])
       expect(declared['meocord/eslint (import)']).toEqual(['default', 'typescriptConfig'])
       expect(Object.keys(cjs).filter(key => Number.isNaN(Number(key)))).toEqual(['typescriptConfig'])

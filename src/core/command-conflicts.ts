@@ -2,7 +2,7 @@ import { ApplicationCommandType } from 'discord.js'
 import { getCommandMap } from '@src/decorator/controller.decorator.js'
 import { registrationKey, serialise } from '@src/core/command-registration.js'
 import { CommandType } from '@src/enum/index.js'
-import { type CommandMetadata } from '@src/interface/command-decorator.interface.js'
+import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { refuse } from '@src/util/refusal.util.js'
 
@@ -11,13 +11,13 @@ type ControllerClass = new (...args: any[]) => unknown
 /** One `@Command` handler, as an error names it. */
 interface Declared {
   controllerClass: ControllerClass
-  meta: CommandMetadata
+  meta: CommandMeta
 }
 
 const where = ({ controllerClass, meta }: Declared) => `${controllerClass.name}.${meta.methodName}`
 
 /** The context menu kind a handler's builder registers; `undefined` for one without a builder, which takes both. */
-const contextMenuKind = (meta: CommandMetadata): unknown => (meta.builder as { type?: unknown } | undefined)?.type
+const contextMenuKind = (meta: CommandMeta): unknown => (meta.builder as { type?: unknown } | undefined)?.type
 
 /** A command as an error names it: `slash command "settings notify"`, `user context menu command "Report"`. */
 function describe(type: CommandType, name: string, kind?: unknown): string {
@@ -27,7 +27,7 @@ function describe(type: CommandType, name: string, kind?: unknown): string {
 }
 
 /** Whether two handlers declared under one name would both be sent the same interactions. */
-function overlap(a: CommandMetadata, b: CommandMetadata): boolean {
+function overlap(a: CommandMeta, b: CommandMeta): boolean {
   if (a.type !== CommandType.CONTEXT_MENU) return true
   const [kindA, kindB] = [contextMenuKind(a), contextMenuKind(b)]
   return kindA === undefined || kindB === undefined || kindA === kindB

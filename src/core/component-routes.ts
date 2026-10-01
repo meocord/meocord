@@ -1,5 +1,5 @@
 import { type CommandType } from '@src/enum/index.js'
-import { type CommandMetadata } from '@src/interface/index.js'
+import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { createRegexFromPattern, findAmbiguousRoutes, getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
 import { decodeRouteParams } from '@src/common/route.js'
 import { parseSegment } from '@src/core/scalar-types.js'
@@ -13,7 +13,7 @@ export type RouteParamValue = string | number | boolean
 /** A `@Command` route matched by customId pattern. */
 export interface ComponentRoute {
   controllerClass: ControllerClass
-  meta: CommandMetadata<string>
+  meta: CommandMeta<string>
   pattern: string
   /** The type of each typed param, such as `int` for `{count:int}`; untyped params are text. */
   types: Record<string, string>

@@ -64,7 +64,7 @@ export enum CommandType {
  * @example
  * ```ts
  * @ReactionHandler('👍')
- * async vote(reaction: MessageReaction, { action }: ReactionHandlerOptions) {
+ * async vote(reaction: MessageReaction, { action }: ReactionEvent) {
  *   const change = action === ReactionHandlerAction.ADD ? 'counted' : 'taken back'
  *   await reaction.message.reply(`Vote ${change}.`)
  * }
