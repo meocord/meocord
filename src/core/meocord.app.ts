@@ -45,6 +45,7 @@ import { isShardProcess } from '@src/util/sharding-mode.util.js'
 import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
 import { releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerCommands } from '@src/core/command-registration.js'
+import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
@@ -212,6 +213,13 @@ export class MeoCordApp implements MeoCordApplication {
    * promise rejects, so the process exits non-zero even when the caller catches the error to log it.
    * A later `start()` that logs in clears that code again.
    *
+   * The providers, services and event handlers are set up once: a `start()` after a failed one logs in
+   * again with them, a call while one is under way waits for it, and a call once the bot is online
+   * does nothing.
+   *
+   * Deprecated: calling `start()` again after a failed login. Since 4.1; it rejects in 5.0. Create the app
+   * again with `MeoCordFactory.create` instead.
+   *
    * @returns A promise that resolves once the bot is logged in.
    * @throws The error of a factory that failed, already logged and naming its token, or the login
    *   error, such as an invalid token or Discord being unreachable.
@@ -222,11 +230,50 @@ export class MeoCordApp implements MeoCordApplication {
    * await app.start()
    * ```
    */
-  async start() {
+  async start(): Promise<void> {
     if (isRegisterOnly()) return this.registerOnly()
+    if (this.online) return
+    this.starting ??= this.startOnce().finally(() => (this.starting = undefined))
+    return this.starting
+  }
 
+  /** The `start()` under way, which a concurrent call waits for. */
+  private starting?: Promise<void>
+
+  /** Whether the providers, services and event handlers are set up, which a retry after a failed login reuses. */
+  private prepared = false
+
+  /** Whether the bot logged in, after which `start()` has nothing to do. */
+  private online = false
+
+  private async startOnce(): Promise<void> {
     this.logger.log('Starting bot...')
+    if (!this.prepared) {
+      await this.prepare()
+      this.prepared = true
+    }
+    runningApps.add(this.close)
+    if (this.loginFailed) {
+      if (!MeoCordApp.warnedRetry) {
+        MeoCordApp.warnedRetry = true
+        this.logger.warn(
+          'Retrying start() after a failed login is deprecated and will be removed in the next major version (5.0). ' +
+            'Create the app again with MeoCordFactory.create instead.',
+        )
+      }
+      undoFailedLogin(this.bot)
+    }
+    await this.login()
+  }
 
+  /** Whether a login of this app failed, so a retry restores the client discord.js destroyed. */
+  private loginFailed = false
+
+  /** Whether the deprecation of a retry after a failed login was logged, once a process. */
+  private static warnedRetry = false
+
+  /** Makes the provided values and listed services, and attaches the Discord event handlers. */
+  private async prepare(): Promise<void> {
     // Every provided value is made before anything that injects it is resolved, and before login
     if (this.startup) {
       try {
@@ -242,7 +289,6 @@ export class MeoCordApp implements MeoCordApplication {
     }
 
     installSignalHandlers()
-    runningApps.add(this.close)
 
     this.bot.on('clientReady', readyClient =>
       this.runListener('clientReady', async () => {
@@ -277,7 +323,10 @@ export class MeoCordApp implements MeoCordApplication {
     this.attachEventHandlers()
     this.warnAboutMissingRequirements()
     this.noteGlobalStagesOnEvents()
+  }
 
+  /** Logs the bot in, setting the exit code when that fails and clearing it when a later attempt succeeds. */
+  private async login(): Promise<void> {
     const login = this.bot.login(this.discordToken)
     const stopped = new Promise<never>((_, reject) => {
       this.abortLogin = () => {
@@ -309,20 +358,23 @@ export class MeoCordApp implements MeoCordApplication {
       }
       await tellDevRunner({ meocord: 'login-failed' })
       MeoCordApp.toldDevRunnerLoginFailed = true
+      this.loginFailed = true
       throw error
     } finally {
       this.abortLogin = undefined
     }
     // A shutdown that began as the login completed has the client to close; the bot is not reported online
     if (this.closing) throw stoppedBeforeOnline()
+    // 0 rather than undefined, which Bun ignores
     if (MeoCordApp.failedLoginSetExitCode && process.exitCode === 1) {
-      process.exitCode = undefined
+      process.exitCode = 0
       MeoCordApp.failedLoginSetExitCode = false
     }
     if (MeoCordApp.toldDevRunnerLoginFailed) {
       MeoCordApp.toldDevRunnerLoginFailed = false
       await tellDevRunner({ meocord: 'online' })
     }
+    this.online = true
     this.logger.log('Bot is online!')
   }
 

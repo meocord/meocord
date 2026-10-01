@@ -149,7 +149,8 @@ describe('MeoCordApp', () => {
         expect(process.exitCode).toBe(1)
         await app.start()
 
-        expect(process.exitCode).toBeUndefined()
+        // 0 rather than undefined, which Bun ignores
+        expect(process.exitCode).toBe(0)
       })
 
       // A code the application set for its own reasons is the application's to keep.
