@@ -1,6 +1,6 @@
 import path from 'path'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { hostname, tmpdir } from 'os'
 import { createRequire } from 'module'
 import { parseJsonc } from '@src/util/json.util.js'
 
@@ -25,14 +25,55 @@ function resolveExtends(value: string | string[], cwd: string): string | string[
 let copiesDir: string | undefined
 let copies = 0
 
+// A copies directory is named `meocord-tsconfig-<host>-<pid>-<random>`, for the process that made it. The host is
+// cut short, as a full domain name would take the name past what a file system allows.
+const COPIES_DIR = /^meocord-tsconfig-([^-]+)-(\d+)-/
+const thisHost = () => hostname().replace(/[^A-Za-z0-9.]/g, '_').slice(0, 64) || '_'
+
+// Only "no such process" is dead: a process another user owns refuses the signal with EPERM, and is alive
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * Removes the copies directories of this host's processes that have ended without removing their own, as one killed
+ * or crashed does before its exit hook runs. Another host's directory, in a temp directory machines or containers
+ * share, is left alone: its process can't be checked from here.
+ */
+function removeAbandonedCopies(tempDir: string, host: string): void {
+  let entries: string[]
+  try {
+    entries = readdirSync(tempDir)
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const owner = COPIES_DIR.exec(entry)
+    if (!owner || owner[1] !== host || isRunning(Number(owner[2]))) continue
+    try {
+      rmSync(path.join(tempDir, entry), { recursive: true, force: true })
+    } catch {
+      // Another user's, which this process may not remove
+    }
+  }
+}
+
 /**
  * The directory this process writes its tsconfig copies in: one for the process, removed as it exits, so a watch
  * session that copies the file on every reload leaves one directory and one exit hook, not one per copy. Another
- * process, such as a second build at once, has a directory of its own.
+ * process, such as a second build at once, has a directory of its own. Making it first removes any left by a process
+ * that never reached its exit hook.
  */
 function copiesDirectory(): string {
   if (copiesDir) return copiesDir
-  const dir = mkdtempSync(path.join(tmpdir(), 'meocord-tsconfig-'))
+  const host = thisHost()
+  removeAbandonedCopies(tmpdir(), host)
+  const dir = mkdtempSync(path.join(tmpdir(), `meocord-tsconfig-${host}-${process.pid}-`))
   process.once('exit', () => rmSync(dir, { recursive: true, force: true }))
   copiesDir = dir
   return dir
