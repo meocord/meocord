@@ -55,12 +55,13 @@ jobs:
       - name: Guard AGENTS.md
         if: github.event_name == 'pull_request'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'agents-md-approved') }}
           MAX_LINES: 230
+        # HEAD is the pull request merged into its base as the base is now, and its first parent is that base, so
+        # their diff is the pull request's own change. The base SHA the event names can predate later merges.
         run: |
-          git fetch --quiet --depth=1 origin "$BASE_SHA"
-          if git diff --quiet "$BASE_SHA" HEAD -- AGENTS.md; then exit 0; fi
+          git fetch --quiet --depth=2 origin "$GITHUB_SHA"
+          if git diff --quiet HEAD^1 HEAD -- AGENTS.md; then exit 0; fi
           if [ "$APPROVED" != "true" ]; then
             echo "::error file=AGENTS.md::AGENTS.md changed without the maintainer's 'agents-md-approved' label."
             exit 1
