@@ -45,7 +45,7 @@ const COMMAND_METADATA_KEY = Symbol('commands')
 const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
 const REACTION_HANDLER_METADATA_KEY = Symbol('reaction_handlers')
 const AUTOCOMPLETE_METADATA_KEY = Symbol('autocomplete_handlers')
-/** The routes a class's own `@Command` and `@MessageHandler` decorators declare, by method, beside those it inherits. */
+/** The routes a class's own handler decorators declare, by method, beside those it inherits. */
 const DECLARED_ROUTES_KEY = Symbol('declared_routes')
 
 const logger = new Logger('Command')
@@ -58,51 +58,61 @@ export function ownHandlerList<T>(key: symbol, target: object): T[] {
   return Reflect.getOwnMetadata(key, target) ?? [...(Reflect.getMetadata(key, target) ?? [])]
 }
 
-/** A route a handler answers: its kind, a command type in lower case or `message`, and its name or pattern. */
-interface HandlerRoute {
+/** A route a handler answers, as a warning names it, such as `button "page/{n}"` or `every message`. */
+export interface HandlerRoute {
   method: string
-  kind: string
-  route: string
+  label: string
 }
 
 const commandKind = (type: CommandType): string => type.toLowerCase().replaceAll('_', ' ')
 
-/** Records a route a class's own decorator declares for a method, which {@link warnInheritedRoutes} reads. */
+const commandRoute = (method: string, type: CommandType, name: string): HandlerRoute => ({ method, label: `${commandKind(type)} "${name}"` })
+const messageRoute = (method: string, pattern: string | undefined): HandlerRoute => ({
+  method,
+  label: pattern ? `message "${pattern}"` : 'every message',
+})
+const reactionRoute = (method: string, emoji: string | undefined): HandlerRoute => ({
+  method,
+  label: emoji ? `reaction "${emoji}"` : 'every reaction',
+})
+const autocompleteRoute = (method: string, commandPath: string, optionName: string | undefined): HandlerRoute => ({
+  method,
+  label: `autocomplete of ${optionName === undefined ? 'every option' : `"${optionName}"`} in "${commandPath}"`,
+})
+
+/** Records a route a class's own decorator declares for a method, which the startup check reads. */
 function declareRoute(target: object, declared: HandlerRoute): void {
   const routes: HandlerRoute[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target) ?? []
   routes.push(declared)
   Reflect.defineMetadata(DECLARED_ROUTES_KEY, routes, target)
 }
 
-/**
- * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, which
- * the next major version (5.0) drops. A route of another kind is another route, even under the same name.
- * `@Controller` calls it, after every method decorator of the class has run.
- */
-export function warnInheritedRoutes(target: abstract new (...args: any[]) => unknown): void {
-  const declared: HandlerRoute[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target.prototype) ?? []
-  const base = Object.getPrototypeOf(target.prototype) as object | null
-  if (declared.length === 0 || !base) return
-  const inherited: HandlerRoute[] = [
-    ...Object.entries(getCommandMap(base) ?? {}).flatMap(([route, metas]) =>
-      metas.map(meta => ({ method: meta.methodName, kind: commandKind(meta.type), route })),
-    ),
-    ...getMessageHandlers(base).map(handler => ({ method: handler.method, kind: 'message', route: handler.pattern ?? '' })),
+/** The routes a class's own handler decorators declare, without those it inherits. */
+export function getDeclaredRoutes(prototype: object): readonly HandlerRoute[] {
+  return Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, prototype) ?? []
+}
+
+/** Every route a class's handlers answer, inherited ones included. */
+export function getHandlerRoutes(prototype: object): HandlerRoute[] {
+  return [
+    ...Object.entries(getCommandMap(prototype) ?? {}).flatMap(([name, metas]) => metas.map(meta => commandRoute(meta.methodName, meta.type, name))),
+    ...getMessageHandlers(prototype).map(handler => messageRoute(handler.method, handler.pattern)),
+    ...getReactionHandlers(prototype).map(handler => reactionRoute(handler.method, handler.emoji)),
+    ...getAutocompleteHandlers(prototype).map(handler => autocompleteRoute(handler.methodName, handler.commandPath, handler.optionName)),
   ]
-  const label = ({ kind, route }: HandlerRoute) => `${kind} "${route}"`
-  for (const method of new Set(declared.map(entry => entry.method))) {
-    const own = declared.filter(entry => entry.method === method)
-    const ownLabels = new Set(own.map(label))
-    const kept = [...new Set(inherited.filter(entry => entry.method === method).map(label))].filter(text => !ownLabels.has(text))
-    if (kept.length === 0) continue
-    const where = `${target.name}.${method}`
-    warnDeprecatedBehaviour(
-      logger,
-      `An inherited route that a re-declared handler keeps (${where} answers ${kept.join(', ')} as well as ${[...ownLabels].join(', ')})`,
-      'is dropped',
-      `a decorator for each route ${where} should answer`,
-    )
-  }
+}
+
+/**
+ * Adds a handler the class's own decorator declares. One it inherits for the same method and route is replaced where
+ * it stands, so the class's own options apply and the routes keep their order.
+ */
+function addOwnHandler<T>(key: symbol, target: object, entry: T, sameRoute: (other: T) => boolean): void {
+  const handlers = ownHandlerList<T>(key, target)
+  const inherited: T[] = Reflect.getMetadata(key, Object.getPrototypeOf(target) as object) ?? []
+  const index = handlers.findIndex(other => inherited.includes(other) && sameRoute(other))
+  if (index === -1) handlers.push(entry)
+  else handlers[index] = entry
+  Reflect.defineMetadata(key, handlers, target)
 }
 
 /** The class's own command map, started from a copy of the inherited one, for the same reason. */
@@ -217,8 +227,9 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
  * and `{--name}` a flag. Only the most specific matching pattern runs, across every controller. A message that
  * names the command but does not fit its pattern gets the command's usage in reply, as a
  * {@link MessageUsageError}. The params the handler declares are checked against the pattern when the code
- * compiles. A subclass that declares an inherited handler on
- * another pattern still answers the inherited one, and logs a warning: in 5.0 the subclass's own patterns replace it.
+ * compiles. A subclass that re-declares an inherited handler on the same pattern takes its own options; on another
+ * pattern it still answers the inherited one too, which the bot warns about as it starts. In the next major version
+ * (5.0) the subclass's own patterns replace the inherited ones.
  *
  * @param pattern - The words to match, such as `'roll {sides:int} {note...?}'`. An empty pattern runs for every
  *   message, as `@MessageHandler()` does, and logs a warning: it is deprecated, and refused in 5.0.
@@ -248,14 +259,14 @@ export function MessageHandler<
 >(pattern: Pattern, options?: MessageHandlerOptions): PatternedMessageHandlerDecorator<T, R, Pattern>
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
   return function (target: object, propertyKey: string) {
-    const handlers = ownHandlerList<MessageHandlerMetadata>(MESSAGE_HANDLER_METADATA_KEY, target)
     // An empty pattern means every message, as no pattern does
     if (pattern === '') {
       warnDeprecatedBehaviour(logger, `@MessageHandler('') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
     }
-    handlers.push({ pattern: pattern || undefined, method: propertyKey.toString(), options })
-    Reflect.defineMetadata(MESSAGE_HANDLER_METADATA_KEY, handlers, target)
-    declareRoute(target, { method: propertyKey.toString(), kind: 'message', route: pattern || '' })
+    const method = propertyKey.toString()
+    const declared = { pattern: pattern || undefined, method, options }
+    addOwnHandler<MessageHandlerMetadata>(MESSAGE_HANDLER_METADATA_KEY, target, declared, other => other.method === method && other.pattern === declared.pattern)
+    declareRoute(target, messageRoute(method, declared.pattern))
   }
 }
 
@@ -289,6 +300,9 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * gateway keeps current, fetched first only when the bot holds it by id alone, and a reaction without its count
  * is fetched too. For data straight from Discord, such as after a reconnect that missed updates, call
  * `reaction.message.fetch()`. Reactions from bots, the bot's own included, are skipped unless `bots: true` is set.
+ * A subclass that re-declares an inherited handler on the same emoji takes its own settings; on another it still
+ * answers the inherited one too, which the bot warns about as it starts. In the next major version (5.0) the
+ * subclass's own emoji replace the inherited ones.
  *
  * @param emoji - The emoji to handle: its character, or a custom emoji's id, `<:name:id>` or name.
  * @param settings - Whether bots' reactions reach it too; see {@link ReactionHandlerSettings}.
@@ -326,9 +340,14 @@ export function ReactionHandler(
 ): ReactionHandlerDecorator<MessageReaction | PartialMessageReaction, unknown> {
   const [emoji, own] = typeof emojiOrSettings === 'object' ? [undefined, emojiOrSettings] : [emojiOrSettings, settings]
   return function (target: object, propertyKey: string) {
-    const handlers = ownHandlerList<ReactionHandlerMetadata>(REACTION_HANDLER_METADATA_KEY, target)
-    handlers.push({ emoji, method: propertyKey.toString(), settings: own })
-    Reflect.defineMetadata(REACTION_HANDLER_METADATA_KEY, handlers, target)
+    const method = propertyKey.toString()
+    addOwnHandler<ReactionHandlerMetadata>(
+      REACTION_HANDLER_METADATA_KEY,
+      target,
+      { emoji, method, settings: own },
+      other => other.method === method && other.emoji === emoji,
+    )
+    declareRoute(target, reactionRoute(method, emoji))
   }
 }
 
@@ -575,8 +594,9 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * handlers of one type whose patterns match exactly the same ids stop the bot at startup; patterns that only overlap
  * are warned about, naming the one that runs: the more specific, or between equally specific ones, the one listed first. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
- * kind, the bot checks it as it starts. A subclass that declares an inherited handler on another name or pattern
- * still answers the inherited one, and logs a warning: in 5.0 the subclass's own declarations replace it.
+ * kind, the bot checks it as it starts. A subclass that re-declares an inherited handler on the same name or pattern
+ * takes its own builder and options; on another it still answers the inherited one too, which the bot warns about
+ * as it starts. In the next major version (5.0) the subclass's own declarations replace the inherited ones.
  *
  * @param name - The command's name or subcommand path, or a component's customId pattern or route.
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
@@ -720,12 +740,7 @@ export function Command<
       specificity = patternSpecificity
     }
 
-    // Ensure commandName supports multiple entries
-    if (!commands[commandName]) {
-      commands[commandName] = []
-    }
-
-    commands[commandName].push({
+    const declared: CommandMeta = {
       methodName: propertyKey,
       builder: builderInstance,
       ...(typeof builderOrType === 'function' && { builderClass: builderOrType as abstract new (...args: any[]) => unknown }),
@@ -734,10 +749,16 @@ export function Command<
       dynamicParams,
       specificity,
       ...(guilds && { guilds }),
-    })
+    }
+    // One the class inherits for this method and route is replaced where it stands, so this one's options apply
+    const metas = (commands[commandName] ??= [])
+    const inherited: CommandMeta[] = getCommandMap(Object.getPrototypeOf(target) as object)?.[commandName] ?? []
+    const replaced = metas.findIndex(meta => inherited.includes(meta) && meta.methodName === propertyKey && meta.type === commandType)
+    if (replaced === -1) metas.push(declared)
+    else metas[replaced] = declared
 
     Reflect.defineMetadata(COMMAND_METADATA_KEY, commands, target)
-    declareRoute(target, { method: propertyKey, kind: commandKind(commandType), route: commandName })
+    declareRoute(target, commandRoute(propertyKey, commandType, commandName))
   }
 }
 
@@ -782,7 +803,9 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @remarks
  * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs
  * its class and global guards and its filters, but no interceptors; a guard must not answer, and returning
- * `false` closes the menu with an empty list.
+ * `false` closes the menu with an empty list. A subclass that re-declares an inherited handler on another command
+ * path or option still completes the inherited one too, which the bot warns about as it starts. In the next major
+ * version (5.0) the subclass's own declarations replace the inherited ones.
  *
  * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
  * @param optionName - The option to complete. Leave it out to handle every option, branching on
@@ -815,9 +838,14 @@ export function Autocomplete<_R = unknown>(commandPath: string, optionName?: str
       | TypedPropertyDescriptor<(interaction: AutocompleteInteraction) => R>
       | TypedPropertyDescriptor<() => R>,
   ) {
-    const handlers = ownHandlerList<AutocompleteMeta>(AUTOCOMPLETE_METADATA_KEY, target)
-    handlers.push({ commandPath, optionName, methodName: propertyKey.toString() })
-    Reflect.defineMetadata(AUTOCOMPLETE_METADATA_KEY, handlers, target)
+    const methodName = propertyKey.toString()
+    addOwnHandler<AutocompleteMeta>(
+      AUTOCOMPLETE_METADATA_KEY,
+      target,
+      { commandPath, optionName, methodName },
+      other => other.methodName === methodName && other.commandPath === commandPath && other.optionName === optionName,
+    )
+    declareRoute(target, autocompleteRoute(methodName, commandPath, optionName))
   }
 }
 
