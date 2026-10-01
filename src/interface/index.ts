@@ -526,7 +526,8 @@ export interface MessageCommandOptions {
   /**
    * What a message starts with to reach a patterned handler: a prefix, a list of them, or a function
    * of the message returning them, such as a server's own prefix. Without one, a pattern matches the
-   * message as it is. A handler's own `prefix` replaces it.
+   * message as it is. A function that finds none, returning an empty list or nothing, starts no command
+   * for that message; only `''` takes it as it is. A handler's own `prefix` replaces it.
    */
   prefix?: MessagePrefix | ((message: Message) => MessagePrefix | Promise<MessagePrefix>)
   /**
