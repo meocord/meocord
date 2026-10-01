@@ -12,8 +12,8 @@ export const DEFAULT_THEME_MAX_USERS = 50_000
 /** How long a call waits for a resolver, unless `themeForTimeoutMs` says otherwise. */
 export const DEFAULT_THEME_FOR_TIMEOUT_MS = 1_000
 
-/** How long a component's lock waits for the presenter's loading view before showing MeoCord's: as long as for a resolver. */
-export const LOADING_DRAW_TIMEOUT_MS = DEFAULT_THEME_FOR_TIMEOUT_MS
+/** How long a component's lock waits for the presenter's loading view before showing MeoCord's; matches themeFor's default. */
+export const LOADING_DRAW_TIMEOUT_MS = 1_000
 /** How long a server or user whose lookup failed is not asked again. */
 export const THEME_FAILURE_BACKOFF_MS = 10_000
 /** How long a burst of failures or of answers lasts, from its first: its second is summed up, the rest only counted. */

@@ -173,6 +173,8 @@ export interface ResponseCall {
 }
 
 const ALREADY_ACKNOWLEDGED = 40060
+/** Discord's code for an interaction it no longer knows, such as one past its three seconds unacknowledged. */
+const UNKNOWN_INTERACTION = 10062
 const TOKEN_EXPIRED = new Set([50027, 10015])
 /**
  * How old an interaction's token must be for a token error to mean it expired. Discord's tokens last 15
@@ -291,7 +293,6 @@ function attachmentList(message: { attachments?: unknown } | null | undefined): 
   return values && typeof (values as Iterable<unknown>)[Symbol.iterator] === 'function' ? [...(values as Iterable<unknown>)] : []
 }
 
-/** Whether a presenter's result is a view still being drawn. */
 /** What a loading drawing that missed its deadline is taken as. */
 const LATE = Symbol('late')
 
@@ -301,6 +302,7 @@ function presenterName(presenter: ResponsePresenter): string {
   return typeof cls === 'function' && cls !== Object && cls.name ? cls.name : 'The presenter'
 }
 
+/** Whether a presenter's result is a view still being drawn. */
 function isDrawing(view: ResponseView | Promise<ResponseView>): view is Promise<ResponseView> {
   return typeof (view as { then?: unknown }).then === 'function'
 }
@@ -1028,8 +1030,9 @@ export class InteractionResponse implements ResponseState {
     const theme = await themeForInteraction(this.interaction)
     // Drawn before anything is sent; a presenter that fails is answered for with MeoCord's own view, then thrown to
     // the caller, which reports it as the call's fault rather than passing it for a refusal
-    const { view, failure } = await this.drawnView(error, message, theme)
-    await this.deliverError(view, visibility, ifUnanswered)
+    const { view, failure, gone } = await this.drawnView(error, message, theme)
+    // Its refusal already logged, an interaction Discord no longer knows is not answered again
+    if (!gone) await this.deliverError(view, visibility, ifUnanswered)
     if (failure !== undefined) throw failure
   }
 
@@ -1060,11 +1063,15 @@ export class InteractionResponse implements ResponseState {
 
   /**
    * The presenter's error view, drawn and rendered as one step. One it draws asynchronously has the interaction
-   * acknowledged privately first, so the drawing never misses Discord's three seconds. Should the presenter throw or
-   * reject, or its view be one MeoCord cannot render, MeoCord's own view takes its place, and the failure is returned
-   * for the caller to report once the user is answered.
+   * acknowledged privately first, so the drawing never misses Discord's three seconds; `gone` when Discord no longer
+   * knows the interaction. Should the presenter fail, or draw a view MeoCord cannot render, MeoCord's own view takes its
+   * place, and the failure is returned for the caller to report once the user is answered.
    */
-  private async drawnView(error: unknown, message: string, theme: ResolvedTheme): Promise<{ view: ResponseView; failure?: unknown }> {
+  private async drawnView(
+    error: unknown,
+    message: string,
+    theme: ResolvedTheme,
+  ): Promise<{ view: ResponseView; failure?: unknown; gone?: boolean }> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
     const presented = { message, error, tone } as const
     const context = this.presenterContext(this.v2, theme)
@@ -1081,6 +1088,8 @@ export class InteractionResponse implements ResponseState {
     } catch (failure) {
       return fallback(failure)
     }
+    // Set when the interaction is one Discord no longer knows, which takes no answer at all
+    let gone = false
     if (isDrawing(produced)) {
       // Settled into a value now, so a drawing that rejects while the acknowledgement is awaited is still handled
       const drawing = Promise.resolve(produced).then(
@@ -1088,18 +1097,21 @@ export class InteractionResponse implements ResponseState {
         (failure: unknown) => ({ failure }),
       )
       this.sync()
-      // Discord's refusal is the acknowledgement's, never the presenter's: logged, and the view is still delivered
+      // Discord's refusal is the acknowledgement's, never the presenter's, and is logged once
       if (this.phase === 'unanswered') {
-        await this.acknowledgePrivately().catch((refusal: unknown) => logFailedSend(logger, 'acknowledge the interaction privately', refusal))
+        await this.acknowledgePrivately().catch((refusal: unknown) => {
+          gone = errorCode(refusal) === UNKNOWN_INTERACTION
+          logFailedSend(logger, 'acknowledge the interaction privately', refusal)
+        })
       }
       const drawn = await drawing
-      if ('failure' in drawn) return fallback(drawn.failure)
+      if ('failure' in drawn) return { ...fallback(drawn.failure), gone }
       produced = drawn.view
     }
     try {
-      return { view: ready(produced) }
+      return { view: ready(produced), gone }
     } catch (failure) {
-      return fallback(failure)
+      return { ...fallback(failure), gone }
     }
   }
 
