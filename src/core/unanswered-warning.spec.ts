@@ -78,8 +78,31 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
     }
   }
 
+  // Returns after 20 ms if the handler has not, leaving it to finish on its own
+  @loaded.Interceptor()
+  class Racing {
+    intercept(_context: unknown, next: { handle(): Promise<unknown> }) {
+      return Promise.race([next.handle(), new Promise(resolve => setTimeout(() => resolve('timed out'), 20))])
+    }
+  }
+
   @loaded.Controller()
   class Shop {
+    @loaded.Command('slow', loaded.CommandType.SLASH)
+    @loaded.UseInterceptor(Racing)
+    async slow(interaction: any) {
+      await new Promise(resolve => setTimeout(resolve, 60))
+      await loaded.respond(interaction).send('done')
+    }
+
+    @loaded.Command('slowDeferred', loaded.CommandType.SLASH)
+    @loaded.Defer()
+    @loaded.UseInterceptor(Racing)
+    async slowDeferred(interaction: any) {
+      await new Promise(resolve => setTimeout(resolve, 60))
+      await loaded.respond(interaction).send('done')
+    }
+
     @loaded.Command('late', loaded.CommandType.SLASH)
     @loaded.UseInterceptor(Late)
     async late() {}
@@ -189,6 +212,24 @@ describe('the warning for an interaction left unanswered', () => {
       'Shop.late: its interceptor Late returned before the handler ran, without answering the interaction, so the user ' +
         'saw "The application did not respond". Answer it in Late, or await next.handle(). Shown once per handler; ' +
         '@MeoCord({ warnUnanswered: false }) turns it off.',
+    ])
+  })
+
+  it('names an interceptor that returns before the handler finishes, not the handler, which answers later', async () => {
+    process.env.NODE_ENV = 'development'
+    const run = await startApp(await load())
+
+    for (const command of ['slow', 'slowDeferred']) await run(command)
+    await new Promise(resolve => setTimeout(resolve, 80))
+
+    expect(warned.filter(message => /^Shop\.slow/.test(message))).toEqual([
+      'Shop.slow: its interceptor Racing returned before the handler finished, without answering the interaction, so the ' +
+        'user saw "The application did not respond". Answer it in Racing, or await next.handle(). Shown once per handler; ' +
+        '@MeoCord({ warnUnanswered: false }) turns it off.',
+      "Shop.slowDeferred: its interceptor Racing returned before the handler finished, and the deferred interaction had no " +
+        "follow-up when the call ended, so @Defer's lock was released while the user still saw it thinking. Follow up in " +
+        'Racing with respond(interaction).send(), or await next.handle(). Shown once per handler; @MeoCord({ ' +
+        'warnUnanswered: false }) turns it off.',
     ])
   })
 

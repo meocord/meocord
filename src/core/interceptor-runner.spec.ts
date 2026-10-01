@@ -14,7 +14,7 @@ import {
 } from '@src/decorator/index.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CallHandler, type GuardInterface, type InterceptorInterface } from '@src/interface/index.js'
-import { ExecutionContext } from '@src/common/index.js'
+import { ExecutionContext, Logger } from '@src/common/index.js'
 import { MeoCordApp } from '@src/core/meocord.app.js'
 import { bindGlobalStages, appStages, prepareHandlerStages } from '@src/core/handler-pipeline.js'
 import {
@@ -417,6 +417,24 @@ class TimesOut implements InterceptorInterface {
   }
 }
 
+// Starts the handler once it has returned, outside the call
+@Interceptor()
+class StartsLate implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    setTimeout(() => void next.handle(), 0)
+    return 'later'
+  }
+}
+
+// Leaves the handler to run in the background, catching what it throws itself
+@Interceptor()
+class Background implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    void next.handle().catch((error: Error) => log.push(`background caught ${error.message}`))
+    return 'queued'
+  }
+}
+
 @Interceptor()
 class CatchesCallback implements InterceptorInterface {
   async intercept(_context: ExecutionContext, next: CallHandler) {
@@ -431,10 +449,24 @@ class CatchesCallback implements InterceptorInterface {
 
 @Controller()
 class UnawaitedController {
-  @Command('slowTimesOut', CommandType.SLASH)
+  @Command('throwsAfterTimeout', CommandType.SLASH)
   @UseInterceptor(TimesOut)
-  async slowTimesOut() {
-    await new Promise(resolve => setTimeout(resolve, 300))
+  async throwsAfterTimeout() {
+    await new Promise(resolve => setTimeout(resolve, 40))
+    throw new Error('database down')
+  }
+
+  @Command('startsLate', CommandType.SLASH)
+  @UseInterceptor(StartsLate)
+  async startsLate() {
+    throw new Error('late failure')
+  }
+
+  @Command('background', CommandType.SLASH)
+  @UseInterceptor(Background)
+  async background() {
+    await slow()
+    throw new Error('database down')
   }
 
   @Command('hangTimesOut', CommandType.SLASH)
@@ -521,13 +553,52 @@ describe('an interceptor that returns before the call it started ends', () => {
     expect(log).toEqual(['caught database down', 'swallowed database down'])
   })
 
-  it.each(['slowTimesOut', 'hangTimesOut'] as const)('leaves a call to end with the interceptor when it took the run on: %s', async name => {
+  it('leaves a call to end with the interceptor when it took the run on, even one that never settles', async () => {
     const startedAt = performance.now()
 
-    const { ran } = await module().invoke(UnawaitedController, name, slash(name))
+    const { ran } = await module().invoke(UnawaitedController, 'hangTimesOut', slash('hangTimesOut'))
 
     expect(ran).toBe(true)
     expect(performance.now() - startedAt).toBeLessThan(200)
+  })
+
+  it('warns of a run it took on that throws once the call has ended, naming the interceptor and the error', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+    await module().invoke(UnawaitedController, 'throwsAfterTimeout', slash('throwsAfterTimeout'))
+    await new Promise(resolve => setTimeout(resolve, 60))
+
+    expect(warn).toHaveBeenCalledWith(
+      'TimesOut returned before UnawaitedController.throwsAfterTimeout finished, which then threw; nothing caught it, so the ' +
+        'call could not report it:',
+      expect.objectContaining({ message: 'database down' }),
+    )
+    warn.mockRestore()
+  })
+
+  it('leaves a run it took on and catches itself to it, warning of nothing', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+    await module().invoke(UnawaitedController, 'background', slash('background'))
+    await new Promise(resolve => setTimeout(resolve, 40))
+
+    expect(log).toEqual(['background caught database down'])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('leaves a run started once the interceptor has returned outside the call, so what it throws is unhandled', async () => {
+    const unhandled: unknown[] = []
+    const collect = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', collect)
+    try {
+      await module().invoke(UnawaitedController, 'startsLate', slash('startsLate'))
+      await new Promise(resolve => setTimeout(resolve, 20))
+    } finally {
+      process.off('unhandledRejection', collect)
+    }
+
+    expect(unhandled).toEqual([expect.objectContaining({ message: 'late failure' })])
   })
 
   it('leaves an error a callback in its chain throws to the chain that catches it', async () => {
