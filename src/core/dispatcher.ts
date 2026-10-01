@@ -599,11 +599,13 @@ export class Dispatcher {
       .filter(({ handlers }) => handlers.length > 0)
     if (runs.length === 0) return
 
-    // A reaction arrives for messages the bot may no longer be able to read -- deleted,
-    // or in a channel it lost access to -- and `fetch` rejects for all of them. That is
-    // an ordinary outcome rather than a fault, so the reaction is skipped quietly.
+    // A message the gateway keeps whole is read from the cache; only a partial one, known by its id alone, is
+    // fetched, and a partial reaction, which fetching fetches its message for. A message the bot can no longer
+    // read -- deleted, or in a channel it lost access to -- fails that fetch, an ordinary outcome rather than a
+    // fault, so the reaction is skipped quietly.
     try {
-      await reaction.message.fetch()
+      if (reaction.partial) await reaction.fetch()
+      else if (reaction.message.partial) await reaction.message.fetch()
     } catch (error) {
       this.logger.debug(`Skipping a reaction whose message could not be fetched: ${String(error)}`)
       return
