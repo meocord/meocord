@@ -474,6 +474,64 @@ interface Run {
   error?: string
 }
 
+/** A process, its parent, the CPU time it has used, and how it was started. */
+interface ProcessRow {
+  pid: number
+  ppid: number
+  cpu: string
+  command: string
+}
+
+/** Every process running now, from `ps` or, on Windows, from Win32_Process. */
+function processRows(): ProcessRow[] {
+  if (process.platform === 'win32') {
+    const query =
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,UserModeTime,KernelModeTime,CommandLine | ConvertTo-Json -Compress'
+    const { stdout } = spawnSync('powershell', ['-NoProfile', '-Command', query], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const rows = JSON.parse(stdout || '[]') as {
+      ProcessId: number
+      ParentProcessId: number
+      UserModeTime: number
+      KernelModeTime: number
+      CommandLine: string | null
+    }[]
+    // Win32_Process counts CPU time in 100-nanosecond units
+    return rows.map(row => ({
+      pid: row.ProcessId,
+      ppid: row.ParentProcessId,
+      cpu: `${((row.UserModeTime + row.KernelModeTime) / 1e7).toFixed(1)}s`,
+      command: row.CommandLine ?? '',
+    }))
+  }
+  const { stdout } = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,time=,command='], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  return stdout
+    .split('\n')
+    .map(line => line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/))
+    .filter(match => match !== null)
+    .map(([, pid, ppid, cpu, command]) => ({ pid: Number(pid), ppid: Number(ppid), cpu, command }))
+}
+
+/** The process `root` and everything it started, one line each, with the CPU time each has used. */
+function processTree(root: number): string {
+  try {
+    const rows = processRows()
+    const tree = new Set([root])
+    for (let grew = true; grew; ) {
+      grew = false
+      for (const row of rows) {
+        if (tree.has(row.ppid) && !tree.has(row.pid)) {
+          tree.add(row.pid)
+          grew = true
+        }
+      }
+    }
+    const lines = rows.filter(row => tree.has(row.pid)).map(row => `  pid ${row.pid}, cpu ${row.cpu}: ${row.command}`)
+    return lines.length > 0 ? lines.join('\n') : '  (nothing: the process tree had already exited)'
+  } catch (error) {
+    return `  (could not list processes: ${error instanceof Error ? error.message : String(error)})`
+  }
+}
+
 /**
  * Runs a command in its own process group, sending the scenario's signal to the group once the output
  * shows what it waits for. Resolves when the command itself exits, even if a child it started holds
@@ -505,7 +563,8 @@ function run(command: string, args: string[], dir: string, scenario: Scenario): 
     let error: string | undefined
     const timeoutMs = scenario.timeoutMs ?? 120_000
     const timeout = setTimeout(() => {
-      error = `did not finish within ${timeoutMs / 1000}s`
+      // What was still running, and how much CPU each had used, tells a process stuck waiting from one still working
+      error = `did not finish within ${timeoutMs / 1000}s; still running:\n${processTree(child.pid!)}`
       toGroup('SIGKILL')
     }, timeoutMs)
 
@@ -833,8 +892,9 @@ const scenarios: Scenario[] = [
     argv: ['generate', 'service', 'Formatted'],
     expect: {
       code: 0,
+      counts: { "Formatting with your project's ESLint": 1 },
       says: ['Created'],
-      never: ['Failed to create', 'EINVAL'],
+      never: ['Failed to create', 'EINVAL', 'Could not format'],
       creates: ['src/services/formatted.service.ts', 'src/services/formatted.service.spec.ts'],
     },
   },

@@ -5,7 +5,7 @@ import {
   assertFilesAbsent,
   commandNameFor,
   createDirectoryIfNotExists,
-  generateFile,
+  writeFiles,
   populateTemplate,
   validateAndFormatName,
 } from '@src/util/generator-cli.util.js'
@@ -26,7 +26,7 @@ export class ControllerGeneratorHelper {
    * Generates a controller of the given type, with its spec and, for command types, its builder.
    * @throws Exits the process when the name is invalid or the type unsupported.
    */
-  generateController(args: { controllerName: string | undefined }, type: ControllerType, options: { message?: boolean } = {}): void {
+  generateController(args: { controllerName: string | undefined }, type: ControllerType, options: { message?: boolean } = {}): string[] {
     const { parts, kebabCaseName, className } = validateAndFormatName(args.controllerName)
     const controllerDir = path.join(process.cwd(), 'src', 'controllers', type, ...parts)
 
@@ -38,7 +38,7 @@ export class ControllerGeneratorHelper {
     ])
 
     const template = this.buildControllerTemplate(className, type, parts, kebabCaseName, options)
-    this.generateControllerStructure(controllerDir, kebabCaseName, className, type, template, parts, options)
+    return this.generateControllerStructure(controllerDir, kebabCaseName, className, type, template, parts, options)
   }
 
   /** Where a controller's own builder is written: beside it, named after it. */
@@ -98,7 +98,7 @@ export class ControllerGeneratorHelper {
     return template ? { template, variables } : undefined
   }
 
-  /** Writes the controller, its spec, and for command types its builder, into `controllerDir`. */
+  /** Writes the controller, its spec, and for command types its builder, into `controllerDir`, and returns those written. */
   private generateControllerStructure(
     controllerDir: string,
     kebabCaseName: string,
@@ -107,21 +107,26 @@ export class ControllerGeneratorHelper {
     controllerTemplate: string,
     parts: string[],
     options: { message?: boolean },
-  ): void {
-    this.generateBuilderFile(className, kebabCaseName, type, controllerDir, parts, options)
+  ): string[] {
+    const builder = this.generateBuilderFile(className, kebabCaseName, type, controllerDir, parts, options)
     createDirectoryIfNotExists(controllerDir)
 
     const controllerFilePath = path.join(controllerDir, `${kebabCaseName}.${type}.controller.ts`)
-    generateFile(controllerFilePath, controllerTemplate)
 
     // Each type's own spec, which invokes the handler as dispatch would and checks its answer
     const { variables } = this.getTemplateConfig(type, className, parts, kebabCaseName, options)!
     const specTemplatePath = path.resolve(__dirname, '..', 'builder-template', 'controller', `${type}.controller.spec.template`)
     const specContent = populateTemplate(specTemplatePath, { ...variables, kebabCaseName })
-    generateFile(path.join(controllerDir, `${kebabCaseName}.${type}.controller.spec.ts`), specContent)
+    return [
+      ...builder,
+      ...writeFiles([
+        [controllerFilePath, controllerTemplate],
+        [path.join(controllerDir, `${kebabCaseName}.${type}.controller.spec.ts`), specContent],
+      ]),
+    ]
   }
 
-  /** Writes the builder for command controller types into `controllerDir`; other types have none. */
+  /** Writes the builder for command controller types into `controllerDir`, returning it when written; other types have none. */
   private generateBuilderFile(
     className: string,
     kebabCaseName: string,
@@ -129,13 +134,13 @@ export class ControllerGeneratorHelper {
     controllerDir: string,
     parts: string[],
     options: { message?: boolean },
-  ): void {
+  ): string[] {
     const builderConfig = this.getBuilderConfig(type, className, kebabCaseName, parts, options)
-    if (!builderConfig) return
+    if (!builderConfig) return []
 
     const builderTemplate = populateTemplate(builderConfig.template, builderConfig.variables)
     createDirectoryIfNotExists(path.join(controllerDir, 'builders'))
-    generateFile(this.builderFilePath(controllerDir, kebabCaseName), builderTemplate)
+    return writeFiles([[this.builderFilePath(controllerDir, kebabCaseName), builderTemplate]])
   }
 
   /** The builder template and its variables for a controller type, or undefined when it has no builder. */

@@ -4,7 +4,7 @@ import {
   assertFilesAbsent,
   buildTemplate,
   createDirectoryIfNotExists,
-  generateFile,
+  writeFiles,
   validateAndFormatName,
 } from '@src/util/generator-cli.util.js'
 
@@ -19,7 +19,7 @@ export class InterceptorGeneratorHelper {
    * Generates an interceptor and its spec. The name may contain slashes for nested directories.
    * @throws Exits the process when the name is missing or invalid.
    */
-  generateInterceptor(interceptorName?: string): void {
+  generateInterceptor(interceptorName?: string): string[] {
     if (!interceptorName) {
       this.logger.error('Interceptor name is required.')
       process.exit(1)
@@ -37,7 +37,9 @@ export class InterceptorGeneratorHelper {
     const specTemplate = buildTemplate(className, 'interceptor.spec.template', { kebabCaseName })
 
     createDirectoryIfNotExists(interceptorDir)
-    generateFile(interceptorFile, interceptorTemplate)
-    generateFile(specFile, specTemplate)
+    return writeFiles([
+      [interceptorFile, interceptorTemplate],
+      [specFile, specTemplate],
+    ])
   }
 }

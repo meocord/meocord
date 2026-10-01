@@ -90,11 +90,10 @@ export function createDirectoryIfNotExists(directory: string) {
 }
 
 /**
- * Creates a file and formats it with the project's ESLint. The write is exclusive, so an existing file
- * is never replaced; a failed write sets a non-zero exit code, and formatting, which comes after it,
- * never does.
+ * Creates a file, and says whether it did. The write is exclusive, so an existing file is never replaced; a failed
+ * write sets a non-zero exit code.
  */
-export function generateFile(filePath: string, content: string): void {
+export function generateFile(filePath: string, content: string): boolean {
   const relative = path.relative(process.cwd(), filePath)
   try {
     fs.writeFileSync(filePath, content, { flag: 'wx' })
@@ -102,35 +101,54 @@ export function generateFile(filePath: string, content: string): void {
     process.exitCode = 1
     if ((error as NodeJS.ErrnoException)?.code === 'EEXIST') {
       logger.error(`${relative} already exists; left it untouched.`)
-      return
+      return false
     }
     logger.error(`Failed to create ${relative}`, error)
-    return
+    return false
   }
   logger.log(`Created ${relative}`)
-  formatWithLocalESLint(filePath)
+  return true
+}
+
+/** Creates each file in order with {@link generateFile}, and returns the paths of those it created. */
+export function writeFiles(files: readonly (readonly [filePath: string, content: string])[]): string[] {
+  return files.filter(([filePath, content]) => generateFile(filePath, content)).map(([filePath]) => filePath)
 }
 
 /**
- * Formats a generated file with the project's own ESLint, when it has one.
+ * Formats the files a generator wrote with the project's own ESLint, when it has one, in one run, and resolves once
+ * that run has finished. The files are written either way: formatting is a courtesy, so a run that fails, or rules
+ * that reject the template, are reported and never fail the command.
  *
- * Reaching for `npx` instead would start downloading ESLint into a project that
- * deliberately does not have it, once per generated file, with no way to see it happen —
- * the call is not awaited. A project with its own rules still gets them applied.
+ * One run, rather than one per file, builds the project's type information once. Reaching for `npx` instead would
+ * start downloading ESLint into a project that deliberately does not have it.
  */
-function formatWithLocalESLint(filePath: string): void {
-  const script = localESLintScript()
+export async function formatGeneratedFiles(filePaths: readonly string[]): Promise<void> {
+  const script = filePaths.length > 0 ? localESLintScript() : undefined
   if (!script) return
 
-  try {
-    execFile(process.execPath, [script, '--fix', filePath], () => {
-      // Formatting is a courtesy; a project whose rules reject the template should still
-      // end up with the file it asked for.
-    })
-  } catch {
-    // Nor one that cannot start: the file is written either way
-  }
+  logger.log("Formatting with your project's ESLint...")
+  const failure = await new Promise<string | undefined>(resolve => {
+    try {
+      execFile(process.execPath, [script, '--fix', ...filePaths], (error, _stdout, stderr) => {
+        if (!error) return resolve(undefined)
+        // ESLint exits 1 for problems left after fixing, and 2 when it could not run
+        if (error.code === 1) return resolve('ESLint reports problems it could not fix; run it on the files to see them.')
+        resolve(firstLine(stderr) ?? firstLine(error.message))
+      })
+    } catch (error) {
+      resolve(firstLine(error instanceof Error ? error.message : String(error)))
+    }
+  })
+  if (failure !== undefined) logger.warn(`Could not format the generated files: ${failure}`)
 }
+
+/** The first line of `text` that says anything, which names the cause. */
+const firstLine = (text: string): string | undefined =>
+  text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean)
 
 /**
  * The project's own ESLint, as the script its package names for `eslint`, run with this runtime rather than through

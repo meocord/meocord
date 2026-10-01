@@ -1,8 +1,9 @@
 import path from 'path'
 import { vi } from 'vitest'
 
-const { mockExistsSync, mockMkdirSync, mockWriteFileSync, mockReadFileSync, mockExecFile, mockLoggerLog, mockLoggerError } =
+const { mockExistsSync, mockMkdirSync, mockWriteFileSync, mockReadFileSync, mockExecFile, mockLoggerLog, mockLoggerError, mockLoggerWarn } =
   vi.hoisted(() => ({
+    mockLoggerWarn: vi.fn(),
     mockExistsSync: vi.fn(),
     mockMkdirSync: vi.fn(),
     mockWriteFileSync: vi.fn(),
@@ -37,7 +38,7 @@ vi.mock('@src/common/index.js', () => ({
     class {
       log = mockLoggerLog
       error = mockLoggerError
-      warn = vi.fn()
+      warn = mockLoggerWarn
       info = vi.fn()
       debug = vi.fn()
       verbose = vi.fn()
@@ -52,6 +53,8 @@ const {
   assertFilesAbsent,
   createDirectoryIfNotExists,
   generateFile,
+  writeFiles,
+  formatGeneratedFiles,
   buildTemplate,
   populateTemplate,
 } = await import('@src/util/generator-cli.util.js')
@@ -197,8 +200,8 @@ describe('generateFile', () => {
   })
 
   // `wx` fails rather than replaces: an existing file is never overwritten, whatever called this.
-  it('writes the file exclusively, so it can never replace one', () => {
-    generateFile('/some/file.ts', 'export const x = 1')
+  it('writes the file exclusively, so it can never replace one, and says it did', () => {
+    expect(generateFile('/some/file.ts', 'export const x = 1')).toBe(true)
     expect(mockWriteFileSync).toHaveBeenCalledWith('/some/file.ts', 'export const x = 1', { flag: 'wx' })
   })
 
@@ -210,7 +213,7 @@ describe('generateFile', () => {
     mockLoggerError.mockClear()
     const exitCode = process.exitCode
 
-    generateFile(path.join(process.cwd(), 'src', 'file.ts'), 'content')
+    expect(generateFile(path.join(process.cwd(), 'src', 'file.ts'), 'content')).toBe(false)
 
     expect(process.exitCode).toBe(1)
     // Named relative to the project, with the platform's own separator.
@@ -232,57 +235,92 @@ describe('generateFile', () => {
     process.exitCode = exitCode
   })
 
+  it('writes each file in order, and returns those it wrote', () => {
+    mockWriteFileSync.mockImplementation((file: string) => {
+      if (file === '/b.ts') throw Object.assign(new Error('exists'), { code: 'EEXIST' })
+    })
+    const exitCode = process.exitCode
+
+    expect(writeFiles([['/a.ts', 'a'], ['/b.ts', 'b'], ['/c.ts', 'c']])).toEqual(['/a.ts', '/c.ts'])
+    process.exitCode = exitCode
+  })
+})
+
+describe('formatGeneratedFiles', () => {
   const ESLINT_MANIFEST = JSON.stringify({ name: 'eslint', bin: { eslint: './bin/eslint.js' } })
   const eslintScript = () => path.resolve(process.cwd(), 'node_modules', 'eslint', 'bin', 'eslint.js')
+  type Done = (error: (Error & { code?: number }) | null, stdout: string, stderr: string) => void
+  const eslintExits = (error: (Error & { code?: number }) | null, stderr = '') =>
+    mockExecFile.mockImplementation((_file: string, _args: string[], done: Done) => done(error, '', stderr))
 
-  // A project with its own rules still gets them applied to what was generated.
-  it("formats with the project's own eslint when it has one, run by this runtime", () => {
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(ESLINT_MANIFEST as any)
-
-    generateFile('/some/file.ts', 'content')
-
-    expect(mockExecFile).toHaveBeenCalledWith(process.execPath, [eslintScript(), '--fix', '/some/file.ts'], expect.any(Function))
+  beforeEach(() => {
+    mockExecFile.mockReset()
+    mockExistsSync.mockReset().mockReturnValue(true)
+    mockReadFileSync.mockReset().mockReturnValue(ESLINT_MANIFEST as any)
+    mockLoggerLog.mockClear()
+    mockLoggerWarn.mockClear()
   })
 
-  // A .cmd shim can't be spawned without a shell, so on Windows it threw EINVAL
-  it('never spawns a .cmd shim, on Windows either', () => {
-    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(ESLINT_MANIFEST as any)
+  // One run builds the project's type information once, where a run per file built it for each, side by side.
+  // On Windows a .cmd shim can't be spawned without a shell, so the script runs with this runtime there too.
+  it.each(['linux', 'win32'])("formats every generated file in one run of the project's eslint, by this runtime, on %s", async platform => {
+    const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform as NodeJS.Platform)
+    eslintExits(null)
 
-    generateFile('/some/file.ts', 'content')
-    platform.mockRestore()
+    await formatGeneratedFiles(['/src/a.service.ts', '/src/a.service.spec.ts'])
+    spy.mockRestore()
 
-    expect(mockExecFile).toHaveBeenCalledWith(process.execPath, [eslintScript(), '--fix', '/some/file.ts'], expect.any(Function))
+    expect(mockExecFile).toHaveBeenCalledTimes(1)
+    expect(mockExecFile).toHaveBeenCalledWith(
+      process.execPath,
+      [eslintScript(), '--fix', '/src/a.service.ts', '/src/a.service.spec.ts'],
+      expect.any(Function),
+    )
+    expect(mockLoggerLog).toHaveBeenCalledWith("Formatting with your project's ESLint...")
+    expect(mockLoggerWarn).not.toHaveBeenCalled()
   })
 
-  // The file is written by then: a format that cannot even start must not report it as failed
-  it('reports the file created, and keeps a success code, when formatting throws', () => {
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(ESLINT_MANIFEST as any)
-    mockExecFile.mockImplementationOnce(() => {
-      throw Object.assign(new Error('spawn EINVAL'), { code: 'EINVAL' })
-    })
+  // The command waits for it, so it ends once the files are formatted, and no later
+  it('settles only once the eslint run has finished', async () => {
+    let finish: () => void = () => {}
+    mockExecFile.mockImplementation((_file: string, _args: string[], done: Done) => (finish = () => done(null, '', '')))
+    let settled = false
+
+    const formatting = formatGeneratedFiles(['/src/a.ts']).then(() => (settled = true))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(settled).toBe(false)
+
+    finish()
+    await formatting
+    expect(settled).toBe(true)
+  })
+
+  // The files are written either way: what went wrong is said, and the command's code is left alone
+  it.each([
+    ['rules it could not fix', () => eslintExits(Object.assign(new Error('Command failed'), { code: 1 })), 'ESLint reports problems it could not fix'],
+    ['eslint that could not run', () => eslintExits(Object.assign(new Error('Command failed'), { code: 2 }), '\nOops! Something went wrong!\n'), 'Oops! Something went wrong!'],
+    ['a spawn that throws', () => mockExecFile.mockImplementation(() => { throw new Error('spawn EINVAL') }), 'spawn EINVAL'],
+  ])('says it could not format, and keeps a success code, for %s', async (_case, fail, reason) => {
+    fail()
     const exitCode = process.exitCode
     process.exitCode = undefined
 
-    generateFile('/some/file.ts', 'content')
+    await formatGeneratedFiles(['/src/a.ts'])
 
     expect(process.exitCode).toBeUndefined()
-    expect(mockLoggerLog).toHaveBeenCalledWith(`Created ${path.relative(process.cwd(), '/some/file.ts')}`)
-    expect(mockLoggerError).not.toHaveBeenCalled()
+    expect(mockLoggerWarn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^Could not format the generated files: ${reason}`)))
     process.exitCode = exitCode
   })
 
-  // Reaching for npx would start downloading eslint into a project that deliberately
-  // has none, once per generated file, and the call is not awaited so nothing shows it.
-  it('does not reach for eslint when the project has none', () => {
+  // Reaching for npx would start downloading eslint into a project that deliberately has none
+  it('runs nothing and says nothing when the project has no eslint, or nothing was written', async () => {
     mockExistsSync.mockReturnValue(false)
-
-    generateFile('/some/file.ts', 'content')
+    await formatGeneratedFiles(['/src/a.ts'])
+    mockExistsSync.mockReturnValue(true)
+    await formatGeneratedFiles([])
 
     expect(mockExecFile).not.toHaveBeenCalled()
+    expect(mockLoggerLog).not.toHaveBeenCalled()
   })
 })
 

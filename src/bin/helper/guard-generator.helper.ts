@@ -4,7 +4,7 @@ import {
   assertFilesAbsent,
   buildTemplate,
   createDirectoryIfNotExists,
-  generateFile,
+  writeFiles,
   validateAndFormatName,
 } from '@src/util/generator-cli.util.js'
 
@@ -19,7 +19,7 @@ export class GuardGeneratorHelper {
    * Generates a guard and its spec. The name may contain slashes for nested directories.
    * @throws Exits the process when the name is missing or invalid.
    */
-  generateGuard(guardName?: string): void {
+  generateGuard(guardName?: string): string[] {
     if (!guardName) {
       this.logger.error('Guard name is required.')
       process.exit(1)
@@ -37,7 +37,9 @@ export class GuardGeneratorHelper {
     const specTemplate = buildTemplate(className, 'guard.spec.template', { kebabCaseName })
 
     createDirectoryIfNotExists(guardDir)
-    generateFile(guardFile, guardTemplate)
-    generateFile(specFile, specTemplate)
+    return writeFiles([
+      [guardFile, guardTemplate],
+      [specFile, specTemplate],
+    ])
   }
 }

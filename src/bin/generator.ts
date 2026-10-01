@@ -11,7 +11,7 @@ import { FilterGeneratorHelper } from '@src/bin/helper/filter-generator.helper.j
 import { PipeGeneratorHelper } from '@src/bin/helper/pipe-generator.helper.js'
 import { ObserverGeneratorHelper } from '@src/bin/helper/observer-generator.helper.js'
 import wait from '@src/util/wait.util.js'
-import { toClassName, validateAndFormatName } from '@src/util/generator-cli.util.js'
+import { formatGeneratedFiles, toClassName, validateAndFormatName } from '@src/util/generator-cli.util.js'
 
 /**
  * Why a name cannot be a path inside the kind's folder: one that climbs out with `..`, starts at the
@@ -213,6 +213,8 @@ export class GeneratorCLI {
       process.exit(1)
     }
 
+    // The files written, which one run of the project's ESLint formats once all are
+    let written: string[] = []
     switch (component) {
       case 'controller':
         if (!type) {
@@ -225,31 +227,31 @@ export class GeneratorCLI {
           await wait(100)
           process.exit(1)
         }
-        await this.handleGenerateController({ name, type, message: args.message === true })
+        written = await this.handleGenerateController({ name, type, message: args.message === true })
         break
 
       case 'service':
-        this.serviceGeneratorHelper.generateService(name)
+        written = this.serviceGeneratorHelper.generateService(name)
         break
 
       case 'guard':
-        this.guardGeneratorHelper.generateGuard(name)
+        written = this.guardGeneratorHelper.generateGuard(name)
         break
 
       case 'interceptor':
-        this.interceptorGeneratorHelper.generateInterceptor(name)
+        written = this.interceptorGeneratorHelper.generateInterceptor(name)
         break
 
       case 'filter':
-        this.filterGeneratorHelper.generateFilter(name)
+        written = this.filterGeneratorHelper.generateFilter(name)
         break
 
       case 'pipe':
-        this.pipeGeneratorHelper.generatePipe(name)
+        written = this.pipeGeneratorHelper.generatePipe(name)
         break
 
       case 'observer':
-        this.observerGeneratorHelper.generateObserver(name)
+        written = this.observerGeneratorHelper.generateObserver(name)
         break
 
       default:
@@ -258,6 +260,8 @@ export class GeneratorCLI {
         process.exit(1)
     }
 
+    await formatGeneratedFiles(written)
+
     // A file that failed to write sets the exit code; there is no next step then
     if (!process.exitCode) {
       const next = nextStepFor(component, name, type)
@@ -265,9 +269,9 @@ export class GeneratorCLI {
     }
   }
 
-  private async handleGenerateController(args: { name: string; type: ControllerType; message: boolean }): Promise<void> {
+  private async handleGenerateController(args: { name: string; type: ControllerType; message: boolean }): Promise<string[]> {
     try {
-      this.controllerGeneratorHelper.generateController({ controllerName: args.name }, args.type, { message: args.message })
+      return this.controllerGeneratorHelper.generateController({ controllerName: args.name }, args.type, { message: args.message })
     } catch (error) {
       this.logger.error(`Error generating controller: ${error instanceof Error ? error.message : String(error)}`)
       await wait(100)
