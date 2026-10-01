@@ -156,53 +156,70 @@ describe('import-x/no-cycle', () => {
 })
 
 describe('@typescript-eslint/no-floating-promises', () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-floating-')))
-  afterAll(() => fs.rmSync(root, { recursive: true, force: true }))
+  const roots: string[] = []
+  afterAll(() => roots.forEach(root => fs.rmSync(root, { recursive: true, force: true })))
 
-  // The three tsconfigs the config's type-aware parser reads, as a generated app has them
-  const compilerOptions = { strict: true, module: 'ESNext', moduleResolution: 'Bundler' }
-  const tsconfigs = {
-    'tsconfig.json': { compilerOptions, include: ['src/**/*.ts'] },
-    'tsconfig.test.json': { extends: './tsconfig.json', include: ['src/**/*.ts'] },
-    'tsconfig.eslint.json': { extends: './tsconfig.json', include: ['src/**/*.ts'] },
-  }
-  for (const [name, tsconfig] of Object.entries(tsconfigs)) fs.writeFileSync(path.join(root, name), JSON.stringify(tsconfig))
-  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'floating', type: 'module' }))
-  fs.mkdirSync(path.join(root, 'src'))
-  // An interceptor's shape: the handler's promise, and what the interceptor does with it
-  const handler = 'export const next = { handle: async (): Promise<string> => { throw new Error(\'handler failed\') } }\n'
-  fs.writeFileSync(path.join(root, 'src', 'next.ts'), handler)
-  const files: Record<string, string> = {
-    'dropped.ts': "import { next } from './next'\n\nexport async function intercept(): Promise<void> {\n  next.handle()\n}\n",
-    'awaited.ts': "import { next } from './next'\n\nexport async function intercept(): Promise<string> {\n  return await next.handle()\n}\n",
-    'voided.ts': "import { next } from './next'\n\nexport function intercept(): void {\n  void next.handle()\n}\n",
-  }
-  for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(root, 'src', name), text)
-
-  const floating = async (config: Linter.Config[], file: string) => {
-    const eslint = new ESLint({
-      cwd: root,
-      overrideConfigFile: true,
-      overrideConfig: [...config, { files: ['**/*.ts'], languageOptions: { parserOptions: { tsconfigRootDir: root } } }],
-    })
-    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root)
-    const [result] = await eslint.lintFiles([path.join(root, 'src', file)]).finally(() => cwd.mockRestore())
-    return result.messages
-      .filter(message => message.ruleId === '@typescript-eslint/no-floating-promises')
-      .map(message => [message.severity, message.line])
+  // A project of its own for each config, so the two never share a program, shaped as a generated app's: the three
+  // tsconfigs the type-aware parser reads, and the `@src/*` alias
+  const project = () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-floating-')))
+    roots.push(root)
+    const compilerOptions = { strict: true, module: 'ESNext', moduleResolution: 'Bundler', paths: { '@src/*': ['./src/*'] } }
+    const tsconfigs = {
+      'tsconfig.json': { compilerOptions, include: ['src/**/*.ts'] },
+      'tsconfig.test.json': { extends: './tsconfig.json', include: ['src/**/*.ts'] },
+      'tsconfig.eslint.json': { extends: './tsconfig.json', include: ['src/**/*.ts'] },
+    }
+    for (const [name, tsconfig] of Object.entries(tsconfigs)) fs.writeFileSync(path.join(root, name), JSON.stringify(tsconfig))
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'floating', type: 'module' }))
+    fs.mkdirSync(path.join(root, 'src'))
+    // An interceptor's shape: the handler's promise, and what the interceptor does with it
+    const files: Record<string, string> = {
+      'next.ts': "export const next = { handle: async (): Promise<string> => { throw new Error('handler failed') } }\n",
+      'dropped.ts': "import { next } from './next'\n\nexport async function intercept(): Promise<void> {\n  next.handle()\n}\n",
+      'awaited.ts': "import { next } from './next'\n\nexport async function intercept(): Promise<string> {\n  return await next.handle()\n}\n",
+      'voided.ts': "import { next } from './next'\n\nexport function intercept(): void {\n  void next.handle()\n}\n",
+    }
+    for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(root, 'src', name), text)
+    return root
   }
 
   describe.each([
     ['meocord.eslint.mjs', esmConfig as Linter.Config[]],
     ['meocord.eslint.cjs', cjsConfig],
   ])('%s', (_name, config) => {
+    const root = project()
+    // Every path absolute, from the project's own root, so nothing reads the working directory
+    const eslint = new ESLint({
+      cwd: root,
+      overrideConfigFile: true,
+      overrideConfig: [
+        ...config,
+        {
+          files: ['**/*.ts'],
+          languageOptions: {
+            parserOptions: {
+              tsconfigRootDir: root,
+              project: ['tsconfig.json', 'tsconfig.test.json', 'tsconfig.eslint.json'].map(name => path.join(root, name)),
+            },
+          },
+        },
+      ],
+    })
+    const floating = async (file: string) => {
+      const [result] = await eslint.lintFiles([path.join(root, 'src', file)])
+      return result.messages
+        .filter(message => message.ruleId === '@typescript-eslint/no-floating-promises')
+        .map(message => [message.severity, message.line])
+    }
+
     it('fails a promise nothing awaits, as an interceptor that drops next.handle() leaves one', async () => {
-      expect(await floating(config, 'dropped.ts')).toEqual([[2, 4]])
+      expect(await floating('dropped.ts')).toEqual([[2, 4]])
     })
 
     it('passes a promise awaited, or one marked as meant to run on its own with void', async () => {
-      expect(await floating(config, 'awaited.ts')).toEqual([])
-      expect(await floating(config, 'voided.ts')).toEqual([])
+      expect(await floating('awaited.ts')).toEqual([])
+      expect(await floating('voided.ts')).toEqual([])
     })
   })
 })
