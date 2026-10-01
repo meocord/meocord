@@ -315,6 +315,9 @@ const ENV_FILES = {
   '.env.production': 'FROM_MODE=production\n',
 }
 
+/** What a production bot on Bun says when Bun loaded the development .env files. */
+const BUN_DEVELOPMENT_ENV = 'because NODE_ENV is unset, and this is a production build'
+
 /** A line that makes the template config's rsbuild hook throw, in place of its first statement. */
 const HOOK_THROWS = "throw new Error('hook broke')"
 
@@ -1835,31 +1838,59 @@ const scenarios: Scenario[] = [
     expect: { code: 0, says: ['did not finish within 6000 ms'], never: ['did not exit within'] },
   })),
   // A new app's config reads the .env files Bun reads, so the bot gets the same values however it is started, and a
-  // production build the production ones, NODE_ENV set or not
+  // production build the production ones, NODE_ENV set or not. Bun alone loads the development files itself, before
+  // the config runs, when NODE_ENV is unset: there the bot says so.
   ...(
     [
-      ['start --dev', 'development', { argv: ['start', '--dev'] }],
-      ['start --prod --build', 'production', { argv: ['start', '--prod', '--build'] }],
-      ['a production build started with node', 'production', { before: [['build', '--prod']], command: ['node', 'dist/main.js'] }],
+      ['start --dev', 'development', 'fast', { argv: ['start', '--dev'] }],
+      ['start --prod --build', 'production', 'fast', { argv: ['start', '--prod', '--build'] }],
+      ['a production build started with node', 'production', 'fast', { before: [['build', '--prod']], command: ['node', 'dist/main.js'] }],
       [
         'a production build started with node and NODE_ENV=production',
         'production',
+        'fast',
         { before: [['build', '--prod']], command: ['node', 'dist/main.js'], env: { NODE_ENV: 'production' } },
       ],
-    ] as [string, string, Pick<Scenario, 'argv' | 'before' | 'command' | 'env'>][]
+      ['on bun, start --prod --build', 'production', 'slow', { runtime: 'bun', argv: ['start', '--prod', '--build'] }],
+      [
+        'a production build started with bun and NODE_ENV=production',
+        'production',
+        'slow',
+        { before: [['build', '--prod']], command: [runtimeBinary('bun'), '--no-install', 'dist/main.js'], env: { NODE_ENV: 'production' } },
+      ],
+    ] as [string, string, Tier, Pick<Scenario, 'argv' | 'before' | 'command' | 'env' | 'runtime'>][]
   ).map(
-    ([how, mode, run]): Scenario => ({
+    ([how, mode, tier, run]): Scenario => ({
       name: `${how} reads .env.local and the ${mode} .env file`,
-      tier: 'fast',
+      tier,
       platforms: ['linux', 'darwin'],
       ...run,
       files: { ...ENV_FILES, 'src/app.ts': readyApp, 'src/ready.service.ts': envFilesService },
       discord: { readyDelayMs: 0 },
       signal: { name: 'SIGINT', after: 'Ready with' },
       timeoutMs: 60_000,
-      expect: { code: 0, says: [`Ready with FROM_LOCAL=local FROM_MODE=${mode}`] },
+      expect: { code: 0, says: [`Ready with FROM_LOCAL=local FROM_MODE=${mode}`], never: [BUN_DEVELOPMENT_ENV] },
     }),
   ),
+  {
+    name: 'a production build started with bun and no NODE_ENV says Bun loaded .env.development',
+    tier: 'slow',
+    platforms: ['linux', 'darwin'],
+    before: [['build', '--prod']],
+    command: [runtimeBinary('bun'), '--no-install', 'dist/main.js'],
+    files: { ...ENV_FILES, 'src/app.ts': readyApp, 'src/ready.service.ts': envFilesService },
+    discord: { readyDelayMs: 0 },
+    signal: { name: 'SIGINT', after: 'Ready with' },
+    timeoutMs: 60_000,
+    expect: {
+      code: 0,
+      says: [
+        'Bun loaded .env.development because NODE_ENV is unset, and this is a production build; set NODE_ENV=production, ' +
+          'or start with `bun --no-env-file`.',
+        'Ready with FROM_LOCAL=local FROM_MODE=development',
+      ],
+    },
+  },
   {
     name: 'start --dev exits 1 when its first build cannot start, as build does',
     tier: 'fast',

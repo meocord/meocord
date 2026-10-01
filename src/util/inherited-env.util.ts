@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseEnv } from 'node:util'
+import { buildMode } from '@src/util/bundle-entry.util.js'
 
 /**
  * The .env files a bot starts with, in the order Bun reads them, a later one winning: `.env`, the mode's, the local
@@ -9,6 +10,21 @@ import { parseEnv } from 'node:util'
 export function envFiles(nodeEnv: string | undefined): string[] {
   const mode = nodeEnv || 'development'
   return ['.env', `.env.${mode}`, ...(mode === 'test' ? [] : ['.env.local']), `.env.${mode}.local`]
+}
+
+/**
+ * The development .env files Bun loaded into a production build: with `NODE_ENV` unset, Bun reads the development
+ * files before any code runs, and the config's dotenv keeps a value already set. Empty on Node, with `NODE_ENV` set,
+ * and in any other build.
+ */
+export function bunDevelopmentEnvFiles(
+  env: NodeJS.ProcessEnv = process.env,
+  root = process.cwd(),
+  bun = process.versions.bun !== undefined,
+): string[] {
+  if (!bun || env.NODE_ENV || buildMode() !== 'production') return []
+  const production = envFiles('production')
+  return envFiles(undefined).filter(file => !production.includes(file) && existsSync(path.join(root, file)))
 }
 
 /**

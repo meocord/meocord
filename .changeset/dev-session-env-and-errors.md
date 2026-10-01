@@ -21,4 +21,6 @@ config({
 })
 ```
 
+On Bun, set `NODE_ENV=production` where you start a production bot yourself, as with `bun dist/main.js` under pm2, systemd or Docker. With `NODE_ENV` unset, Bun loads `.env.development` and `.env.development.local` before any code runs, and dotenv keeps what is already set, so their values win over `.env.production`. The bot now warns when that happens: "Bun loaded .env.development because NODE_ENV is unset, and this is a production build; set NODE_ENV=production, or start with `bun --no-env-file`." `meocord start --prod` sets `NODE_ENV=production` already.
+
 `meocord build --prod` compiles `meocord.config.ts` in production mode, as it builds the bot, so `process.env.NODE_ENV` in the config reads `production` in a production build however the bot is started. It read `development`, the mode the config was always compiled in. So a config that branches on `NODE_ENV`, such as to register commands to a development guild, now takes its production branch in a production build: check what that branch does before you deploy, and rebuild to pick this up.
