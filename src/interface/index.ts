@@ -544,10 +544,11 @@ export interface ReactionEvent {
 }
 
 /**
- * The second argument a `@ReactionHandler` method receives, under its earlier name.
+ * The second argument a `@ReactionHandler` method receives: another name for `ReactionEvent`.
  *
  * @deprecated Since 4.1, and removed in the next major version (5.0). Use `ReactionEvent` instead. Every other
- * `…Options` type is what a decorator takes, and this one is what a handler receives.
+ * `…Options` type is something you pass in, to a decorator, a function or a constructor, and this one is what a
+ * handler receives.
  *
  * @group Types
  * @see {@link ReactionEvent}

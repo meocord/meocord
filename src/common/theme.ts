@@ -41,7 +41,7 @@ function assign(name: LegacyColor, value: ColorResolvable): void {
 }
 
 /**
- * The colours MeoCord's views used, before themes.
+ * Five of the theme's colours as static properties: primary, success, info, danger and warning.
  *
  * Each one reads the matching role of the theme where it is read, `useTheme().colors`, so code written against it
  * follows `@MeoCord({ theme })` and `@UseTheme` with no change. Assigning one still recolours MeoCord's views, as a

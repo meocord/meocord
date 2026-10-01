@@ -2,7 +2,7 @@
 'meocord': minor
 ---
 
-`ReactionEvent` names the second argument a `@ReactionHandler` method receives, `{ user, action }`. `ReactionHandlerOptions` stays as a deprecated alias of it: every other `…Options` type is what a decorator takes.
+`ReactionEvent` names the second argument a `@ReactionHandler` method receives, `{ user, action }`. `ReactionHandlerOptions` stays as a deprecated alias of it: every other `…Options` type is something you pass in, to a decorator, a function or a constructor.
 
 These are deprecated, and removed in the next major version (5.0). Each still works in 4.x, and its JSDoc names what to use instead:
 
