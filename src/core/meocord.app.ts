@@ -320,7 +320,11 @@ export class MeoCordApp implements MeoCordApplication {
 
     this.bot.on('clientReady', readyClient =>
       this.runListener('clientReady', async () => {
-        this.activityInterval = setInterval(() => this.updateActivity(), 10000)
+        // Only for activities the app listed: without them, a status it sets itself stays as it set it
+        if (this.activities?.length) {
+          this.updateActivity()
+          this.activityInterval ??= setInterval(() => this.updateActivity(), 10000)
+        }
         // Started before registration and not waited on by it, so a slow or failed registration never holds them up
         const readyHooks = this.runReadyHooks((readyClient ?? this.bot) as Client<true>)
         // With process sharding, the manager registers once for every shard
