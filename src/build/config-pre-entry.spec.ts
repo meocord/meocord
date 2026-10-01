@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process'
 import { cpSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
+import { pathToFileURL } from 'url'
 import { createRsbuild, type RsbuildConfig } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
@@ -61,7 +62,12 @@ interface RunResult {
   asset: string
   /** The same build, its dist copied elsewhere and run from there, as a deploy does. */
   copied?: RunResult
+  /** The same build, imported by a wrapper, as pm2 starts a bundle, so process.argv[1] is the wrapper's. */
+  wrapped?: RunResult
 }
+
+/** Where the wrapper that imports a build sits: apart from dist, as pm2's ProcessContainerFork is. */
+const wrapperDir = path.join(fixture, 'process-manager')
 
 /** Where a mode's dist is copied to: inside the fixture, which git ignores, and outside its dist. */
 const copyOf = (mode: string) => path.join(fixture, `${mode}-copy`)
@@ -80,20 +86,23 @@ async function buildAndRun(mode: 'production' | 'development', adjust = (config:
 
   const env = { ...process.env }
   delete env.GREETING
-  const run = (dist: string) => {
-    const output = execFileSync('node', [path.join(dist, 'main.js')], { cwd: fixture, env, encoding: 'utf8' })
+  const run = (dist: string, script = path.join(dist, 'main.js')) => {
+    const output = execFileSync('node', [script], { cwd: fixture, env, encoding: 'utf8' })
     return JSON.parse(output.trim().split('\n').at(-1)!) as RunResult
   }
+  const wrapper = path.join(wrapperDir, `${mode}.mjs`)
+  writeFileSync(wrapper, `await import(${JSON.stringify(pathToFileURL(path.join(fixture, 'dist', 'main.js')).href)})\n`)
   // Copied before the other mode's build replaces dist
   rmSync(copyOf(mode), { recursive: true, force: true })
   cpSync(path.join(fixture, 'dist'), copyOf(mode), { recursive: true })
-  return { ...run(path.join(fixture, 'dist')), copied: run(copyOf(mode)) }
+  return { ...run(path.join(fixture, 'dist')), copied: run(copyOf(mode)), wrapped: run(path.join(fixture, 'dist'), wrapper) }
 }
 
 beforeAll(() => {
   rmSync(fixture, { recursive: true, force: true })
   mkdirSync(path.join(fixture, 'src'), { recursive: true })
   mkdirSync(path.join(fixture, 'dist'), { recursive: true })
+  mkdirSync(wrapperDir, { recursive: true })
   writeFileSync(path.join(fixture, 'package.json'), JSON.stringify({ name: 'pre-entry-spec', private: true, type: 'module' }))
   writeFileSync(
     path.join(fixture, 'tsconfig.json'),
@@ -136,12 +145,16 @@ describe('the config pre-entry, built and run with node', () => {
     expect(path.normalize(copied!.asset)).toBe(path.join(copyOf(mode), 'assets', 'logo.png'))
   })
 
-  // A shard manager spawns this path; process.argv[1] may be a process manager's wrapper instead
-  it('records the built bundle as its own path in a production build', async () => {
-    const result = await runFor('production')
+  // A shard manager spawns this path, and assets sit beside it; process.argv[1] is a process manager's wrapper there
+  it.each(['production', 'development'] as const)(
+    'records the built bundle as its own path, started by a wrapper as pm2 starts it, in a %s build',
+    async mode => {
+      const { wrapped } = await runFor(mode)
 
-    expect(realpathSync(result.bundleEntry)).toBe(realpathSync(path.join(fixture, 'dist', 'main.js')))
-  })
+      expect(realpathSync(wrapped!.bundleEntry)).toBe(realpathSync(path.join(fixture, 'dist', 'main.js')))
+      expect(path.normalize(wrapped!.asset)).toBe(path.join(fixture, 'dist', 'assets', 'logo.png'))
+    },
+  )
 
   it('is what makes the value available: without it, the options read undefined', async () => {
     const result = await buildAndRun('production', config => ({ ...config, source: { ...config.source, preEntry: [] } }))

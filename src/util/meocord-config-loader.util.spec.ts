@@ -74,16 +74,6 @@ describe('loadMeoCordConfig', () => {
     expect(compiledConfigProblem()).toBeUndefined()
   })
 
-  // A development build records the pre-entry's source, so the bundle is argv[1], which `node -e` has none of
-  it('reads dist under the working directory when a built bot has no bundle path to go by', async () => {
-    writeCompiledConfig(`export default { appName: 'Fallback' }\n`)
-    Reflect.set(globalThis, BUNDLE_ENTRY_KEY, '/meocord/dist/esm/build/load-config.pre-entry.js')
-    vi.spyOn(process, 'argv', 'get').mockReturnValue([process.execPath])
-    const { loadMeoCordConfig } = await freshLoader()
-
-    expect(loadMeoCordConfig()).toEqual({ appName: 'Fallback' })
-  })
-
   // Started from elsewhere, a bot told only to build again had nothing to go on
   it('says whether a config was missing or failed to load, and where it looked', async () => {
     const compiled = path.join(project, 'dist', 'meocord.config.mjs')

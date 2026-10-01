@@ -1,7 +1,7 @@
 // Runs before the application's entry, so whatever environment meocord.config loads -- a dotenv
 // import, say -- is in place when the entry's decorators read process.env. Silent when the config
 // is missing or throws: MeoCordFactory.create loads it again and reports that.
-import { existsSync, realpathSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,21 +13,15 @@ listenForDevRunnerStop()
 
 // Bundled into the application's entry, so this is the built bundle's own path. A shard manager spawns
 // it: process.argv[1] may be a process manager's wrapper instead.
-const entry = fileURLToPath(import.meta.url)
-globalThis[Symbol.for('meocord.bundleEntry')] = entry
-
-// A development build fixes import.meta.url to this file's source, so there the bundle is what was started
-const started = process.argv[1]
-const bundle = entry.endsWith('load-config.pre-entry.js') ? started && existsSync(started) && realpathSync(started) : entry
+const bundle = fileURLToPath(import.meta.url)
+globalThis[Symbol.for('meocord.bundleEntry')] = bundle
 
 // Assets are beside the bundle too, wherever dist was copied to: an asset import is this directory and its file name,
 // rather than the directory the build ran in, which the bundle would otherwise carry
-if (bundle) __webpack_public_path__ = `${path.dirname(bundle).replace(/\\/g, '/')}/`
+__webpack_public_path__ = `${path.dirname(bundle).replace(/\\/g, '/')}/`
 
 // Beside the bundle, wherever the bot was started from, as the runtime loader reads it
-const compiledPath = bundle
-  ? path.join(path.dirname(bundle), 'meocord.config.mjs')
-  : path.resolve(process.cwd(), 'dist', 'meocord.config.mjs')
+const compiledPath = path.join(path.dirname(bundle), 'meocord.config.mjs')
 let config
 
 if (existsSync(compiledPath)) {
@@ -40,4 +34,4 @@ if (existsSync(compiledPath)) {
   }
 }
 
-if (bundle && (config?.default ?? config)?.sourceMappedStacks !== false) installStackRemapper(bundle)
+if ((config?.default ?? config)?.sourceMappedStacks !== false) installStackRemapper(bundle)

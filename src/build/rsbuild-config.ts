@@ -109,12 +109,10 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
       bundlerChain: chain => {
         // MeoCord's own generated files never start a rebuild
         chain.watchOptions({ ...chain.get('watchOptions'), ignored: (file: string) => path.resolve(file).startsWith(generated) })
-        // The pre-entry records the bundle's own path from import.meta.url, which the bundler would
-        // otherwise fix at build time to the pre-entry's source file. Production only: a development
-        // build keeps the fixed path, and bundleEntry() goes by process.argv there.
-        if (mode === 'production') {
-          chain.module.rule('meocord-pre-entry').test(CONFIG_PRE_ENTRY).parser({ importMeta: false })
-        }
+        // The pre-entry records the bundle's own path from import.meta.url, which the bundler would otherwise fix at
+        // build time to the pre-entry's source file. In every mode: a process manager such as pm2 starts the bundle
+        // from a wrapper of its own, so process.argv[1] names that wrapper, not the bundle
+        chain.module.rule('meocord-pre-entry').test(CONFIG_PRE_ENTRY).parser({ importMeta: false })
         // Hoisting modules into one scope renames a class whose name another module also declares, and
         // MeoCord keys cooldowns and names handlers by class name, so a build keeps each module's own scope
         chain.optimization.concatenateModules(false)

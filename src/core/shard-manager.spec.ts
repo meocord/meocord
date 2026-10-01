@@ -159,9 +159,9 @@ describe('ShardManager', () => {
     expect(options).toMatchObject({ totalShards: 2, mode: 'process', respawn: false, execArgv: process.execArgv })
   })
 
-  // `node -e "import('./dist/main.js')"` in a development build: no recorded bundle and no script to spawn
+  // Code outside a built bundle, run with `node -e`: no recorded bundle and no script to spawn
   it('exits 1 before spawning anything when it cannot find the bundle to start the shards from', async () => {
-    Reflect.set(globalThis, BUNDLE_ENTRY_KEY, '/meocord/dist/esm/build/load-config.pre-entry.js')
+    Reflect.deleteProperty(globalThis, BUNDLE_ENTRY_KEY)
     const argv = vi.spyOn(process, 'argv', 'get').mockReturnValue([process.execPath])
     const { manager, shards, exit } = setup({ shards: 1 })
 
