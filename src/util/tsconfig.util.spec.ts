@@ -3,7 +3,8 @@ import path from 'path'
 import { tmpdir } from 'os'
 import { spawnSync } from 'child_process'
 
-const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mockReaddirSync, mockRmSync, mockHostname } = vi.hoisted(() => {
+const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mockReaddirSync, mockRmSync, mockHostname, mockReadlinkSync } =
+  vi.hoisted(() => {
   let made = 0
   return {
     mockExistsSync: vi.fn(),
@@ -15,6 +16,10 @@ const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mo
     mockRmSync: vi.fn(),
     // A '-' in the name, which a directory name can't carry between its fields
     mockHostname: vi.fn(() => 'build-01.local'),
+    // As outside Linux, where there is no /proc
+    mockReadlinkSync: vi.fn((): string => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    }),
   }
 })
 
@@ -24,6 +29,7 @@ vi.mock('fs', () => ({
   writeFileSync: mockWriteFileSync,
   mkdtempSync: mockMkdtempSync,
   readdirSync: mockReaddirSync,
+  readlinkSync: mockReadlinkSync,
   rmSync: mockRmSync,
 }))
 
@@ -214,6 +220,23 @@ describe('prepareModifiedTsConfig', () => {
     const dir = path.basename(path.dirname(prepareModifiedTsConfig()))
 
     expect(dir).toMatch(new RegExp(`^meocord-tsconfig-a{63}\\.-${process.pid}-`))
+  })
+
+  // Two containers can share a host name and a temp directory, while each numbers its processes on its own
+  it("on Linux, judges only its own PID namespace's directories", async () => {
+    mockTsConfig({ compilerOptions: {} })
+    mockReadlinkSync.mockReturnValueOnce('pid:[4026531836]')
+    const ended = spawnSync(process.execPath, ['-e', '0']).pid!
+    const left = `meocord-tsconfig-build_01.local_4026531836-${ended}-a1b2c3`
+    const kept = [`meocord-tsconfig-build_01.local_4026532999-${ended}-d4e5f6`, `meocord-tsconfig-build_01.local-${ended}-g7h8i9`]
+    mockReaddirSync.mockReturnValueOnce([left, ...kept])
+    mockRmSync.mockClear()
+
+    const { prepareModifiedTsConfig } = await freshModule()
+    const dir = path.basename(path.dirname(prepareModifiedTsConfig()))
+
+    expect(mockRmSync.mock.calls).toEqual([[path.join(tmpdir(), left), { recursive: true, force: true }]])
+    expect(dir).toMatch(new RegExp(`^meocord-tsconfig-build_01\\.local_4026531836-${process.pid}-`))
   })
 
   // A process killed, or one that crashes, never runs its exit hook, and its directory would stay forever
