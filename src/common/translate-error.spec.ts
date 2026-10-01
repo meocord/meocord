@@ -64,6 +64,15 @@ describe('translateError', () => {
     expect(translateError(new Error('socket hang up'), t, 'id')).toBe('Terjadi kesalahan.')
   })
 
+  it("reads {{ and }} in a translation of MeoCord's text as one brace each", () => {
+    const braces = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { ping: 'Pong!' }, id: { meocord: { fallback: { notFound: 'Tidak ditemukan: lihat {{help}}.' } } } },
+    })
+
+    expect(translateError(new CommandNotFoundError(), braces, 'id')).toBe('Tidak ditemukan: lihat {help}.')
+  })
+
   it("returns a guard's or a UserError's message as the app wrote it", () => {
     expect(translateError(new GuardDeniedError('Owners only.'), t, 'id')).toBe('Owners only.')
     expect(translateError(new UserError('Link your account first.'), t, 'id')).toBe('Link your account first.')

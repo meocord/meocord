@@ -1,5 +1,6 @@
+import { vi } from 'vitest'
 import { ChatInputCommandInteraction, type Guild, Locale } from 'discord.js'
-import { createTranslator, defineCatalog } from '@src/common/index.js'
+import { createTranslator, defineCatalog, Logger } from '@src/common/index.js'
 import { missingTranslatorError } from '@src/common/translator.js'
 import { createMockInteraction } from '@src/testing/index.js'
 
@@ -117,9 +118,99 @@ describe('interpolation', () => {
   })
 })
 
+describe('braces written as text', () => {
+  const braces = createTranslator({
+    default: 'en-US',
+    locales: {
+      'en-US': defineCatalog({ route: 'Buttons use ticket/{{id}} as their customId', wrapped: '{{{user}}} wraps {{ and }}' }),
+      id: { route: 'Tombol memakai ticket/{{id}}' },
+    },
+  })
+
+  it('reads {{ and }} as one brace each, so {{word}} shows {word} and takes no param', () => {
+    expect(braces.default('route')).toBe('Buttons use ticket/{id} as their customId')
+    expect(braces.default('wrapped', { user: 'Ada' })).toBe('{Ada} wraps { and }')
+    expect(braces.locale('id')('route')).toBe('Tombol memakai ticket/{id}')
+  })
+
+  it('gives each brace once in the localizations', () => {
+    expect(braces.localizations('route')).toEqual({ id: 'Tombol memakai ticket/{id}' })
+  })
+})
+
 describe('localizations', () => {
   it("lists only the other locales whose catalog has the message", () => {
     expect(t.localizations('ban.description')).toEqual({ 'es-ES': 'Banear a un miembro', ja: 'メンバーをBANする' })
+  })
+
+  // A catalog from a JSON file, whose messages the compiler types as string
+  const loose = createTranslator({
+    default: 'en-US',
+    locales: {
+      'en-US': { ban: { description: 'Ban a member', done: 'Banned {user}.' } },
+      id: { ban: { description: 'Blokir {usr}', done: '{user} diblokir.' } },
+      ja: { ban: { description: 'メンバーをBANする' } },
+    } as never,
+  }) as unknown as { localizations: (key: string) => unknown }
+
+  it('refuses a key whose message takes params, which Discord would show as written', () => {
+    expect(() => loose.localizations('ban.done')).toThrow(
+      'localizations("ban.done"): the message takes {user}, and a name or description is shown as written. Use a message without params.',
+    )
+  })
+
+  it('leaves out a translation with a {param}, as expectCompleteCatalog reports it', () => {
+    expect(loose.localizations('ban.description')).toEqual({ ja: 'メンバーをBANする' })
+  })
+})
+
+describe('a key with no message, in development', () => {
+  let warned: string[]
+  beforeEach(() => {
+    vi.stubEnv('NODE_ENV', 'development')
+    warned = []
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((...args: unknown[]) => void warned.push(args.join(' ')))
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  const fresh = () =>
+    createTranslator({ default: 'en-US', locales: { 'en-US': { menu: { title: 'Menu' }, hi: 'Hi' } } as never }) as unknown as {
+      default: (key: string) => string
+      locale: (locale: string) => (key: string) => string
+      localizations: (key: string) => unknown
+    }
+
+  it('warns once per key that the key is shown, naming a group as one', () => {
+    const own = fresh()
+
+    expect(own.default('nope')).toBe('nope')
+    expect(own.locale('id')('nope')).toBe('nope')
+    expect(own.default('menu')).toBe('menu')
+    expect(own.localizations('menu.missing')).toEqual({})
+    expect(own.default('hi')).toBe('Hi')
+
+    expect(warned).toEqual([
+      'No catalog has a message with the key "nope", so the key is shown in its place.',
+      '"menu" names a group of messages, not one, so the key is shown in its place.',
+      'No catalog has a message with the key "menu.missing", so the key is shown in its place.',
+    ])
+  })
+
+  it('warns for each translator of its own', () => {
+    fresh().default('nope')
+    fresh().default('nope')
+
+    expect(warned).toHaveLength(2)
+  })
+
+  it('stays quiet outside development', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    fresh().default('nope')
+
+    expect(warned).toEqual([])
   })
 })
 
