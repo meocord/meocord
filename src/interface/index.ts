@@ -627,10 +627,11 @@ export interface MessageCommandOptions {
   /**
    * What a message starts with to reach a patterned handler: a prefix, a list of them, or a function
    * of the message returning them, such as a server's own prefix. Without one, a pattern matches the
-   * message as it is. A function that finds none, returning an empty list or nothing, starts no command
-   * for that message; only `''` takes it as it is. A handler's own `prefix` replaces it.
+   * message as it is. Where a function finds none, returning an empty list, `undefined` or `null`, no prefix
+   * starts a command for that message, though a mention still does when `mention` is on; only `''` takes it as it
+   * is. A handler's own `prefix` replaces it.
    */
-  prefix?: MessagePrefix | ((message: Message) => MessagePrefix | Promise<MessagePrefix>)
+  prefix?: MessagePrefix | ((message: Message) => MessagePrefix | null | undefined | Promise<MessagePrefix | null | undefined>)
   /**
    * Also accepts a mention of the bot, `<@id>` or `<@!id>`, where a prefix goes. `'only'` accepts nothing else
    * in a server, neither a prefix nor the message as it is, so a server's messages reach commands only when they
@@ -1061,7 +1062,9 @@ export type MessageScope = 'guild' | 'dm' | 'any'
 export interface MessageHandlerOptions {
   /**
    * The handler's own prefixes, in place of the app's; a mention of the bot still counts when the app
-   * accepts one. `false` matches the message as it is, with no prefix or mention.
+   * accepts one. `false` matches the message as it is, with no prefix or mention. Where a message also fits a
+   * handler with the same pattern that takes the app's prefixes, as it can when the app's prefix is a function, this
+   * handler runs, whatever order the controllers are listed in.
    */
   prefix?: false | MessagePrefix
   /**

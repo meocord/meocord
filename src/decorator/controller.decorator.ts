@@ -30,7 +30,7 @@ import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
-import { choicesOf, isSegmentType, parseSegment } from '@src/core/scalar-types.js'
+import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
@@ -421,7 +421,8 @@ export function createRegexFromPattern(pattern: string): {
   specificity: number
 } {
   const params: string[] = []
-  const types: Record<string, string> = {}
+  // By the param's own name, so one named like an inherited key, such as `__proto__`, keeps its type
+  const types: Record<string, string> = Object.create(null)
   let regexPattern = ''
   let cursor = 0
   let literalLength = 0
@@ -475,7 +476,7 @@ export function createRegexFromPattern(pattern: string): {
     params: params.length,
     typed: Object.values(types).reduce((sum, type) => sum + narrowness(type), 0),
   })
-  return { regex, params, types, specificity }
+  return { regex, params, types: lookupTable(types), specificity }
 }
 
 /** How few values a segment type takes, so a narrower type ranks first: words to choose from, then bool, int, number. */

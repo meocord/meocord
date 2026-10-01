@@ -159,6 +159,19 @@ describe('@MeoCord({ messages })', () => {
 
     void [One, Many, PerGuild, Wrong]
   })
+
+  // A per-server lookup finds no prefix for a server without one, which starts no prefixed command there
+  it('takes a prefix function that finds none, returning undefined or null, as it is or in a promise', () => {
+    const prefixes = new Map<string, string>()
+
+    @MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { prefix: message => prefixes.get(message.guildId ?? '') } })
+    class Lookup {}
+
+    @MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { prefix: async message => prefixes.get(message.guildId ?? '') ?? null } })
+    class AsyncLookup {}
+
+    void [Lookup, AsyncLookup]
+  })
 })
 
 declare module '@src/interface/index.js' {
