@@ -95,8 +95,8 @@ export interface MeoCordApplication {
    * each of which does so.
    *
    * A call while one is under way waits for it, and a call once the bot is online does nothing.
-   * Calling it again after a failed login is deprecated since 4.1 and rejects in 5.0; create the app again with
-   * `MeoCordFactory.create` instead.
+   * Retrying it after a failed login is deprecated; in the next major version (5.0) it rejects. Use
+   * `MeoCordFactory.create` to make a new app instead. A retry after a provider's factory failed stays supported.
    *
    * @returns A promise that resolves once the bot is logged in, or every shard has been spawned.
    * @throws For a bot in one process, the error of a provider's factory that failed, or the login

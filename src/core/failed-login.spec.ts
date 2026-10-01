@@ -8,10 +8,13 @@ const connectOf = (client: Client) => client.ws as unknown as { connect: () => P
 
 const sweeperIntervals = (client: Client) => (client.sweepers as unknown as { intervals: Record<string, unknown> }).intervals
 
-/** A client whose gateway connection fails, as an unreachable Discord does, with a message sweeper configured. */
+/**
+ * A client whose gateway connection fails, as an unreachable Discord does, with a message sweeper configured. Only the
+ * manager's connect is stood in for, with no network: Client.login's own handling of the failure is what runs.
+ */
 function failingClient() {
   const client = new Client({ intents: [], sweepers: { messages: { interval: 3600, lifetime: 1800 } } })
-  vi.spyOn(connectOf(client), 'connect').mockRejectedValue(new Error('getaddrinfo ENOTFOUND discord.com'))
+  vi.spyOn(connectOf(client), 'connect').mockRejectedValue(new Error('gateway unreachable (stand-in)'))
   return client
 }
 
@@ -25,7 +28,7 @@ describe("discord.js's failed login", () => {
     const destroy = vi.spyOn(client.sweepers as unknown as { destroy: () => void }, 'destroy')
     expect(destroyedFlag(client)).toBe(false)
 
-    await expect(client.login('token')).rejects.toThrow('ENOTFOUND')
+    await expect(client.login('token')).rejects.toThrow('gateway unreachable')
 
     expect(destroyedFlag(client)).toBe(true)
     expect(destroy).toHaveBeenCalled()

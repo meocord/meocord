@@ -94,11 +94,30 @@ export function bindProvider(container: Container, provider: Provider, bindClass
     return
   }
   const { useFactory, inject = [] } = provider as FactoryProvider
-  // Resolved in dependency order before anything needs it, so each injected value is already made
-  container
-    .bind(token)
-    .toDynamicValue(context => useFactory(...inject.map(dependency => context.get(dependency as ServiceIdentifier))))
-    .inSingletonScope()
+  // Made once, as a singleton, but kept only once made: a factory that throws or rejects runs again on the next
+  // resolve, so a start() after it failed tries it again. Resolves while one is pending share it.
+  let kept: { value: unknown } | undefined
+  container.bind(token).toDynamicValue(context => {
+    if (kept) return kept.value
+    // Resolved in dependency order before anything needs it, so each injected value is already made
+    const made: unknown = useFactory(...inject.map(dependency => context.get(dependency as ServiceIdentifier)))
+    if (!(made instanceof Promise)) {
+      kept = { value: made }
+      return made
+    }
+    const pending = made.then(
+      value => {
+        kept = { value }
+        return value
+      },
+      (error: unknown) => {
+        kept = undefined
+        throw error
+      },
+    )
+    kept = { value: pending }
+    return pending
+  })
   for (const dependency of inject) if (isAppClassToken(dependency)) bindClass(dependency)
 }
 

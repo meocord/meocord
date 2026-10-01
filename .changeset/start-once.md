@@ -8,4 +8,4 @@ After a retry logs in, the client works as a fresh one would: `isReady()` report
 
 A retry that logs in now clears the exit code the failed login set to `0`, which Bun keeps, rather than to `undefined`, which Bun ignores.
 
-Calling `start()` again after a failed login is deprecated, and logs a warning once. In 5.0 it rejects. To retry, create the app again with `MeoCordFactory.create`.
+Retrying `start()` after a failed login is deprecated; in the next major version (5.0) it rejects. Use `MeoCordFactory.create` to make a new app instead. It logs that warning once. A retry after a provider's factory failed stays supported, with no warning.

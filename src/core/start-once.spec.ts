@@ -36,7 +36,7 @@ function loginSucceedsOn(...attempts: number[]) {
   vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client) {
     seen.clients.push(this)
     seen.logins++
-    return attempts.includes(seen.logins) ? Promise.resolve('token') : Promise.reject(new Error('getaddrinfo ENOTFOUND discord.com'))
+    return attempts.includes(seen.logins) ? Promise.resolve('token') : Promise.reject(new Error('gateway unreachable (stand-in)'))
   })
   vi.spyOn(Client.prototype, 'destroy').mockResolvedValue(undefined)
   return seen
@@ -162,7 +162,7 @@ describe('start()', () => {
 
   it('leaves a client discord.js destroyed on the failed login usable after the retry, and says the retry is deprecated, once', async () => {
     vi.spyOn(Client.prototype, 'destroy')
-    const connect = vi.fn().mockRejectedValueOnce(new Error('getaddrinfo ENOTFOUND discord.com')).mockResolvedValue(undefined)
+    const connect = vi.fn().mockRejectedValueOnce(new Error('gateway unreachable (stand-in)')).mockResolvedValue(undefined)
     const clients: Client[] = []
     vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client, token?: string) {
       clients.push(this)
@@ -178,7 +178,7 @@ describe('start()', () => {
     const [client] = clients
     expect((client.ws as unknown as { destroyed: boolean }).destroyed).toBe(false)
     expect(connect).toHaveBeenCalledTimes(2)
-    const deprecations = logged.warn.filter(args => String(args[0]).includes('Retrying start() after a failed login is deprecated'))
+    const deprecations = logged.warn.filter(args => String(args[0]).includes('Retrying start() after a failed login is deprecated; in the next major version (5.0) it rejects'))
     expect(deprecations).toHaveLength(1)
   })
 
@@ -188,6 +188,35 @@ describe('start()', () => {
 
     await app.start()
 
+    expect(logged.warn.flat().map(String).join('\n')).not.toMatch(/deprecated/)
+  })
+
+  it("retries after a provider's factory failed, with no deprecation, since no login ran", async () => {
+    const seen = loginSucceedsOn(1)
+    let attempts = 0
+    @MeoCord({
+      controllers: [Ping],
+      providers: [
+        {
+          provide: 'database',
+          useFactory: async () => {
+            attempts++
+            if (attempts === 1) throw new Error('connection refused')
+            return { connected: true }
+          },
+        },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class FactoryApp {}
+    app = MeoCordFactory.create(FactoryApp)
+
+    await expect(app.start()).rejects.toThrow('connection refused')
+    await app.start()
+
+    expect(attempts).toBe(2)
+    expect(seen.logins).toBe(1)
+    expect(listenerCounts(seen.clients[0])).toEqual([1, 1, 1, 1, 1])
     expect(logged.warn.flat().map(String).join('\n')).not.toMatch(/deprecated/)
   })
 })
