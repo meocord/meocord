@@ -1,0 +1,19 @@
+import { Collection, UserSelectMenuInteraction } from 'discord.js'
+import { createMockInteraction, createMockUser, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}UserSelectMenuController } from './{{kebabCaseName}}.user-select-menu.controller.js'
+
+describe('{{className}}UserSelectMenuController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}UserSelectMenuController] }).compile()
+
+  it('answers with the users selected', async () => {
+    const user = createMockUser({ username: 'ada' })
+    const interaction = createMockInteraction(UserSelectMenuInteraction, {
+      customId: '{{commandName}}',
+      users: new Collection([[user.id, user]]),
+    })
+
+    await module.invoke({{className}}UserSelectMenuController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'Selected: ada' })
+  })
+})

@@ -1,0 +1,29 @@
+import { MessageReaction } from 'discord.js'
+import { ReactionHandlerAction } from 'meocord/enum'
+import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}ReactionController } from './{{kebabCaseName}}.reaction.controller.js'
+
+describe('{{className}}ReactionController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}ReactionController] }).compile()
+
+  it('replies to a 😋 reaction, naming who added it', async () => {
+    const reaction = createMockInteraction(MessageReaction, { message: createMockMessage() })
+    const user = createMockUser()
+    const added = { user, action: ReactionHandlerAction.ADD }
+
+    await module.invoke({{className}}ReactionController, 'handleReaction', reaction, added)
+
+    expect(reaction.message.reply).toHaveBeenCalledWith(`${user.username} reacted with 😋!`)
+  })
+
+  it('leaves a removed reaction unanswered', async () => {
+    const reaction = createMockInteraction(MessageReaction, { message: createMockMessage() })
+
+    await module.invoke({{className}}ReactionController, 'handleReaction', reaction, {
+      user: createMockUser(),
+      action: ReactionHandlerAction.REMOVE,
+    })
+
+    expect(reaction.message.reply).not.toHaveBeenCalled()
+  })
+})

@@ -1,0 +1,15 @@
+import { PrimaryEntryPointCommandInteraction } from 'discord.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}PrimaryEntryPointController } from './{{kebabCaseName}}.primary-entry-point.controller.js'
+
+describe('{{className}}PrimaryEntryPointController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}PrimaryEntryPointController] }).compile()
+
+  it('replies', async () => {
+    const interaction = createMockInteraction(PrimaryEntryPointCommandInteraction, { commandName: '{{commandName}}' })
+
+    await module.invoke({{className}}PrimaryEntryPointController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+  })
+})

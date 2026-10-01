@@ -1,0 +1,24 @@
+import { ButtonInteraction } from 'discord.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}ButtonController } from './{{kebabCaseName}}.button.controller.js'
+
+describe('{{className}}ButtonController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}ButtonController] }).compile()
+
+  it('answers a click', async () => {
+    const interaction = createMockInteraction(ButtonInteraction, { customId: '{{commandName}}' })
+
+    await module.invoke({{className}}ButtonController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'Button clicked!' })
+  })
+
+  it('reads the id from the customId', async () => {
+    // The customId's route gives the handler its id
+    const interaction = createMockInteraction(ButtonInteraction, { customId: '{{commandName}}/42' })
+
+    await module.invoke({{className}}ButtonController, 'handle{{className}}WithId', interaction)
+
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'Button with id 42 clicked!' })
+  })
+})

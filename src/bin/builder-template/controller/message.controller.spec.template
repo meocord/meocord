@@ -1,0 +1,14 @@
+import { createMockMessage, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}MessageController } from './{{kebabCaseName}}.message.controller.js'
+
+describe('{{className}}MessageController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}MessageController] }).compile()
+
+  it('replies to the message', async () => {
+    const message = createMockMessage({ content: '{{commandName}}' })
+
+    await module.invoke({{className}}MessageController, 'handle{{className}}', message)
+
+    expect(message.reply).toHaveBeenCalledWith('Hello from {{commandName}}!')
+  })
+})

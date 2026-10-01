@@ -82,13 +82,15 @@ describe('ControllerGeneratorHelper', () => {
     const generate = (name: string, type: ControllerType) => helper.generateController({ controllerName: name }, type)
 
     it.each([ControllerType.SLASH, ControllerType.CONTEXT_MENU, ControllerType.PRIMARY_ENTRY_POINT])(
-      'writes a %s builder of its own, named after the controller, registering its own command name',
+      'writes a %s builder of its own, named after the controller, registering the name @Command gives it',
       type => {
         generate('Greeting', type)
 
+        // The name is written once, in @Command, so the builder can't register another
         const builder = read(type, 'builders', 'greeting.builder.ts')
         expect(builder).toContain('export class GreetingCommandBuilder')
-        expect(builder).toMatch(/['"]greeting['"]/)
+        expect(builder).toContain('build(commandName: string)')
+        expect(builder).not.toMatch(/name: ['"]greeting['"]|setName\(['"]greeting['"]\)/)
         expect(read(type, `greeting.${type}.controller.ts`)).toContain("@Command('greeting', GreetingCommandBuilder)")
       },
     )
@@ -110,7 +112,7 @@ describe('ControllerGeneratorHelper', () => {
       generate('Profile', ControllerType.SLASH)
 
       expect(read('slash', 'builders', 'greeting.builder.ts')).toContain('// my edit')
-      expect(read('slash', 'builders', 'profile.builder.ts')).toContain("setName('profile')")
+      expect(read('slash', 'builders', 'profile.builder.ts')).toContain('export class ProfileCommandBuilder')
       expect(read('slash', 'greeting.slash.controller.ts')).toContain("@Command('greeting'")
       expect(read('slash', 'profile.slash.controller.ts')).toContain("@Command('profile'")
     })
@@ -121,8 +123,17 @@ describe('ControllerGeneratorHelper', () => {
       generate('ban', ControllerType.SLASH)
 
       expect(read('slash', 'admin', 'ban.slash.controller.ts')).toContain("@Command('admin-ban', AdminBanCommandBuilder)")
-      expect(read('slash', 'admin', 'builders', 'ban.builder.ts')).toContain("setName('admin-ban')")
+      expect(read('slash', 'admin', 'builders', 'ban.builder.ts')).toContain('export class AdminBanCommandBuilder')
       expect(read('slash', 'ban.slash.controller.ts')).toContain("@Command('ban', BanCommandBuilder)")
+    })
+
+    // A spec that only checks the controller exists passes whatever the handler does
+    it.each(Object.values(ControllerType))('writes a %s spec that invokes the handler', type => {
+      generate('Greeting', type)
+
+      const spec = read(type, `greeting.${type}.controller.spec.ts`)
+      expect(spec).toContain('module.invoke(')
+      expect(spec).not.toContain('toBeDefined()')
     })
 
     it('completes the slash command generated under the same name', () => {

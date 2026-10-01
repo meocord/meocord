@@ -1,0 +1,18 @@
+import { StringSelectMenuInteraction } from 'discord.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}SelectMenuController } from './{{kebabCaseName}}.select-menu.controller.js'
+
+describe('{{className}}SelectMenuController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}SelectMenuController] }).compile()
+
+  it('answers with what was picked', async () => {
+    const interaction = createMockInteraction(StringSelectMenuInteraction, {
+      customId: '{{commandName}}',
+      values: ['one', 'two'],
+    })
+
+    await module.invoke({{className}}SelectMenuController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'You picked one, two.' })
+  })
+})

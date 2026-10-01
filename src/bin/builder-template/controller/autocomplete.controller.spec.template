@@ -1,0 +1,18 @@
+import { AutocompleteInteraction } from 'discord.js'
+import { createChatInputOptions, createMockInteraction, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}AutocompleteController } from './{{kebabCaseName}}.autocomplete.controller.js'
+
+describe('{{className}}AutocompleteController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}AutocompleteController] }).compile()
+
+  it('offers the choices that start with what was typed', async () => {
+    const interaction = createMockInteraction(AutocompleteInteraction, {
+      commandName: '{{commandName}}',
+      options: createChatInputOptions({ focused: 'query', query: 'al' }),
+    })
+
+    await module.invoke({{className}}AutocompleteController, 'completeQuery', interaction)
+
+    expect(interaction.respond).toHaveBeenCalledWith([{ name: 'alpha', value: 'alpha' }])
+  })
+})

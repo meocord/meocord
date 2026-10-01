@@ -1,0 +1,15 @@
+import { ModalSubmitInteraction } from 'discord.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from 'meocord/testing'
+import { {{className}}ModalSubmitController } from './{{kebabCaseName}}.modal-submit.controller.js'
+
+describe('{{className}}ModalSubmitController', () => {
+  const module = MeoCordTestingModule.create({ controllers: [{{className}}ModalSubmitController] }).compile()
+
+  it('answers the submission', async () => {
+    const interaction = createMockInteraction(ModalSubmitInteraction, { customId: '{{commandName}}' })
+
+    await module.invoke({{className}}ModalSubmitController, 'handle{{className}}', interaction)
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+  })
+})

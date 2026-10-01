@@ -13,10 +13,11 @@ import { CommandType } from 'meocord/enum'
 // ever reaching the bot.
 @CommandBuilder(CommandType.PRIMARY_ENTRY_POINT)
 export class {{builderClassName}} {
-  build() {
+  // The name comes from @Command, so the command registered and the one handled are always the same
+  build(commandName: string) {
     return {
       type: ApplicationCommandType.PrimaryEntryPoint as const,
-      name: '{{commandName}}',
+      name: commandName,
       description: 'Launch the activity',
       handler: EntryPointCommandHandlerType.AppHandler,
       integration_types: [ApplicationIntegrationType.GuildInstall],
