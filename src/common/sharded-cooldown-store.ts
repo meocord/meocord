@@ -25,6 +25,8 @@ export interface CooldownChannel {
   /** Sends `message`, throwing when it cannot, and telling `failed` when its delivery fails later. */
   send(message: ShardMessage, failed?: (error: Error) => void): void
   onMessage(listener: (message: unknown) => void): void
+  /** Calls `listener` once the channel closes, as when the manager is gone. */
+  onClose(listener: () => void): void
 }
 
 /** A shard's channel to its manager, or none outside process sharding. */
@@ -46,6 +48,7 @@ export function channelOver(proc: Pick<NodeJS.Process, 'connected' | 'send' | 'o
       })
     },
     onMessage: listener => void proc.on('message', listener),
+    onClose: listener => void proc.on('disconnect', listener),
   }
 }
 
@@ -165,6 +168,10 @@ export class ShardedCooldownStore extends CooldownStore {
       const waiting = this.pending.get(message.id)
       if ('error' in message) waiting?.reject(new Error(`The shard manager's cooldown store failed: ${message.error}`))
       else waiting?.resolve(message.verdict, message.recorded)
+    })
+    // No answer comes over a closed channel, so a call already sent fails at once rather than at the timeout
+    channel.onClose(() => {
+      for (const waiting of [...this.pending.values()]) waiting.reject(new Error('The shard manager is gone: its IPC channel has closed.'))
     })
   }
 }
