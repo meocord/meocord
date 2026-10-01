@@ -1,26 +1,15 @@
 import 'reflect-metadata'
-import { type ServiceIdentifier } from 'inversify'
-import { type ActivityOptions, type ClientOptions } from 'discord.js'
 import { MetadataKey } from '@src/enum/index.js'
 import {
-  type DispatchObserver,
-  type ExceptionFilter,
-  type GuardInterface,
   type MessageCommandOptions,
-  type InterceptorInterface,
-  type ResponsePresenter,
 } from '@src/interface/index.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
 import { type CatalogShape, CATALOGS, lookup, type Translator } from '@src/common/translator.js'
-import { type CooldownStore } from '@src/common/cooldown-store.js'
-import { type Provider } from '@src/interface/provider.interface.js'
+import { type MeoCordOptions } from '@src/decorator/app-options.js'
 import { providerMap } from '@src/core/providers.js'
 import { BUILT_IN_TYPES } from '@src/core/message-params.js'
 import { assertObservers } from '@src/core/observer-runner.js'
-import { type CooldownStoreFailure } from '@src/core/cooldown-runner.js'
-import { type CheckedEntry } from '@src/decorator/stage-entry.js'
-import { type RootTheme, type ThemeResolvers } from '@src/interface/theme.interface.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
@@ -88,56 +77,7 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  * The options are stored as metadata and read when the application is created. Stages listed here, guards,
  * interceptors and filters, apply to every dispatched handler, outside the controller's and the method's own.
  *
- * @param options.controllers - Controllers to register.
- * @param options.clientOptions - Options for the discord.js `Client`.
- * @param options.activities - Activities the bot rotates through: one is shown once the bot is ready, and another
- *   every 10 seconds. Without them MeoCord leaves the bot's presence as the app sets it.
- * @param options.services - Services to register that no controller depends on.
- * @param options.providers - Values classes inject by token with `@Inject`: `{ provide, useValue }`,
- *   `{ provide, useClass }`, or `{ provide, useFactory, inject? }`, whose factory may return a promise,
- *   awaited before login. A token is a class, a string, a symbol or a `createToken` token. Provided
- *   values run their `onReady` and `onShutdown` hooks, in dependency order with the services.
- * @param options.guards - Guards run before every dispatched handler, ahead of the controller's and
- *   the method's own guards: guard classes, or `{ provide, params? }`. A controller method called
- *   directly runs only its own guards.
- * @param options.interceptors - Interceptors run around every dispatched handler except autocomplete,
- *   outside the controller's and the method's own. A controller method called directly runs none.
- * @param options.filters - Exception filters tried after the method's and the controller's, and for
- *   errors outside any handler, such as `CommandNotFoundError`.
- * @param options.cooldownStore - Where `@Cooldown` counts calls, in place of this process's memory: a
- *   class extending `CooldownStore`, resolved like a service so it can inject its client.
- * @param options.cooldownStoreFailure - What a call with a cooldown gets when the store throws, rejects or
- *   does not answer in time: `'deny'`, the default, refuses it with `CooldownStoreError`, which the fallback
- *   answers privately; `'allow'` runs it uncounted. Either way the failure is logged once per outage, which ends
- *   when the store answers 30 seconds or more after its last failure. Under `'deny'`, a call the store counts after
- *   the timeout is given back through its verdict's `release`, so the refused caller loses no use; under `'allow'`
- *   that late count is the call's own.
- * @param options.cooldownStoreTimeoutMs - How long a call waits for the cooldown store before it counts as
- *   a failure, in milliseconds, at most `2147483647`. Defaults to `1000`.
- * @param options.i18n - The translator `createTranslator` made, injected as `Translator` wherever a class
- *   asks for one.
- * @param options.presenter - The `ResponsePresenter` that styles loading and error views, and, with its
- *   `messageError`, a message command's error replies, resolved once from the container. Without one, MeoCord's own
- *   styling is used.
- * @param options.messages - How message commands start and match across the app: the `prefix`, a mention of the
- *   bot, `mention: 'only'`, the app's own param `types`, how usage replies look, and the built-in `help`; see {@link MessageCommandOptions}.
- * @param options.observers - `@Observer` classes told about every dispatched call once it has settled,
- *   with its outcome and duration, in the order listed. The call never waits for them.
- * @param options.warnUnanswered - Warns, once per handler, when a handler, or an interceptor that returns
- *   without running it, finishes without answering its interaction, or defers it and never follows up,
- *   which leaves the user waiting. On in development (`NODE_ENV` is `development`, as under
- *   `meocord start --dev`) and off otherwise.
- * @param options.theme - The app's theme: the roles it changes from MeoCord's defaults, and every role the app
- *   adds. It applies to every handler, beneath each `@UseTheme`; code reads it with `useTheme()`. Each token is
- *   checked here, so a bad one stops the bot before it logs in.
- * @param options.themeFor - Themes by where a call comes from: `guild` for a server's, over the handler's, and
- *   `user` for a user's, over the server's, in a server or a DM. Each returns part of a theme or `undefined`, at once
- *   or as a promise, and is looked up while `@Defer` acknowledges, before the guards. A result that is not a valid
- *   theme is left out, with a warning once per server or user; a resolver that fails or passes its timeout leaves
- *   its theme out of the call, logged once until it answers again.
- * @param options.themeCache - How long `themeFor`'s results are kept (`ttlSeconds`, 300 unless set) and how many
- *   (`maxGuilds`, 10,000, and `maxUsers`, 50,000), the oldest dropped first. Inject `ThemeCache` to clear one sooner.
- * @param options.themeForTimeoutMs - How long a call waits for a resolver, in milliseconds; 1,000 unless set.
+ * @param options - The app's controllers, client options and the rest; see {@link MeoCordOptions}.
  *
  * @example
  * ```ts
@@ -155,32 +95,14 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  *
  * @group Decorators
  * @category App
+ * @see {@link MeoCordOptions}
  * @see {@link MeoCordFactory}
  * @see {@link MeoCordConfig}
  * @see {@link https://meocord.dev/docs/4.1/configuration | Configuration}
  */
-export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(options: {
-  controllers: ServiceIdentifier[]
-  clientOptions: ClientOptions
-  activities?: ActivityOptions[]
-  services?: ServiceIdentifier[]
-  providers?: Provider[]
-  guards?: { [K in keyof G]: CheckedEntry<G[K], new (...args: any[]) => GuardInterface> }
-  interceptors?: { [K in keyof I]: CheckedEntry<I[K], new (...args: any[]) => InterceptorInterface> }
-  filters?: { [K in keyof F]: CheckedEntry<F[K], new (...args: any[]) => ExceptionFilter<any>> }
-  i18n?: Translator<any>
-  cooldownStore?: new (...args: any[]) => CooldownStore
-  cooldownStoreFailure?: CooldownStoreFailure
-  cooldownStoreTimeoutMs?: number
-  presenter?: new (...args: any[]) => ResponsePresenter
-  messages?: MessageCommandOptions
-  observers?: (new (...args: any[]) => DispatchObserver)[]
-  warnUnanswered?: boolean
-  theme?: RootTheme
-  themeFor?: ThemeResolvers
-  themeCache?: { ttlSeconds?: number; maxGuilds?: number; maxUsers?: number }
-  themeForTimeoutMs?: number
-}): (target: any) => void {
+export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(
+  options: MeoCordOptions<G, I, F>,
+): (target: any) => void {
   return (target: any): void => {
     assertStageEntries('@MeoCord({ guards })', 'guard', target.name, options.guards ?? [])
     assertStageEntries('@MeoCord({ interceptors })', 'interceptor', target.name, options.interceptors ?? [])

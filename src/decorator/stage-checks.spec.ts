@@ -63,8 +63,8 @@ describe('@Catch given something that is not an error class', () => {
     void Broken
 
     expect(warnings()).toEqual([
-      'Broken: @Catch takes error classes, and its first is undefined, so it matches no error. In the next major ' +
-        'version (5.0) this is refused. Give the class, such as @Catch(CooldownError).',
+      "Broken: @Catch's first entry, undefined, which matches no error, is deprecated; in the next major version (5.0) " +
+        'it is refused. Use an error class, such as @Catch(CooldownError), instead.',
     ])
   })
 

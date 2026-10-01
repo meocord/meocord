@@ -99,7 +99,7 @@ describe('a malformed entry', () => {
 
   it.each([
     ['null', null, 'null is not a class'],
-    ['a string', 'Allow', 'string is not a class'],
+    ['a string', 'Allow', '"Allow" is not a class'],
     ['{ provide } naming no class', { provide: 'Allow' }, '{ provide } does not name a class'],
     ['params that are not an object', { provide: Allow, params: 5 }, 'the params of Allow are not an object'],
     ['params that are an array', { provide: Allow, params: [1] }, 'the params of Allow are not an object'],

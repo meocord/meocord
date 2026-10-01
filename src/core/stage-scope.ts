@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { type ExecutionContextType } from '@src/common/execution-context.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { describeValue, isConstructor } from '@src/util/value.util.js'
 
 /** The context types a guard, interceptor or observer class declared it runs for, such as `@Guard({ types })`. */
 const STAGE_TYPES = Symbol('stage_types')
@@ -36,10 +37,10 @@ export function defineStageTypes(
 
 /** Why an entry is not a class or `{ provide: Class, params? }`, or undefined when it is one. */
 function malformation(entry: unknown): string | undefined {
-  if (typeof entry === 'function') return undefined
-  if (typeof entry !== 'object' || entry === null) return `${entry === null ? 'null' : typeof entry} is not a class`
+  if (isConstructor(entry)) return undefined
+  if (typeof entry !== 'object' || entry === null) return `${describeValue(entry)} is not a class`
   const { provide, params } = entry as { provide?: unknown; params?: unknown }
-  if (typeof provide !== 'function') return '{ provide } does not name a class'
+  if (!isConstructor(provide)) return '{ provide } does not name a class'
   if (params !== undefined && (typeof params !== 'object' || params === null || Array.isArray(params))) {
     return `the params of ${provide.name || 'an entry'} are not an object`
   }
@@ -73,7 +74,7 @@ export function assertStageEntries(
 
 /** The class of a stage entry. */
 export function stageClass(entry: StageEntry): new (...args: any[]) => unknown {
-  return typeof entry === 'function' ? entry : entry.provide
+  return isConstructor(entry) ? (entry as new (...args: any[]) => unknown) : entry.provide
 }
 
 /** The context types a stage declared, or `undefined` when it runs for every type. */

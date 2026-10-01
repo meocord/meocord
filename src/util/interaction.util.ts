@@ -17,6 +17,7 @@ import {
 } from 'discord.js'
 import { CommandType } from '@src/enum/controller.enum.js'
 import { quoteForLog } from '@src/util/user-text.util.js'
+import { withArticle } from '@src/util/value.util.js'
 
 /**
  * The discord.js interaction class each command type handles, shared by `@Command`, the dispatcher and
@@ -36,8 +37,11 @@ const INTERACTION_CLASSES: Record<CommandType, { readonly prototype: object; rea
   [CommandType.MODAL_SUBMIT]: ModalSubmitInteraction,
 }
 
-/** The name of the discord.js class a command type's handler takes, such as `ButtonInteraction`. */
-export const interactionClassName = (type: CommandType): string => INTERACTION_CLASSES[type]?.name ?? 'an interaction'
+/** The discord.js class a command type's handler takes, after its article, such as `a ButtonInteraction`. */
+export const interactionClassName = (type: CommandType): string => {
+  const name = INTERACTION_CLASSES[type]?.name
+  return name ? withArticle(name) : 'an interaction'
+}
 
 /** Command types Discord identifies by a registered name rather than by a customId. */
 const NAME_ROUTED_TYPES: ReadonlySet<CommandType> = new Set([
