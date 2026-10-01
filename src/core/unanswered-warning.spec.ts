@@ -86,7 +86,7 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
     dispatch(loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName }))
 }
 
-const unanswered = () => warned.filter(message => message.includes('Shop.'))
+const unanswered = () => warned.filter(message => /^Shop\.\w+ (finished without answering|deferred its interaction)/.test(message))
 
 describe('the warning for an interaction left unanswered', () => {
   const env = process.env.NODE_ENV
