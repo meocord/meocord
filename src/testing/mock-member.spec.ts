@@ -88,6 +88,13 @@ describe("a mock server's @everyone role", () => {
     expect([guild.roles.everyone.id, guild.roles.everyone.position]).toEqual([guild.id, 0])
     expect(guild.roles.cache.get(guild.id)).toBe(guild.roles.everyone)
     expect(configured.roles.everyone).toBe(given)
+    expect(given.position).toBe(0)
+  })
+
+  it('ranks below a role made without a position, so that role is the highest of a member who has it', () => {
+    const plain = createMockInteraction(Role, {})
+
+    expect(createMockMember({ roles: [plain] }).roles.highest).toBe(plain)
   })
 
   it("counts in every member's permissions, first in its role cache, as discord.js has it", () => {

@@ -520,6 +520,11 @@ export class TestingModule {
    *
    * // A guard that throws GuardDeniedError, or a handler that throws UserError
    * await expect(module.invoke(ModerationController, 'kick', interaction)).rejects.toThrow(GuardDeniedError)
+   *
+   * // dispatch answers it as the bot does, and resolves with the outcome
+   * const { ran, error } = await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'kick' }))
+   * expect(ran).toBe(false)
+   * expect(error).toBeInstanceOf(GuardDeniedError)
    * ```
    */
   async invoke<C extends new (...args: any[]) => unknown, M extends HandlerName<C>>(
@@ -968,8 +973,9 @@ export class TestingModuleBuilder {
           | { cooldownStore?: new (...args: any[]) => CooldownStore; cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }
           | undefined)
       : undefined
-    // The app's own store, as the bot binds it, whether the module is given the app or built from it
-    const store = appOptions?.cooldownStore
+    // The app's own store, as the bot binds it, whether the module is given the app or built from it; none when the
+    // test provides the CooldownStore, so nothing builds the app's or asks for what it injects
+    const store = providers.has(CooldownStore) ? undefined : appOptions?.cooldownStore
     const roots = [
       ...(this.options.controllers ?? []),
       ...services,
@@ -1037,7 +1043,7 @@ export class TestingModuleBuilder {
     }
     for (const service of services) bindClass(service)
     // The app's own store, resolved like a service, unless the test provides the CooldownStore itself
-    if (store && !providers.has(CooldownStore)) {
+    if (store) {
       bindClass(store)
       container.bind(CooldownStore).toService(store)
     }
@@ -1068,7 +1074,7 @@ export class TestingModuleBuilder {
     assertObservers("the testing module's observers", observers)
     bindObservers(container, observers)
     // The store calls ask: the test's own when it provides CooldownStore, else the app's
-    const boundStore = providers.has(CooldownStore) ? CooldownStore : store
+    const boundStore = store ?? (providers.has(CooldownStore) ? CooldownStore : undefined)
     // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
     // after what it injects
     const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
