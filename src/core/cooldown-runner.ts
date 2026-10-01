@@ -130,29 +130,36 @@ export function cooldownPolicyOf(container: Container): CooldownPolicy {
 
 const logger = new Logger('Cooldown')
 
-/** The failing calls of each store that has not answered since its last failure. */
-const outages = new WeakMap<CooldownStore, { failures: number; since: number }>()
+/**
+ * How long a store goes without a failure before its outage ends. A store that fails some calls and answers others,
+ * as a cluster with one node down does, stays in one outage rather than starting a new one with each failure.
+ */
+const OUTAGE_QUIET_MS = 30_000
+
+/** Each store's open outage: its failed calls, and when the first and the latest failed. */
+const outages = new WeakMap<CooldownStore, { failures: number; since: number; last: number }>()
 
 /** Logs a store's failure once per outage: the first, with its cause and what calls get until it answers. */
 function reportFailure(store: CooldownStore, error: CooldownStoreError, { failure, timeoutMs }: CooldownPolicy): void {
   const outage = outages.get(store)
   if (outage) {
     outage.failures++
+    outage.last = Date.now()
     return
   }
-  outages.set(store, { failures: 1, since: Date.now() })
+  outages.set(store, { failures: 1, since: Date.now(), last: Date.now() })
   const name = store.constructor.name
   const reason = error.timedOut ? `did not answer within ${timeoutMs} ms` : `failed: ${String((error.cause as Error | undefined)?.message ?? error.cause)}`
   if (failure === 'allow') logger.warn(`The cooldown store ${name} ${reason}. Calls run uncounted until it answers again.`)
   else logger.error(`The cooldown store ${name} ${reason}. Calls with a cooldown are refused until it answers again.`, error.cause ?? '')
 }
 
-/** Logs that a store answers again, after an outage. */
+/** Logs that a store answers again, once it has gone {@link OUTAGE_QUIET_MS} without a failure. */
 function reportRecovery(store: CooldownStore): void {
   const outage = outages.get(store)
-  if (!outage) return
+  if (!outage || Date.now() - outage.last < OUTAGE_QUIET_MS) return
   outages.delete(store)
-  const seconds = Math.round((Date.now() - outage.since) / 1000)
+  const seconds = Math.round((outage.last - outage.since) / 1000)
   logger.log(`The cooldown store ${store.constructor.name} answers again, after ${outage.failures} failed call(s) over ${seconds}s.`)
 }
 
