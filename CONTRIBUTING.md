@@ -357,9 +357,10 @@ The **Real Discord** job runs `test:e2e` on pull requests from branches of this 
 `main` and `beta`, and nightly. Its values are secrets of the `e2e` GitHub environment, under the same
 names as `.env`, and reach only the step that runs the script, which also masks both tokens. The job
 can read the repository and nothing more, requests no OIDC token and keeps no git credentials. Runs
-share the `discord-e2e` concurrency group, so only one logs in as the test bot at a time, and a
-running check is never cancelled for another. It is not a required check, so an outage at Discord blocks
-no merge. Pull requests from forks get no secrets: for them a separate job explains the skip. Without
+share the `discord-e2e` concurrency group, so only one logs in as the test bot at a time, a running
+check is never cancelled for another, and a waiting one keeps its place in the queue rather than being
+replaced by the next. It is not a required check, so an outage at Discord blocks no merge.
+Pull requests from forks get no secrets: for them a separate job explains the skip. Without
 the environment's secrets, the job passes with the skip message. With the test bot's but without the
 helper bot's, the job skips the helper bot's checks, as a contributor's run does, and adds a warning to the
 run saying which secrets to set, so a passing job never hides that they did not run.
