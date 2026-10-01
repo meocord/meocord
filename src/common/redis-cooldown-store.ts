@@ -222,8 +222,9 @@ export class RedisCooldownStore extends CooldownStore {
   /**
    * Records a call against every entry if all allow it, as one script: one round trip, however many
    * cooldowns a handler stacks. On Redis Cluster, where a handler's keys sit in different slots and one
-   * script cannot reach them all, each key is counted by a script of its own, in order, so a call one
-   * cooldown refuses has counted against those before it; `hashTag: 'handler'` keeps them in one slot.
+   * script cannot reach them all, each key is counted by a script of its own, in order, and a refusal gives
+   * back the uses counted before it, so the call still counts against all or none; `hashTag: 'handler'` keeps
+   * the keys in one slot, in one round trip.
    *
    * @param entries - The keys and limits the call counts against.
    * @returns Whether the call was recorded, and if not, how long until it can be and which entry refused it.
@@ -237,8 +238,23 @@ export class RedisCooldownStore extends CooldownStore {
       return verdict.allowed ? withRelease(verdict, async () => void (await this.run(RELEASE_SCRIPT, keys, [call]))) : verdict
     } catch (error) {
       if (entries.length === 1 || !messageOf(error).includes('CROSSSLOT')) throw error
-      return super.consumeMany(entries)
+      return this.consumeEach(entries)
     }
+  }
+
+  /** Counts the entries one script each, in order, keeping each one's release: what one script does, in steps. */
+  private async consumeEach(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
+    const releases: (() => Promise<void>)[] = []
+    const releaseAll = async () => void (await Promise.all(releases.map(release => release())))
+    for (const [index, entry] of entries.entries()) {
+      const verdict = await this.consumeMany([entry])
+      if (!verdict.allowed) {
+        await releaseAll()
+        return { ...verdict, blocked: index }
+      }
+      if (verdict.release) releases.push(verdict.release)
+    }
+    return withRelease({ allowed: true, retryAfterMs: 0 }, releaseAll)
   }
 
   /**

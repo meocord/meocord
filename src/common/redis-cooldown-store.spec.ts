@@ -79,7 +79,7 @@ describe('RedisCooldownStore', () => {
     await expect(store.consume('k', limit)).rejects.toThrow(/replied .*where it returns \[allowed, retryAfterMs, index\]/)
   })
 
-  it('on Redis Cluster, counts keys in other slots with a script each, in order, stopping at a refusal', async () => {
+  it('on Redis Cluster, counts keys in other slots with a script each, in order, giving back those counted at a refusal', async () => {
     const replies = [
       [1, 0, -1],
       [0, 2_000, 0],
@@ -97,8 +97,30 @@ describe('RedisCooldownStore', () => {
     ])
 
     expect(verdict).toEqual({ allowed: false, retryAfterMs: 2_000, blocked: 1 })
-    expect(evaluate.mock.calls.map(([, keys]) => keys)).toEqual([
-      ['meocord:cooldown:a', 'meocord:cooldown:b', 'meocord:cooldown:c'],
+    expect(evaluate.mock.calls.map(([script, keys]) => [script.includes('ZADD') ? 'count' : 'release', ...keys])).toEqual([
+      ['count', 'meocord:cooldown:a', 'meocord:cooldown:b', 'meocord:cooldown:c'],
+      ['count', 'meocord:cooldown:a'],
+      ['count', 'meocord:cooldown:b'],
+      // a counted the call before b refused it, so it is given back
+      ['release', 'meocord:cooldown:a'],
+    ])
+  })
+
+  // A call counted after the timeout is given back, on a cluster too
+  it('on Redis Cluster, gives back every key a call counted when its verdict is released', async () => {
+    const evaluate = createMockFn<RedisEval>((script, keys) =>
+      keys.length > 1 && script.includes('ZADD')
+        ? Promise.reject(new Error("CROSSSLOT Keys in request don't hash to the same slot"))
+        : Promise.resolve([1, 0, -1]),
+    )
+
+    const verdict = await new RedisCooldownStore(evaluate).consumeMany([
+      { key: 'a', limit },
+      { key: 'b', limit },
+    ])
+    await verdict.release?.()
+
+    expect(evaluate.mock.calls.filter(([script]) => !script.includes('ZADD')).map(([, keys]) => keys)).toEqual([
       ['meocord:cooldown:a'],
       ['meocord:cooldown:b'],
     ])
