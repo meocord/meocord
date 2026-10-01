@@ -239,7 +239,11 @@ export interface CallHandler {
    * handler, again. Return or await what it returns to act on the result. When the interceptor
    * returns first and leaves the promise, or a `then` or `finally` chain from it, without a rejection
    * handler, the call ends when the handler does and fails with what it throws, so its filters see
-   * it. A promise it hands to something else, such as `Promise.all`, is that one's to handle.
+   * it. A promise it hands to something else, such as `Promise.all`, is that one's to handle. A run the interceptor
+   * takes on and returns before, as racing it against a timeout does, that later fails is logged as a warning, unless
+   * a handler of the interceptor's own disposes of the error. One that forwards it into a promise that has already
+   * settled, such as with `(error) => reject(error)`, disposes of it unseen: race it with `Promise.race`, or handle
+   * the error where it arrives.
    *
    * @returns What the handler returns, once it has run. Rejects with what the handler throws.
    */

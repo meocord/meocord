@@ -417,6 +417,32 @@ class TimesOut implements InterceptorInterface {
   }
 }
 
+const afterTimeout = (run: Promise<unknown>) => Promise.race([run, new Promise(resolve => setTimeout(() => resolve('timed out'), 20))])
+
+// Races the handler as TimesOut does, passing its error on: rethrown as it is
+@Interceptor()
+class RethrowsLate implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    return afterTimeout(
+      next.handle().then(undefined, (error: unknown) => {
+        throw error
+      }),
+    )
+  }
+}
+
+// The same, wrapping it in an error of the app's, in an async handler
+@Interceptor()
+class WrapsLate implements InterceptorInterface {
+  intercept(_context: ExecutionContext, next: CallHandler) {
+    return afterTimeout(
+      next.handle().catch(async (error: Error) => {
+        throw new Error(`wrapped: ${error.message}`)
+      }),
+    )
+  }
+}
+
 // Starts the handler once it has returned, outside the call
 @Interceptor()
 class StartsLate implements InterceptorInterface {
@@ -467,6 +493,20 @@ class UnawaitedController {
   @Command('throwsAfterTimeout', CommandType.SLASH)
   @UseInterceptor(TimesOut)
   async throwsAfterTimeout() {
+    await new Promise(resolve => setTimeout(resolve, 40))
+    throw new Error('database down')
+  }
+
+  @Command('rethrowsAfterTimeout', CommandType.SLASH)
+  @UseInterceptor(RethrowsLate)
+  async rethrowsAfterTimeout() {
+    await new Promise(resolve => setTimeout(resolve, 40))
+    throw new Error('database down')
+  }
+
+  @Command('wrapsAfterTimeout', CommandType.SLASH)
+  @UseInterceptor(WrapsLate)
+  async wrapsAfterTimeout() {
     await new Promise(resolve => setTimeout(resolve, 40))
     throw new Error('database down')
   }
@@ -584,14 +624,18 @@ describe('an interceptor that returns before the call it started ends', () => {
     expect(performance.now() - startedAt).toBeLessThan(200)
   })
 
-  it('warns of a run it took on that throws once the call has ended, naming the interceptor and the error', async () => {
+  it.each([
+    ['as it is', 'TimesOut', 'throwsAfterTimeout'],
+    ['through a handler that rethrows it', 'RethrowsLate', 'rethrowsAfterTimeout'],
+    ['through an async handler that wraps it', 'WrapsLate', 'wrapsAfterTimeout'],
+  ] as const)('warns of a run it took on that throws once the call has ended, passed on %s', async (_how, interceptor, name) => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 
-    await module().invoke(UnawaitedController, 'throwsAfterTimeout', slash('throwsAfterTimeout'))
+    await module().invoke(UnawaitedController, name, slash(name))
     await new Promise(resolve => setTimeout(resolve, 60))
 
     expect(warn).toHaveBeenCalledWith(
-      'TimesOut returned before UnawaitedController.throwsAfterTimeout finished, which then threw; nothing caught it, so the ' +
+      `${interceptor} returned before UnawaitedController.${name} finished, which then threw; nothing caught it, so the ` +
         'call could not report it:',
       expect.objectContaining({ message: 'database down' }),
     )
