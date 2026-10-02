@@ -6,6 +6,7 @@ import {
   type APIActionRowComponent,
   type APIComponentInMessageActionRow,
   ApplicationIntegrationType,
+  Attachment,
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
@@ -896,10 +897,18 @@ describe('createChatInputOptions', () => {
     })
   })
 
+  it('getAttachment returns the attachment given, as an Attachment option carries it', () => {
+    const file = createMockInteraction(Attachment, { id: '1', name: 'log.txt' })
+    const options = createChatInputOptions({ file })
+    expect(options.getAttachment('file')).toBe(file)
+    expect(options.getAttachment('other')).toBeNull()
+    expect(() => options.getAttachment('other', true)).toThrow('Option "other" is required but was not provided.')
+  })
+
   describe('unlisted methods fall through to auto-stub', () => {
-    it('getAttachment is auto-stubbed as a mock function', () => {
+    it('getMessage is auto-stubbed as a mock function', () => {
       const options = createChatInputOptions({})
-      expect(vi.isMockFunction((options as any).getAttachment)).toBe(true)
+      expect(vi.isMockFunction((options as any).getMessage)).toBe(true)
     })
   })
 })

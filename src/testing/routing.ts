@@ -6,7 +6,8 @@ import {
   matchComponentRoute,
 } from '@src/core/component-routes.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
-import { buildMessageRoutes, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
+import { buildMessageRoutes, fitsScope, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
+import { needsGuild } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix } from '@src/interface/index.js'
 
 /**
@@ -37,10 +38,9 @@ export interface MessageToResolve {
   /** The bot's user id, so a mention of it counts as a start when the app accepts one. */
   botId?: string
   /**
-   * Whether the message is a direct message, where `mention: 'only'` does not apply and a handler whose scope fits
-   * is chosen first; one whose scope does not fit is returned only when none that fits matches, and dispatch answers
-   * it with its usage rather than running it. Without it the message may be from anywhere, and a mention alone
-   * starts what it starts in a server.
+   * Whether the message is a direct message, where `mention: 'only'` does not apply, and a handler that works only in
+   * a server, by its scope or a `member`, `role` or `channel` param, is not reached, as dispatch answers it with its
+   * usage. Without it the message may be from anywhere, and a mention alone starts what it starts in a server.
    */
   dm?: boolean
 }
@@ -113,7 +113,7 @@ function controllersOf(app: ControllerClass): ControllerClass[] {
  *
  * @param app - The application class decorated with `@MeoCord`.
  * @param input - The component type and its `customId`, or the message's content with its prefix and the bot's id.
- * @returns The handler the input reaches, with the params it captures, or `undefined` when no route handles the input.
+ * @returns The handler that runs, with the params it captures, or `undefined` when no route handles the input.
  * @throws TypeError for a message to an app whose prefix is a function, when no `prefix` is given.
  *
  * @example
@@ -148,6 +148,8 @@ export function resolveRoute(
     const matched = matchMessageRoute(buildMessageRoutes(controllersOf(app), messages), input.content, starts)
     if (!matched) return undefined
     const { route, params } = matched
+    // Dispatch answers a route that does not work in a DM with its usage, and never runs it
+    if (starts.inGuild === false && (!fitsScope(route.scope, false) || needsGuild(route))) return undefined
     return { controller: route.controllerClass, method: route.method, handler: route.controllerClass.prototype[route.method], params }
   }
 

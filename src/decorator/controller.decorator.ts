@@ -616,15 +616,15 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * customId pattern, `{name}` captures one `/`-separated segment into the handler's params. When the code compiles,
  * the keys the handler's params require are checked against the pattern or route, a typed segment's value against
  * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives; a key a pipe
- * produces is declared `Piped<T>`, and left to the pipe. Two component
- * handlers of one type whose patterns match exactly the same ids stop the bot at startup; patterns that only overlap
- * are warned about, naming the one that runs: the more specific, or between equally specific ones, the one listed first.
- * In the next major version (5.0), the one that spells out the first segment where two equally specific patterns
- * differ runs instead, and the warning names the pairs that changes. A context menu handler receives the kind its
- * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
- * kind, `@Command` checks the parameter type it emits as it applies. A subclass that re-declares an inherited handler on the same name or pattern
- * takes its own builder and options; on another it still answers the inherited one too, which the bot warns about
- * as it starts. In the next major version (5.0) the subclass's own declarations replace the inherited ones.
+ * produces is declared `Piped<T>`, and left to the pipe. Two component handlers of one type whose patterns match
+ * exactly the same ids stop the bot at startup; patterns that only overlap are warned about, naming the one that
+ * runs: the more specific, or between equally specific ones, the one listed first. In the next major version (5.0),
+ * the one that spells out the first segment where two equally specific patterns differ runs instead, and the warning
+ * names the pairs that changes. A context menu handler receives the kind its builder's `setType()` names, and one
+ * declaring the other kind fails to compile; when the compiler cannot tell the kind, `@Command` checks the parameter
+ * type it emits as it applies. A subclass that re-declares an inherited handler on the same name or pattern takes its
+ * own builder and options; on another it still answers the inherited one too, which the bot warns about as it
+ * starts. In the next major version (5.0) the subclass's own declarations replace the inherited ones.
  *
  * @param name - The command's name or subcommand path, or a component's customId pattern or route.
  * @param builderOrType - A command builder class, which registers the command with Discord, or a
@@ -832,14 +832,14 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * your own data. Enable it on the option with `setAutocomplete(true)` in the command's builder.
  *
  * @remarks
- * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs
- * its guards, the global ones, its class's and its own, and its filters, but no interceptors; a guard must not answer, and returning
- * `false` closes the menu with an empty list. The bot warns as it starts about a handler Discord never asks, such as
- * one for an option registered without autocomplete, and about one that completes what an earlier handler already
- * does, since only the first runs; the next major version (5.0) refuses to start with either. A subclass that
- * re-declares an inherited handler on another command path or option still completes the inherited one too, which
- * the bot warns about as it starts. In the next major version (5.0) the subclass's own declarations replace the
- * inherited ones.
+ * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs its
+ * guards, the global ones, its class's and its own, and its filters, but no interceptors; a guard must not answer,
+ * and returning `false` closes the menu with an empty list. The bot warns as it starts about a handler Discord never
+ * asks, such as one for an option registered without autocomplete, and about one that completes what an earlier
+ * handler already does, since only the first runs; the next major version (5.0) refuses to start with either. A
+ * subclass that re-declares an inherited handler on another command path or option still completes the inherited one
+ * too, which the bot warns about as it starts. In the next major version (5.0) the subclass's own declarations
+ * replace the inherited ones.
  *
  * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
  * @param optionName - The option to complete. Leave it out to handle every option, branching on

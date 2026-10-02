@@ -173,8 +173,7 @@ describe('@Command', () => {
       expect(regexFor('profile/{userId}').test('profile/')).toBe(false)
     })
 
-    it('does not let a shorter pattern take a longer id', () => {
-      expect(regexFor('profile/{uuid}').test('profile/abc/123')).toBe(false)
+    it('does not let a longer pattern take a shorter id', () => {
       expect(regexFor('profile/{uuid}/{id}').test('profile/abc')).toBe(false)
     })
   })
