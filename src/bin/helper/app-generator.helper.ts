@@ -51,6 +51,17 @@ const PACKAGE_MANAGER_FILES: Record<string, string> = {
   'pnpm-workspace.yaml': 'pnpm',
 }
 
+/**
+ * What one package manager reads from `package.json`, added after the template's fields for an app made with it.
+ *
+ * npm 11.16 and later warn about each dependency install script it neither allows nor denies. None of these is needed:
+ * @swc/core and unrs-resolver only check the per-platform binding npm installs, and fsevents ships its binary prebuilt.
+ * npm also leaves a denied package's bins unlinked, and none of these has one.
+ */
+const PACKAGE_MANAGER_FIELDS: Record<string, Record<string, unknown>> = {
+  npm: { allowScripts: { '@swc/core': false, fsevents: false, 'unrs-resolver': false } },
+}
+
 /** The script prefix for a package manager, such as `bun ` for bun. */
 export function runtimePrefixFor(packageManager: string): string {
   return RUNTIME_PREFIXES[packageManager] ?? ''
@@ -117,8 +128,10 @@ export class AppGeneratorHelper {
       if (readBy !== undefined && readBy !== variables.packageManager) return []
 
       const destination = path.join(targetDir, relative)
+      const fields = relative === 'package.json' ? PACKAGE_MANAGER_FIELDS[variables.packageManager] : undefined
+      const rendered = renderTemplate(templatePath, variables)
       fs.mkdirSync(path.dirname(destination), { recursive: true })
-      fs.writeFileSync(destination, renderTemplate(templatePath, variables))
+      fs.writeFileSync(destination, fields ? `${JSON.stringify({ ...JSON.parse(rendered), ...fields }, null, 2)}\n` : rendered)
 
       return [relative]
     })

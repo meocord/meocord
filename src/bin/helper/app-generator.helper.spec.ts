@@ -253,4 +253,16 @@ describe('the packages a new app uses', () => {
   it.each(['bun', 'npm', 'yarn'])('writes no pnpm-workspace.yaml for a %s project', packageManager => {
     expect(fs.existsSync(path.join(generated(packageManager), 'pnpm-workspace.yaml'))).toBe(false)
   })
+
+  // npm 11.16 and later warn about every dependency install script package.json neither allows nor denies
+  it('settles, for npm, the install scripts it leaves off, in package.json after the dependencies', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(generated('npm'), 'package.json'), 'utf8'))
+
+    expect(manifest.allowScripts).toEqual({ '@swc/core': false, fsevents: false, 'unrs-resolver': false })
+    expect(Object.keys(manifest).slice(-1)).toEqual(['allowScripts'])
+  })
+
+  it.each(['bun', 'pnpm', 'yarn'])('declares no allowScripts for a %s project', packageManager => {
+    expect(JSON.parse(fs.readFileSync(path.join(generated(packageManager), 'package.json'), 'utf8')).allowScripts).toBeUndefined()
+  })
 })
