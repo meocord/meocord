@@ -137,7 +137,7 @@ const SKIP = new Set(['constructor', 'toString', 'valueOf', 'toJSON', 'then'])
 
 type StubValue = Mock | object | string | number | boolean | null
 
-function stubDeep(instance: object, externalStubs?: Map<string, StubValue>): object {
+function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
   const stubs = externalStubs ?? new Map<string, StubValue>()
 
   const proxy: object = new Proxy(instance, {
@@ -203,6 +203,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>): obj
     // data property shadows the accessor, which is what test setup means.
     set(target, prop, value) {
       Object.defineProperty(target, prop, { value, writable: true, enumerable: true, configurable: true })
+      onSet?.(prop, value)
       return true
     },
   })
@@ -511,6 +512,11 @@ function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[
 /** The interaction a mock options resolver was given to, for the server a user option's member is in. */
 const optionOwners = new WeakMap<object, { guildId?: unknown; guild?: unknown }>()
 
+/** Records the interaction a mock options resolver belongs to. */
+const ownOptions = (interaction: object, options: unknown): void => {
+  if (typeof options === 'object' && options !== null) optionOwners.set(options, interaction)
+}
+
 /** A mock user that is a person, with an id of its own unless given one. */
 const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object.create(User.prototype), { id, bot: false }))
 
@@ -756,8 +762,7 @@ export function createMockInteraction<T extends object>(
           : given
       Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true })
     }
-    const { options } = props as { options?: unknown }
-    if (typeof options === 'object' && options !== null) optionOwners.set(options, instance)
+    ownOptions(instance, (props as { options?: unknown }).options)
   }
 
   // Ids and a user, as Discord always sends; no server unless the test names one, as in a direct message
@@ -840,7 +845,10 @@ export function createMockInteraction<T extends object>(
     for (const kind of choices) if (!Object.prototype.hasOwnProperty.call(instance, kind)) instance[kind] = new Collection()
   }
 
-  return stubDeep(instance, stubs) as DeepMocked<T>
+  // Options assigned after creation, directly or through Object.assign, belong to it as those given do
+  return stubDeep(instance, stubs, (prop, value) => {
+    if (prop === 'options') ownOptions(instance, value)
+  }) as DeepMocked<T>
 }
 
 // ---------------------------------------------------------------------------
@@ -1774,6 +1782,10 @@ function optionTypeOf(value: unknown): ApplicationCommandOptionType {
   return ApplicationCommandOptionType.String
 }
 
+/** The discord.js classes an entity option's value is an instance of, each read by its own getters. */
+const ENTITY_CLASSES = [User, GuildMember, Role, BaseChannel, Attachment] as const
+type EntityClass = (typeof ENTITY_CLASSES)[number]
+
 /** A user option's member: the user's in the server of the interaction the options are given to, or none in a DM. */
 type MemberOf = (name: string, user: User) => object | null
 
@@ -1845,7 +1857,9 @@ function buildOptionData(
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
  * and in a server its `member` too. A user option's
  * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
- * a member given resolves `getUser()` to its user. A whole number is an Integer option and a fraction a Number one, so
+ * a member given resolves `getUser()` to its user. An entity getter reads only its own kinds: another is `null`, and
+ * with `required` throws discord.js's type error; a plain `{ id }` reads as any kind.
+ * A whole number is an Integer option and a fraction a Number one, so
  * `getInteger()` reads only a whole number, and `getNumber()` reads either.
  *
  * @typeParam Cached - `any` by default, to match `createMockInteraction(ChatInputCommandInteraction)`; pass it when the
@@ -1918,8 +1932,15 @@ export function createChatInputOptions<Cached extends CacheType = any>(
       resolveOrThrow(name, typeof values[name] === 'boolean' ? (values[name] as boolean) : null, required),
   )
 
-  const getObjectOption = (name: string, required?: boolean) =>
-    resolveOrThrow(name, isObjectOption(values[name]) ? (values[name] as { id: string }) : null, required)
+  // An entity of another kind is null, or discord.js's type error when required; a plain `{ id }` may be any kind
+  const getObjectOption = (name: string, kinds: readonly EntityClass[], expected: readonly ApplicationCommandOptionType[], required?: boolean) => {
+    const value = values[name]
+    if (!isObjectOption(value)) return resolveOrThrow(name, null, required)
+    if (kinds.some(Kind => value instanceof Kind) || !ENTITY_CLASSES.some(Kind => value instanceof Kind)) return value
+    if (required === true) throw new Error(`Option "${name}" is of type: ${optionTypeOf(value)}; expected ${expected.join(', ')}.`)
+    return null
+  }
+  const { User: USER, Role: ROLE, Channel: CHANNEL, Mentionable: MENTIONABLE } = ApplicationCommandOptionType
 
   // A user option carries both the user and, in a server, its member, whichever of the two the test gave
   // Kept apart, so a member read before the options belong to an interaction is not what one in a DM reads later
@@ -1936,16 +1957,22 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   }
 
   base.getUser = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) => {
-    const value = getObjectOption(name, required)
+    const value = getObjectOption(name, [User, GuildMember], [USER, MENTIONABLE], required)
     return value instanceof GuildMember ? value.user : value
   })
-  base.getRole = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
-  base.getChannel = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
+  base.getRole = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
+    getObjectOption(name, [Role], [ROLE, MENTIONABLE], required),
+  )
+  base.getChannel = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
+    getObjectOption(name, [BaseChannel], [CHANNEL], required),
+  )
   base.getMember = createMockFn<(name: string) => object | null>((name: string) => {
-    const value = getObjectOption(name)
+    const value = getObjectOption(name, [User, GuildMember], [USER, MENTIONABLE])
     return value instanceof User ? memberOf(name, value) : value
   })
-  base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
+  base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
+    getObjectOption(name, [User, GuildMember, Role], [MENTIONABLE], required),
+  )
   base.getAttachment = createMockFn<(name: string, required?: boolean) => Attachment | null>((name: string, required?: boolean) =>
     resolveOrThrow(name, values[name] instanceof Attachment ? values[name] : null, required),
   )
