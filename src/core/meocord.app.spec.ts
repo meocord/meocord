@@ -40,7 +40,7 @@ import {
 import { Logger } from '@src/common/index.js'
 import { createChatInputOptions, createMockInteraction, createMockMessage, createMockUser, createModalFields, resolveRoute } from '@src/testing/index.js'
 import { Autocomplete, Command, Controller, MeoCord, MessageHandler, ReactionHandler, Validate } from '@src/decorator/index.js'
-import { CommandType } from '@src/enum/index.js'
+import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { MeoCordApp, shutdownAndExit } from '@src/core/meocord.app.js'
 import { DEV_RUNNER_ENV } from '@src/util/dev-runner.util.js'
 import { PARENT_SEND_TIMEOUT_MS } from '@src/util/parent-send.util.js'
@@ -1025,7 +1025,7 @@ describe('MeoCordApp', () => {
     class PingBuilder {
       build = () => ({ toJSON: () => ({ name: 'ping', type: 1, description: 'Pong' }) }) as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, PingBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, PingBuilder)
 
     @Controller()
     class PingController {

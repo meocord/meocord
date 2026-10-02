@@ -36,13 +36,13 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: m
 const { Container } = await import('inversify')
 const { Logger } = await import('@src/common/index.js')
 const { Command, Controller } = await import('@src/decorator/index.js')
-const { CommandType } = await import('@src/enum/index.js')
+const { CommandType, MetadataKey } = await import('@src/enum/index.js')
 const { MeoCordApp } = await import('@src/core/meocord.app.js')
 
 class PingBuilder {
   build = () => ({ toJSON: () => ({ name: 'ping', type: 1, description: 'Pong' }) }) as any
 }
-Reflect.defineMetadata('commandType', CommandType.SLASH, PingBuilder)
+Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, PingBuilder)
 
 @Controller()
 class PingController {
