@@ -20,7 +20,7 @@
   - `@inject(Token)` on an interface-typed parameter works, not "missing metadata on type Object".
   - An injection cycle is refused naming it, not "Circular dependency found: (No dependency trace)".
   - A constructor parameter with no runtime type is refused naming the class and parameter, not inversify's `emitDecoratorMetadata` error.
-  - A class with no decorator whose constructor injects is refused naming the class and the decorator to add, not inversify's missing-metadata error.
+  - A class with no decorator whose constructor injects, guards, interceptors, filters and pipes included, is refused as the app starts naming the class and the decorator to add, not inversify's missing-metadata error, which a guard gave only at its first call.
   - A guard in `services` or `providers`, or injected into a service, reads each call's own `params`; one with a setter param or a sealed instance shares them, with a warning.
 - **Handler types**
   - A handler may return a value or take fewer parameters, not "Unable to resolve signature of method decorator".
