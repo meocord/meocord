@@ -33,6 +33,7 @@ vi.mock('discord.js', async original => ({
 
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: mockLoadConfig }))
 
+const { Container } = await import('inversify')
 const { Logger } = await import('@src/common/index.js')
 const { Command, Controller } = await import('@src/decorator/index.js')
 const { CommandType } = await import('@src/enum/index.js')
@@ -53,7 +54,7 @@ describe('MeoCordApp.start() in register-only mode', () => {
   const client = { login: vi.fn(), on: vi.fn() }
   let exit: ReturnType<typeof vi.spyOn>
 
-  const start = () => new MeoCordApp([PingController] as any, {} as any, client as any, 'the-token').start()
+  const start = () => new MeoCordApp([PingController] as any, new Container(), client as any, 'the-token').start()
 
   beforeEach(() => {
     process.env.MEOCORD_REGISTER_ONLY = '1'
@@ -131,7 +132,7 @@ describe('MeoCordApp.start() in register-only mode', () => {
       throw new Error('exited')
     }) as never)
 
-    await expect(new MeoCordApp([PingController] as any, {} as any, client as any, '').start()).rejects.toThrow('exited')
+    await expect(new MeoCordApp([PingController] as any, new Container(), client as any, '').start()).rejects.toThrow('exited')
 
     expect(exit).toHaveBeenCalledWith(1)
     expect(rest.get).not.toHaveBeenCalled()
