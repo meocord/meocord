@@ -12,9 +12,9 @@ export async function tellManager(message: ShardMessage): Promise<void> {
 let ending = false
 
 /**
- * Ends a shard whose startup failed, so its manager restarts it. A refusal would be the same in every shard, so the
- * manager is told first, and logs it and stops them all. The exit waits until the caller has handled the error and the
- * manager has the reason.
+ * Ends a shard whose startup failed, which its manager restarts unless it was told the failure is one every shard
+ * meets: a refusal, told here first, which the manager logs before stopping them all, or a login Discord refused, told
+ * as it failed. The exit waits until the caller has handled the error and the manager has the reason.
  */
 export function endFailedShard(error: unknown): void {
   if (ending) return

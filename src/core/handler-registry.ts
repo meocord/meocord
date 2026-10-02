@@ -139,7 +139,7 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
   description: string | undefined
   /** Where the command works, from its `scope` option. */
   scope: MessageScope
-  /** Whether its `hidden` option leaves it out of help and of a parent's list of subcommands. */
+  /** Whether its `hidden` option leaves it out of help's lists, including a parent's list of subcommands. */
   hidden: boolean
   /**
    * The command as a user types it, after `prefix`: `usage('!')` gives `!ban <target> [duration] [reason…]`.
@@ -305,7 +305,7 @@ export class HandlerRegistry {
   private messageRoutes?: MessageRoute[]
 
   /**
-   * @param classes - The controllers and services to read handlers from. The factory fills the list
+   * @param classes - The app's classes to read handlers from. The factory fills the list
    *   once the app is bound; entries are read on the first {@link list}.
    * @param messages - The app's `messages` options, whose `caseSensitive` message entries' `matches` follows.
    * @param translator - The app's translator, read when {@link messageHelp} words its labels; none for English.
@@ -320,7 +320,7 @@ export class HandlerRegistry {
    * Lists the registered handlers.
    *
    * @param filter - Narrows the list by kind, controller, or both.
-   * @returns The handlers, in the order their controllers and services were bound.
+   * @returns The handlers, class by class in the order the app makes its classes, each after what it injects.
    */
   list<K extends HandlerKind = HandlerKind>(filter: HandlerFilter<K> = {}): Extract<HandlerEntry, { kind: K }>[] {
     this.entries ??= this.collect()
@@ -334,11 +334,11 @@ export class HandlerRegistry {
   /**
    * Works out what the built-in help would answer a message, for a help command of your own.
    *
-   * It lists the message commands the author can use where the message was sent, or describes the one `query`
+   * It lists the message commands that work where the message was sent, or describes the one `query`
    * names, with the same rules the built-in follows: hidden and guarded handlers are left out of lists, and shown
    * when named. It works whether `messages.help` is on or off.
    *
-   * @param message - The message asking for help; its start, author and place decide what is listed.
+   * @param message - The message asking for help; its start and where it was sent decide what is listed.
    * @param query - The command asked about, such as `ban` or `config set`; leave it out to list them all.
    * @returns The help, as the presenter's `messageHelp` receives it.
    *

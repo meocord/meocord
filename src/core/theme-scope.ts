@@ -97,7 +97,7 @@ export function setLegacyThemeLayer(layer: ThemeOverride | undefined): void {
   legacyVersion++
 }
 
-// The theme outside any call: the app the process runs, once it has started
+// The theme outside any call: the one of the app or testing module that claimed it, until it gives it up
 let ambient: { owner: object; theme: () => ResolvedTheme } | undefined
 let ambientVersion = 0
 
@@ -123,7 +123,7 @@ export function claimAmbientTheme(owner: object, theme: () => ResolvedTheme): bo
   return true
 }
 
-/** Gives up the theme read outside a call, when `owner` has it: its start failed, or it has stopped. */
+/** Gives up the theme read outside a call, when `owner` has it: its start failed, or its shutdown has begun. */
 export function releaseAmbientTheme(owner: object): void {
   if (ambient?.owner !== owner) return
   ambient = undefined
@@ -175,13 +175,14 @@ export function themeForInteraction(interaction: object): ResolvedTheme | Promis
  * The theme of the running call, with every role present.
  *
  * Read it wherever a call runs: in a handler, in a service or presenter it calls, and in work it starts, such as a
- * timer's follow-up. Outside a call, it is the theme of the app the process runs, or MeoCord's defaults before an app
- * has started; it never throws.
+ * timer's follow-up. Outside a call, it is the theme of the app the process runs, from when its start begins until the
+ * start fails or its shutdown begins, and MeoCord's defaults otherwise; it never throws.
  *
  * @remarks
  * The theme is MeoCord's defaults, then the app's theme, then each `@UseTheme` from the controller's base class down
- * to the handler, then `@MeoCord`'s `themeFor`: the server's theme, then the user's, each over the layers before it.
- * It reads the call through `AsyncLocalStorage`, and it is frozen: it is shared by every call it applies to.
+ * to the handler (as far up as `inheritStages` lets a class inherit), then `@MeoCord`'s `themeFor`: the server's theme,
+ * then the user's, each over the layers before it. It reads the call through `AsyncLocalStorage`, and its objects and
+ * arrays are frozen, since it is shared by every call it applies to; a class instance or a `Map` in it is not.
  *
  * @returns The resolved theme, with every role present.
  *

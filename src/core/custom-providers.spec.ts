@@ -120,7 +120,7 @@ describe('@MeoCord({ providers })', () => {
     expect(container.get(Storage)).toBe(container.get(Notes).storage)
   })
 
-  it('binds a provided class once, whichever provider in the list injects it first', async () => {
+  it('binds a provided class once, in whichever order the providers are listed', async () => {
     for (const order of ['dependent first', 'dependency first'] as const) {
       const loaded = await load()
 

@@ -111,7 +111,7 @@ describe('app.stop()', () => {
     expect(destroy).toHaveBeenCalledTimes(1)
   })
 
-  it('ends a login under way, so start() rejects, and the bot never comes online', async () => {
+  it('ends a login under way, so start() rejects without exiting', async () => {
     const { release } = login('held')
     const app = MeoCordFactory.create(App)
 

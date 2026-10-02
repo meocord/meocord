@@ -109,7 +109,7 @@ describe('collectCommands', () => {
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('"broken" (description is required)'))
   })
 
-  // Entry point commands have no builder class, so their builder returns the REST body itself.
+  // discord.js has no builder class for entry point commands, so their builder returns the REST body itself.
   it('collects an entry point command from a raw REST body', () => {
     const body = {
       type: ApplicationCommandType.PrimaryEntryPoint as const,
@@ -468,7 +468,6 @@ describe('registerCommands', () => {
       expect(rest.get.mock.calls.map(([route]) => route).sort()).toEqual(['/applications/app/commands', '/applications/app/guilds/dev/commands'])
     })
 
-    // The default scope is sent even when empty, so a configuration naming no guild leaves nothing else to check
     // Everything goes to the development guild then, so a command's own guilds are scopes not sent to
     it("checks a command's own guilds while everything goes to the development guild", async () => {
       const rest = createRest({ '/applications/app/guilds/staff/commands': [{ name: 'ban' }] })
@@ -478,6 +477,7 @@ describe('registerCommands', () => {
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('still registered to guild staff (ban)'))
     })
 
+    // The default scope is sent even when empty, so a configuration naming no guild leaves nothing else to check
     it('checks no scope when the configuration names no guild', async () => {
       const rest = createRest()
       await register({ rest, config: {}, controllerClasses: [controllerWith([{ name: 'ping', guilds: ['staff'] }])] }).run
@@ -717,7 +717,7 @@ describe('registerCommands', () => {
   })
 })
 
-/** A controller whose command \`name\` is built from \`body\`, as a REST body the builder returns. */
+/** A controller whose command `name` is built from `body`, through a builder whose `toJSON` returns it. */
 function controllerBuilding(entries: { name: string; body: object; method?: string }[]) {
   @Controller()
   class BuiltController {}

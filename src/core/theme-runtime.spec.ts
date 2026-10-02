@@ -448,7 +448,7 @@ describe('a theme that is not valid', () => {
 })
 
 describe('the layer the deprecated Theme statics write', () => {
-  it('goes beneath the app\'s theme, and every app sees it at once', async () => {
+  it('goes beneath the app\'s theme, and a running app sees it at once', async () => {
     @Controller()
     class Plain {
       @Command('plain', CommandType.BUTTON)

@@ -19,11 +19,10 @@ const entriesOf = (map: unknown): [string, unknown][] =>
   typeof map === 'object' && map !== null ? Object.entries(map as Record<string, unknown>) : []
 
 /**
- * What Discord would reject in a command's localised names and descriptions, checked before sending
- * so the error names the field instead of arriving as an opaque 50035. The command's own names and
- * descriptions are left to discord.js's builders and to Discord.
+ * What Discord would reject in a command's localised names and descriptions, so the error names the field instead of
+ * an opaque 50035; the command's own names and descriptions are left to discord.js and Discord.
  *
- * @returns One line per problem, such as `"ban" description_localizations.ja: 104 characters (limit 100)`.
+ * @returns One line per problem, such as `"ban" description_localizations.ja: 104 characters (1 to 100)`.
  */
 export function localizationProblems(commandName: string, body: LocalizedNode): string[] {
   const problems: string[] = []

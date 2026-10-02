@@ -15,7 +15,7 @@ describe('fatalLoginCode', () => {
     expect(fatalLoginCode(new Error('Used invalid intents'))).toBe('InvalidIntents')
   })
 
-  it('reads nothing fatal from an error a restart can fix, or from no error', () => {
+  it('reads nothing fatal from an error it does not know as fatal, or from anything not an Error', () => {
     expect(fatalLoginCode(new Error('getaddrinfo ENOTFOUND discord.com'))).toBeUndefined()
     expect(fatalLoginCode(Object.assign(new Error('x'), { code: 'TokenMissing' }))).toBeUndefined()
     expect(fatalLoginCode(undefined)).toBeUndefined()

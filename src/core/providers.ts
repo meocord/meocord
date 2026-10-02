@@ -32,8 +32,9 @@ const isToken = (value: unknown): value is ProviderToken =>
   typeof value === 'function' || typeof value === 'string' || typeof value === 'symbol'
 
 /**
- * Checks each provider's shape and indexes them by token, throwing on the first that cannot be bound:
- * no token, not exactly one of `useValue`, `useClass` and `useFactory`, or a token provided twice.
+ * Checks each provider's shape and indexes them by token, throwing on the first that cannot be bound, such as one with
+ * no token, not exactly one of `useValue`, `useClass` and `useFactory`, one that injects `ExecutionContext`, or a
+ * token provided twice.
  */
 export function providerMap(providers: readonly Provider[], where: string): ProviderMap {
   const map: ProviderMap = new Map()
@@ -245,7 +246,7 @@ export interface GraphOptions {
 /**
  * What must exist before `token`: a factory's `inject`, a provided or bound class's constructor
  * dependencies, nothing for a value. Only the app's classes and provided tokens count; a token MeoCord binds itself
- * counts as the app's class it stands for, if any.
+ * counts as the app's class it stands for, if any, when `followOwnTokens`, and as nothing otherwise.
  */
 export function tokenDependencies(
   container: Container,

@@ -537,7 +537,7 @@ describe('ShardManager', () => {
     })
   })
 
-  // `meocord start --dev` ends its watch session on this: a code change cannot fix a login Discord refused
+  // `meocord start --dev` is told of a failed login, which it reports as it waits for a change to the code or `.env`
   describe('under meocord start --dev', () => {
     const originalSend = process.send
     const order: unknown[] = []
