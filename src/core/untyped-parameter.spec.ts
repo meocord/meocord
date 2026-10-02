@@ -125,3 +125,78 @@ describe('a constructor parameter with no runtime type', () => {
     )
   })
 })
+
+describe('a class with no decorator', () => {
+  const undecorated = (cls: string) =>
+    `${cls}: its constructor takes parameters, but ${cls} has no decorator, so TypeScript recorded none of their types ` +
+    'and it cannot be created. Decorate it with @Service().'
+
+  @Service()
+  class Clock {
+    now() {
+      return 1
+    }
+  }
+
+  // As TypeScript leaves a class with no decorator: no record of its constructor's types
+  class Reminders {
+    constructor(readonly clock: Clock) {}
+  }
+
+  @Service()
+  class Base {
+    constructor(readonly clock: Clock) {}
+  }
+
+  it.each([
+    ['MeoCordFactory.create', (services: any[]) => MeoCordFactory.create(appWith({ services }))],
+    ['the testing module', (services: any[]) => MeoCordTestingModule.fromApp(appWith({ services })).compile()],
+  ])('is refused by %s when its constructor injects, naming it and the decorator to add', (_where, create) => {
+    expect(() => create([Reminders])).toThrow(new Error(undecorated('Reminders')))
+  })
+
+  it('is refused when it has a constructor of its own over a decorated base, whose types it does not share', () => {
+    class Later extends Base {
+      constructor(
+        clock: Clock,
+        readonly delay: Clock,
+      ) {
+        super(clock)
+      }
+    }
+    expect(() => MeoCordFactory.create(appWith({ services: [Later] }))).toThrow(new Error(undecorated('Later')))
+  })
+
+  it.each([
+    [
+      'a parameter with a default value, which its constructor does not count',
+      class Defaults {
+        constructor(readonly clock = new Clock()) {}
+      },
+    ],
+    [
+      'a rest parameter',
+      class Rest {
+        readonly clocks: Clock[]
+        constructor(...clocks: Clock[]) {
+          this.clocks = clocks
+        }
+      },
+    ],
+    ['no constructor of its own over a decorated base, whose types it takes', class Inherits extends Base {}],
+  ] as [string, new (...args: any[]) => object][])('is created as before with %s', (_case, cls) => {
+    const module = MeoCordTestingModule.fromApp(appWith({ services: [cls] })).compile()
+    expect(module.get(cls)).toBeInstanceOf(cls)
+    expect(() => MeoCordFactory.create(appWith({ services: [cls] }))).not.toThrow()
+  })
+
+  it('leaves a decorated class as it was, its types recorded', () => {
+    @Service()
+    class Decorated {
+      constructor(readonly clock: Clock) {}
+    }
+    const module = MeoCordTestingModule.fromApp(appWith({ services: [Decorated, Base] })).compile()
+    expect(module.get(Decorated).clock).toBe(module.get(Clock))
+    expect(module.get(Base).clock).toBe(module.get(Clock))
+  })
+})

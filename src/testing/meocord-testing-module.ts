@@ -64,6 +64,7 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
+import { meocordClasses } from '@src/core/meocord-classes.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
@@ -991,7 +992,7 @@ export class TestingModuleBuilder {
       ...(this.options.observers ?? []),
     ]
     const reachable = reachableClasses(roots, providers)
-    assertTypedParameters(reachable)
+    assertTypedParameters(reachable, meocordClasses())
     // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
     const needClient = reachable.filter(cls => injectedTokens(cls).includes(Client))
     if (needClient.length > 0 && !providers.has(Client)) {
