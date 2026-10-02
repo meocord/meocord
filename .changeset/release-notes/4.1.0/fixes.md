@@ -1,52 +1,51 @@
 ### Fixes to 4.0 behaviour
 
 - **Running the bot**
-  - Calling `app.start()` again after a failed login no longer attaches every handler a second time, which ran each command, message and reaction twice.
-  - A bot started without the CLI, as with `node dist/main.js`, has the values `meocord.config.ts` loads from `.env` before its modules run, so an option such as `@MeoCord({ activities: [{ name: process.env.STATUS! }] })` reads them. Rebuild to pick this up.
-  - A privileged intent Discord refuses at login, and a token Discord refuses or an empty one, are each explained in one line: the intents the bot asks for and where to enable them, or where to get a new token.
-  - A command builder that can't be built is named, with its command, in the error that stops registration, where 4.0 logged only discord.js's error. As in 4.0, no command is sent until it is fixed.
-  - A slash command builder given on a subcommand path, as `@Command('settings notify email', SettingsCommandBuilder)`, is named as the handler loads, with the advice to give it to `@Command('settings')`, where 4.0 failed with discord.js's "Invalid string format". One that names its command itself keeps working, with a warning at startup.
-  - A process adds one SIGINT and one SIGTERM listener however many apps it creates, so a test suite that creates many apps no longer triggers Node's `MaxListenersExceededWarning`.
-  - A SIGINT or SIGTERM while the bot is still logging in stops it at once, with "Bot has shut down", where 4.0 did nothing until a second one forced exit 1.
-  - A built config that is missing or fails to load is reported once, naming the file, the reason and what to do, where 4.0 printed its error up to three times.
-  - A reaction in a DM the bot hasn't cached since it started reaches its handlers again; from discord.js 14.26.2, it was dropped before any listener saw it.
+  - Retrying `app.start()` after a failed login no longer attaches every handler twice.
+  - `node dist/main.js` has the config's `.env` values before the app's modules run. Rebuild.
+  - A refused privileged intent, or a refused or empty token, is explained in one line with where to fix it.
+  - A builder that can't be built is named with its command in the registration error.
+  - A builder on a subcommand path is named with the fix, not "Invalid string format"; one naming its own command still works, with a warning.
+  - One SIGINT and SIGTERM listener per process: many apps no longer trigger `MaxListenersExceededWarning`.
+  - A signal during login stops the bot at once, with "Bot has shut down".
+  - A missing or broken built config is reported once, with the file, reason and fix.
+  - Reactions in uncached DMs reach their handlers again on discord.js 14.26.2 and later.
 - **Routing and dispatch**
-  - A button, select menu or modal that a discord.js collector answers is no longer answered "Command not found!" first.
-  - A user and a message context menu with the same name, which Discord allows, each reach their own handler, where the first declared took both.
-  - The warning about two component patterns that can match the same customId is given as the bot starts, rather than at the first click.
-  - A controller that extends another no longer adds its handlers to the base class, which then routed to handlers it doesn't have.
+  - A click a discord.js collector answers no longer gets "Command not found!".
+  - A user and a message context menu of one name each reach their own handler.
+  - Overlapping component patterns are warned about at startup, not the first click.
+  - A subclass controller no longer adds its handlers to its base class.
 - **Dependency injection**
-  - A controller, service or guard that extends another decorated class gets its own constructor's dependencies, where a subclass with its own constructor failed to resolve.
-  - A controller or service that injects with `@inject(Token)` on a parameter typed as an interface is created, where 4.0 bound `Object` in place of the token and failed with "missing metadata on type Object".
-  - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
-  - A constructor parameter with no runtime type, as when two classes import each other or it's typed with an interface or `import type`, is refused as the app is created, naming the class and the parameter, rather than with inversify's error about `emitDecoratorMetadata`.
-  - A guard listed in `@MeoCord({ services })` or `providers`, or injected into a service, reads each call's own `params`; one that takes a param through a setter, or seals its instance, still shares them, and the bot warns once.
+  - A subclass with its own constructor gets its own dependencies.
+  - `@inject(Token)` on an interface-typed parameter works, not "missing metadata on type Object".
+  - An injection cycle is refused naming it, not "Circular dependency found: (No dependency trace)".
+  - A parameter with no runtime type is refused naming the class and parameter, not inversify's `emitDecoratorMetadata` error.
+  - A guard in `services` or `providers`, or injected into a service, reads each call's own `params`; one with a setter param or a sealed instance shares them, with a warning.
 - **Handler types**
-  - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
-  - `applyDecorators` passes on the method or class a decorator returns in place of the one it was given, as a wrapping decorator does, where 4.0 dropped it and kept the original.
+  - A handler may return a value or take fewer parameters, not "Unable to resolve signature of method decorator".
+  - `applyDecorators` passes on what a wrapping decorator returns.
 - **Builds**
-  - A production build keeps every class's own name. When two modules declared a class of one name, one was renamed, such as `Shop` to `shop_controller_Shop`, in errors and logs and wherever the code read its `name`.
-  - Every imported file lands in `dist/assets` under its own name, as images, fonts and media already did, except an imported WebAssembly module, which takes a content hash.
-  - On Windows, `new URL('./file', import.meta.url)` for a file the build bundles gives a `file:` URL. 4.0 built it on the dist folder's disk path, which a URL reads as the scheme `c:`, so `fileURLToPath` refused it with `ERR_INVALID_URL_SCHEME`. Rebuild to pick this up.
-  - A `tsconfig.json` that uses `extends`, `files`, `typeRoots`, comments, or `paths` under a `baseUrl` builds as TypeScript reads it, and `meocord build` no longer rewrites the file. Builds that run at the same time no longer read each other's copy of it.
-  - A self-contained build runs under Bun, packs each package with the dependency versions it was installed with, and what a package npm nested under another needs, and in a pnpm project packs the packages an external depends on and a native package's per-platform binary. 4.0 gave every package the first version it copied, and could fail with "Cannot find module". Rebuild to pick this up.
+  - Production builds keep class names, where a clash renamed `Shop` to `shop_controller_Shop`.
+  - Imported files land in `dist/assets` under their own names; a WebAssembly module takes a content hash.
+  - On Windows, `new URL('./file', import.meta.url)` gives a `file:` URL, not a `c:` path `fileURLToPath` refused with `ERR_INVALID_URL_SCHEME`. Rebuild.
+  - A `tsconfig.json` with `extends`, `files`, `typeRoots`, comments or `baseUrl` paths builds as TypeScript reads it, is never rewritten, and concurrent builds no longer clash.
+  - Self-contained builds run under Bun and pack each package's installed dependency versions, npm-nested and pnpm-store dependencies, and per-platform binaries, fixing "Cannot find module". Rebuild.
 - **The CLI**
-  - `meocord start` passes SIGINT and SIGTERM on to the bot, as Docker, pm2 and systemd send them to the CLI alone, so the bot shuts down cleanly rather than being left running.
-  - `meocord start --dev` runs one bot at a time, restarts it through its own shutdown on Windows too, where it was killed outright, and starts it again on the next rebuild after it exited on its own, where it stayed stopped. It keeps the bot running when a save doesn't compile, or when a saved `meocord.config.ts`'s `rsbuild` hook throws, where it ended the session and left the bot running in the background.
-  - `meocord start --dev --build` builds once, where it built twice, and `meocord start --dev` exits 1 when watch mode can't start, as `build` does.
-  - `meocord create` keeps the app when git can't make its first commit, leaves the app to the Git repository it is created in, where 4.0 made a repository within it, and writes any app name into `meocord.config.ts` as a valid string. A name with no letters or digits is refused, where 4.0 reported `Directory "" already exists`.
-  - An app `meocord create` makes passes its own `lint` and `test` on pnpm, installs on pnpm 11 and later and on npm 11.16 and later without warnings, and `create` warns on Node.js 22.0 to 22.12, below the version the package requires.
-  - `meocord generate` works on Windows in npm, Yarn and pnpm projects, writes files that pass the app's lint as written, formats them with one ESLint run, and refuses a name that would write outside `src/`. On Windows, `\` separates folders in a name.
-  - `meocord build` and `start --prod` no longer clear the screen, `start --dev` clears it only in a terminal and keeps the scrollback, and no command writes screen-clearing codes into piped output, such as CI logs or `docker logs`.
-  - `meocord --help` no longer prints "No available choices." for an argument that has none.
-  - The CLI runs in a project at the filesystem root, as with `WORKDIR /` in a container, where it stopped with "Cannot locate the "MeoCord" package directory".
-  - `require('meocord/package.json')` resolves, for a tool that reads the installed version.
-  - `meocord/eslint` ignores `coverage/`.
+  - `meocord start` forwards SIGINT and SIGTERM, so Docker, pm2 and systemd stop the bot cleanly.
+  - `start --dev` runs one bot at a time, restarts it through its own shutdown on Windows and after it exits on its own, and keeps it running when a save doesn't compile or an `rsbuild` hook throws.
+  - `start --dev --build` builds once, and `start --dev` exits 1 when watching can't start.
+  - `create` keeps the app when git can't commit, joins an enclosing Git repository, quotes any app name, and refuses a name with no letters, not `Directory "" already exists`.
+  - A created app passes `lint` and `test` on pnpm and installs on pnpm 11+ and npm 11.16+ without warnings; `create` warns on Node.js 22.0 to 22.12.
+  - `generate` works on Windows, writes lint-clean files formatted in one ESLint run, and refuses a name outside `src/`, with `\` separating folders on Windows.
+  - `build` and `start --prod` don't clear the screen, `start --dev` keeps scrollback, and no command writes screen-clearing codes into piped output.
+  - `--help` no longer prints "No available choices.".
+  - The CLI runs at the filesystem root, not "Cannot locate the "MeoCord" package directory".
+  - `require('meocord/package.json')` resolves, and `meocord/eslint` ignores `coverage/`.
 - **Logging**
-  - `Logger` prints a value of any type, where a `Symbol` made it throw, and colours a line only where its own stream is a terminal, so `2>>errors.log` gets no colour codes.
-  - Log lines quote what a user sent, such as a message's text or a reaction's emoji, escaping line breaks and control characters, and shorten a long message's text, with its length.
-  - The CLI and tests no longer read the app's name, or its `.env`, from a `dist` an earlier build left.
+  - `Logger` prints any value, a `Symbol` included, and colours a line only when its own stream is a terminal.
+  - Log lines escape what a user sent, and shorten long message text, with its length.
+  - The CLI and tests no longer read the app's name or `.env` from a stale `dist`.
 - **Testing**
-  - Mocks answer where 4.0's returned a stub: an interaction has an `'en-US'` locale and a `createdTimestamp` and `createdAt`, `inGuild()` answers from its `guildId`, and a method that returns a promise in discord.js resolves. Nothing changes in a bot.
-  - A mock interaction made without a `client` gets one from `createMockClient`, with its user and channel cached, and `getAttachment()` returns the `Attachment` given, or `null`, where 4.0 returned stubs.
-  - `createMockChannel` takes `ThreadChannel`, stubs `threads.create` on text, announcement, forum and media channels, and gives a subclass the managers of the channel class it extends.
+  - Mocks have an `'en-US'` locale, `createdTimestamp` and `createdAt`, a working `inGuild()` and resolving promise methods.
+  - A mock interaction without a `client` gets one from `createMockClient`, and `getAttachment()` returns the `Attachment` given, or `null`.
+  - `createMockChannel` takes `ThreadChannel`, stubs `threads.create` on text, announcement, forum and media channels, and gives a subclass its base's managers.
