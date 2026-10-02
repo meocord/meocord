@@ -111,8 +111,8 @@ export abstract class CooldownStore {
   abstract consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict>
 
   /**
-   * Records a call against every entry: all of a handler's stacked cooldowns, in one step. `@Cooldown`
-   * calls this, once per call.
+   * Records a call against every entry: all of a handler's stacked cooldowns. `@Cooldown` calls this, once per
+   * call.
    *
    * This default calls {@link consume} for each entry in order and stops at the first that refuses, so
    * the entries before it have counted the call. Override it to check every entry and record the call
@@ -164,15 +164,8 @@ export function longestRefusal(verdicts: readonly CooldownVerdict[]): CooldownBa
 const SWEEP_INTERVAL_MS = 60_000
 
 /**
- * The default `CooldownStore`: call times per key, in this process's memory. Checking and recording
- * run with nothing awaited between them, so concurrent calls cannot both take the last use.
- *
- * With process sharding each shard has its own, so `per: 'user'` and `'global'` cooldowns count per
- * shard; bind a shared store for those.
- */
-/**
- * A key's call times, oldest first. Those from `head` on are in the window; those before it have left, and
- * are dropped from the array once they outnumber the rest, so trimming a call costs O(1) amortised.
+ * A key's call times, oldest first. Those from `head` on are in the window; those before it have left, and are
+ * dropped from the array once more than 32 have and they outnumber the rest, so trimming a call costs O(1) amortised.
  */
 interface CallTimes {
   times: number[]
@@ -276,7 +269,12 @@ export class MemoryCooldownStore extends CooldownStore {
     return { allowed, retryAfterMs }
   }
 
-  /** Checks every entry, and records the call against all of them only if all allow it. */
+  /**
+   * Checks every entry, and records the call against all of them only if all allow it.
+   *
+   * @param entries - The keys and limits the call counts against, in the order the cooldowns are declared.
+   * @returns Whether the call was recorded, and if not, how long until it can be and which entry refused it.
+   */
   consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
     const now = Date.now()
     const counts = this.check(entries, now)
@@ -300,7 +298,12 @@ export class MemoryCooldownStore extends CooldownStore {
     return Promise.resolve(verdict)
   }
 
-  /** Checks every entry as consumeMany does, recording nothing, and holding nothing for a key not yet counted. */
+  /**
+   * Checks every entry as consumeMany does, recording nothing, and holding nothing for a key not yet counted.
+   *
+   * @param entries - The keys and limits the call would count against.
+   * @returns Whether the call would be allowed now, and if not, how long until it would be and which entry refuses it.
+   */
   peekMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
     const verdicts = entries.map(({ key, limit }) => {
       const entry = this.calls.get(key)
@@ -324,7 +327,11 @@ export class MemoryCooldownStore extends CooldownStore {
     return this.calls.size
   }
 
-  /** Drops every key whose calls have all left their window. */
+  /**
+   * Drops every key whose calls have all left their window. It runs once a minute from the store's first call.
+   *
+   * @param now - The time to measure the windows from, the current time by default.
+   */
   sweep(now = Date.now()): void {
     for (const [key, entry] of this.calls) {
       const newest = entry.times[entry.times.length - 1]

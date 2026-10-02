@@ -129,7 +129,7 @@ export interface ResponseErrorOptions {
 export interface ResponseLockOptions {
   /**
    * Which controls to disable: every control on the message (`'all'`, the default), only the one the
-   * user used (`'clicked'`), or none, which also skips the loading view (`'none'`).
+   * user used (`'clicked'`), or none (`'none'`), which leaves the message as it is, with no loading view.
    */
   disable?: 'all' | 'clicked' | 'none'
 }
@@ -234,7 +234,7 @@ function editedSince(stamp: number | null | undefined, ours: number | undefined)
 interface MessageLock {
   /** The message with no call holding it: before the first lock, then as the last settled call left it. */
   original: Snapshot
-  /** The message's own attachments when it was first locked, which every edit keeps by listing them. */
+  /** The message's own attachments when it was first locked, which an edit lists to keep them as a loading view's files come and go. */
   attachments: unknown[]
   /** Whether a loading view put files of its own on it, which putting it back has to leave out. */
   drawn?: boolean
@@ -329,7 +329,10 @@ export interface ResponseState {
   /** Where the answer stands, re-read from the interaction so answers made around this state count. */
   readonly state: ResponsePhase
 
-  /** The message this state last sent or edited, or the message a component is on. Read-only: edit through the state. */
+  /**
+   * The message this state last replied with, updated or edited, never a follow-up, or the message a component is on.
+   * Read-only: edit through the state.
+   */
   readonly message: Message | undefined
 
   /** The components and embeds of the message before `@Defer` locked it; `undefined` until then. */
@@ -348,7 +351,7 @@ export interface ResponseState {
   /**
    * Locks the message a component is on, as `@Defer`'s second step does: snapshots its components
    * and embeds, disables its controls, shows the loading emoji on the clicked button, and adds the
-   * presenter's loading view. Commands have no message to lock. Does nothing once locked.
+   * presenter's loading view. Commands have no message to lock. Does nothing once locked, or with `disable: 'none'`.
    *
    * The loading view is left out when it would pass 10 embeds or the Components V2 component limit;
    * the lock still applies. A loading view left behind by a crash or restart is dropped first.
@@ -417,7 +420,8 @@ export interface ResponseState {
    * - A command whose reply is deferred: `'reply'` edits that reply into the error; `'private'` edits a
    *   private deferral into it, and deletes a public one, then follows up privately.
    * - A component on a private (ephemeral) message: the error is added to that message, where it fits.
-   * - Otherwise: a private follow-up, never an edit of the message the user clicked.
+   * - Otherwise: a private follow-up. The message the user clicked is never edited into the error, only put back as
+   *   it was before a lock.
    *
    * A `UserError` shows its own message, privately, unless `options` say otherwise.
    *

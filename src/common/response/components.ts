@@ -29,8 +29,8 @@ function children(node: Json): Json[] | undefined {
 }
 
 /**
- * The components with their controls disabled — buttons, section accessories and the five select
- * menus — and the clicked button showing the loading emoji. Every other node is kept as it was.
+ * The components with their controls disabled, every one or only the clicked one as `options.disable` says: buttons,
+ * section accessories and the five select menus. The clicked button shows the loading emoji; every other node is kept.
  */
 export function lockComponents(components: readonly Json[], options: LockOptions): Json[] {
   const parsed = options.loadingEmoji ? parseEmoji(options.loadingEmoji) : null
@@ -62,7 +62,7 @@ export function countComponents(components: readonly Json[]): number {
   }, 0)
 }
 
-/** The components without a loading container MeoCord rendered, left behind by a crash or restart. */
+/** The components without the containers MeoCord rendered, such as a loading view left behind by a crash or restart. */
 export function withoutRenderedViews(components: readonly Json[]): Json[] {
   return components.filter(node => !(node.type === ComponentType.Container && node.id === RENDERED_CONTAINER_ID))
 }

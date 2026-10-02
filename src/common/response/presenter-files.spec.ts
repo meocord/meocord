@@ -150,7 +150,7 @@ describe('a presenter that draws its view asynchronously', () => {
     expect(names(sent(interaction.editReply))).toEqual(['card.png'])
   })
 
-  it('draws the loading view after the lock acknowledges the click', async () => {
+  it('acknowledges the click and edits in the loading view the presenter drew', async () => {
     const interaction = button(presenting(() => [card()], { drawn: true }))
 
     await respond(interaction).lock()
@@ -520,7 +520,7 @@ describe("an interaction presenter's view that fails", () => {
     }],
     ['rejects', () => Promise.reject(new Error('canvas broke'))],
     ['returns a colour that is no colour', () => ({ text: 'hi', color: 'notacolor' }) as unknown as ResponseView],
-  ])("locks with MeoCord's own loading view when the presenter's %s, warning with its name", async (_case, fail) => {
+  ])("locks with MeoCord's own loading view when the presenter's %s, with a warning", async (_case, fail) => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     const interaction = button(failing(fail))
 

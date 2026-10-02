@@ -112,7 +112,7 @@ describe("a view's image and thumbnail", () => {
     })
   })
 
-  it('leave the first image to the embed image when the thumbnail takes another', () => {
+  it('give the embed image the first image file the thumbnail does not take', () => {
     expect(renderEmbed({ text: 't', files, thumbnail: 'card.png' })).toMatchObject({
       image: { url: 'attachment://badge.png' },
       thumbnail: { url: 'attachment://card.png' },

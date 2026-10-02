@@ -51,16 +51,9 @@ export interface RedisCooldownStoreOptions {
 }
 
 /**
- * One call against every cooldown it counts against, checked and recorded as one step on the server. A
- * sorted set per key holds the time of each call in the window: calls that have left it are trimmed and the
- * rest counted, and only when every key allows the call is it added to all of them, each key set to expire
- * when its window would be empty. Time is the server's, so every process counts by one clock, and each
- * member is the call's nonce, so calls in the same microsecond stay apart and a call can be released. A refusal reports the longest wait
- * among the keys that refused, and which key that is.
- *
- * KEYS the keys; ARGV[1] a nonce for this call, then uses and windowMs for each key in turn.
- * Replies {1, 0, -1} when allowed, {0, retryAfterMs, index, retryTimestamp} when refused: the refusing key's
- * oldest call in the window, by the server's clock, plus its window.
+ * Checks and records one call against every key in one step, by the server's clock: a sorted set of call nonces
+ * scored by time per key, each set to expire when its window empties. KEYS the keys; ARGV[1] the nonce, then uses and
+ * windowMs per key. Replies {1, 0, -1} allowed, or {0, retryAfterMs, index, retryTimestamp} for the longest refusal.
  */
 const SCRIPT = `local time = redis.call('TIME')
 local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
@@ -91,9 +84,7 @@ return {1, 0, -1}
 `
 
 /**
- * The same check as SCRIPT, writing nothing: calls newer than the window are counted in place rather than
- * trimmed, and a key at its limit reports the wait until its oldest call in the window leaves it.
- *
+ * The same check as SCRIPT, writing nothing: calls in the window are counted, and those that have left it stay.
  * KEYS the keys; ARGV uses and windowMs for each key in turn. Replies as SCRIPT does.
  */
 const PEEK_SCRIPT = `local time = redis.call('TIME')
@@ -172,6 +163,9 @@ export class RedisCooldownStore extends CooldownStore {
   /**
    * A store that runs its script through `evaluate`. To bind one to an app, use
    * {@link RedisCooldownStore.using}, which `@MeoCord({ cooldownStore })` takes.
+   *
+   * @param evaluate - Runs a script, as the client's `EVAL`.
+   * @param options - A key prefix, an `EVALSHA` runner, and `hashTag` for Redis Cluster.
    */
   constructor(
     private readonly evaluate: RedisEval,
@@ -185,7 +179,8 @@ export class RedisCooldownStore extends CooldownStore {
    * A store class for `@MeoCord({ cooldownStore })` that runs its script with your client.
    *
    * @param evaluate - Runs a script, as the client's `EVAL`.
-   * @param options - A key prefix, and an `EVALSHA` runner to send the script only when the server lacks it.
+   * @param options - A key prefix, an `EVALSHA` runner to send the script only when the server lacks it, and `hashTag`
+   *   to keep a handler's keys in one Redis Cluster slot.
    * @returns A class the app resolves like a service, with nothing to inject.
    *
    * @example
@@ -227,8 +222,8 @@ export class RedisCooldownStore extends CooldownStore {
    * Records a call against every entry if all allow it, as one script: one round trip, however many
    * cooldowns a handler stacks. On Redis Cluster, where a handler's keys sit in different slots and one
    * script cannot reach them all, each key is counted by a script of its own, in order, and a refusal gives
-   * back the uses counted before it, so the call still counts against all or none; `hashTag: 'handler'` keeps
-   * the keys in one slot, in one round trip.
+   * back the uses counted before it, so a refused call counts against none unless a give-back fails;
+   * `hashTag: 'handler'` keeps the keys in one slot, in one round trip.
    *
    * @param entries - The keys and limits the call counts against.
    * @returns Whether the call was recorded, and if not, how long until it can be and which entry refused it.
@@ -314,7 +309,7 @@ function handlerTagged(key: string): string {
 
 const messageOf = (error: unknown): string => String((error as Error | undefined)?.message ?? error)
 
-/** The script's `{allowed, retryAfterMs, index}` reply, as a verdict. */
+/** The script's `{allowed, retryAfterMs, index, retryTimestamp?}` reply, as a verdict. */
 function verdictOf(reply: unknown, count: number): CooldownBatchVerdict {
   const [allowed, retryAfterMs, blocked, retryTimestamp] = Array.isArray(reply) ? reply.map(Number) : []
   const valid =

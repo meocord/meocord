@@ -19,7 +19,7 @@ describe('SetMetadata', () => {
     },
   )
 
-  // Written above @UseGuard, it once replaced the guard list dispatch reads, so the guard never ran.
+  // Written above @UseGuard, a value under 'guards' would replace the list dispatch reads, so the guard would never run
   it('cannot empty the guards a handler runs', () => {
     @Guard()
     class Deny implements GuardInterface {

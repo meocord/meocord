@@ -24,7 +24,7 @@ let rejectedEnv: string | undefined
  */
 export function logThreshold(): number {
   if (threshold === undefined) {
-    // The config first: loading it runs its `import 'dotenv/config'`, which may set the variable
+    // The config first: loading it runs its dotenv call, which may set the variable
     const configured = isBuiltApplication() ? loadMeoCordConfig()?.logLevel : undefined
     const raw = process.env[LOG_LEVEL_ENV]
     // An environment variable is often written in capitals, DEBUG for debug

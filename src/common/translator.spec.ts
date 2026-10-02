@@ -95,10 +95,20 @@ describe('plurals', () => {
     expect(ru('warnings', { count: 5 })).toBe('5 предупреждений')
   })
 
-  // Indonesian has only `other`, so every count reads the same.
-  it('falls back to `other` for a category the message lacks', () => {
+  // Indonesian's rules select only `other`, and English's select `other` for 0, so a `zero` form is not read
+  it('uses the form the locale’s rules select', () => {
     expect(t.locale('id')('warnings', { count: 1 })).toBe('1 peringatan')
     expect(t.default('apples', { count: 0 })).toBe('0 apples')
+  })
+
+  it('falls back to `other` for a category the message lacks', () => {
+    const items = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { items: { one: '{count} item', other: '{count} items' } }, ru: { items: { one: '{count} предмет', other: '{count} предметов' } } },
+    })
+
+    // Russian's rules select `few` for 3, which this message has no form for
+    expect(items.locale('ru')('items', { count: 3 })).toBe('3 предметов')
   })
 })
 

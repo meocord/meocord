@@ -3,8 +3,8 @@ import { type Token } from '@src/interface/provider.interface.js'
 /**
  * Creates a token to provide and inject a value by, typed with what it provides.
  *
- * Use one for a value that is not a class instance, such as a settings object, so `@Inject(TOKEN)` and
- * `TestingModule.get(TOKEN)` know its type. A class is its own token and needs none.
+ * Use one for a value that is not a class instance, such as a settings object, so `TestingModule.get(TOKEN)` and a
+ * provider's `useValue` or `useFactory` are checked against its type. A class is its own token and needs none.
  *
  * @remarks
  * A token is a symbol, so two tokens with the same description stay distinct, and its description names it in

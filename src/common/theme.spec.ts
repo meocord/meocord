@@ -83,7 +83,7 @@ describe('Theme, deprecated', () => {
     expect(read).toEqual(['#123456', '#00FF00'])
   })
 
-  it('recolours what respond() sends when assigned after the app has answered, as it did in 4.0', async () => {
+  it('recolours what respond() sends when assigned after the app has answered', async () => {
     @MeoCord({ controllers: [Answering], clientOptions: { intents: [] }, theme: { colors: { info: '#00FF00' } } })
     class App {}
     const module = MeoCordTestingModule.create({ app: App, controllers: [Answering] }).compile()

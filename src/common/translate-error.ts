@@ -39,8 +39,8 @@ export function errorText(error: unknown, translator: Translator<any> | undefine
  * or a `UserError`'s message is the app's and is returned as it is; any other error is the fallback's generic fault.
  *
  * @remarks
- * Each text comes from the translator's catalogs down the locale's chain, then MeoCord's English: see
- * {@link MeoCordMessages}. An interaction is answered in its user's locale; a message in its server's preferred
+ * Each text comes from the translator's catalogs down the locale's chain, with MeoCord's English last, or for an English
+ * request before a default in another language: see {@link MeoCordMessages}. An interaction is answered in its user's locale; a message in its server's preferred
  * locale, or, in a DM, the translator's default.
  *
  * @param error - What the call threw.

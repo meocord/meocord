@@ -46,7 +46,7 @@ const hiddenValues = new Set<string>()
 
 /**
  * Keeps `value`, such as the bot's credential, out of every line Logger prints from now on, whatever object, string
- * or error carries it: as given, trimmed, and without the `Bot ` or `Bearer ` prefix discord.js strips.
+ * or error carries it: trimmed, and without the `Bot ` or `Bearer ` prefix discord.js strips.
  */
 export function hideInLogs(value: string | undefined): void {
   if (typeof value !== 'string') return
@@ -74,13 +74,13 @@ const redact = (text: string): string => {
  * `meocord.config.ts`'s `logLevel`, or `MEOCORD_LOG_LEVEL` for one run, decides which print.
  *
  * @remarks
- * A string prints in the level's colour. Any other argument, a Symbol or a BigInt included, is printed as `console.log`
+ * A string prints in its tag's colour. Any other argument, a Symbol or a BigInt included, is printed as `console.log`
  * prints it, an object four levels deep: its non-enumerable properties stay unprinted, and an error prints its stack,
  * its own properties and its `cause`. The bot's credentials print as
  * `[redacted]` wherever they appear in a line. A line prints when its level is at or above the threshold: `debug`,
  * then `log` (with `info` and `verbose`, tagged `[INFO]` and `[VERBOSE]`), `warn`, `error`. Warnings and errors print
- * to stderr and the rest to stdout, each in colour only where its stream is a terminal, so none goes to a file or a log
- * collector, unless `FORCE_COLOR` asks for it.
+ * to stderr and the rest to stdout, each in colour only where its stream is a terminal, so no colour code goes to a file or
+ * a log collector, unless `FORCE_COLOR` asks for it.
  *
  * @example
  * ```ts
@@ -116,32 +116,56 @@ export class Logger {
     return LOG_LEVEL_RANK[level] >= threshold
   }
 
-  /** Prints a line at the `log` level. */
+  /**
+   * Prints a line at the `log` level.
+   *
+   * @param args - What to print, separated by spaces.
+   */
   log(...args: any[]): void {
     if (Logger.shows('log')) this.logWithContext('log', args)
   }
 
-  /** Prints a line tagged `[INFO]`, shown at the `log` level as `log` is. */
+  /**
+   * Prints a line tagged `[INFO]`, shown at the `log` level as `log` is.
+   *
+   * @param args - What to print, separated by spaces.
+   */
   info(...args: any[]): void {
     if (Logger.shows('log')) this.logWithContext('log', args, 'INFO')
   }
 
-  /** Prints a warning, shown unless the level is `error` or `silent`. */
+  /**
+   * Prints a warning, shown unless the level is `error` or `silent`.
+   *
+   * @param args - What to print, separated by spaces.
+   */
   warn(...args: any[]): void {
     if (Logger.shows('warn')) this.logWithContext('warn', args)
   }
 
-  /** Prints an error, shown unless the level is `silent`. */
+  /**
+   * Prints an error, shown unless the level is `silent`.
+   *
+   * @param args - What to print, separated by spaces.
+   */
   error(...args: any[]): void {
     if (Logger.shows('error')) this.logWithContext('error', args)
   }
 
-  /** Prints a line at the `debug` level, shown only when the level is `debug`. */
+  /**
+   * Prints a line at the `debug` level, shown only when the level is `debug`.
+   *
+   * @param args - What to print, separated by spaces.
+   */
   debug(...args: any[]): void {
     if (Logger.shows('debug')) this.logWithContext('debug', args)
   }
 
-  /** Prints a line tagged `[VERBOSE]`, shown at the `log` level as `log` is. */
+  /**
+   * Prints a line tagged `[VERBOSE]`, shown at the `log` level as `log` is.
+   *
+   * @param args - What to print, separated by spaces.
+   */
   verbose(...args: any[]): void {
     if (Logger.shows('log')) this.logWithContext('log', args, 'VERBOSE')
   }

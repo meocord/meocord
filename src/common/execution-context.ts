@@ -117,8 +117,8 @@ export abstract class ExecutionContext {
   abstract getType(): ExecutionContextType
 
   /**
-   * The controller class declaring the handler, or `undefined` in a filter handling an error no
-   * handler was reached for, such as `CommandNotFoundError`.
+   * The controller class the handler runs on, the subclass for a handler it inherits, or `undefined` in a filter
+   * handling an error no handler was reached for, such as `CommandNotFoundError`.
    */
   abstract getController(): (new (...args: any[]) => unknown) | undefined
 
@@ -133,7 +133,7 @@ export abstract class ExecutionContext {
   abstract getHandlerName(): string | undefined
 
   /**
-   * The `params` of the running guard's, interceptor's or filter's own `{ provide, params }` entry: how
+   * The `params` of the running guard's, interceptor's, pipe's or filter's own `{ provide, params }` entry: how
    * that stage was configured. For the call's input, the handler's second argument, see
    * {@link ExecutionContext.getHandlerParams}.
    *
@@ -143,8 +143,9 @@ export abstract class ExecutionContext {
 
   /**
    * The handler's params, its second argument: a command's options, a component's customId params, a
-   * modal's fields, a select menu's choices or a message pattern's params. They are read as they stand when the stage asks. A guard sees them raw. An
-   * interceptor sees them raw before `next.handle()` and validated and piped after it. A filter sees
+   * modal's fields, a select menu's choices or a message pattern's params. They are read as they stand when the
+   * stage asks. A guard sees them raw. An interceptor sees them raw before `next.handle()` and validated and piped
+   * after it. A filter sees
    * them as they were when the error was thrown. Not the same as {@link ExecutionContext.getParams},
    * which is the running stage's own configuration.
    *
@@ -223,7 +224,7 @@ export class HandlerExecutionContext extends ExecutionContext {
     this.type = call.type ?? inferContextType(call.args[0])
   }
 
-  /** The same call, with the params of another guard. */
+  /** The same call, with the params of another stage's `{ provide, params }` entry. */
   withParams(params: Record<string, unknown> | undefined): HandlerExecutionContext {
     return new HandlerExecutionContext({ ...this.call, type: this.type, params })
   }
@@ -287,7 +288,7 @@ export class HandlerExecutionContext extends ExecutionContext {
 }
 
 /**
- * The context of an interaction that reached no handler: one no route matched, or one that failed
+ * The context of an interaction or message that reached no handler: one no route matched, or one that failed
  * before routing. It has arguments and a type, but no controller, handler or metadata.
  */
 export class UnroutedExecutionContext extends ExecutionContext {

@@ -18,7 +18,7 @@ import {
 
 /** Runs under `vitest --typecheck`: each decorator's options have a name an app can use, as a wrapper needs. */
 describe('named decorator options', () => {
-  it('are what each stage decorator takes', () => {
+  it('are what @Guard, @Interceptor and @Observer take, and ValidateOptions holds pipes', () => {
     expectTypeOf<Parameters<typeof Guard>[0]>().toEqualTypeOf<GuardOptions | undefined>()
     expectTypeOf<Parameters<typeof Interceptor>[0]>().toEqualTypeOf<InterceptorOptions | undefined>()
     expectTypeOf<Parameters<typeof Observer>[0]>().toEqualTypeOf<ObserverOptions | undefined>()
