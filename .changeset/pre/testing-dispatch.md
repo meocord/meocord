@@ -1,5 +1,0 @@
----
-'meocord': minor
----
-
-`module.dispatch(input)` in `meocord/testing` sends an interaction, a message or a reaction through the bot's own dispatch: routed over the module's controllers and its `app`'s message options exactly as the bot routes it, then run through the full pipeline of each handler it reaches. It resolves to `{ ran, handlers, error? }`, where `handlers` lists each handler reached, in the order it ran, with its own `ran` and `error`. What the user is sent reaches the mocks as the bot sends it, including a usage reply and the built-in fallback's answer to an error no filter handles. An error the fallback answers as the user's own outcome resolves in `error`: a usage reply, an unknown command, or a guard's, a cooldown's, a validation's or a `UserError`'s refusal. Any other error no filter handles rejects the call once the fallback has answered. A reaction is dispatched with the user who reacted, `module.dispatch(reaction, { user, action })`, added unless an action is given, so `@ReactionHandler` can be tested through routing, which `emit` never reaches. `invoke` still tests one handler you name.
