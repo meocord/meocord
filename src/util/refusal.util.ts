@@ -34,6 +34,14 @@ export function decoratedName(target: object, propertyKey?: string | symbol): st
   return `${(target as { constructor: { name: string } }).constructor.name}.${String(propertyKey)}`
 }
 
+/**
+ * Refuses a decorator that goes only on a method, or on a member, where it is applied to a class, directly or through
+ * `applyDecorators`, rather than store what nothing reads or fail on the method it lacks.
+ */
+export function refuseOnClass(decorator: string, target: object, propertyKey: string | symbol | undefined, place = 'a method'): void {
+  if (propertyKey === undefined) throw refuse(new Error(`${decoratedName(target)}: ${decorator} goes on ${place}, not on a class.`))
+}
+
 /** Whether an error is one MeoCord raised for code it refuses. */
 export function isRefusal(error: unknown): error is Error {
   return typeof error === 'object' && error !== null && (error as Record<symbol, unknown>)[REFUSAL] === true

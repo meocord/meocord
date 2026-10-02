@@ -31,7 +31,7 @@ import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
 
@@ -268,6 +268,7 @@ export function MessageHandler<
 >(pattern: Pattern, options?: MessageHandlerOptions): PatternedMessageHandlerDecorator<T, R, Pattern>
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
   return function (target: object, propertyKey: string) {
+    refuseOnClass('@MessageHandler', target, propertyKey)
     // An empty pattern means every message, as no pattern does
     if (pattern === '') {
       warnDeprecatedBehaviour(logger, `@MessageHandler('') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
@@ -349,6 +350,7 @@ export function ReactionHandler(
 ): ReactionHandlerDecorator<MessageReaction | PartialMessageReaction, unknown> {
   const [emoji, own] = typeof emojiOrSettings === 'object' ? [undefined, emojiOrSettings] : [emojiOrSettings, settings]
   return function (target: object, propertyKey: string) {
+    refuseOnClass('@ReactionHandler', target, propertyKey)
     const method = propertyKey.toString()
     addOwnHandler<ReactionHandlerMetadata>(
       META.reactionHandlers,
@@ -667,6 +669,7 @@ export function Command<
       TypedParamsAccept<N, T, P> &
       ChoicesAccept<N, T, P>,
   ) {
+    refuseOnClass('@Command', target, propertyKey)
     const originalMethod = _descriptor.value
     if (!originalMethod) {
       throw refuse(new Error(`${target.constructor.name}.${propertyKey}: @Command is on something with no implementation.`))
@@ -865,6 +868,7 @@ export function Autocomplete<_R = unknown>(commandPath: string, optionName?: str
       | TypedPropertyDescriptor<(interaction: AutocompleteInteraction) => R>
       | TypedPropertyDescriptor<() => R>,
   ) {
+    refuseOnClass('@Autocomplete', target, propertyKey)
     const methodName = propertyKey.toString()
     addOwnHandler<AutocompleteMeta>(
       META.autocompleteHandlers,

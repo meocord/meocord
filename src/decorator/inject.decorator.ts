@@ -1,5 +1,6 @@
 import { inject, type ServiceIdentifier } from 'inversify'
 import { type ProviderToken } from '@src/interface/provider.interface.js'
+import { refuseOnClass } from '@src/util/refusal.util.js'
 
 /**
  * Injects what a token provides into a constructor parameter.
@@ -30,5 +31,9 @@ export function Inject(
   token: ProviderToken,
 ): (target: object, propertyKey: string | symbol | undefined, parameterIndex: number) => void {
   const decorate = inject(token as ServiceIdentifier)
-  return (target, propertyKey, parameterIndex) => decorate(target, propertyKey, parameterIndex)
+  return (target, propertyKey, parameterIndex) => {
+    // A constructor parameter has no property key either, but has an index
+    if (typeof parameterIndex !== 'number') refuseOnClass('@Inject', target, propertyKey, 'a constructor parameter or a property')
+    decorate(target, propertyKey, parameterIndex)
+  }
 }
