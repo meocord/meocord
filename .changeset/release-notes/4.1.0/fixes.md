@@ -44,3 +44,4 @@
   - The CLI and tests no longer read the app's name, or its `.env`, from a `dist` an earlier build left.
 - **Testing**
   - Mocks answer where 4.0's returned a stub: an interaction has an `'en-US'` locale and a `createdTimestamp` and `createdAt`, `inGuild()` answers from its `guildId`, and a method that returns a promise in discord.js resolves. Nothing changes in a bot.
+  - `createMockChannel` takes `ThreadChannel`, stubs `threads.create` on text, announcement, forum and media channels, and gives a subclass the managers of the channel class it extends.
