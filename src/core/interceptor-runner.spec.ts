@@ -17,6 +17,7 @@ import { type CallHandler, type GuardInterface, type InterceptorInterface } from
 import { ExecutionContext, Logger } from '@src/common/index.js'
 import { MeoCordApp } from '@src/core/meocord.app.js'
 import { bindGlobalStages, appStages, prepareHandlerStages } from '@src/core/handler-pipeline.js'
+import { runInterceptors } from '@src/core/interceptor-runner.js'
 import {
   createChatInputOptions,
   createMockInteraction,
@@ -703,5 +704,31 @@ describe('an interceptor that returns before the call it started ends', () => {
     await listeners.get('interactionCreate')?.(interaction)
 
     expect(interaction.reply).toHaveBeenCalledOnce()
+  })
+})
+
+// The unanswered warning blames the interceptor it was last told of, which ended the call only if it is the outermost
+describe('runInterceptors, with nested interceptors that both return before the handler finishes', () => {
+  it('tells of the outermost last, though the inner one settles after it', async () => {
+    const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+    @Interceptor()
+    class Outer {
+      intercept(_context: unknown, next: CallHandler) {
+        void next.handle()
+      }
+    }
+    @Interceptor()
+    class Inner {
+      async intercept(_context: unknown, next: CallHandler) {
+        void next.handle()
+        await pause(10)
+      }
+    }
+    const context = { withParams: () => context, getHandlerName: () => 'slow', getController: () => Outer }
+    const told: string[] = []
+
+    await runInterceptors([Outer, Inner], new Container(), context as never, () => pause(40), cls => told.push(cls.name))
+
+    expect(told.at(-1)).toBe('Outer')
   })
 })
