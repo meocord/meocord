@@ -144,7 +144,7 @@ describe('MeoCordFactory.create()', () => {
         clientOptions: { shardCount: 3 },
         message: 'meocord.config.ts: sharding.shards (2) and clientOptions.shards/shardCount disagree; set the shards in one place.',
       },
-    ])('is reported once before login, with where it comes from, for $load', ({ controllers, config, clientOptions, message }) => {
+    ])('is reported once before login, its message first, for $load', ({ controllers, config, clientOptions, message }) => {
       Reflect.set(globalThis, BUNDLE_ENTRY, '/bots/shop/dist/main.js')
       mockLoadConfig.mockReturnValue({ discordToken: 'test-token', ...config })
       class ShopApp {}

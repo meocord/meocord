@@ -151,9 +151,9 @@ const quoted = (names: string[]) =>
   names.length < 2 ? names.map(name => `"${name}"`).join('') : `${names.slice(0, -1).map(name => `"${name}"`).join(', ')} and "${names.at(-1)}"`
 
 /**
- * Warns, in one message, of every name-routed handler Discord never sends an interaction to: a subcommand path or an
- * autocomplete option its builder does not register, a customId pattern as a command name, a builder registering
- * another name, a command no builder registers, or an `@Autocomplete` an earlier-listed handler already answers.
+ * Warns, in one message, of every name-routed handler Discord never sends an interaction to: a subcommand path its
+ * builder does not register or an option it does not register with autocomplete on, a customId pattern as a command
+ * name, a builder registering another name, a command no builder registers, or an `@Autocomplete` an earlier one answers.
  * @param options - `missingBuilders: false`, which testing passes, leaves out commands no builder registers.
  */
 export function warnUnregisteredCommands(controllerClasses: readonly ControllerClass[], { missingBuilders = true } = {}): void {
