@@ -13,6 +13,7 @@ import {
   type ResponsePresenter,
 } from '@src/interface/index.js'
 import { createMockMessage, MeoCordTestingModule, resolveRoute } from '@src/testing/index.js'
+import { GuardDeniedError } from '@src/common/index.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { warn: [] as unknown[][] } }))
 
@@ -33,7 +34,12 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 const BOT_ID = '111'
 
 /** Starts an app built by the factory, logged in as a bot with id {@link BOT_ID}, without a network. */
-async function startApp(options: { controllers: any[]; messages?: MessageCommandOptions; presenter?: new () => ResponsePresenter }): Promise<Client> {
+async function startApp(options: {
+  controllers: any[]
+  messages?: MessageCommandOptions
+  presenter?: new () => ResponsePresenter
+  guards?: (new () => GuardInterface)[]
+}): Promise<Client> {
   const clients: Client[] = []
   vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client) {
     clients.push(this)
@@ -288,6 +294,23 @@ describe('the built-in help', () => {
       ],
       handler: { controller: 'Moderation', method: 'mute' },
     })
+  })
+
+  it("runs the app's guards first, answering as they answer a command", async () => {
+    let saying = false
+    @Guard()
+    class Closed implements GuardInterface {
+      canActivate() {
+        if (saying) throw new GuardDeniedError('The bot is closed here.')
+        return false
+      }
+    }
+    const client = await startApp({ controllers: [Moderation], messages: HELP, guards: [Closed] })
+    const asked = ['!help', '!help mute', '!config']
+
+    for (const content of [...asked, '!purge 5']) expect(replies(await send(client, content))).toEqual([])
+    saying = true
+    for (const content of [...asked, '!purge 5']) expect(replies(await send(client, content))).toEqual(['The bot is closed here.'])
   })
 
   it('leaves a hidden subcommand out of a parent’s usage listing too', async () => {

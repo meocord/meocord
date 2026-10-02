@@ -9,6 +9,7 @@ import {
   type CurrentArgs,
   HandlerExecutionContext,
   inferContextType,
+  UnroutedExecutionContext,
 } from '@src/common/execution-context.js'
 import { appliesTo } from '@src/core/stage-scope.js'
 import { Logger } from '@src/common/logger.js'
@@ -115,7 +116,7 @@ function needsContext(container: Container, cls: object, seen = new Set<object>(
 }
 
 /** Resolves a guard for one call, in a child container holding the context when it needs one. */
-function resolveGuard(container: Container, guard: GuardClass, context: HandlerExecutionContext): GuardInterface {
+function resolveGuard(container: Container, guard: GuardClass, context: HandlerExecutionContext | UnroutedExecutionContext): GuardInterface {
   if (!needsContext(container, guard)) {
     return container.get(guard, { autobind: true })
   }
@@ -220,11 +221,14 @@ function assignParams(guardClass: GuardClass, instance: object, params: Record<s
   }
 }
 
-/** One guarded call: the container guards resolve from, and what the context describes. */
+/**
+ * One guarded call: the container guards resolve from, and what the context describes. A call no handler
+ * takes, such as the built-in help, has no controller or method, and its guards get an unrouted context.
+ */
 export interface GuardedCall {
   container: Container
-  controller: new (...args: any[]) => unknown
-  methodName: string
+  controller?: new (...args: any[]) => unknown
+  methodName?: string
   args: readonly unknown[]
   type?: ExecutionContextType
   currentArgs?: CurrentArgs
@@ -245,8 +249,11 @@ export async function runGuards(guards: readonly GuardEntry[], call: GuardedCall
   const applicable = guards.filter(guard => appliesTo(guard, type))
   if (applicable.length === 0) return true
 
-  const { container, ...handlerCall } = call
-  const context = new HandlerExecutionContext({ ...handlerCall, type })
+  const { container, controller, methodName, ...handlerCall } = call
+  const context =
+    controller && methodName !== undefined
+      ? new HandlerExecutionContext({ ...handlerCall, controller, methodName, type })
+      : new UnroutedExecutionContext(call.args)
 
   for (const guard of applicable) {
     const [guardClass, params] = isGuardWithParams(guard) ? [guard.provide, guard.params] : [guard, undefined]
@@ -276,7 +283,7 @@ export async function runGuards(guards: readonly GuardEntry[], call: GuardedCall
 
     if (typeof guardInstance.canActivate !== 'function') {
       throw new Error(
-        `Guard ${guardClass.name} applied to ${call.methodName} does not have a valid canActivate method.`,
+        `Guard ${guardClass.name}${methodName === undefined ? '' : ` applied to ${methodName}`} does not have a valid canActivate method.`,
       )
     }
 

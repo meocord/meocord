@@ -30,8 +30,8 @@ export function helpWords(help: boolean | MessageHelpOptions | undefined): strin
 
 /**
  * Whether a route's handler may be listed where the caller did not name it: not hidden, and with no guards on its
- * controller or method, read as the pipeline collects them. Help and a parent's list of subcommands run no guards,
- * so they must not name what a guard may refuse.
+ * controller or method, read as the pipeline collects them. Help and a parent's list of subcommands run only the
+ * app's guards, so they must not name what a handler's own guard may refuse.
  */
 export const isListable = (route: MessageRoute): boolean =>
   !route.hidden && handlerStages(route.controllerClass.prototype as object, route.method).guards.length === 0
