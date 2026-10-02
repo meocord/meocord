@@ -5,6 +5,7 @@
   - A bot started without the CLI, as with `node dist/main.js`, has the values `meocord.config.ts` loads from `.env` before its modules run, so an option such as `@MeoCord({ activities: [{ name: process.env.STATUS! }] })` reads them. Rebuild to pick this up.
   - A privileged intent Discord refuses at login, and a token Discord refuses or an empty one, are each explained in one line: the intents the bot asks for and where to enable them, or where to get a new token.
   - A command builder that can't be built is named, with its command, in the error that stops registration, where 4.0 logged only discord.js's error. As in 4.0, no command is sent until it is fixed.
+  - A slash command builder given on a subcommand path, as `@Command('settings notify email', SettingsCommandBuilder)`, is named as the handler loads, with the advice to give it to `@Command('settings')`, where 4.0 failed with discord.js's "Invalid string format". One that names its command itself keeps working, with a warning at startup.
   - A process adds one SIGINT and one SIGTERM listener however many apps it creates, so a test suite that creates many apps no longer triggers Node's `MaxListenersExceededWarning`.
   - A SIGINT or SIGTERM while the bot is still logging in stops it at once, with "Bot has shut down", where 4.0 did nothing until a second one forced exit 1.
   - A built config that is missing or fails to load is reported once, naming the file, the reason and what to do, where 4.0 printed its error up to three times.
@@ -18,12 +19,14 @@
   - A controller, service or guard that extends another decorated class gets its own constructor's dependencies, where a subclass with its own constructor failed to resolve.
   - A controller or service that injects with `@inject(Token)` on a parameter typed as an interface is created, where 4.0 bound `Object` in place of the token and failed with "missing metadata on type Object".
   - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
+  - A constructor parameter with no runtime type, as when two classes import each other or it's typed with an interface or `import type`, is refused as the app is created, naming the class and the parameter, rather than with inversify's error about `emitDecoratorMetadata`.
 - **Handler types**
   - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
   - `applyDecorators` passes on the method or class a decorator returns in place of the one it was given, as a wrapping decorator does, where 4.0 dropped it and kept the original.
 - **Builds**
   - A production build keeps every class's own name. When two modules declared a class of one name, one was renamed, such as `Shop` to `shop_controller_Shop`, in errors and logs and wherever the code read its `name`.
-  - Every imported file lands in `dist/assets` under its own name, as images, fonts and media already did.
+  - Every imported file lands in `dist/assets` under its own name, as images, fonts and media already did, except an imported WebAssembly module, which takes a content hash.
+  - On Windows, `new URL('./file', import.meta.url)` for a file the build bundles gives a `file:` URL, where 4.0 gave the bundle's folder as a disk path, which `fileURLToPath` refused with `ERR_INVALID_URL_SCHEME`. Rebuild to pick this up.
   - A `tsconfig.json` that uses `extends`, `files`, `typeRoots`, comments, or `paths` under a `baseUrl` builds as TypeScript reads it, and `meocord build` no longer rewrites the file. Builds that run at the same time no longer read each other's copy of it.
   - A self-contained build runs under Bun, packs each package with the dependency versions it was installed with, and what a package npm nested under another needs, and in a pnpm project packs the packages an external depends on and a native package's per-platform binary. 4.0 gave every package the first version it copied, and could fail with "Cannot find module". Rebuild to pick this up.
 - **The CLI**
@@ -44,4 +47,5 @@
   - The CLI and tests no longer read the app's name, or its `.env`, from a `dist` an earlier build left.
 - **Testing**
   - Mocks answer where 4.0's returned a stub: an interaction has an `'en-US'` locale and a `createdTimestamp` and `createdAt`, `inGuild()` answers from its `guildId`, and a method that returns a promise in discord.js resolves. Nothing changes in a bot.
+  - A mock interaction made without a `client` gets one from `createMockClient`, with its user and channel cached, and `getAttachment()` returns the `Attachment` given, or `null`, where 4.0 returned stubs.
   - `createMockChannel` takes `ThreadChannel`, stubs `threads.create` on text, announcement, forum and media channels, and gives a subclass the managers of the channel class it extends.
