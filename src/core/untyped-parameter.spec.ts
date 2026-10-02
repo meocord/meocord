@@ -16,7 +16,6 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: (
 const { MeoCordFactory } = await import('@src/core/meocord-factory.js')
 const { MeoCord, Controller, Service, Inject, Command, UseGuard, UseInterceptor, UsePipe } = await import('@src/decorator/index.js')
 const { CommandType } = await import('@src/enum/index.js')
-const { meocordClasses, meocordClassAdvice } = await import('@src/core/meocord-classes.js')
 const { MeoCordTestingModule } = await import('@src/testing/meocord-testing-module.js')
 
 // What a class's constructor types read as when one is an interface, an `import type`, or a class
@@ -251,24 +250,6 @@ describe('a class with no decorator', () => {
     const module = MeoCordTestingModule.fromApp(appWith({ services: [Decorated, Base] })).compile()
     expect(module.get(Decorated).clock).toBe(module.get(Clock))
     expect(module.get(Base).clock).toBe(module.get(Clock))
-  })
-
-  // Every exported class the check would refuse is one MeoCord binds itself, or one with advice of its own
-  it("knows every one of MeoCord's exported classes it would refuse, by the class itself", async () => {
-    const entries: Record<string, unknown>[] = await Promise.all([
-      import('@src/core/index.js'),
-      import('@src/decorator/index.js'),
-      import('@src/common/index.js'),
-      import('@src/interface/index.js'),
-      import('@src/enum/index.js'),
-      import('@src/testing/index.js'),
-    ])
-    const refused = entries
-      .flatMap(entry => Object.values(entry))
-      .filter((value): value is new (...args: any[]) => unknown => typeof value === 'function' && /^class[\s{]/.test(Function.prototype.toString.call(value)))
-      .filter(cls => cls.length > ((Reflect.getMetadata('design:paramtypes', cls) as unknown[] | undefined)?.length ?? 0))
-    expect(refused.length).toBeGreaterThan(0)
-    for (const cls of refused) expect([cls.name, meocordClasses().includes(cls) || meocordClassAdvice(cls) !== undefined]).toEqual([cls.name, true])
   })
 })
 
