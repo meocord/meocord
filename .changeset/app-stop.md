@@ -11,4 +11,4 @@ await app.start()
 await app.stop()
 ```
 
-A SIGINT or SIGTERM after a failed login now exits with the code the failed login set, 1, rather than 0, so a process supervisor no longer reads a bot that never came online as a clean stop.
+A SIGINT or SIGTERM after a failed login now exits with the code the failed login set, 1, where 4.0 exited 0, so a process supervisor no longer reads a bot that never came online as a clean stop. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#smaller-changes).
