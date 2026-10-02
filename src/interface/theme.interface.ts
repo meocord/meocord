@@ -233,7 +233,8 @@ export interface UserThemeTarget {
 }
 
 /**
- * Themes that depend on where a call comes from, as `@MeoCord({ themeFor })` takes them.
+ * Themes that depend on where a call comes from, as `@MeoCord({ themeFor })` takes them, or a class implementing
+ * {@link ThemeResolver}.
  *
  * Each resolver returns part of a theme, or `undefined` or `null` for none, at once or as a promise. A server's theme
  * goes over the handler's, and a user's over the server's.
@@ -244,6 +245,7 @@ export interface UserThemeTarget {
  *
  * @group Configuration
  * @category App options
+ * @see {@link ThemeResolver}
  */
 export interface ThemeResolvers {
   /** The theme for calls from a server; not asked for a call from a DM. */
@@ -253,12 +255,13 @@ export interface ThemeResolvers {
 }
 
 /**
- * A class that looks themes up with the app's services, as `@MeoCord({ themeFor })` takes it in place of
- * {@link ThemeResolvers}.
+ * A class, decorated with `@Service()`, that looks themes up with the app's services, as `@MeoCord({ themeFor })`
+ * takes it in place of {@link ThemeResolvers}.
  *
  * Its methods are the resolvers: `guild()` for a server's theme and `user()` for a user's, each optional. The class is
  * resolved from the app's container, so its constructor injects the app's services and providers, and it runs
- * `OnReady` and `OnShutdown` as a service does.
+ * `OnReady` and `OnShutdown` as a service does. Without a decorator, TypeScript records none of its constructor's
+ * types, and a constructor that injects is refused.
  *
  * @remarks
  * Its results are cached, timed out and logged as the functions' are; inject `ThemeCache` to clear one when the choice
