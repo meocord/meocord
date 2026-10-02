@@ -85,5 +85,8 @@ export function renderApp(appDir: string, tarball: string, packageManager: 'bun'
   const manifestPath = path.join(appDir, 'package.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   manifest.dependencies.meocord = `file:${tarball}`
+  // npm lists a tarball's `prepare` as an unsettled install script, where it skips a registry package's, though it
+  // runs `prepare` only for a directory. Allowed, matched by the dependency's own spec: a denied package's bins go unlinked.
+  if (manifest.allowScripts) manifest.allowScripts[manifest.dependencies.meocord] = true
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
 }

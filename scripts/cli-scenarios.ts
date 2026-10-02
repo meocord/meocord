@@ -1133,6 +1133,18 @@ const scenarios: Scenario[] = [
     expect: { code: 0, creates: ['dist/main.js', 'dist/meocord.config.mjs'], never: ['ERR_PNPM', 'Ignored build scripts'] },
   },
 
+  // npm 11.16 and later warn about each dependency install script package.json neither allows nor denies. A pinned
+  // npm, since the one installed may predate the warning; `ci` installs every package the lockfile lists for here.
+  {
+    name: 'an app created for npm installs with npm 11.17, with no install script left unsettled',
+    tier: 'slow',
+    windows: true,
+    cwd: 'npm-app',
+    command: ['npx', '--yes', 'npm@11.17.0', 'ci', '--no-audit', '--no-fund'],
+    timeoutMs: 300_000,
+    expect: { code: 0, never: ['allow-scripts'] },
+  },
+
   // Slow: an app npm installed, run through its own package scripts and the meocord bin
   {
     name: 'an app npm installed builds through its build:prod script',
