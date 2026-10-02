@@ -1,5 +1,5 @@
 ---
-'meocord': patch
+'meocord': minor
 ---
 
 `meocord start --dev` fixes:
