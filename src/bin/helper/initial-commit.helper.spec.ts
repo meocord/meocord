@@ -38,7 +38,7 @@ const IDENTITY = '[user]\n  name = Test\n  email = test@example.com\n[init]\n  d
 // As on a machine where git cannot guess an email, such as a fresh Linux container
 const NO_IDENTITY = '[user]\n  useConfigOnly = true\n[init]\n  defaultBranch = main\n'
 
-// Each case runs git four to six times, and a loaded Windows runner has taken over 2 s for a case
+// Each case runs git up to six times, and a loaded Windows runner can take over 2 s for a case
 describe('makeInitialCommit', { timeout: 20_000 }, () => {
   it('commits every file the app keeps, its lockfile included, and nothing it ignores', async () => {
     const { root, gitAt, app } = sandbox(IDENTITY)

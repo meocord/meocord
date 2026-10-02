@@ -47,15 +47,9 @@ export const freeCommonJsGlobals = (compact: boolean) => ({
 })
 
 /**
- * Keeps a bundle starting on every runtime it is built for.
- *
- * An `eval` devtool is replaced before the bundler reads it, with a warning, since the bundle it makes
- * cannot run (see {@link nonEvalDevtool}).
- *
- * And once each chunk is minified, its free `module` and `exports` are made undefined (see
- * {@link freeCommonJsGlobals}). An ES module that probes for CommonJS, as lodash-es does with
- * `typeof exports`, leaves them in the chunk's top scope, where Node ignores them and Bun decides the
- * whole file is CommonJS, then refuses its `import` statements.
+ * Keeps a bundle starting under Node and Bun: replaces an `eval` devtool, with a warning ({@link nonEvalDevtool}),
+ * and after the size optimisations makes each chunk's free `module` and `exports` undefined ({@link freeCommonJsGlobals}).
+ * An ES module probing for CommonJS, as lodash-es does, leaves them in the top scope, where Bun reads it as CommonJS.
  */
 export class RunnableBundlePlugin implements Rspack.RspackPluginInstance {
   apply(compiler: Rspack.Compiler): void {

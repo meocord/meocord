@@ -50,7 +50,7 @@ vi.mock('@src/util/package-manager.util.js', async importOriginal => ({
   detectInstalledPMs: () => ['bun'],
 }))
 
-// Git itself is initial-commit.helper.spec's; here, when create runs it and what create does with each outcome
+// Git itself is initial-commit.helper.spec's; here, when create runs it, and that a commit git cannot make keeps the app
 const { makeInitialCommit } = vi.hoisted(() => ({ makeInitialCommit: vi.fn() }))
 vi.mock('@src/bin/helper/initial-commit.helper.js', () => ({ makeInitialCommit }))
 
@@ -63,7 +63,7 @@ describe('meocord create', () => {
   let root: string
   let exit: ReturnType<typeof vi.spyOn>
 
-  /** Runs `create bot` in a directory of its own. */
+  /** Gives the test a directory of its own to run create in. */
   function sandbox() {
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-create-')))
     roots.push(root)
@@ -92,7 +92,7 @@ describe('meocord create', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
-  // The app is complete and installed by then; deleting it for a commit git could not make lost all of it
+  // The app is complete and installed by then; deleting it for a commit git cannot make would lose all of it
   it('keeps the app, and says what is left to do, when git cannot make the first commit', async () => {
     sandbox()
     makeInitialCommit.mockResolvedValue({ outcome: 'not-committed', reason: 'Author identity unknown' })

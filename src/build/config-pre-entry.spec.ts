@@ -35,7 +35,7 @@ export class App {}
 export const greeting: string | null = Reflect.get(App, 'options').greeting ?? null
 `
 
-// Imports the application first, then loads the config the way MeoCordFactory.create does.
+// Imports the application first, then requires the compiled config again, as the runtime's loader does.
 const MAIN = `
 import { greeting } from './app'
 import logo from './logo.png'

@@ -1,13 +1,7 @@
 /**
- * Checks the declarations the package ships as a consumer's compiler reads them, after `bun run build`:
- *
- * - each `meocord/<entry>` resolves through package.json's `exports` map, from an ES module to its `.d.ts` and from
- *   a CommonJS one to its `.d.cts`, and `meocord/eslint` to `meocord.eslint.d.ts` and `.d.cts`;
- * - those files and every chunk they import compile with no error of their own, an unresolved import included;
- * - each entry exports, for both conditions, exactly the names its source declares, a value as a value and a type
- *   as a type.
- *
- * src/public-api.spec.ts pins what the source declares; this checks that the build ships it.
+ * Checks the shipped declarations as a consumer's compiler reads them, after `bun run build`: each `meocord/<entry>`
+ * resolves through `exports` to its `.d.ts` (import) and `.d.cts` (require), they and their chunks compile with no
+ * error, and they export exactly the names, values and types the source entry declares.
  */
 import { existsSync } from 'fs'
 import path from 'path'

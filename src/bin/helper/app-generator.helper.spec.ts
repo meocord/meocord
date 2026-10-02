@@ -44,8 +44,8 @@ describe('AppGeneratorHelper', () => {
     expect(written.filter(name => name.endsWith('.template'))).toEqual([])
   })
 
-  // npm omits dotfiles from a published tarball, so they are packaged under a stand-in
-  // prefix and have to come back as dotfiles here.
+  // npm omits a .gitignore from a published tarball, so every dotfile is packaged under a stand-in
+  // prefix and has to come back as a dotfile here.
   it.each(['.gitignore', '.env.example', '.prettierrc.mjs'])('restores %s as a dotfile', name => {
     expect(fs.existsSync(path.join(target, name))).toBe(true)
   })
@@ -83,7 +83,6 @@ describe('AppGeneratorHelper', () => {
     expect(unresolved).toEqual([])
   })
 
-  // The token is read from the environment because this file is committed.
   it('puts the app\'s type declarations in src/types: the theme as a module, the assets as a script', () => {
     const theme = read('src/types/theme.d.ts')
     const assets = read('src/types/assets.d.ts')
@@ -97,6 +96,7 @@ describe('AppGeneratorHelper', () => {
     expect(fs.existsSync(path.join(target, 'src', 'assets.d.ts'))).toBe(false)
   })
 
+  // The token is read from the environment because this file is committed.
   it('does not write a token into the committed config', () => {
     expect(read('meocord.config.ts')).toContain('process.env.DISCORD_TOKEN')
     expect(read('.gitignore')).toContain('.env')
@@ -104,7 +104,7 @@ describe('AppGeneratorHelper', () => {
 
   // A parameter has to own its segment, so a pattern the framework rejects would leave
   // every generated application crashing on the first import.
-  it('ships component patterns the framework accepts', () => {
+  it('ships the sample button pattern with its param in a segment of its own', () => {
     expect(read(path.join('src', 'controllers', 'button', 'sample.button.controller.ts'))).toContain(
       "@Command('button-with/{ownerId}', CommandType.BUTTON)",
     )

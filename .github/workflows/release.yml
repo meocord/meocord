@@ -14,16 +14,15 @@ on:
   # GitHub's merge queue: the required checks run on the queued merge before it lands on main.
   merge_group:
     types: [checks_requested]
-  # Publishing is gated by merging the release pull request, so this is not how a
-  # release is started. It is here to re-run the job after a publish fails partway.
+  # Publishing is gated by merging the release pull request, so this is not how a release is started. It re-runs the
+  # checks, pack and publish after a publish fails partway.
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A new push to a pull request makes the run in flight irrelevant. Release branches are
-# keyed individually so a release is never cancelled by the push that follows it, and each
-# queued merge has a ref of its own (gh-readonly-queue/...), so none cancels another.
+# A new push to a pull request cancels its run in flight; any other run finishes. Each branch and each queued merge
+# (gh-readonly-queue/...) has a group of its own, where a newer run replaces only one still waiting to start.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -341,7 +340,7 @@ jobs:
       - name: Run CLI scenarios
         run: bun run cli:scenarios
 
-  # Publishes, with --dry-run, the tarball `build` packed, from a job that has only that file: npm reads the package's
+  # Publishes, with --dry-run, the tarball `build` packed, from a job with no checkout: npm reads the package's
   # name, version and files from the tarball, as `publish` does with the one `pack` makes at a release. The files must
   # be the ones packing in place gave, so what a release publishes is what a pull request shows.
   package-dry-run:
@@ -390,13 +389,10 @@ jobs:
           console.log(`${published.name}@${published.version}: the tarball publishes the ${inPlace.length} files packing in place gave.`)
           EOF
 
-  # The checks that install and run code from outside the repository's lockfile: a generated
-  # application's whole dependency tree, its bot, bundling, sharding. They gate a release, so they
-  # run before it, but in a job of their own that can only read the repository: code they install
-  # never runs where the publishing identity can be requested.
-  # Only for a push to main or beta, or a manual re-run: never for a pull request or a queued merge.
-  # Its needs are checked one by one rather than by the implicit success(), which also requires every job
-  # further up to have run: the slow scenarios job, which "Test" reports, is skipped on a push by design.
+  # The checks that run code from outside the lockfile (a generated app's dependency tree, its bot, bundling, sharding),
+  # for a push to main or beta or a manual re-run, in a read-only job, so that code never runs where the publishing
+  # identity can be requested. Needs are named one by one: the implicit success() also reads the slow scenarios job,
+  # which "Test" reports and a push skips.
   release-checks:
     name: Release checks
     if: >-
@@ -441,11 +437,9 @@ jobs:
       - name: Run the slow CLI scenarios
         run: bun run cli:scenarios --tier slow
 
-  # The smoke app against real Discord, as the test application's bot: see "Checking against real
-  # Discord" in CONTRIBUTING.md. Its secrets live in the `e2e` environment and reach only the step that
-  # runs it. Not a required check, so an outage at Discord blocks nothing; test:e2e skips and passes
-  # when the environment has no secrets. Skipped in the merge queue: the pull request already ran it,
-  # and the push to main runs it again.
+  # The smoke app against real Discord (see "Checking against real Discord" in CONTRIBUTING.md), its `e2e` secrets
+  # reaching only the step that runs it. Not a required check, so an outage at Discord blocks nothing, and test:e2e
+  # passes without secrets. Skipped in the merge queue: the pull request ran it, and the push to main runs it again.
   e2e:
     name: Real Discord
     if: >-
@@ -456,8 +450,8 @@ jobs:
     environment: e2e
     permissions:
       contents: read
-    # One run at a time across workflows, since every run logs in as the same bot; none is cancelled. Pending runs
-    # queue in the order they arrive, rather than each new one replacing the one already waiting.
+    # One run at a time across workflows, since every run logs in as the same bot. This group cancels none, and pending
+    # runs queue in the order they arrive, rather than each new one replacing the one already waiting.
     concurrency:
       group: discord-e2e
       cancel-in-progress: false
@@ -507,11 +501,9 @@ jobs:
       - name: Explain the skip
         run: echo "::notice title=Real Discord not run::Pull requests from forks get no Discord secrets, so the real-Discord checks run only for branches of this repository, nightly and on main."
 
-  # Versions, and only that: with pending changesets it opens or updates the release pull request, which bumps the
-  # version and writes the changelog, and with none it does nothing. It runs `changeset version` and prettier, code from
-  # dependencies, so it holds no publishing identity: `publish` below does, and runs none of that.
-  # Its needs are checked one by one, as the release checks' are, so the slow scenarios job skipped on a
-  # push does not skip the release, and one that did not succeed, the release checks above all, stops it.
+  # Versions, and only that: with pending changesets it opens or updates the release pull request; with none it does
+  # nothing. It runs `changeset version` and prettier, code from dependencies, so it holds no publishing identity.
+  # Needs are named one by one, so the slow scenarios job a push skips does not skip it, and a failed need stops it.
   release:
     name: Release
     if: >-
@@ -532,9 +524,8 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      # The action commits the version bump. Husky's pre-commit hook runs the full
-      # lint, which has already passed on this commit and cannot fix a generated
-      # CHANGELOG anyway, so it is skipped rather than run twice.
+      # Keeps husky's pre-commit hook out of this job. None is installed here, as the install runs no scripts, and the
+      # action commits the version bump through the API.
       HUSKY: 0
     steps:
       # The action pushes through the GitHub API rather than the git CLI, so it needs no
@@ -557,13 +548,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
 
-      # With pending changesets, this opens or updates the release pull request and stops. With none, which is the
-      # state right after that pull request merges, it does nothing, and `publish` publishes the version committed.
-      # So the merge is the trigger, and nothing reaches npm without one.
-      # A pull request opened with the workflow's own token does not start CI on its own: GitHub
-      # holds those runs until someone approves them. RELEASE_TOKEN, when the repository has one,
-      # opens the release pull request as that identity instead, so its checks start like any
-      # other. Without it, the workflow's token is used and the runs wait for approval.
+      # With pending changesets this opens or updates the release pull request; with none, as right after it merges, it
+      # does nothing, and `pack` and `publish` release the committed version, so nothing reaches npm without that merge.
+      # RELEASE_TOKEN, when set, opens the pull request so its checks start; GitHub holds the checks of one opened with
+      # the workflow's own token until someone approves them.
       - name: Open or update the release pull request
         id: changesets
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
@@ -608,11 +596,10 @@ jobs:
         id: pack
         uses: changesets/action/pack@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
 
-  # Publishes, and only that: the tarball `pack` made, with the dist-tag in its publish plan, then pushes the version's
-  # tag and creates its GitHub release. It holds the publishing identity, so changesets, its action and CLI, and npm
-  # are all that run beside it: the install runs no scripts, nothing is built, and npm runs no lifecycle script for a
-  # tarball.
-  # Each need is named, so a pack that failed or was skipped stops it.
+  # Publishes the tarball `pack` made, with its publish plan's dist-tag, then pushes the version's tag and creates its
+  # GitHub release. It holds the publishing identity, so only changesets and npm run here: the install runs no scripts,
+  # nothing is built, and npm runs no lifecycle script for a tarball. Needs are named, so a failed or skipped pack
+  # stops it.
   publish:
     name: Publish
     if: >-
@@ -668,13 +655,9 @@ jobs:
           pack-dir-artifact-id: ${{ needs.pack.outputs.artifact-id }}
           create-github-releases: true
 
-  # Asks the docs site to add the version just published, rather than wait for its hourly schedule:
-  # it starts the docs repository's version sync (meocord/docs, .github/workflows/sync-versions.yml),
-  # which verifies the package and opens a pull request there. It runs as the docs bot, a GitHub App
-  # whose token here can only start workflows in meocord/docs. The app's credentials live in the
-  # Production environment, set by the maintainer: the variable DOCS_BOT_CLIENT_ID and the secret
-  # DOCS_BOT_PRIVATE_KEY. A job of its own, so nothing it runs sits beside the publishing identity,
-  # and nothing in it fails the release: the version is already on npm, and the schedule still runs.
+  # Starts meocord/docs's version sync (.github/workflows/sync-versions.yml) rather than wait for its hourly run, as the
+  # docs bot, a GitHub App whose token here may only start workflows there; DOCS_BOT_CLIENT_ID and DOCS_BOT_PRIVATE_KEY
+  # live in Production. A job of its own, away from the publishing identity, and nothing in it fails the release.
   docs-sync:
     name: Docs sync
     needs: publish

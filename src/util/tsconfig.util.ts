@@ -93,12 +93,9 @@ function copiesDirectory(): string {
 }
 
 /**
- * Writes a copy of the project's `tsconfig.json` for the bundler to a temporary file, with comments
- * and trailing commas removed, paths made absolute as TypeScript reads them (a `paths` target from
- * `baseUrl` when there is one) and `noEmit` removed. The project's file is never changed. Each call
- * gets a file of its own in this process's directory, removed when the process exits, so builds
- * running at once never share or overwrite the file.
- * @returns The absolute path to the temporary tsconfig.
+ * Writes a copy of the project's tsconfig.json for the bundler and returns its path: comments and trailing commas
+ * removed, paths made absolute (a `paths` target from `baseUrl` when set), `noEmit` dropped. One file per call in this
+ * process's directory, removed at exit; the project's file is never written.
  * @throws When `tsconfig.json` is missing or cannot be parsed.
  */
 export function prepareModifiedTsConfig(): string {

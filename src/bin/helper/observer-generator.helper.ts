@@ -17,7 +17,7 @@ export class ObserverGeneratorHelper {
 
   /**
    * Generates an observer and its spec. The name may contain slashes for nested directories.
-   * @throws Exits the process when the name is missing or invalid.
+   * @throws Exits the process when the name is missing or invalid, or a file it would write exists.
    */
   generateObserver(observerName?: string): string[] {
     if (!observerName) {

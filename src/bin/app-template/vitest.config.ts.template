@@ -3,8 +3,8 @@ import swc from 'unplugin-swc'
 import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
-  // SWC rather than vite's esbuild: esbuild cannot emit decorator metadata, which the
-  // dependency injection behind @Controller and @Service reads at runtime.
+  // SWC, which emits the decorator metadata the dependency injection behind
+  // @Controller and @Service reads at runtime.
   plugins: [
     swc.vite({
       // Coverage reads a file no test imports as file.ts?cache=…&vitest-uncovered-coverage=true; the default
@@ -28,8 +28,7 @@ export default defineConfig({
     clearMocks: true,
     include: ['src/**/*.spec.ts'],
     coverage: {
-      // istanbul rather than v8: v8 coverage needs Node's inspector API, which bun does
-      // not implement, and this template is expected to run under either runtime.
+      // istanbul rather than v8, so coverage is the same under either runtime this template runs on
       provider: 'istanbul',
       include: ['src/**/*.ts'],
       // `include` reports untested files as zero rather than dropping them from the percentage; they go

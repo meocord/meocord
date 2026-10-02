@@ -3,7 +3,7 @@ import { type MeoCordConfig } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { isShardProcess } from '@src/util/shard-process.util.js'
 
-// Beside the dev runner's channel, which the bundle's pre-entry loads, so without this module's imports
+// From a module of its own, which the dev runner the pre-entry loads imports without this module's imports
 export { isShardProcess, SHARDING_MANAGER_ENV } from '@src/util/shard-process.util.js'
 
 /** What this process is, as far as sharding goes. */
@@ -32,7 +32,6 @@ export function shardingRole(config: MeoCordConfig, env: NodeJS.ProcessEnv = pro
 /**
  * The client options for a single process: `sharding.shards` in internal mode becomes the client's
  * `shards`, unless `clientOptions` already shards, which must then agree.
- *
  * @throws When `sharding` and `clientOptions` ask for different shards, or process mode meets
  *   `clientOptions.shards`.
  */

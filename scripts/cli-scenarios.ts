@@ -1,11 +1,8 @@
 /**
- * Runs the real CLI, installed from the packed build, through scenarios that must succeed and scenarios
- * that must fail clearly: each asserts the exit code and what the output says, and that no process is
- * left running. Run after `bun run build`.
- * `--tier fast` (the default) needs no network after one install. `--tier slow` adds an npm install,
- * the bun runtime, bundled builds, sharding and signals; it reaches Discord, where an invalid token
- * is refused. `--windows` runs the subset whose paths and shims differ there, from both tiers; `--only <text>`
- * filters by name.
+ * Runs the CLI installed from the packed build through scenarios that must succeed or fail clearly, checking the exit
+ * code, the output and that no process is left running. Run after `bun run build`. `--tier fast|slow|all` (fast by
+ * default; both reach Discord to have a token refused); `--windows` runs the Windows subset, from both tiers unless one
+ * is named; `--only <text>` filters by name.
  */
 
 import { spawn, spawnSync } from 'child_process'
@@ -48,7 +45,7 @@ interface Scenario {
    * empty directory, or the directory holding the apps.
    */
   cwd?: 'app' | 'npm-app' | 'pnpm-app' | 'empty' | 'parent'
-  /** Files written before it runs, relative to cwd; `null` deletes. Restored afterwards. */
+  /** Files written before it runs, relative to cwd; `null` deletes. Restored afterwards, but a deleted directory. */
   files?: Record<string, string | null>
   /** The CLI's arguments. */
   argv?: string[]
@@ -64,7 +61,7 @@ interface Scenario {
   hides?: string[]
   /**
    * A signal sent once the output shows `after`: to the whole process group, as a terminal's Ctrl+C is,
-   * or to the CLI alone, as Docker, pm2 and systemd send one. `repeatAfterMs` sends it again that much later.
+   * or to the CLI alone, as Docker sends one. `repeatAfterMs` sends it again that much later.
    */
   signal?: { name: NodeJS.Signals; after: string; times?: number; to?: 'group' | 'cli'; repeatAfterMs?: number }
   /** Files changed while it runs, each once the output shows `after` `times` times; restored afterwards. */
@@ -99,7 +96,7 @@ const workDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'meocord-cli-')))
 const appDir = path.join(workDir, 'app')
 const npmAppDir = path.join(workDir, 'npm-app')
 const pnpmAppDir = path.join(workDir, 'pnpm-app')
-/** pnpm as npx runs it: a pinned pnpm 12, the line that refuses unsettled build scripts and day-old releases. */
+/** pnpm as npx runs it: a pinned pnpm 12, which refuses unsettled build scripts and releases under a day old. */
 const PNPM = 'npx --yes pnpm@12.8.1'
 const emptyDir = path.join(workDir, 'empty')
 const hiddenDir = path.join(workDir, 'hidden')
@@ -158,8 +155,8 @@ const generatedNames = [
 ]
 const pascal = (kebab: string) => kebab.replace(/(^|-)([a-z])/g, (_, _dash, letter: string) => letter.toUpperCase())
 
-/** Every generator run for two of each kind of component. */
-const generateTwoOfEach = generatedNames.flatMap(({ name }) => [
+/** Every generator run for three of each kind of component. */
+const generateThreeOfEach = generatedNames.flatMap(({ name }) => [
   ...Object.values(ControllerType).map(type => ['g', 'co', type, name]),
   ...['s', 'gu', 'i', 'f', 'pi', 'ob'].map(kind => ['g', kind, name]),
 ])
@@ -403,8 +400,8 @@ void bootstrap()
 `
 
 /**
- * An entry that has MeoCord refuse a pattern it catches, which starts the reporting, then leaves a rejection of its
- * own unhandled: an Error, or a string, and heard by a listener of its own, or not.
+ * An entry that has MeoCord refuse a pattern it catches, which starts the reporting, then leaves a rejection
+ * unhandled: an Error, a string or a refusal of MeoCord's, heard by a listener of its own or not.
  */
 const rejectingMain = (reason: 'error' | 'string' | 'refusal', own: boolean) => `import { route } from 'meocord/common'
 
@@ -610,9 +607,9 @@ function processTree(root: number): string {
 }
 
 /**
- * Runs a command in its own process group, sending the scenario's signal to the group once the output
- * shows what it waits for. Resolves when the command itself exits, even if a child it started holds
- * the output open.
+ * Runs a command, in its own process group off Windows, sending the scenario's signal to the group or to the CLI
+ * alone once the output shows what it waits for. Resolves when the command itself exits, even if a child it started
+ * holds the output open.
  */
 function run(command: string, args: string[], dir: string, scenario: Scenario): Promise<Run> {
   const posix = process.platform !== 'win32'
@@ -936,7 +933,7 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    name: 'start and register refuse a config of the wrong shape too',
+    name: 'register refuses a config of the wrong shape too',
     tier: 'fast',
     files: { 'meocord.config.ts': config("{ discordToken: 'x', shutdownTimeout: 'soon' }") },
     argv: ['register'],
@@ -1191,10 +1188,10 @@ const scenarios: Scenario[] = [
   },
 
   {
-    name: 'two of every generated component, listed beside the samples, build and start without a routing warning',
+    name: 'three of every generated component, listed beside the samples, build and start without a routing warning',
     tier: 'slow',
     files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': appWithGenerated, dist: null },
-    before: generateTwoOfEach,
+    before: generateThreeOfEach,
     thenEdits: autocompleteOptions,
     argv: ['start', '--prod', '--build'],
     timeoutMs: 120_000,
@@ -1386,8 +1383,6 @@ const scenarios: Scenario[] = [
     expect: { code: 1, says: ['Shard 0 cannot log in (TokenInvalid)', REFUSED_TOKEN, 'Stopping every shard'], never: ['restarting it'] },
   },
 
-  // Slow: stop signals, sent to the whole process group as a terminal's Ctrl+C is, or to the CLI alone
-  // as Docker, pm2 and systemd send them. Either way the bot shuts down through its own path, once.
   // A restart of start --dev is one sequence: the old bot stops, even mid-login, and one new bot starts
   ...(['node', 'bun'] as const).flatMap((runtime): Scenario[] => [
     {
@@ -1615,9 +1610,8 @@ const scenarios: Scenario[] = [
     timeoutMs: 60_000,
     expect: { code: 0, says: ['1 pass', '0 fail'], never: ['[ERROR]'] },
   },
-  // Each stop is tested in both phases, reached by what the output shows rather than by timing: online, once the local
-  // Discord's READY has run the ready hook, and mid-login, against an API that never answers
-  // A refusal as the application loads reads as one line and exits 1, a decorator's or MeoCordFactory.create's alike
+  // A refusal as the application loads reads as one line, a decorator's or MeoCordFactory.create's alike; a rejection of
+  // the app's own goes to its listener or to the runtime's report
   ...(['node', 'bun'] as const).flatMap((runtime): Scenario[] => [
     {
       name: `start --prod on ${runtime} reports a decorator it refuses as one line, and exits 1`,
@@ -1706,7 +1700,7 @@ const scenarios: Scenario[] = [
   ]),
   // A production build keeps every class's own name, as development does, however many modules declare it
   {
-    name: 'start --prod refuses two same-named controllers with a cooldown, as a development build does',
+    name: 'start --prod refuses two same-named controllers with a cooldown',
     tier: 'fast',
     files: {
       '.env': INVALID_TOKEN_ENV,
@@ -1732,6 +1726,9 @@ const scenarios: Scenario[] = [
     timeoutMs: 60_000,
     expect: { code: 1, says: [REFUSED_MESSAGE_PATTERN], never: ['_SampleMessageController', 'Starting bot'] },
   },
+  // Stop signals, sent to the whole process group as a terminal's Ctrl+C is, or to the CLI alone as Docker sends them;
+  // either way the bot shuts down through its own path, once. Each stop is tested in both phases, reached by what the
+  // output shows rather than by timing: online, once the local Discord's READY has run the ready hook, and mid-login
   ...(
     [
       ['Ctrl+C', { name: 'SIGINT', to: 'group' }],
@@ -1910,7 +1907,7 @@ const scenarios: Scenario[] = [
     },
   },
   {
-    name: 'start --dev exits 1 when its first build cannot start, as build does',
+    name: 'start --dev exits 1 when its first build cannot start',
     tier: 'fast',
     files: { '.env': INVALID_TOKEN_ENV, 'meocord.config.ts': validConfig.replace('config.tools ??= {}', HOOK_THROWS) },
     argv: ['start', '--dev'],

@@ -72,10 +72,8 @@ function importsOf(file: string): TemplateImport[] {
 const allTemplates = templateDirs.flatMap(dir => templateFiles(dir))
 const allImports = allTemplates.flatMap(importsOf)
 
-// Rendering a template proves nothing about whether the code it produces compiles.
-// `context-menu` imported `CommandType` from `meocord/decorator`, which does not
-// export it, so the generated controller failed to build -- and every render-only
-// assertion passed regardless.
+// Rendering a template proves nothing about whether the code it produces compiles: a name imported
+// from a module that does not export it fails the generated app's build while every render passes.
 describe('generator templates', () => {
   it('finds imports to check', () => {
     expect(allImports.length).toBeGreaterThan(0)
@@ -101,7 +99,7 @@ function commandsOf(file: string): TemplateCommand[] {
   const source = readFileSync(file, 'utf8')
   const template = labelFor(file)
 
-  // Rendered as a nested name renders it, the longest command name a generator writes
+  // Rendered as a nested name renders it, its folders joined to it with hyphens
   return [...source.matchAll(COMMAND_CALL)].map(([, pattern, member]) => ({
     template,
     pattern: pattern.replaceAll('{{commandName}}', 'admin-ban'),
@@ -113,8 +111,8 @@ const allCommands = allTemplates.flatMap(commandsOf)
 
 // An invalid pattern is not a compile error -- `@Command` throws while the class is
 // being defined, so a template carrying one typechecks, ships, and takes the user's
-// bot down on the first import. `verify:generated` loads what it generates, for its
-// own two names; this checks every template, whatever it generates.
+// bot down on the first import. `verify:generated` loads what it generates, for the
+// names it picks; this checks every template, whatever it generates.
 describe('generator template command patterns', () => {
   it('finds command patterns to check', () => {
     expect(allCommands.length).toBeGreaterThan(0)

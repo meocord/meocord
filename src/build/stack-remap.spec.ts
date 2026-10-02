@@ -17,7 +17,7 @@ describe('installStackRemapper', () => {
   const load = createRequire(import.meta.url)
   const runtimeHook = Error.prepareStackTrace
 
-  // A compiled file whose map points line 2 of its code back to line 3 of boom.ts
+  // A compiled file whose map points its throw back to line 4 of boom.ts
   const compile = (writeMap = true) => {
     const { code, map } = rspack.experiments.swc.transformSync(
       "// the source\n\nexport function explode(): never {\n  throw new Error('boom')\n}\n",

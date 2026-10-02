@@ -80,7 +80,7 @@ export { load, freeModule, modules }
 /**
  * A bundled build of an entry that imports an ES module probing for CommonJS, as lodash-es does, and a
  * CommonJS module, under an eval devtool set as an application's hook would set it; then run on Node
- * and on Bun, where the free probes made the whole bundle CommonJS and the eval hid import.meta.
+ * and on Bun, where the free probes would make the whole bundle CommonJS.
  */
 describe('a bundled build with an ES module that probes for CommonJS, under an eval devtool', () => {
   const fixture = mkdtempSync(path.join(tmpdir(), 'meocord-runnable-'))

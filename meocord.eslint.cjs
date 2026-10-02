@@ -9,8 +9,8 @@ const path = require('path')
 
 const tsFiles = ['**/*.ts']
 
-// The cycle check needs the TypeScript resolver, which projects created before it was added lack;
-// without it every import would warn that it cannot be resolved, so the check is left out instead
+// The cycle check needs eslint-import-resolver-typescript; in a project without it every import would warn that it
+// cannot be resolved, so the check and the resolver setting are left out there
 const hasTypeScriptResolver = (() => {
   try {
     createRequire(path.join(process.cwd(), 'package.json')).resolve('eslint-import-resolver-typescript')

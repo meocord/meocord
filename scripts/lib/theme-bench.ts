@@ -1,8 +1,7 @@
 /**
- * Measures what theming adds to one handler call through the pipeline: nothing set, an app theme, a `@UseTheme`
- * scope, and a scope whose handler reads the theme. A plain call with no theme at all, measured in the same run, is
- * the reference, so the budgets hold on any machine. Prints one JSON line of nanoseconds; `scripts/bench-theme.ts`
- * runs it under Bun and Node and checks the budgets.
+ * Measures what theming adds to one handler call: an app theme, a `@UseTheme` scope, a handler reading the theme, and
+ * server and user themes resolved, against a plain call in the same run. Prints one JSON line of nanoseconds;
+ * `scripts/bench-theme.ts` runs it under Bun and Node and checks the budgets.
  */
 import 'reflect-metadata'
 import { Container } from 'inversify'
@@ -100,7 +99,7 @@ export async function run(): Promise<Measured> {
       app: containerFor(AppThemed, { theme: { colors: { primary: '#000003' } } }),
       scoped: containerFor(Scoped),
       read: containerFor(Reads),
-      // A server's and a user's themes, both found in their caches, as they are after a call's first
+      // A server's and a user's themes, both found in their caches, as they are after the first call
       resolved: containerFor(
         Resolved,
         { themeFor: { resolvers: { guild: () => ({ colors: { primary: '#000004' } }), user: () => ({ colors: { info: '#000005' } }) } } },

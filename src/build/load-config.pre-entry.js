@@ -22,8 +22,8 @@ globalThis[BUILD_MODE_KEY] = process.env.NODE_ENV
 // rather than the directory the build ran in, which the bundle would otherwise carry
 __webpack_public_path__ = `${path.dirname(bundle).replace(/\\/g, '/')}/`
 
-// Beside the bundle, wherever the bot was started from, by the loader the runtime uses. The bundle carries its own copy
-// of it, and the module cache evaluates the config once for both; the factory reports one that is missing or fails
+// Beside the bundle, wherever the bot was started from, by the loader the runtime uses: the same module when meocord is
+// bundled, else a copy of it, and require's cache evaluates the config once either way; the factory reports a failure
 const config = loadMeoCordConfig()
 
 if (config?.sourceMappedStacks !== false) installStackRemapper(bundle)

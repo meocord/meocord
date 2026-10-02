@@ -47,7 +47,7 @@ describe('loadMeoCordConfig', () => {
     expect(loadMeoCordConfig()).toBeUndefined()
   })
 
-  // MeoCordFactory.create reports it, once; the loader runs earlier, for the logger, and stays quiet
+  // MeoCordFactory.create reports it, once; the loader runs earlier, in the pre-entry and for the logger, and stays quiet
   it('keeps why a compiled config failed to load, prints nothing, and returns undefined', async () => {
     writeCompiledConfig(`throw new Error('broken config')\n`)
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -77,7 +77,7 @@ describe('loadMeoCordConfig', () => {
     expect(compiledConfigProblem()).toBeUndefined()
   })
 
-  // Started from elsewhere, a bot told only to build again had nothing to go on
+  // Started from elsewhere, a bot has to say where it looked and where it was started to say what is wrong
   it('says whether a config was missing or failed to load, and where it looked', async () => {
     const compiled = path.join(project, 'dist', 'meocord.config.mjs')
     const missing = await freshLoader()

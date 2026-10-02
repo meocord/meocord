@@ -17,7 +17,7 @@ export class GuardGeneratorHelper {
 
   /**
    * Generates a guard and its spec. The name may contain slashes for nested directories.
-   * @throws Exits the process when the name is missing or invalid.
+   * @throws Exits the process when the name is missing or invalid, or a file it would write exists.
    */
   generateGuard(guardName?: string): string[] {
     if (!guardName) {

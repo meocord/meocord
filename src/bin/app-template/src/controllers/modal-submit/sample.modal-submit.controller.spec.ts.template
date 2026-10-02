@@ -5,7 +5,7 @@ import { SampleModalSubmitController } from '@src/controllers/modal-submit/sampl
 describe('SampleModalSubmitController', () => {
   const module = MeoCordTestingModule.create({ controllers: [SampleModalSubmitController] }).compile()
 
-  it('defers privately, then answers the submission', async () => {
+  it('defers, then answers the submission', async () => {
     const interaction = createMockInteraction(ModalSubmitInteraction, { customId: 'submit-modal' })
 
     await module.invoke(SampleModalSubmitController, 'handleModal', interaction)

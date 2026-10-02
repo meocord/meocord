@@ -86,7 +86,7 @@ describe('bundledModuleFiles', () => {
     expect(bundledModuleFiles(undefined)).toEqual([])
   })
 
-  // A production build concatenates most packages; their members only appear as orphans.
+  // A concatenated package, as an app's tools.rspack can turn on, lists its members only as orphans
   it('asks for orphan modules, which is where concatenated packages are listed', () => {
     let options: Record<string, unknown> = {}
     bundledModuleFiles({

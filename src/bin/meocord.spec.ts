@@ -186,7 +186,7 @@ describe('spawning the application', () => {
         return { child, send }
       }
 
-      // Docker, pm2 and systemd signal the CLI alone; the bot would otherwise keep running
+      // Docker signals the CLI alone; the bot would otherwise keep running
       it.skipIf(process.platform === 'win32').each(['SIGINT', 'SIGTERM'] as const)('passes %s on to the application', async signal => {
         const { child, send } = await started()
 
@@ -224,8 +224,6 @@ describe('spawning the application', () => {
     })
   })
 
-  // Someone who typed `bun` expects a bun process. Pinning the binary the CLI happens to
-  // be executing would hand them node, because the bin's shebang defers to it.
   // `meocord register` runs the same bundle, told by its environment to register and exit.
   describe('register()', () => {
     // Only the keys register sets: a failed assertion prints what it received, and the rest is the
@@ -261,7 +259,7 @@ describe('spawning the application', () => {
       expect(exitSpy).toHaveBeenCalledWith(1)
     })
 
-    it('asks for a build, and spawns nothing, when there is no bundle', async () => {
+    it('exits 1, and spawns nothing, when there is no bundle', async () => {
       vi.mocked(existsSync).mockReturnValue(false)
       spawnMock.mockClear()
 
@@ -272,6 +270,8 @@ describe('spawning the application', () => {
     })
   })
 
+  // Someone who typed `bun` expects a bun process. Pinning the binary the CLI happens to
+  // be executing would hand them node, because the bin's shebang defers to it.
   describe('following the launcher', () => {
     beforeEach(() => Object.assign(process.env, BUN_LAUNCHER))
 
@@ -289,8 +289,6 @@ describe('spawning the application', () => {
     })
   })
 
-  // Watching and production reach the bundle through the same command, so a runtime
-  // that works in development cannot silently differ from the one that ships.
   describe('the terminal', () => {
     const ESC = '\u001b['
     const escapes = () =>
@@ -321,7 +319,7 @@ describe('spawning the application', () => {
     }
 
     // In a log, a CI run or a process manager, an escape code is noise, and some viewers clear on it
-    it('writes no escape code as a production start begins, in a terminal or not', async () => {
+    it('writes no escape code as a production start begins, even in a terminal', async () => {
       process.stdout.isTTY = true
       await new MeoCordCLI().startProd()
 
@@ -356,7 +354,9 @@ describe('spawning the application', () => {
   describe('dev watcher', () => {
     const watcher = () => new MeoCordCLI() as unknown as { restartApp: () => void; appProcess: unknown }
 
-    it('runs the application exactly as production does', async () => {
+    // Watching and production reach the bundle through the same command, so a runtime
+    // that works in development cannot silently differ from the one that ships.
+    it('runs the application with the command and arguments production uses', async () => {
       await new MeoCordCLI().startProd()
       const production = lastSpawn()
 
@@ -455,7 +455,7 @@ describe('spawning the application', () => {
       }
 
       // A watcher can report one edit twice; a launch for each would leave a second bot running, untracked
-      it('starts one application, from the latest build, once the previous one exits', () => {
+      it('starts one application once the previous one exits', () => {
         const { cli, first } = restarting()
         spawnMock.mockClear()
 

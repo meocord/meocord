@@ -106,7 +106,7 @@ describe('createRsbuildConfig', () => {
       expect(config.source?.preEntry).toEqual([])
     })
 
-    // The application build and the config build share dist; cleaning let the second erase the first.
+    // The application build and the config build share dist; cleaning would let the second erase the first.
     it('does not empty dist before building', () => {
       const config = createRsbuildConfig({ mode: 'production' })
 
@@ -137,7 +137,7 @@ describe('createRsbuildConfig', () => {
       expect(config.output?.assetPrefix).toBe(`${dist.replace(/\\/g, '/')}/`)
     })
 
-    // Rspack emits the prefix unescaped, so a backslash in it corrupted every asset path on Windows.
+    // Rspack emits the prefix unescaped, so a backslash in it would corrupt every asset path on Windows.
     it('writes the prefix with forward slashes, which survive being emitted as a string literal', () => {
       expect(assetPrefixFor('D:\\a\\meocord\\dist')).toBe('D:/a/meocord/dist/')
       expect(assetPrefixFor('/srv/bot/dist')).toBe('/srv/bot/dist/')
@@ -219,7 +219,7 @@ describe('optional externals', () => {
   const externalsOf = (config: ReturnType<typeof createRsbuildConfig>) =>
     (config.output?.externals as Record<string, string>[])[0]
 
-  it('keeps each name a require at its call site, after discord.js\'s own, once each', () => {
+  it('keeps each name a require at its call site, discord.js\'s own included', () => {
     const optional = externalsOf(
       createRsbuildConfig({ mode: 'production', optionalExternals: ['supports-color', 'bufferutil', '@node-rs/xxhash'] }),
     )

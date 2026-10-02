@@ -24,7 +24,7 @@ function contextMenuKind(options: { message?: boolean }): { contextMenuType: str
 export class ControllerGeneratorHelper {
   /**
    * Generates a controller of the given type, with its spec and, for command types, its builder.
-   * @throws Exits the process when the name is invalid or the type unsupported.
+   * @throws When the type is unsupported; exits the process when the name is invalid or a file it would write exists.
    */
   generateController(args: { controllerName: string | undefined }, type: ControllerType, options: { message?: boolean } = {}): string[] {
     const { parts, kebabCaseName, className } = validateAndFormatName(args.controllerName)

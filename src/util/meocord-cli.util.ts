@@ -108,9 +108,8 @@ export function generateArgumentsTable(args: readonly Argument[]): string {
 }
 
 /**
- * Ensures that the script is being run from the root directory of the project.
- * Validates the existence of required files, dependencies, and configuration.
- * If validation fails, it logs an error message and terminates the process.
+ * Exits unless the CLI runs from a project root: package.json is there, the meocord package is installed, and the
+ * project's `dependencies` list it.
  */
 export async function ensureReady() {
   const meocordPath = findModulePackageDir('meocord')

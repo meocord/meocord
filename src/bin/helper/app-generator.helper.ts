@@ -4,16 +4,10 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-/** Marks a packaged template file, and is dropped from the name that gets written. */
+/** Marks a packaged template file, so this repository's tooling never reads it as a source; dropped when written. */
 const TEMPLATE_SUFFIX = '.template'
 
-/**
- * Stands in for a leading dot while the file is packaged.
- *
- * npm omits a `.gitignore` from a published tarball, and this repository's own tooling
- * would treat a packaged `.ts` as one of its sources, so nothing here is stored under
- * the name it is written as.
- */
+/** Stands in for a leading dot while the file is packaged, since npm omits a `.gitignore` from a published tarball. */
 const DOT_PREFIX = '_'
 
 /** Values substituted into the template's `{{...}}` placeholders. */
@@ -24,7 +18,7 @@ export interface AppTemplateVariables extends Record<string, string> {
   displayName: string
   /** Version of the framework doing the generating, which the application pins. */
   version: string
-  /** Package manager the application was created with, used in its README examples. */
+  /** Package manager the application was created with: its README examples, and the files and fields only it reads. */
   packageManager: string
   /**
    * Prefix that puts the framework's own commands on the chosen runtime.
@@ -62,7 +56,7 @@ const PACKAGE_MANAGER_FIELDS: Record<string, Record<string, unknown>> = {
   npm: { allowScripts: { '@swc/core': false, fsevents: false, 'unrs-resolver': false } },
 }
 
-/** The script prefix for a package manager, such as `bun ` for bun. */
+/** The script prefix for a package manager, such as `bun --bun ` for bun. */
 export function runtimePrefixFor(packageManager: string): string {
   return RUNTIME_PREFIXES[packageManager] ?? ''
 }

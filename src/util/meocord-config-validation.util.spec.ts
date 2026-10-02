@@ -62,7 +62,7 @@ describe('configProblems', () => {
     expect(configProblems({ discordToken: 't', shutdownTimeout }).errors).toEqual([])
   })
 
-  // `[process.env.GUILD_ID]` with the variable unset; registration drops the blank ids and warns
+  // `[process.env.GUILD_ID]` with the variable unset; registration drops the blank ids
   it('accepts guild ids an unset environment variable leaves undefined', () => {
     expect(configProblems({ discordToken: 't', commands: { guilds: [undefined, '1'] } }).errors).toEqual([])
   })

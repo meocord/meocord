@@ -108,8 +108,8 @@ describe('import-x/no-cycle', () => {
     expect(await lintCycles('notes.ts')).toEqual([[1, 'Dependency cycle detected']])
   })
 
-  // A project created before the resolver joined the template: its imports cannot be resolved, so the check
-  // stays off rather than warn on every import and fail `eslint --max-warnings=0`
+  // A project without eslint-import-resolver-typescript: its imports cannot be resolved, so the check stays off
+  // rather than warn on every import and fail `eslint --max-warnings=0`
   it('is left out, with the resolver setting, where the project cannot resolve the TypeScript resolver', async () => {
     const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root)
     try {

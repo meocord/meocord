@@ -127,7 +127,7 @@ describe('validateRunConfig', () => {
     expect(mockReadSourceConfig).not.toHaveBeenCalled()
   })
 
-  // A broken one is what the bot would run; meocord.config.ts would pass for it, and a later check stop before the bot says why
+  // A broken one is what the bot would run; meocord.config.ts would pass, and the bot would stop without saying why
   it('stops at a compiled config that fails to load, with why, rather than check meocord.config.ts', async () => {
     mockLoadCompiledConfig.mockReturnValue(undefined)
     mockCompiledProblem.mockReturnValue({ path: 'dist/meocord.config.mjs', missing: false, error: new Error('boom') })
@@ -282,7 +282,7 @@ describe('compileAndValidateConfig', () => {
   })
 })
 
-// Connecting to the gateway is the point at which a token is actually required.
+// Starting the bot or registering its commands is where a token is required
 describe('validateDiscordToken', () => {
   beforeEach(() => {
     mockWait.mockClear()

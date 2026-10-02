@@ -37,7 +37,7 @@ export function validateAndFormatName(originalName?: string): {
   className: string
   commandName: string
 } {
-  // Shared by every generator -- controllers, services and guards -- so the messages name none.
+  // Shared by every generator, so the messages name no kind of component
   if (!originalName) {
     logger.error('A name is required.')
     process.exit(1)
@@ -116,12 +116,9 @@ export function writeFiles(files: readonly (readonly [filePath: string, content:
 }
 
 /**
- * Formats the files a generator wrote with the project's own ESLint, when it has one, in one run, and resolves once
- * that run has finished. The files are written either way: formatting is a courtesy, so a run that fails, or rules
- * that reject the template, are reported and never fail the command.
- *
- * One run, rather than one per file, builds the project's type information once. Reaching for `npx` instead would
- * start downloading ESLint into a project that deliberately does not have it.
+ * Formats the written files with the project's own ESLint in one run, so its type information is built once, and
+ * resolves when it ends. A failed run or a rule the template breaks is warned about, never fatal; with no local
+ * ESLint it does nothing, rather than download one through `npx`.
  */
 export async function formatGeneratedFiles(filePaths: readonly string[]): Promise<void> {
   const script = filePaths.length > 0 ? localESLintScript() : undefined
