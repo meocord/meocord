@@ -76,7 +76,7 @@ describe('RedisCooldownStore', () => {
   it.each([null, 'OK', [2, 0, -1], [0], [1, 0], [0, 10, 3]])('says what it expected when the adapter resolves to %j', async reply => {
     const store = new RedisCooldownStore(() => Promise.resolve(reply))
 
-    await expect(store.consume('k', limit)).rejects.toThrow(/replied .*where it returns \[allowed, retryAfterMs, index\], and when refused the wait's end/)
+    await expect(store.consume('k', limit)).rejects.toThrow(/replied .*where it returns \[allowed, retryAfterMs, index\], with the wait's end after them when refused/)
   })
 
   it('on Redis Cluster, counts keys in other slots with a script each, in order, giving back those counted at a refusal', async () => {
