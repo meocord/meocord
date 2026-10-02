@@ -3,8 +3,9 @@
 - **Running the bot**
   - Calling `app.start()` again after a failed login no longer attaches every handler a second time, which ran each command, message and reaction twice.
   - A bot started without the CLI, as with `node dist/main.js`, has the values `meocord.config.ts` loads from `.env` before its modules run, so an option such as `@MeoCord({ activities: [{ name: process.env.STATUS! }] })` reads them. Rebuild to pick this up.
-  - A privileged intent Discord refuses at login is explained, naming the intents the bot asks for and where to enable them, and a token Discord refuses, or an empty one, is explained in one line with where to get a new one, rather than discord.js's error and its stack.
+  - A privileged intent Discord refuses at login, and a token Discord refuses or an empty one, are each explained in one line: the intents the bot asks for and where to enable them, or where to get a new token. A new app's `main.ts` logs that line alone; one made with 4.0 still prints discord.js's error after it.
   - A command builder that can't be built is named, with its command, in the error that stops registration, where 4.0 logged only discord.js's error. As in 4.0, no command is sent until it is fixed.
+  - A process adds one SIGINT and one SIGTERM listener however many apps it creates, so a test suite that creates many apps no longer triggers Node's `MaxListenersExceededWarning`.
   - A reaction in a DM the bot hasn't cached since it started reaches its handlers again; from discord.js 14.26.2, it was dropped before any listener saw it.
 - **Routing and dispatch**
   - A button, select menu or modal that a discord.js collector answers is no longer answered "Command not found!" first.
@@ -13,6 +14,7 @@
   - A controller that extends another no longer adds its handlers to the base class, which then routed to handlers it doesn't have.
 - **Dependency injection**
   - A controller, service or guard that extends another decorated class gets its own constructor's dependencies, where a subclass with its own constructor failed to resolve.
+  - A controller or service that injects with `@inject(Token)` on a parameter typed as an interface is created, where 4.0 bound `Object` in place of the token and failed with "missing metadata on type Object".
   - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
 - **Handler types**
   - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
