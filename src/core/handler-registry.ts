@@ -269,6 +269,14 @@ function messageCommand(
   }
 }
 
+/** The message routes the app's dispatcher reads, by the app's registry, so its help and dispatch read one table. */
+const dispatchedRoutes = new WeakMap<HandlerRegistry, readonly MessageRoute[]>()
+
+/** Has `registry` work out message help from `routes`, the table the app's dispatcher routes messages with. */
+export function shareMessageRoutes(registry: HandlerRegistry, routes: readonly MessageRoute[]): void {
+  dispatchedRoutes.set(registry, routes)
+}
+
 /**
  * Lists every handler the app registered, with the metadata declared on it.
  *
@@ -302,6 +310,7 @@ function messageCommand(
  */
 export class HandlerRegistry {
   private entries?: HandlerEntry[]
+  /** Built from `classes` for a registry no dispatcher shares its routes with. */
   private messageRoutes?: MessageRoute[]
 
   /**
@@ -334,9 +343,9 @@ export class HandlerRegistry {
   /**
    * Works out what the built-in help would answer a message, for a help command of your own.
    *
-   * It lists the message commands that work where the message was sent, or describes the one `query`
-   * names, with the same rules the built-in follows: hidden and guarded handlers are left out of lists, and shown
-   * when named. It works whether `messages.help` is on or off.
+   * It lists the message commands of the app's controllers that work where the message was sent, or describes the
+   * one `query` names, with the same routes and rules the built-in follows: hidden and guarded handlers are left out
+   * of lists, and shown when named. It works whether `messages.help` is on or off.
    *
    * @param message - The message asking for help; its start and where it was sent decide what is listed.
    * @param query - The command asked about, such as `ban` or `config set`; leave it out to list them all.
@@ -353,7 +362,7 @@ export class HandlerRegistry {
    * ```
    */
   async messageHelp(message: Message, query?: string): Promise<MessageHelp> {
-    this.messageRoutes ??= buildMessageRoutes([...this.classes], this.messages)
+    const routes = dispatchedRoutes.get(this) ?? (this.messageRoutes ??= buildMessageRoutes([...this.classes], this.messages))
     const starts = await messageStarts(this.messages, message, message.client?.user?.id)
     const text = (message.content ?? '').trim()
     const rest = afterStart(text, starts.prefixes.filter(prefix => prefix !== ''), starts.mention, this.messages.caseSensitive ?? false)
@@ -363,7 +372,7 @@ export class HandlerRegistry {
         ? text.slice(0, text.length - rest.length)
         : (starts.prefixes.find(prefix => prefix !== '') ?? (starts.mention ? `<@${starts.mention}> ` : ''))
     return computeMessageHelp(
-      this.messageRoutes,
+      routes,
       { start, query: query?.trim() ?? '', starts, invocation: helpInvocation(start, this.messages.help) },
       this.messages.types,
       textRenderer(this.translator(), messageLocale(message)),
