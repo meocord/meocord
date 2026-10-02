@@ -12,7 +12,8 @@ import { type MeoCordConfig } from '@src/interface/index.js'
  * null, logging that it was not found.
  */
 export const findModulePackageDir = (moduleName: string, baseDir: string = process.cwd()): string | null => {
-  for (let dir = path.resolve(baseDir); ; dir = path.dirname(dir)) {
+  // From the directory as given: resolving it would add the working directory's drive on Windows
+  for (let dir = baseDir; ; dir = path.dirname(dir)) {
     const modulePath = path.join(dir, 'node_modules', moduleName)
     if (fs.existsSync(modulePath)) return modulePath
     if (dir === path.dirname(dir)) break
