@@ -6,7 +6,7 @@ import { createExecutionContext } from './execution-context.js'
 import { getResponse } from './response.js'
 
 /**
- * Runs under `vitest --typecheck`. The negative case uses `@ts-expect-error`,
+ * Runs under `vitest --typecheck`. The negative cases use `@ts-expect-error`,
  * which fails once the rejected form starts compiling.
  */
 
@@ -25,8 +25,8 @@ class NotificationService {
 describe('overrideProvider', () => {
   // Asserted by calling it, not by inspecting the parameter type: `T` extends
   // `Partial<T>`, so `.parameter(0).toExtend<Partial<T>>()` holds under both
-  // signatures and proves nothing. Passing a genuine partial is what fails when
-  // the parameter tightens back to `T`.
+  // signatures and proves nothing. Passing a genuine partial is what fails if
+  // the parameter tightens to `T`.
   it('accepts a double covering only the methods under test', () => {
     MeoCordTestingModule.create({})
       .overrideProvider(NotificationService)

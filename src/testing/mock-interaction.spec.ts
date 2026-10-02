@@ -103,7 +103,7 @@ describe('createMockInteraction', () => {
   })
 
   describe('auto-stubbing', () => {
-    it('auto-stubs prototype methods as vi.fn()', () => {
+    it('auto-stubs prototype methods as mock functions', () => {
       const interaction = createMockInteraction(ButtonInteraction)
       expect(typeof interaction.isButton).toBe('function')
       expect(vi.isMockFunction(interaction.isButton)).toBe(true)
@@ -266,7 +266,7 @@ describe('createMockInteraction', () => {
       expect(interaction.isRepliable()).toBe(false)
     })
 
-    it('is vi.fn() — can be overridden per test', () => {
+    it('is a mock function — can be overridden per test', () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
       interaction.isRepliable.mockReturnValue(false)
       expect(interaction.isRepliable()).toBe(false)
@@ -391,7 +391,7 @@ describe('createMockInteraction', () => {
       await expect(interaction.deleteReply()).rejects.toThrow()
     })
 
-    it('reply is vi.fn() — call assertions still work', async () => {
+    it('reply is a mock function — call assertions still work', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
       await interaction.reply({ content: 'hello' })
       expect(interaction.reply).toHaveBeenCalledWith({ content: 'hello' })
@@ -501,10 +501,8 @@ describe('createMockInteraction', () => {
       expect((interaction as any).options.getSubcommand()).toBe('ping')
     })
 
-    // discord.js declares targetUser / targetMessage as prototype getters with no
-    // setter. A plain assignment against a getter-only accessor is a no-op, so the
-    // write has to shadow the accessor with an own data property or test setup
-    // silently vanishes and the later read falls through to an empty auto-stub.
+    // discord.js declares targetUser / targetMessage as prototype getters with no setter, and a plain write to one
+    // throws in strict code, so the mock's write shadows the accessor with an own data property.
     it('a write to a prototype getter shadows it with an own value', () => {
       const interaction = createMockInteraction(UserContextMenuCommandInteraction)
       const target = createMockUser()
@@ -512,7 +510,7 @@ describe('createMockInteraction', () => {
       expect((interaction as any).targetUser).toBe(target)
     })
 
-    it('a write to a prototype getter is visible to prototype methods reading it', () => {
+    it('a write to another prototype getter shadows it too (targetMessage)', () => {
       const interaction = createMockInteraction(MessageContextMenuCommandInteraction)
       const message = createMockMessage()
       ;(interaction as any).targetMessage = message
@@ -643,9 +641,6 @@ describe('createMockInteraction', () => {
     })
   })
 
-  // These assert a compile-time contract, so the gate is `tsc --noEmit -p
-  // tsconfig.test.json`, not the runtime assertion. A mock that cannot be handed
-  // to the code under test without a cast pushes one cast into every call site.
   describe('locales', () => {
     it('has the user’s locale, and no server locale without a guildId, as in a DM', () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
@@ -678,6 +673,9 @@ describe('createMockInteraction', () => {
     })
   })
 
+  // These assert a compile-time contract, so the gate is `tsc --noEmit -p
+  // tsconfig.test.json`, not the runtime assertion. A mock that cannot be handed
+  // to the code under test without a cast pushes one cast into every call site.
   describe('assignability to the real discord.js class', () => {
     it('is accepted where the real class is expected, without a cast', () => {
       const interaction = createMockInteraction(ButtonInteraction, { customId: 'gi-profile-1-2' })
@@ -885,7 +883,7 @@ describe('createChatInputOptions', () => {
     })
   })
 
-  describe('methods are vi.fn() — configurable per test', () => {
+  describe('methods are mock functions — configurable per test', () => {
     it('getNumber is a mock function', () => {
       const options = createChatInputOptions({ uid: 12345678 })
       expect(vi.isMockFunction(options.getNumber)).toBe(true)
@@ -899,7 +897,7 @@ describe('createChatInputOptions', () => {
   })
 
   describe('unlisted methods fall through to auto-stub', () => {
-    it('getAttachment is auto-stubbed as vi.fn()', () => {
+    it('getAttachment is auto-stubbed as a mock function', () => {
       const options = createChatInputOptions({})
       expect(vi.isMockFunction((options as any).getAttachment)).toBe(true)
     })
@@ -1066,7 +1064,7 @@ describe('createMockMessage', () => {
     expect([message.guild, message.guildId]).toEqual([guild, '300'])
   })
 
-  it("keeps a guild's members, roles and channels in real caches, by id", () => {
+  it("keeps a guild's members and roles in real caches, by id", () => {
     const member = createMock<GuildMember>({ id: '1' })
     const guild = createMockGuild({ members: [member] })
     expect(guild.members.cache.get('1')).toBe(member)
@@ -1084,7 +1082,7 @@ describe('createMockMessage', () => {
     expect(msg.attachments.size).toBe(0)
   })
 
-  it('methods are auto-stubbed as vi.fn()', () => {
+  it('methods are auto-stubbed as mock functions', () => {
     const msg = createMockMessage()
     expect(vi.isMockFunction(msg.edit)).toBe(true)
     expect(vi.isMockFunction(msg.react)).toBe(true)
@@ -1134,7 +1132,7 @@ describe('createMockMessage', () => {
     expect(result).toBeInstanceOf(Message)
   })
 
-  it('delete() is vi.fn() — call assertions still work', async () => {
+  it('delete() is a mock function — call assertions still work', async () => {
     const msg = createMockMessage()
     await msg.delete()
     expect(msg.delete).toHaveBeenCalledTimes(1)
@@ -1145,7 +1143,7 @@ describe('createMockMessage', () => {
     expect(msg.author).toBeInstanceOf(User)
   })
 
-  it('msg.author.send is a vi.fn()', () => {
+  it('msg.author.send is a mock function', () => {
     expect(vi.isMockFunction(createMockMessage().author.send)).toBe(true)
   })
 
@@ -1175,12 +1173,12 @@ describe('createMockMessage', () => {
     expect(vi.isMockFunction((msg.thread as any).fetch)).toBe(true)
   })
 
-  it('msg.mentions.users is a vi.fn() collection', () => {
+  it('msg.mentions.has is a mock function', () => {
     const msg = createMockMessage()
     expect(vi.isMockFunction((msg.mentions as any).has)).toBe(true)
   })
 
-  it('msg.mentions.members is an object (Collection stub)', () => {
+  it('msg.mentions.members is an object', () => {
     const msg = createMockMessage()
     expect((msg.mentions as any).members).toBeDefined()
     expect(typeof (msg.mentions as any).members).toBe('object')
@@ -1311,7 +1309,7 @@ describe('createMockUser', () => {
     expect(createMockUser()).toBeInstanceOf(User)
   })
 
-  it('send() is a vi.fn()', () => {
+  it('send() is a mock function', () => {
     const user = createMockUser()
     expect(vi.isMockFunction(user.send)).toBe(true)
   })
@@ -1322,7 +1320,7 @@ describe('createMockUser', () => {
     expect(user.send).toHaveBeenCalledWith({ embeds: [] })
   })
 
-  it('createDM() is a vi.fn()', () => {
+  it('createDM() is a mock function', () => {
     expect(vi.isMockFunction(createMockUser().createDM)).toBe(true)
   })
 })
@@ -1337,32 +1335,32 @@ describe('createMockClient', () => {
     expect(client.users).not.toBe(client.guilds)
   })
 
-  it('client.users.fetch is a vi.fn() by default', () => {
+  it('client.users.fetch is a mock function by default', () => {
     const client = createMockClient()
     expect(vi.isMockFunction((client.users as any).fetch)).toBe(true)
   })
 
-  it('client.channels.fetch is a vi.fn() by default', () => {
+  it('client.channels.fetch is a mock function by default', () => {
     const client = createMockClient()
     expect(vi.isMockFunction((client.channels as any).fetch)).toBe(true)
   })
 
-  it('client.guilds.fetch is a vi.fn() by default', () => {
+  it('client.guilds.fetch is a mock function by default', () => {
     const client = createMockClient()
     expect(vi.isMockFunction((client.guilds as any).fetch)).toBe(true)
   })
 
-  it('client.application.commands.fetch is a vi.fn() by default', () => {
+  it('client.application.commands.fetch is a mock function by default', () => {
     const client = createMockClient()
     expect(vi.isMockFunction((client.application as any).commands.fetch)).toBe(true)
   })
 
-  it('client.application.commands.set is a vi.fn() by default', () => {
+  it('client.application.commands.set is a mock function by default', () => {
     const client = createMockClient()
     expect(vi.isMockFunction((client.application as any).commands.set)).toBe(true)
   })
 
-  it('client.user.avatarURL is a vi.fn() by default', () => {
+  it('client.user.avatarURL is a mock function by default', () => {
     const client = createMockClient()
     expect(vi.isMockFunction((client.user as any).avatarURL)).toBe(true)
   })
@@ -1430,19 +1428,19 @@ describe('createMockGuild', () => {
     expect(createMockGuild()).toBeInstanceOf(Guild)
   })
 
-  it('guild.members.fetch is a vi.fn() by default', () => {
+  it('guild.members.fetch is a mock function by default', () => {
     expect(vi.isMockFunction((createMockGuild().members as any).fetch)).toBe(true)
   })
 
-  it('guild.channels.fetch is a vi.fn() by default', () => {
+  it('guild.channels.fetch is a mock function by default', () => {
     expect(vi.isMockFunction((createMockGuild().channels as any).fetch)).toBe(true)
   })
 
-  it('guild.roles.fetch is a vi.fn() by default', () => {
+  it('guild.roles.fetch is a mock function by default', () => {
     expect(vi.isMockFunction((createMockGuild().roles as any).fetch)).toBe(true)
   })
 
-  it('guild.bans.fetch is a vi.fn() by default', () => {
+  it('guild.bans.fetch is a mock function by default', () => {
     expect(vi.isMockFunction((createMockGuild().bans as any).fetch)).toBe(true)
   })
 
@@ -1485,7 +1483,7 @@ describe('createMockChannel', () => {
     expect(createMockChannel(TextChannel)).toBeInstanceOf(TextChannel)
   })
 
-  it('send() is a vi.fn()', () => {
+  it('send() is a mock function', () => {
     const channel = createMockChannel(TextChannel)
     expect(vi.isMockFunction(channel.send)).toBe(true)
   })
@@ -1496,34 +1494,34 @@ describe('createMockChannel', () => {
     expect(channel.send).toHaveBeenCalledWith({ content: 'hi' })
   })
 
-  it('channel.messages.fetch is a vi.fn() by default (TextChannel)', () => {
+  it('channel.messages.fetch is a mock function by default (TextChannel)', () => {
     const channel = createMockChannel(TextChannel)
     expect(vi.isMockFunction((channel.messages as any).fetch)).toBe(true)
   })
 
-  it('channel.threads.fetch is a vi.fn() by default (TextChannel)', () => {
+  it('channel.threads.fetch is a mock function by default (TextChannel)', () => {
     const channel = createMockChannel(TextChannel)
     expect(vi.isMockFunction((channel.threads as any).fetch)).toBe(true)
   })
 
-  it('channel.messages.fetch is a vi.fn() by default (DMChannel)', () => {
+  it('channel.messages.fetch is a mock function by default (DMChannel)', () => {
     const channel = createMockChannel(DMChannel as any)
     expect(vi.isMockFunction((channel as any).messages.fetch)).toBe(true)
   })
 
-  it('channel.messages.fetch is a vi.fn() by default (ThreadChannel)', () => {
+  it('channel.messages.fetch is a mock function by default (ThreadChannel)', () => {
     const channel = createMockChannel(ThreadChannel as any)
     expect(vi.isMockFunction((channel as any).messages.fetch)).toBe(true)
   })
 
-  it('channel.members.fetch is a vi.fn() by default (ThreadChannel)', () => {
+  it('channel.members.fetch is a mock function by default (ThreadChannel)', () => {
     const channel = createMockChannel(ThreadChannel as any)
     expect(vi.isMockFunction((channel as any).members.fetch)).toBe(true)
   })
 
   // A text or announcement channel's threads come from GuildTextThreadManager, whose create() the
   // ThreadManager base lacks; a forum or media channel's from GuildForumThreadManager
-  it.each([TextChannel, NewsChannel, ForumChannel, MediaChannel])('threads.create is a vi.fn() (%o)', Class => {
+  it.each([TextChannel, NewsChannel, ForumChannel, MediaChannel])('threads.create is a mock function (%o)', Class => {
     const channel = createMockChannel(Class as typeof TextChannel) as unknown as { threads: { create: unknown } }
     expect(vi.isMockFunction(channel.threads.create)).toBe(true)
   })

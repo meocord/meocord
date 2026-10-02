@@ -114,7 +114,7 @@ describe('a @Command handler called with another kind of interaction', () => {
 })
 
 describe("@MessageHandler('')", () => {
-  it('runs for every message, as @MessageHandler() does, and warns once, naming the handler', () => {
+  it('warns once, naming the handler', () => {
     class Chat {
       @MessageHandler('')
       every() {}

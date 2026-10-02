@@ -82,7 +82,7 @@ describe('a handler a subclass re-declares on the route it inherits', () => {
 })
 
 describe('a handler a subclass re-declares on another route', () => {
-  it('keeps answering the inherited route, as in 4.0, and is named as the bot starts, for every kind of handler', () => {
+  it('keeps answering the inherited route, and is named as the bot starts, for every kind of handler', () => {
     @Controller()
     class ShopLeaf extends Base {
       @Command('shop/page/{n:int}', CommandType.BUTTON)

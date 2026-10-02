@@ -26,9 +26,9 @@ import type {
 } from '@src/interface/command-decorator.interface.js'
 
 /**
- * The runtime spec cannot cover any of this: a handler bound to the wrong interaction
- * class is a compile error, and by the time a test runs the types are gone. The
- * negative cases are assertions too — an unfulfilled `@ts-expect-error` fails.
+ * Which interaction a handler may declare, checked by the compiler; most of it has no
+ * runtime counterpart. The negative cases are assertions too — an unfulfilled
+ * `@ts-expect-error` fails.
  */
 
 @CommandBuilder(CommandType.SLASH)

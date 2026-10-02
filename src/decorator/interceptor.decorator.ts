@@ -18,6 +18,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
  * skips the handler, and calling it twice runs the handler twice. One instance is shared by every call, so
  * it reads each use's params with `context.getParams()`.
  *
+ * @param options - `types`, the context types the interceptor runs for; every type unless given.
  * @throws Error when `types` is empty or only `['autocomplete']`, which interceptors never run for.
  *
  * @example

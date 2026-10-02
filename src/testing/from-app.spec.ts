@@ -384,7 +384,7 @@ describe('closing a module, as the bot shuts down', () => {
     warn.mockRestore()
   })
 
-  // Node fires a longer timer at once, so close() would give up on the hooks immediately
+  // Past 2147478647, the shard manager's or CLI's wait on top of it would pass Node's timer limit and fire at once
   it.each([
     [-1, '-1'],
     [2_147_478_648, '2147478648'],

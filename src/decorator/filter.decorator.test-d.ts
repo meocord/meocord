@@ -3,7 +3,7 @@ import { type ExecutionContext } from '@src/common/index.js'
 import { Catch } from '@src/decorator/index.js'
 import { type ExceptionFilter } from '@src/interface/index.js'
 
-/** Runs under `vitest --typecheck`: the JSDoc examples of `@Catch` and `ExceptionFilter` compile. */
+/** Runs under `vitest --typecheck`: a filter typed by the error its `@Catch` names. */
 
 class RateLimitedError extends Error {
   constructor(readonly retryAfter: number) {
@@ -12,7 +12,7 @@ class RateLimitedError extends Error {
 }
 
 describe('ExceptionFilter', () => {
-  it("compiles the JSDoc's example", () => {
+  it('compiles a filter typed by the error its @Catch names', () => {
     @Catch(RateLimitedError)
     class RateLimitedFilter implements ExceptionFilter<RateLimitedError> {
       async catch(error: RateLimitedError, context: ExecutionContext) {

@@ -220,7 +220,7 @@ export function testCooldownStore(
       expect((await store.consume(entry.key, limit)).allowed).toBe(true)
     })
 
-    test('peeks a refusal with the wait consume gives, or allows it with the default peekMany, and records nothing', async store => {
+    test('peeks a refusal with the wait consume gives, or allows it with the default peekMany', async store => {
       const limit = { uses: 1, windowMs: 2_000 }
       const entry = { key: key('peek-taken'), limit }
       await store.consume(entry.key, limit)
@@ -263,7 +263,7 @@ export function testCooldownStore(
       expect(peeked.blocked).toBe(2)
       expect(peeked.retryAfterMs).toBeGreaterThan(short.windowMs)
       expect(peeked.retryAfterMs).toBeLessThanOrEqual(long.windowMs)
-      // Nothing recorded against the free key by the refused peek, nor by the one before
+      // Nothing recorded against the free key by the refused peek
       expect((await store.consume(batch[0].key, short)).allowed).toBe(true)
     })
   })

@@ -111,7 +111,8 @@ export interface MeoCordOptions<
 
   /**
    * What a call with a cooldown gets when the store throws, rejects or does not answer in time: `'deny'`, the default,
-   * refuses it with `CooldownStoreError`, which the fallback answers privately; `'allow'` runs it uncounted. Either
+   * refuses it with `CooldownStoreError`, which the fallback answers privately (a message command's only with
+   * `messages.dmOnError`); `'allow'` runs it uncounted. Either
    * way the failure is logged once per outage, which ends when the store answers 30 seconds or more after its last
    * failure. Under `'deny'`, a call the store counts after the timeout is given back through its verdict's `release`,
    * so the refused caller loses no use; under `'allow'` that late count is the call's own.

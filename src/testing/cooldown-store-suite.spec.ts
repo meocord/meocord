@@ -86,7 +86,7 @@ class BlindPeekStore extends MemoryCooldownStore {
 }
 
 describe('testCooldownStore', () => {
-  it('fails a store that checks and records in two steps, where concurrent calls at the limit both pass', async () => {
+  it('fails a store that checks and records in two steps, where several concurrent calls at the limit pass', async () => {
     // It keeps the default consumeMany, which takes each key with its consume
     expect(await failures(() => new TwoStepStore())).toEqual([
       expect.stringContaining('lets exactly one of several concurrent calls take the last use'),
@@ -103,7 +103,7 @@ describe('testCooldownStore', () => {
   })
 
   it('fails a store that counts every key together', async () => {
-    // The batch cases, which count several keys, fail it too
+    // Some batch and peek cases, which count a second key, fail it too
     expect(await failures(() => new OneCountStore())).toContainEqual(expect.stringContaining('each key on its own'))
   })
 

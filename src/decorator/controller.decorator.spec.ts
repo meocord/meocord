@@ -248,9 +248,9 @@ describe('@Command', () => {
     })
   })
 
-  // Different segment counts cannot collide, and neither can segments whose literals
-  // differ. What is left is a pair like `a/{x}/c` and `a/b/{y}`: both take `a/b/c`,
-  // and neither is more literal than the other, so ranking cannot settle it.
+  // Two patterns collide when they have as many segments and each pair of segments can
+  // take one value: equal literals, or a param and anything it accepts. `a/{x}/c` and
+  // `a/b/{y}` both take `a/b/c`.
   describe('findAmbiguousRoutes', () => {
     it('reports a pair that trades a literal for a parameter in each direction', () => {
       expect(findAmbiguousRoutes(['a/{x}/c', 'a/b/{y}'])).toEqual([['a/{x}/c', 'a/b/{y}']])
@@ -544,7 +544,7 @@ describe('controller inheritance', () => {
 
     expect(getCommandMap(OtherController.prototype).base.map(meta => meta.methodName)).toEqual(['base', 'other'])
     expect(getCommandMap(BaseController.prototype).base.map(meta => meta.methodName)).toEqual(['base'])
-    expect(Object.keys(getCommandMap(ChildController.prototype))).not.toContain('other')
+    expect(getCommandMap(ChildController.prototype).base.map(meta => meta.methodName)).toEqual(['base'])
   })
 })
 
@@ -573,7 +573,8 @@ describe('a builder that throws', () => {
   })
 })
 
-// A subcommand is described by its command's builder: one on the path either fails to build or is registered twice
+// A subcommand is described by its command's builder: one on the path either fails to build from the path or,
+// naming its command itself, is kept with a warning
 describe('a builder on a subcommand path', () => {
   @CommandBuilder(CommandType.SLASH)
   class SettingsCommandBuilder {

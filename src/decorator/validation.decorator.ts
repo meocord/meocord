@@ -45,10 +45,12 @@ type AcceptsInput<P, Input> = [P] extends [NoInput]
  *
  * @remarks
  * The handler receives the schema's output, so its defaults and coercions apply, and its second parameter is
- * checked against that output. Invalid input throws a `ValidationError` listing each issue, answered only to
- * the caller. A handler takes one `@Validate`: combine schemas into one.
+ * checked against that output. Invalid input throws a `ValidationError` listing each issue: only an interaction's
+ * caller sees it, and a message command's is a reply deleted after `@MeoCord({ messages })`'s
+ * `deleteUsageRepliesAfter`. A handler takes one `@Validate`: combine schemas into one.
  *
  * @param schema - A Standard Schema for the whole input object.
+ * @param options - `pipes`, for single keys of the schema's output, run before that key's `@UsePipe` pipes.
  * @throws Error when `schema` is not a Standard Schema, or the handler already has a `@Validate`, as the decorator applies.
  *
  * @example

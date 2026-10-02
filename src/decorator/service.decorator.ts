@@ -4,9 +4,10 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 /**
  * Marks a class as a service, which controllers and other services inject by its type.
  *
- * Use it for logic and state that outlive one call: database access, API clients, caches, counters. List it
- * in `@MeoCord({ services })` so the app shares one instance. For a value that is not a class, such as a
- * config object or a client made by a factory, use a provider and {@link Inject}.
+ * Use it for logic and state that outlive one call: database access, API clients, caches, counters. The app
+ * makes one instance, shared by every class that injects it; list it in `@MeoCord({ services })` when nothing
+ * injects it. For a value that is not a class, such as a config object or a client made by a factory, use a
+ * provider and {@link Inject}.
  *
  * @remarks
  * A service injects others through its constructor. Its `onReady` and `onShutdown` hooks run as the bot

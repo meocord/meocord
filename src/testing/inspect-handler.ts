@@ -130,7 +130,10 @@ export interface InspectedCooldown {
  * @category Inspection
  */
 export interface InspectHandlerOptions {
-  /** The `@MeoCord` app class, whose global guards, interceptors, filters and observers come first. */
+  /**
+   * The `@MeoCord` app class: its global guards and interceptors come before the handler's own, its global filters
+   * are tried after them, and its observers are listed.
+   */
   app?: new (...args: any[]) => unknown
 }
 
@@ -143,7 +146,7 @@ export interface InspectHandlerOptions {
  *
  * @param controller - The controller class declaring the handler.
  * @param methodName - The handler method's name.
- * @param options - `app`, to put the global stages `@MeoCord` declares first.
+ * @param options - `app`, to include the global stages and observers `@MeoCord` declares.
  * @returns The handler's stages in order, its message pattern, and readers for its metadata.
  *
  * @example

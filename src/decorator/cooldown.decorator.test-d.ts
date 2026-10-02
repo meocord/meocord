@@ -41,7 +41,7 @@ describe('@Cooldown({ by })', () => {
     void Controller
   })
 
-  it("compiles the JSDoc's example as written", () => {
+  it('compiles a by that reads one of several params', () => {
     class Controller {
       // Once an hour per user, for each game account the button checks in
       @Command('check-in/{ownerId}/{uid}', CommandType.BUTTON)
@@ -108,7 +108,6 @@ describe('@MeoCord({ cooldownStoreFailure })', () => {
   it('takes the exported CooldownStoreFailure', () => {
     const failure: CooldownStoreFailure = 'allow'
     expectTypeOf<CooldownStoreFailure>().toEqualTypeOf<'deny' | 'allow'>()
-    // Read through Parameters: expect-type's parameter() gives never for MeoCord's generic signature
     expectTypeOf<Parameters<typeof MeoCord>[0]['cooldownStoreFailure']>().toEqualTypeOf<CooldownStoreFailure | undefined>()
     // @ts-expect-error only 'deny' or 'allow'
     const retry: CooldownStoreFailure = 'retry'

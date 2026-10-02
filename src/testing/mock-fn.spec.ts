@@ -5,8 +5,8 @@ import { ButtonInteraction } from 'discord.js'
 
 /**
  * These assert parity with jest and vitest, which is the whole promise of this
- * module. Each case is run against `vi.fn()` as well, so the expectation is not
- * taken on trust — if vitest ever changed, the parity test would fail too.
+ * module. Where a case also runs `vi.fn()`, vitest's behaviour is the expectation
+ * rather than taken on trust: if vitest changed, that case would fail too.
  */
 describe('createMockFn', () => {
   describe('persistent behaviour is last-wins, as in jest and vitest', () => {
