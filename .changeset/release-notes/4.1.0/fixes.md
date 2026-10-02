@@ -32,7 +32,7 @@
   - Self-contained builds run under Bun and pack each package's installed dependency versions, npm-nested and pnpm-store dependencies, and per-platform binaries, fixing "Cannot find module". Rebuild.
 - **The CLI**
   - `meocord start` forwards SIGINT and SIGTERM, so Docker, pm2 and systemd stop the bot cleanly.
-  - `start --dev` runs one bot at a time, restarts it through its own shutdown on Windows and after it exits on its own, and keeps it running when a save doesn't compile or an `rsbuild` hook throws.
+  - `start --dev` runs one bot at a time, restarts it through its own shutdown on Windows and after it exits on its own, which one Ctrl+C then stops, and keeps it running when a save doesn't compile or an `rsbuild` hook throws.
   - `start --dev --build` builds once, and `start --dev` exits 1 when watching can't start.
   - `create` keeps the app when git can't commit, joins an enclosing Git repository, quotes any app name, and refuses a name with no letters, not `Directory "" already exists`.
   - A created app passes `lint` and `test` on pnpm and installs on pnpm 11+ and npm 11.16+ without warnings; `create` warns on Node.js 22.0 to 22.12.
