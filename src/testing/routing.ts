@@ -39,8 +39,9 @@ export interface MessageToResolve {
   botId?: string
   /**
    * Whether the message is a direct message, where `mention: 'only'` does not apply, and a handler that works only in
-   * a server, by its scope or a `member`, `role` or `channel` param, is not reached, as dispatch answers it with its
-   * usage. Without it the message may be from anywhere, and a mention alone starts what it starts in a server.
+   * a server, by its scope or a `member`, `role` or `channel` param in its pattern, is not reached, as dispatch answers
+   * it with its usage. A flag of those types is refused only when the message gives it, which this does not read.
+   * Without it the message may be from anywhere, and a mention alone starts what it starts in a server.
    */
   dm?: boolean
 }

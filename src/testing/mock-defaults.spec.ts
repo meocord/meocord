@@ -142,6 +142,14 @@ describe("a mock's data, where the test gives none", () => {
     expect(createMockInteraction(ButtonInteraction).client).not.toBe(client)
   })
 
+  it("lets a test spy on an interaction's or a message's client", () => {
+    const other = createMockClient()
+    for (const mock of [createMockInteraction(ButtonInteraction), createMockMessage()]) {
+      vi.spyOn(mock, 'client', 'get').mockReturnValue(other as never)
+      expect(mock.client).toBe(other)
+    }
+  })
+
   it("gives a guild an owner's id, and the time its id was made", () => {
     const guild = createMockGuild()
     expect(read(guild, 'ownerId')).toMatch(SNOWFLAKE)

@@ -768,7 +768,7 @@ export function createMockInteraction<T extends object>(
     const userGiven = !unset('user')
     if (!userGiven) instance.user = mockUser()
     // Assigned once by discord.js's Base constructor, as on a message, and the gateway caches the user on it
-    if (unset('client')) Object.defineProperty(instance, 'client', { value: createMockClient(), writable: true })
+    if (unset('client')) Object.defineProperty(instance, 'client', { value: createMockClient(), writable: true, configurable: true })
     cacheOf((instance.client as Client | undefined)?.users)?.set((instance.user as User).id, instance.user)
     // A channel given says where the interaction was made, for what the test leaves unset, as discord.js reads it
     const given = own('channel')
@@ -1671,7 +1671,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
 
   // Assigned once by discord.js's Base constructor, so an own value, as it is on a real message
   const client = overrides.client ?? createMockClient()
-  Object.defineProperty(instance, 'client', { value: client, writable: true })
+  Object.defineProperty(instance, 'client', { value: client, writable: true, configurable: true })
   cacheChannel(channel, guild, client)
   const userCache = cacheOf(client.users)
   for (const user of [...(overrides.users ?? []), ...(author ? [author] : [])]) userCache?.set(user.id, user)
