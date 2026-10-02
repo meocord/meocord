@@ -25,7 +25,6 @@ Installed with MeoCord.
 | [jiti](https://www.npmjs.com/package/jiti)                                           | MIT        | https://github.com/unjs/jiti                 |
 | [lodash-es](https://www.npmjs.com/package/lodash-es)                                 | MIT        | https://github.com/lodash/lodash             |
 | [reflect-metadata](https://www.npmjs.com/package/reflect-metadata)                   | Apache-2.0 | https://github.com/rbuckton/reflect-metadata |
-| [simple-git](https://www.npmjs.com/package/simple-git)                               | MIT        | https://github.com/steveukx/git-js           |
 
 ## Peer dependencies
 
