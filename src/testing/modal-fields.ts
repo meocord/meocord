@@ -1,4 +1,4 @@
-import { ComponentType, ModalSubmitFields } from 'discord.js'
+import { Attachment, Collection, ComponentType, ModalSubmitFields } from 'discord.js'
 
 /**
  * Builds the `fields` of a submitted form, as discord.js does when a user submits one.
@@ -6,9 +6,10 @@ import { ComponentType, ModalSubmitFields } from 'discord.js'
  * Use it for a mock `ModalSubmitInteraction`: discord.js keeps the `ModalSubmitFields` constructor private, so a test
  * cannot build one directly.
  *
- * @param values - Each field's value, keyed by its customId: a string for a text input, an array for a select's
- *   chosen values.
- * @returns Fields that `getTextInputValue`, `getStringSelectValues` and a handler's params all read.
+ * @param values - Each field's value, keyed by its customId: a string for a text input, an array of strings for a
+ *   select's chosen values, or an array of `Attachment`s for a file upload.
+ * @returns Fields that `getTextInputValue`, `getStringSelectValues`, `getUploadedFiles` and a handler's params all
+ *   read.
  *
  * @example
  * ```ts
@@ -32,13 +33,14 @@ import { ComponentType, ModalSubmitFields } from 'discord.js'
  * @category Mocks
  * @see {@link createMockInteraction}
  */
-export function createModalFields(values: Record<string, string | string[]>): ModalSubmitFields {
-  const components = Object.entries(values).map(([customId, value]) => ({
-    type: ComponentType.Label,
-    component: Array.isArray(value)
-      ? { type: ComponentType.StringSelect, customId, values: value }
-      : { type: ComponentType.TextInput, customId, value },
-  }))
+export function createModalFields(values: Record<string, string | string[] | Attachment[]>): ModalSubmitFields {
+  const component = (customId: string, value: string | string[] | Attachment[]) => {
+    if (!Array.isArray(value)) return { type: ComponentType.TextInput, customId, value }
+    if (!value.some(item => item instanceof Attachment)) return { type: ComponentType.StringSelect, customId, values: value }
+    const attachments = new Collection((value as Attachment[]).map(file => [file.id, file]))
+    return { type: ComponentType.FileUpload, customId, values: [...attachments.keys()], attachments }
+  }
+  const components = Object.entries(values).map(([customId, value]) => ({ type: ComponentType.Label, component: component(customId, value) }))
 
   const Fields = ModalSubmitFields as unknown as new (components: unknown[]) => ModalSubmitFields
   return new Fields(components)

@@ -1,5 +1,6 @@
 import {
   ChannelSelectMenuInteraction,
+  ComponentType,
   type Interaction,
   MentionableSelectMenuInteraction,
   ModalSubmitInteraction,
@@ -25,6 +26,9 @@ export interface HandlerInput {
   collisions: string[]
 }
 
+/** The entries of a discord.js Collection, or none for anything else, such as a test double's stub. */
+const entriesOf = (collection: unknown): unknown[] => (collection instanceof Map ? [...collection.values()] : [])
+
 /**
  * What a modal field submits: a text input's text, a select's chosen ids, a file upload's attachments,
  * or a checkbox's state. Keyed by the field's customId.
@@ -37,13 +41,12 @@ function modalFields(interaction: ModalSubmitInteraction): Record<string, unknow
   const values: Record<string, unknown> = {}
   for (const [customId, field] of fields as Map<string, unknown>) {
     const data = field as unknown as Record<string, unknown>
-    values[customId] = 'value' in data ? data.value : 'values' in data ? data.values : data.attachments
+    // An upload's `values` are the attachments' ids; discord.js resolves the attachments themselves alongside
+    if (data.type === ComponentType.FileUpload) values[customId] = entriesOf(interaction.fields.getUploadedFiles(customId))
+    else values[customId] = 'value' in data ? data.value : data.values
   }
   return values
 }
-
-/** The entries of a discord.js Collection, or none for anything else, such as a test double's stub. */
-const entriesOf = (collection: unknown): unknown[] => (collection instanceof Map ? [...collection.values()] : [])
 
 /**
  * What a select menu's user chose: `values`, the chosen strings or ids, and the objects discord.js resolved
