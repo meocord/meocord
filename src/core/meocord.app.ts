@@ -629,7 +629,15 @@ export class MeoCordApp implements MeoCordApplication {
    */
   private async closeClient(): Promise<boolean> {
     this.closing = true
-    releaseAmbientAppTheme(this.container)
+    try {
+      return await this.shutDownClient()
+    } finally {
+      // Given up last, so the calls under way and the onShutdown hooks still read the app's theme
+      releaseAmbientAppTheme(this.container)
+    }
+  }
+
+  private async shutDownClient(): Promise<boolean> {
     this.logger.log('Shutting down bot...')
 
     // Nothing came online, so there are no hooks to undo; the listeners go first, so none of them runs

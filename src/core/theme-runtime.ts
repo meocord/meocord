@@ -190,7 +190,7 @@ export function claimAmbientAppTheme(container: Container): void {
   claimAmbientTheme(container, () => appTheme(container))
 }
 
-/** Gives up the app's theme as the one read outside a call: its start failed, or its shutdown has begun. */
+/** Gives up the app's theme as the one read outside a call: its start failed, or it has shut down. */
 export function releaseAmbientAppTheme(container: Container): void {
   releaseAmbientTheme(container)
 }

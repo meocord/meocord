@@ -6,7 +6,7 @@ import {
   getDeclaredRoutes,
   getHandlerRoutes,
 } from '@src/decorator/controller.decorator.js'
-import { registrationKey, serialise } from '@src/core/command-registration.js'
+import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
 import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts, literalFirst } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
@@ -101,12 +101,6 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
 
 const logger = new Logger('Commands')
 
-/** The application command types Discord sends a handler of each name-routed type. */
-const SENT_AS: Partial<Record<CommandType, readonly ApplicationCommandType[]>> = {
-  [CommandType.SLASH]: [ApplicationCommandType.ChatInput],
-  [CommandType.CONTEXT_MENU]: [ApplicationCommandType.User, ApplicationCommandType.Message],
-  [CommandType.PRIMARY_ENTRY_POINT]: [ApplicationCommandType.PrimaryEntryPoint],
-}
 
 type Body = ReturnType<typeof serialise>
 interface CommandOption {
@@ -176,7 +170,7 @@ export function warnUnregisteredCommands(controllerClasses: readonly ControllerC
           registered.set(registrationKey(body, name), body)
         } catch {
           // Registration reports it; what it would register is unknown, so nothing under its name is flagged
-          for (const type of SENT_AS[meta.type] ?? []) registered.set(`${type}:${name.split(' ')[0]}`, undefined)
+          for (const type of SENT_AS[meta.type] ?? []) registered.set(`${type}:${commandNameOf(meta.type, name)}`, undefined)
         }
       }
     }

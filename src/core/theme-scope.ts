@@ -123,7 +123,7 @@ export function claimAmbientTheme(owner: object, theme: () => ResolvedTheme): bo
   return true
 }
 
-/** Gives up the theme read outside a call, when `owner` has it: its start failed, or its shutdown has begun. */
+/** Gives up the theme read outside a call, when `owner` has it: its start failed, or it has shut down. */
 export function releaseAmbientTheme(owner: object): void {
   if (ambient?.owner !== owner) return
   ambient = undefined
@@ -176,7 +176,8 @@ export function themeForInteraction(interaction: object): ResolvedTheme | Promis
  *
  * Read it wherever a call runs: in a handler, in a service or presenter it calls, and in work it starts, such as a
  * timer's follow-up. Outside a call, it is the theme of the app the process runs, from when its start begins until the
- * start fails or its shutdown begins, and MeoCord's defaults otherwise; it never throws.
+ * start fails or the app has shut down, its `onShutdown` hooks included, and MeoCord's defaults otherwise; it never
+ * throws.
  *
  * @remarks
  * The theme is MeoCord's defaults, then the app's theme, then each `@UseTheme` from the controller's base class down

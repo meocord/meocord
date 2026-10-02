@@ -1075,6 +1075,46 @@ describe('lifecycle hooks', () => {
       expect(events.slice(-2)).toEqual(['call done', 'store shutdown'])
     })
 
+    // A class still starting when shutdown begins is skipped, as for a stop mid-ready, even if it finishes during the wait
+    it('skips the onShutdown of a class whose onReady finishes while the calls under way are waited for', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const finish = Promise.withResolvers<void>()
+      const running = Promise.withResolvers<void>()
+      const slowBegan = Promise.withResolvers<void>()
+      const finishSlow = Promise.withResolvers<void>()
+
+      @loaded.Service()
+      class Scheduler implements OnReady, OnShutdown {
+        onReady() {
+          slowBegan.resolve()
+          return finishSlow.promise
+        }
+        onShutdown() {
+          events.push('scheduler shutdown')
+        }
+      }
+
+      const { client } = await startApp(loaded, {
+        controllers: [dailyController(loaded, events, finish.promise, running)],
+        services: [Scheduler],
+        cooldownStore: storeWith(loaded, events),
+      })
+      const ready = becomeReady(client)
+      await slowBegan.promise
+      const handled = call(client, slash(loaded))
+      await running.promise
+
+      const stopped = loaded.shutdownAndExit()
+      finishSlow.resolve()
+      await ready
+      finish.resolve()
+      await Promise.all([handled, stopped])
+
+      expect(events).not.toContain('scheduler shutdown')
+      expect(events.at(-1)).toBe('store shutdown')
+    })
+
     // What the store injects is the store's to use until it stops, so it shuts down after the store and the last call
     it('runs the onShutdown of what it injects after its own, once the calls under way have finished', async () => {
       const loaded = await load()

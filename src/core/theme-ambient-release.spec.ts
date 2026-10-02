@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { Client } from 'discord.js'
-import { Command, Controller, MeoCord } from '@src/decorator/index.js'
+import { Command, Controller, MeoCord, Service } from '@src/decorator/index.js'
+import { type OnShutdown } from '@src/interface/index.js'
 import { useTheme } from '@src/common/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
@@ -53,5 +54,28 @@ describe('the theme read outside calls', () => {
     await (Reflect.get(app, 'close') as () => Promise<boolean>)()
 
     expect(online).toBe('#0F0F04')
+  })
+
+  // Given up after the calls under way and the hooks, so onShutdown reads the app's theme as onReady does
+  it("is still the app's while its onShutdown hooks run", async () => {
+    vi.spyOn(Client.prototype, 'login').mockResolvedValue('token')
+    vi.spyOn(Client.prototype, 'destroy').mockResolvedValue(undefined)
+    const seen: unknown[] = []
+    @Service()
+    class Closer implements OnShutdown {
+      onShutdown() {
+        seen.push(useTheme().colors.primary)
+      }
+    }
+    @MeoCord({ controllers: [Plain], services: [Closer], clientOptions: { intents: [] }, theme: { colors: { primary: '#0F0F05' } } })
+    class Closing {}
+    const app = MeoCordFactory.create(Closing)
+    await app.start()
+    const bot = Reflect.get(app, 'bot') as Client
+    await Promise.all(bot.listeners('clientReady').map(listener => listener(bot)))
+
+    await (Reflect.get(app, 'close') as () => Promise<boolean>)()
+
+    expect([seen, useTheme().colors.primary]).toEqual([['#0F0F05'], DEFAULT_THEME.colors.primary])
   })
 })

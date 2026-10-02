@@ -202,6 +202,64 @@ describe('HandlerRegistry, at its edges', () => {
     })
   })
 
+  it('gives an entry point command, whose builder returns the REST body, its JSON and description', () => {
+    const body = { name: 'launch', description: 'Open the activity', type: ApplicationCommandType.PrimaryEntryPoint as const, handler: 2 }
+    @CommandBuilder(CommandType.PRIMARY_ENTRY_POINT)
+    class LaunchBuilder {
+      build() {
+        return body
+      }
+    }
+    @Controller()
+    class LaunchController {
+      @Command('launch', LaunchBuilder)
+      launch() {}
+    }
+
+    const [launch] = new HandlerRegistry([LaunchController]).list({ kind: 'command' })
+
+    expect(launch).toMatchObject({ name: 'launch', command: body, description: 'Open the activity' })
+  })
+
+  // Discord tells commands apart by type and name, so a slash command and a context menu may share a name
+  it('gives a handler with no builder the JSON of its own command kind, a context menu by its whole name', () => {
+    @CommandBuilder(CommandType.SLASH)
+    class ReportBuilder {
+      build(name: string) {
+        return new SlashCommandBuilder().setName(name).setDescription('Report something')
+      }
+    }
+    @CommandBuilder(CommandType.CONTEXT_MENU)
+    class ReportMenuBuilder {
+      build(name: string) {
+        return new ContextMenuCommandBuilder().setName(name).setType(ApplicationCommandType.Message)
+      }
+    }
+    @Controller()
+    class Built {
+      @Command('report', ReportBuilder)
+      report() {}
+
+      @Command('Report message', ReportMenuBuilder)
+      reportMessage() {}
+    }
+    @Controller()
+    class Unbuilt {
+      @Command('report', CommandType.CONTEXT_MENU)
+      reportUser() {}
+
+      @Command('Report message', CommandType.CONTEXT_MENU)
+      reportAgain() {}
+    }
+
+    const entries = new HandlerRegistry([Built, Unbuilt]).list({ controller: Unbuilt, kind: 'command' })
+
+    expect(entries.map(({ name, command }) => [name, command?.name, command?.type])).toEqual([
+      ['report', undefined, undefined],
+      ['Report message', 'Report message', ApplicationCommandType.Message],
+    ])
+  })
+
   it('lists an inherited handler under the subclass bound', () => {
     expect(new HandlerRegistry([DerivedController]).list()).toEqual([
       expect.objectContaining({ kind: 'message', name: 'base', controller: DerivedController, method: 'base' }),
@@ -265,6 +323,27 @@ describe('HandlerRegistry, at its edges', () => {
     expect(everything.usage('!')).toBeUndefined()
     expect(new HandlerRegistry([Flagged]).list({ kind: 'message' })[0].usage('!')).toBe('!purge <count> [ids…] [--bots] --reason=<reason>')
     expect(everything.matches('everything')).toBe(false)
+  })
+
+  // As help gives it: a member, role or channel param or flag makes the command server-only
+  it('gives a message command the scope its params narrow it to', () => {
+    @Controller()
+    class Scoped {
+      @MessageHandler('kick {target:member}')
+      kick() {}
+
+      @MessageHandler('lock {--in:channel}')
+      lock() {}
+
+      @MessageHandler('roll {sides:int}')
+      roll() {}
+    }
+
+    expect(new HandlerRegistry([Scoped]).list({ kind: 'message' }).map(({ command, scope }) => [command, scope])).toEqual([
+      ['kick', 'guild'],
+      ['lock', 'guild'],
+      ['roll', 'any'],
+    ])
   })
 
   it("matches a command's words in case when the handler or the app is case-sensitive", () => {

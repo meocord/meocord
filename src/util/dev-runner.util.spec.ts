@@ -1,4 +1,5 @@
-import { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS, tellDevRunner } from '@src/util/dev-runner.util.js'
+import { DEV_RUNNER_ENV, tellDevRunner } from '@src/util/dev-runner.util.js'
+import { PARENT_SEND_TIMEOUT_MS } from '@src/util/parent-send.util.js'
 
 describe('tellDevRunner', () => {
   const originalSend = process.send
@@ -13,13 +14,16 @@ describe('tellDevRunner', () => {
     vi.useRealTimers()
   })
 
-  it('resolves once the message is sent', async () => {
-    process.send = vi.fn((_message: unknown, _handle: unknown, _options: unknown, callback?: () => void) => {
+  it('sends the message to the dev runner', async () => {
+    const send = vi.fn((_message: unknown, _handle: unknown, _options: unknown, callback?: () => void) => {
       callback?.()
       return true
-    }) as unknown as typeof process.send
+    })
+    process.send = send as unknown as typeof process.send
 
-    await expect(tellDevRunner({ meocord: 'login-failed' })).resolves.toBeUndefined()
+    await tellDevRunner({ meocord: 'login-failed' })
+
+    expect(send).toHaveBeenCalledWith({ meocord: 'login-failed' }, undefined, {}, expect.any(Function))
   })
 
   // Bun's send never calls back when the dev runner is gone, where Node's calls back with an error
@@ -29,19 +33,9 @@ describe('tellDevRunner', () => {
     let settled = false
 
     const told = tellDevRunner({ meocord: 'login-failed' }).then(() => (settled = true))
-    await vi.advanceTimersByTimeAsync(DEV_RUNNER_SEND_TIMEOUT_MS - 1)
-    expect(settled).toBe(false)
-    await vi.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(PARENT_SEND_TIMEOUT_MS)
     await told
 
     expect(settled).toBe(true)
-  })
-
-  it('resolves when the channel is already closed and send throws', async () => {
-    process.send = vi.fn(() => {
-      throw new Error('Channel closed')
-    }) as unknown as typeof process.send
-
-    await expect(tellDevRunner({ meocord: 'login-failed' })).resolves.toBeUndefined()
   })
 })

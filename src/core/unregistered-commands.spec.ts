@@ -177,17 +177,26 @@ describe('handlers of commands no builder registers', () => {
   })
 
   // Registration reports why its JSON fails, and what it would register is unknown
-  it('leaves alone the handlers under the name of a builder whose command cannot be serialised', () => {
+  it('leaves alone the handlers under the name of a builder whose command cannot be serialised, a context menu by its whole name', () => {
     @CommandBuilder(CommandType.SLASH)
     class NoDescriptionBuilder {
       build(name: string) {
         return new SlashCommandBuilder().setName(name)
       }
     }
+    @CommandBuilder(CommandType.CONTEXT_MENU)
+    class NoTypeBuilder {
+      build(name: string) {
+        return new ContextMenuCommandBuilder().setName(name)
+      }
+    }
     @Controller()
     class Broken {
       @Command('broken', NoDescriptionBuilder)
       broken() {}
+
+      @Command('Report message', NoTypeBuilder)
+      report() {}
 
       @Command('broken view', CommandType.SLASH)
       view() {}

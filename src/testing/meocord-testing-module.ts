@@ -380,8 +380,6 @@ export class TestingModule {
     this.closing ??= (async () => {
       // A close during init waits for the hooks it started, so it shuts down whatever they constructed
       await this.readying?.catch(() => undefined)
-      // As a bot shutting down does; a module that never had it leaves another's alone
-      releaseAmbientAppTheme(this.container)
       const entries: LifecycleEntry[] = this.lifecycle
         .filter(unit => this.constructed.has(unit.token))
         // Already made, so this returns the instance; a provided value may be anything, null included
@@ -393,6 +391,8 @@ export class TestingModule {
         hookFailed: (name, error) => failures.push({ name, error }),
         warn: message => new Logger('TestingModule').warn(message),
       })
+      // After the hooks, as a bot shutting down does; a module that never had it leaves another's alone
+      releaseAmbientAppTheme(this.container)
       throwFailures('onShutdown', failures)
     })()
     await this.closing

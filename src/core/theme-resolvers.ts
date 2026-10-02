@@ -111,18 +111,24 @@ class ResolverCache {
   }
 
   private async fetch(id: string, token: object): Promise<ThemeOverride | undefined> {
+    let outcome: { result: unknown } | { error: unknown }
+    try {
+      outcome = { result: await this.within(id) }
+    } catch (error) {
+      outcome = { error }
+    }
+    // An invalidation while it was looked up forgot the id: the result still serves the calls that asked, and that is all
+    const current = this.pending.get(id)?.token === token
     let layer: ThemeOverride | undefined
     let keepMs = this.ttlMs
-    try {
-      layer = this.accept(id, await this.within(id))
-      this.recovered(id)
-    } catch (error) {
-      this.failed(id, error)
-      layer = undefined
+    if ('error' in outcome) {
+      if (current) this.failed(id, outcome.error)
       keepMs = THEME_FAILURE_BACKOFF_MS
+    } else {
+      layer = this.accept(id, outcome.result, current)
+      if (current) this.recovered(id)
     }
-    // Kept only when no invalidation came while it was looked up
-    if (this.pending.get(id)?.token === token) {
+    if (current) {
       this.pending.delete(id)
       this.entries.delete(id)
       this.entries.set(id, { layer, expiresAt: performance.now() + keepMs })
@@ -146,18 +152,18 @@ class ResolverCache {
   }
 
   /**
-   * A result as a layer: copied, then checked; one with problems is left out, with a warning once per id. `null`,
-   * as a database gives for a missing row, is no theme, as `undefined` is.
+   * A result as a layer: copied, then checked; one with problems is left out, with a warning once per id when `report`.
+   * `null`, as a database gives for a missing row, is no theme, as `undefined` is.
    */
-  private accept(id: string, result: unknown): ThemeOverride | undefined {
+  private accept(id: string, result: unknown, report: boolean): ThemeOverride | undefined {
     if (result === undefined || result === null) return undefined
     const layer = copyLayer(result) as ThemeOverride
     const problems = themeProblems(layer, `themeFor.${this.kind} for ${this.kind} ${id}`)
     if (problems.length === 0) {
-      this.warned.delete(id)
+      if (report) this.warned.delete(id)
       return layer
     }
-    if (!this.warned.has(id)) {
+    if (report && !this.warned.has(id)) {
       if (this.warned.size >= this.max) this.warned.clear()
       this.warned.add(id)
       logger.warn(`${problems.join('\n')}\nCalls from this ${this.kind} use the theme without it until the result changes.`)

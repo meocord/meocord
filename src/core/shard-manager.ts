@@ -62,6 +62,7 @@ export class ShardManager implements MeoCordApplication {
   private fatal = false
   private readonly exit: (code: number) => void
   private readonly sleep: (ms: number) => Promise<void>
+  private readonly now: () => number
   private readonly stopRequest: ReturnType<typeof stopRequests>
   /** How long each shard has to shut down, before the manager's margin: read, and warned about, once. */
   private readonly shutdownTimeout: number
@@ -71,7 +72,8 @@ export class ShardManager implements MeoCordApplication {
     hideInLogs(options.token)
     this.exit = options.exit ?? (code => process.exit(code))
     this.sleep = options.sleep ?? sleep
-    this.stopRequest = stopRequests(options.now)
+    this.now = options.now ?? (() => Date.now())
+    this.stopRequest = stopRequests(this.now)
     this.shutdownTimeout = shutdownTimeoutOf(options.config.shutdownTimeout, message => this.logger.warn(message))
   }
 
@@ -105,7 +107,8 @@ export class ShardManager implements MeoCordApplication {
 
     process.on('SIGINT', () => void this.stopAndExit())
     process.on('SIGTERM', () => void this.stopAndExit())
-    onDevRunnerStop(() => void this.stopAndExit())
+    // How `meocord start --dev` stops the bot to restart it; no stop request of the user's, whose first Ctrl+C joins it
+    onDevRunnerStop(() => void this.exitAfterShutdown())
 
     let total: number
     try {
@@ -189,7 +192,7 @@ export class ShardManager implements MeoCordApplication {
   /** Spawns a shard and waits for it to be ready; a failure is logged, and its exit restarts it. */
   private async spawn(shard: Shard): Promise<void> {
     const state = this.shards.get(shard)!
-    state.spawnedAt = Date.now()
+    state.spawnedAt = this.now()
     try {
       await shard.spawn(SHARD_READY_TIMEOUT_MS)
     } catch (error) {
@@ -202,7 +205,7 @@ export class ShardManager implements MeoCordApplication {
   private handleDeath(shard: Shard, child: ChildProcess | undefined): void {
     if (this.stopping || this.fatal) return
     const state = this.shards.get(shard)!
-    if (Date.now() - state.spawnedAt >= RESPAWN_RESET_MS) state.attempts = 0
+    if (this.now() - state.spawnedAt >= RESPAWN_RESET_MS) state.attempts = 0
     const delay = Math.min(RESPAWN_BASE_MS * 2 ** state.attempts, RESPAWN_CAP_MS)
     state.attempts++
 
@@ -243,16 +246,18 @@ export class ShardManager implements MeoCordApplication {
 
   /**
    * Asks every shard to shut down through its own hooks, waits for them up to the shutdown timeout plus a margin, and
-   * kills any left, without ending the manager's process. A call after the first waits for it.
+   * kills any left, without ending the manager's process; one killed sets `process.exitCode` to 1, unless a code is
+   * set. A call after the first waits for it.
    */
   async stop(): Promise<void> {
-    await this.shutDown()
+    // As a signal's shutdown exits 1 for a shard that had to be killed, a code another failure set aside
+    if (!(await this.shutDown()) && !process.exitCode) process.exitCode = 1
   }
 
   /**
    * Stops every shard as {@link stop} does, then exits: 0 when every shard stopped, 1 when one had to be killed.
-   * SIGINT, SIGTERM and a stop from `meocord start --dev` call it. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first
-   * is the same request; one after it kills them all at once.
+   * SIGINT and SIGTERM call it. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first is the same request; one after it
+   * kills them all at once.
    */
   async stopAndExit(): Promise<void> {
     const request = this.stopRequest()
@@ -262,7 +267,14 @@ export class ShardManager implements MeoCordApplication {
       this.killAll()
       return this.exit(1)
     }
-    this.exit((await this.shutDown()) ? 0 : 1)
+    return this.exitAfterShutdown()
+  }
+
+  /** The exit after the shutdown, once however many stops ask for it. */
+  private exiting?: Promise<void>
+
+  private exitAfterShutdown(): Promise<void> {
+    return (this.exiting ??= this.shutDown().then(stopped => this.exit(stopped ? 0 : 1)))
   }
 
   /** The shutdown under way or done, which a later stop waits for: whether every shard stopped on its own. */

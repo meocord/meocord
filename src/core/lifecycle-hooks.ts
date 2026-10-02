@@ -139,16 +139,19 @@ export interface ShutdownSequence {
 }
 
 /**
- * Shuts the entries down, as a bot and a testing module both do. When the cooldown store, or anything it injects
- * directly or through another, has an `onShutdown`, the calls under way finish first, then the store operations they
- * started, so the store's last writes and releases still reach it. The other hooks then run in reverse dependency
- * order, and the store and what it injects last. The whole sequence is waited for at most `timeoutMs`.
+ * Shuts down the entries there are when it begins, as a bot and a testing module both do. When the cooldown store, or
+ * anything it injects directly or through another, has an `onShutdown`, the calls under way finish first, then the
+ * store operations they started, so the store's last writes and releases still reach it. The other hooks then run in
+ * reverse dependency order, and the store and what it injects last. The whole sequence is waited for at most
+ * `timeoutMs`.
  */
 export async function runShutdownSequence(
   container: Container,
   entries: readonly LifecycleEntry[],
   { drainCalls, timeoutMs, hookFailed, warn }: ShutdownSequence,
 ): Promise<void> {
+  // A unit whose onReady settles while the calls drain was still starting when shutdown began, so it is not shut down
+  entries = [...entries]
   const byToken = new Map(entries.map(entry => [entry.token, entry]))
   // The store and everything it reaches through what it injects
   const storeSide = new Set<LifecycleEntry>()

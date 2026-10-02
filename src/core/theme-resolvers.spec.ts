@@ -272,6 +272,33 @@ describe('the cache of themeFor\'s results', () => {
     ])
   })
 
+  // The invalidation clears what the cache knew of the server, its failures included, so the old lookup's is no news
+  it('logs nothing for a lookup it forgot while in flight, which then fails', async () => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    @Service()
+    class Settings {
+      constructor(readonly themes: ThemeCache) {}
+    }
+    Reflect.defineMetadata('design:paramtypes', [ThemeCache], Settings)
+    const answer = Promise.withResolvers<void>()
+    const guild = vi.fn(async (): Promise<ThemeOverride> => {
+      await answer.promise
+      throw new Error('database down')
+    })
+    @MeoCord({ controllers: [Panel], clientOptions: { intents: [] }, themeFor: { guild }, providers: [{ provide: Settings, useClass: Settings }] })
+    class App {}
+    const module = MeoCordTestingModule.create({ app: App, controllers: [Panel], providers: [{ provide: Settings, useClass: Settings }] }).compile()
+    await module.init()
+
+    const inFlight = module.invoke(Panel, 'panel', press('panel'))
+    await vi.waitFor(() => expect(guild).toHaveBeenCalledTimes(1))
+    module.get(Settings).themes.invalidateGuild(GUILD)
+    answer.resolve()
+    await inFlight
+
+    expect(errors.mock.calls.filter(([text]) => String(text).includes('themeFor.guild'))).toEqual([])
+  })
+
   it('does nothing when made by hand, with no app to clear', () => {
     expect(() => new ThemeCache().invalidateGuild('1')).not.toThrow()
   })
