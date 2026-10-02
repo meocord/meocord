@@ -64,6 +64,17 @@ export function injectedTokens(cls: object): unknown[] {
 }
 
 /**
+ * Whether a class's own constructor takes parameters TypeScript recorded no types for, as for a class with no
+ * decorator. Its own record, not one inherited from a decorated base whose constructor it replaces; a parameter with a
+ * default value and a rest parameter are not counted in `length`, so they are not asked for.
+ */
+export function undecoratedConstructor(cls: abstract new (...args: any[]) => unknown): boolean {
+  if (cls.length === 0 || Reflect.getOwnMetadata(MetadataKey.ParamTypes, cls) !== undefined) return false
+  const metadata = Reflect.getOwnMetadata(INVERSIFY_CLASS_METADATA, cls) as { constructorArguments?: (InjectedElement | null | undefined)[] } | undefined
+  return Array.from({ length: cls.length }, (_, index) => metadata?.constructorArguments?.[index]?.value).some(token => token === undefined)
+}
+
+/**
  * The position of the first constructor parameter with no runtime type and no `@Inject` token, or -1.
  * Such a parameter reads as `Object` when it is typed with an interface or an `import type`, and as
  * `Object` or `undefined` when its class's module had not finished loading, as when two classes

@@ -34,6 +34,7 @@ import {
 } from '@src/core/providers.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
+import { meocordClasses } from '@src/core/meocord-classes.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
 import {
@@ -225,7 +226,7 @@ export class MeoCordFactory {
     }
 
     // Before binding, where inversify would otherwise fail first with an error about compiler options
-    assertTypedParameters(reachableClasses(roots, providers))
+    assertTypedParameters(reachableClasses(roots, providers), meocordClasses())
     const container = new Container()
     bindGlobalStages(container, appStages(target as object))
 

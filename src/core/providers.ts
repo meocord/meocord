@@ -1,6 +1,6 @@
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { ExecutionContext } from '@src/common/execution-context.js'
-import { injectedTokens, untypedParameter } from '@src/core/guard-runner.js'
+import { injectedTokens, undecoratedConstructor, untypedParameter } from '@src/core/guard-runner.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import {
@@ -186,13 +186,19 @@ export function reachableClasses(roots: readonly unknown[], providers: ProviderM
 }
 
 /**
- * Throws for the first of `classes` with a constructor parameter nothing can inject: one with no
- * runtime type and no `@Inject` token. It names the classes among `classes` that inject it, the likely
- * other half when two classes import each other, rather than leaving inversify's error to point at
- * the compiler options.
+ * Throws for the first of `classes` that cannot be created: one with no decorator whose constructor injects, or one
+ * with a parameter of no runtime type and no `@Inject` token, naming the classes that inject it, the likely other half
+ * when two classes import each other. Either way, rather than leaving inversify's error to point at compiler options.
+ * `meocordClasses` are MeoCord's own, which it makes itself.
  */
-export function assertTypedParameters(classes: readonly AnyClass[]): void {
+export function assertTypedParameters(classes: readonly AnyClass[], meocordClasses: readonly unknown[]): void {
   for (const cls of classes) {
+    if (!meocordClasses.includes(cls) && undecoratedConstructor(cls)) {
+      throw refuse(new Error(
+        `${cls.name}: its constructor takes parameters, but ${cls.name} has no decorator, so TypeScript recorded none of ` +
+          'their types and it cannot be created. Decorate it with @Service().',
+      ))
+    }
     const index = untypedParameter(cls)
     if (index === -1) continue
     const injectors = classes.filter(other => other !== cls && injectedTokens(other).includes(cls)).map(other => other.name)
