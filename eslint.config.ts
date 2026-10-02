@@ -95,33 +95,6 @@ const preEntryConfig = {
   languageOptions: { globals: { __webpack_public_path__: 'writable' } },
 }
 
-const webpackConfig = {
-  files: ['webpack.config.js'],
-  plugins: {
-    'import-x': importX,
-    prettier: eslintPluginPrettier,
-    'unused-imports': unusedImports,
-  },
-  languageOptions,
-  rules: {
-    ...eslintJs.configs.recommended.rules,
-    'prettier/prettier': 'error',
-    'unused-imports/no-unused-imports': 'error',
-    'no-var': 'error',
-    'prefer-const': 'warn',
-    'no-unused-vars': [
-      'error',
-      {
-        vars: 'all',
-        varsIgnorePattern: '^_',
-        args: 'all',
-        argsIgnorePattern: '^_',
-      },
-    ],
-    'import-x/no-unresolved': 'off',
-  },
-}
-
 const recommendedTypeScriptConfigs = [
   ...eslintTs.configs.recommended.map(config => ({
     ...config,
@@ -169,5 +142,4 @@ export default [
   nodeCompatibleConfig,
   javaScriptConfig,
   preEntryConfig,
-  webpackConfig,
 ]

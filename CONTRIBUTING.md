@@ -88,7 +88,7 @@ lives in the system temp directory, so it cannot resolve anything from the repos
 and it needs network access for the install. Asserting on the text a template renders says nothing about
 whether that text lints, compiles, tests or builds; shipped bugs have hidden in each of those gaps.
 
-**`cli:scenarios`** installs an application from the packed build and runs the real CLI through scenarios that must succeed and scenarios that must fail: each asserts the exit code, what the output says, and which files were written or left alone. It also fails a scenario that leaves a process running. Run it after `bun run build`; `--only <text>` picks scenarios by name, `--windows` runs the subset that also runs on Windows. `--tier slow` runs the slower scenarios: an application installed with npm, the bun runtime, bundled builds run without `node_modules`, process sharding, and stop signals in each start mode, sent to the process group as Ctrl+C is and to the CLI alone as Docker, pm2 and systemd send them. They reach Discord with a token it refuses, so they need the network; they run on every pull request and queued merge, in a job of their own reported under the `Test` check, before every release, and nightly, with `--tier all` running both tiers. An unknown tier, or a selection that matches no scenario, fails before anything is installed. Add a scenario whenever a command gains a flag or a failure gains a message.
+**`cli:scenarios`** installs an application from the packed build and runs the real CLI through scenarios that must succeed and scenarios that must fail: each asserts the exit code, what the output says, and which files were written or left alone. It also fails a scenario that leaves a process running. Run it after `bun run build`; `--only <text>` picks scenarios by name, `--windows` runs the subset that also runs on Windows. `--tier slow` runs the slower scenarios: an application installed with npm, the bun runtime, bundled builds run without `node_modules`, process sharding, and stop signals in each start mode, sent to the process group as Ctrl+C is and to the CLI alone as Docker sends them. They reach Discord with a token it refuses, so they need the network; they run on every pull request and queued merge, in a job of their own reported under the `Test` check, before every release, and nightly, with `--tier all` running both tiers. An unknown tier, or a selection that matches no scenario, fails before anything is installed. Add a scenario whenever a command gains a flag or a failure gains a message.
 
 **The Windows job** installs the packed tarball globally and drives the CLI through the `.cmd` shim npm
 writes from the interpreter line. Nothing on a POSIX runner exercises that path, and generation is what
@@ -405,6 +405,20 @@ workflow, so no npm token is stored anywhere — and every release carries a pro
 The package is built and packed in a job of its own, which cannot publish; the job that publishes
 receives that tarball and publishes it as it was packed. On a pull request, the `Package dry run`
 check publishes the same kind of tarball with `--dry-run` and compares its files with packing in place.
+
+If a version reaches npm but its tag or GitHub release is missing, re-running the Release workflow
+does not repair it: the version is already on npm, so nothing is packed or published, and no tag or
+release is made. Create them by hand on the release commit, the merge of the `chore: release` pull
+request: push the tag `v<version>`, then create the GitHub release on it with that version's
+CHANGELOG section as its notes, marked as a prerelease for a beta:
+
+```bash
+git tag v4.1.0-beta.10 <release-commit> && git push origin v4.1.0-beta.10
+```
+
+```bash
+gh release create v4.1.0-beta.10 --verify-tag --notes-file notes.md --prerelease
+```
 
 The release pull request is opened by the workflow. With only the workflow's own token, GitHub holds
 its CI runs until a maintainer approves them from the pull request's Checks tab, and branch

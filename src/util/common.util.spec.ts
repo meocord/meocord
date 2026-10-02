@@ -91,6 +91,15 @@ describe('findModulePackageDir', () => {
     expect(result).toBe(expectedPath)
   })
 
+  // A project at the filesystem root, as in a container's /app parent, keeps its packages in /node_modules
+  it('finds a module in the filesystem root\'s node_modules', () => {
+    const root = path.parse(process.cwd()).root
+    const expectedPath = path.join(root, 'node_modules', 'meocord')
+    mockExistsSync.mockImplementation((p: unknown) => p === expectedPath)
+
+    expect(findModulePackageDir('meocord', path.join(root, 'app', 'bot'))).toBe(expectedPath)
+  })
+
   it('returns null when module is not found after full traversal', () => {
     mockExistsSync.mockReturnValue(false)
 

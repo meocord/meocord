@@ -145,7 +145,6 @@ const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
     why: "a pattern's own mistakes, which buildMessageRoutes refuses with the handler's name; and a test's resolveRoute",
   },
   'decorator/controller.decorator.ts': { count: 1, why: 'an interaction of the wrong type reaching a handler' },
-  'util/common.util.ts': { count: 1, why: 'the CLI' },
   'util/meocord-cli.util.ts': { count: 3, why: 'the CLI' },
   'util/tsconfig.util.ts': { count: 2, why: 'the CLI' },
 }

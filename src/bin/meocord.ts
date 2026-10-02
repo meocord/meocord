@@ -49,19 +49,26 @@ import { FORCE_REGISTER_ENV, REGISTER_GUILD_ENV, REGISTER_ONLY_ENV } from '@src/
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-/** Oldest Node major the framework supports; `engines.node` also requires 22.13 or later within it. */
-export const MINIMUM_NODE_MAJOR = 22
+/** Oldest Node the framework supports, as `engines.node` gives it: `>=22.13` reads as 22.13.0. */
+const MINIMUM_NODE = packageJson.engines.node.replace(/^>=\s*/, '')
+
+/** Whether `version` is older than `minimum`, both dotted, with a missing part read as 0. */
+function olderThan(version: string, minimum: string): boolean {
+  const [have, need] = [version, minimum].map(text => text.split('.').map(part => Number.parseInt(part, 10) || 0))
+  for (let i = 0; i < Math.max(have.length, need.length); i++) {
+    if ((have[i] ?? 0) !== (need[i] ?? 0)) return (have[i] ?? 0) < (need[i] ?? 0)
+  }
+  return false
+}
 
 /**
  * Warns when the running Node is older than the framework supports. Offline and advisory: a warning is its only
  * outcome, so nothing in it can stop the command.
  */
 function warnIfNodeIsBelowSupported(): void {
-  const major = Number.parseInt(process.versions.node.split('.')[0], 10)
-
-  if (Number.isFinite(major) && major < MINIMUM_NODE_MAJOR) {
+  if (olderThan(process.versions.node, MINIMUM_NODE)) {
     p.log.warn(
-      `Node ${process.versions.node} is older than the supported minimum (v${MINIMUM_NODE_MAJOR}). ` +
+      `Node ${process.versions.node} is older than the supported minimum (v${MINIMUM_NODE}). ` +
         `The app will be created, but may not run.`,
     )
   }
@@ -642,9 +649,6 @@ copies or substantial portions of the Software.
   /** Whether a watch session is stopping, when a rebuild must not start the application again. */
   private stopping = false
 
-  /** Ends a watch session with an exit code; `startDev` also closes its watchers first. */
-  private endDevSession: (code: number) => void = code => process.exit(code)
-
   /**
    * Replaces the running application once it has exited, since two would contend for one gateway session. Builds that
    * finish meanwhile start nothing more: the replacement runs `dist/main.js` as it stands at launch, the latest build.
@@ -731,7 +735,8 @@ copies or substantial portions of the Software.
       cwd: this.projectRoot,
       env: {
         ...this.inheritedEnv,
-        ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
+        // Watch mode runs a development build, whose config reads the development files; Bun reads them for this too
+        ...(devRunner ? { NODE_ENV: 'development' } : process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
         ...this.appEnv,
         ...(devRunner && { [DEV_RUNNER_ENV]: '1' }),
       },
@@ -773,7 +778,7 @@ copies or substantial portions of the Software.
       // Inputs the bundler does not see: the config, and tsconfig.json, which the build reads through a copy MeoCord
       // writes and the bundler never watches. A change rebuilds from them, and the rebuild restarts the application.
       // The .env files need no build: the bot reads them as it starts, so a change restarts it.
-      const restarts = envFiles(process.env.NODE_ENV)
+      const restarts = envFiles('development')
       const reloads: Record<string, string> = {
         'meocord.config.ts': 'MeoCord config change detected, reloading config...',
         'tsconfig.json': 'tsconfig.json change detected, rebuilding...',
@@ -821,10 +826,6 @@ copies or substantial portions of the Software.
         await watching?.close()
         process.exit(code ?? 0)
       }
-      this.endDevSession = code => {
-        stopWatching()
-        void finish(code)
-      }
 
       this.relayStopSignals(
         () => this.appProcess,
@@ -842,7 +843,8 @@ copies or substantial portions of the Software.
       this.stopping = true
       const app = this.appProcess
       if (stillRunning(app)) await new Promise<void>(resolve => this.stopApp(app, 'to end watch mode', resolve))
-      this.endDevSession(1)
+      // Exiting ends any watcher the session started
+      process.exit(1)
     }
   }
 

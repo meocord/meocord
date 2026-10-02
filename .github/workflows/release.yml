@@ -523,10 +523,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    env:
-      # Keeps husky's pre-commit hook out of this job. None is installed here, as the install runs no scripts, and the
-      # action commits the version bump through the API.
-      HUSKY: 0
     steps:
       # The action pushes through the GitHub API rather than the git CLI, so it needs no
       # credentials left in the checkout — and the commits it creates are signed with

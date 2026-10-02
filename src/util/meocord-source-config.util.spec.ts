@@ -1,9 +1,8 @@
 import { vi } from 'vitest'
 
-const { mockExistsSync, mockReadFileSync, mockLoadMeoCordConfig } = vi.hoisted(() => ({
+const { mockExistsSync, mockReadFileSync } = vi.hoisted(() => ({
   mockExistsSync: vi.fn(),
   mockReadFileSync: vi.fn(),
-  mockLoadMeoCordConfig: vi.fn(),
 }))
 
 vi.mock('fs', () => ({
@@ -17,26 +16,22 @@ vi.mock('jiti', () => ({
 
 vi.mock('@src/interface/index.js', () => ({}))
 
-vi.mock('@src/util/meocord-config-loader.util.js', () => ({
-  loadMeoCordConfig: mockLoadMeoCordConfig,
-}))
-
 const { loadMeoCordSourceConfig } = await import('@src/util/meocord-source-config.util.js')
 const { createJiti } = await import('jiti')
 
 describe('loadMeoCordSourceConfig', () => {
   // The compiled copy in dist is the previous build's output. A build that read it would run on
   // the config as it was last time.
-  it('reads meocord.config.ts through jiti', () => {
+  it('reads meocord.config.ts through jiti, never the compiled config', () => {
     mockExistsSync.mockReturnValue(true)
     mockReadFileSync.mockReturnValue('{}')
-    mockLoadMeoCordConfig.mockReturnValue({ discordToken: 'compiled, stale' })
     const load = vi.fn().mockReturnValue({ discordToken: 'source, current' })
     vi.mocked(createJiti).mockReturnValue(load as unknown as ReturnType<typeof createJiti>)
 
     expect(loadMeoCordSourceConfig()?.discordToken).toBe('source, current')
     expect(load).toHaveBeenCalledWith(expect.stringMatching(/meocord\.config\.ts$/))
-    expect(mockLoadMeoCordConfig).not.toHaveBeenCalled()
+    const touched = [...mockExistsSync.mock.calls, ...mockReadFileSync.mock.calls, ...load.mock.calls].map(([file]) => String(file))
+    expect(touched.filter(file => file.endsWith('meocord.config.mjs'))).toEqual([])
   })
 
   it('reads the file again on every call', () => {

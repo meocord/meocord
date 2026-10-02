@@ -1,11 +1,11 @@
 import { vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 
 const { builds } = vi.hoisted(() => ({
-  // Each build writes its output, then waits until the test lets it finish
-  builds: [] as { tag: string; release: () => void }[],
+  // Each build writes its output, then waits until the test lets it finish, or fails it
+  builds: [] as { tag: string; release: () => void; fail: (error: Error) => void }[],
 }))
 
 vi.mock('@src/common/index.js', () => ({
@@ -27,7 +27,7 @@ vi.mock('@rsbuild/core', () => ({
       const tag = `build ${builds.length + 1}`
       mkdirSync(config.output.distPath.root, { recursive: true })
       writeFileSync(path.join(config.output.distPath.root, 'meocord.config.mjs'), tag)
-      await new Promise<void>(release => builds.push({ tag, release }))
+      await new Promise<void>((release, fail) => builds.push({ tag, release, fail }))
     },
   }),
 }))
@@ -84,19 +84,17 @@ describe('compileConfig', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
-  it('keeps the last good config, and exits 1, when a compile fails', async () => {
+  it('keeps the last good config, and no staging, when a compile fails', async () => {
     mkdirSync(dist())
     writeFileSync(path.join(dist(), 'meocord.config.mjs'), 'last good')
     const cli = new MeoCordCLI()
     const compile = cli.compileConfig({ mode: 'development' })
     await until(1)
-    rmSync(path.join(dist(), readdirSync(dist()).find(name => name.startsWith('.meocord-config'))!), { recursive: true })
-    builds[0].release()
+    builds[0].fail(new Error('broken config'))
     await compile
 
     expect(readFileSync(path.join(dist(), 'meocord.config.mjs'), 'utf-8')).toBe('last good')
     expect(readdirSync(dist())).toEqual(['meocord.config.mjs'])
     expect(exit).toHaveBeenCalledWith(1)
-    expect(existsSync(path.join(dist(), '.meocord-config'))).toBe(false)
   })
 })

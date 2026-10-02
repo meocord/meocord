@@ -7,33 +7,18 @@ import wait from '@src/util/wait.util.js'
 import chalk from 'chalk'
 import { type MeoCordConfig } from '@src/interface/index.js'
 
-/** The directory of an installed package, searching `node_modules` upward from `baseDir`, or null. */
+/**
+ * The directory of an installed package, searching `node_modules` from `baseDir` up to the filesystem root's, or
+ * null, logging that it was not found.
+ */
 export const findModulePackageDir = (moduleName: string, baseDir: string = process.cwd()): string | null => {
-  try {
-    // Resolve the node_modules directory from the base directory
-    let currentDir = baseDir
-
-    // Traverse the node_modules directories upwards until the package is found
-    while (currentDir !== path.parse(currentDir).root) {
-      const modulePath = path.join(currentDir, 'node_modules', moduleName)
-
-      if (fs.existsSync(modulePath)) {
-        return modulePath // Return the full path to the module directory
-      }
-
-      // Move up one level in the directory structure
-      currentDir = path.join(currentDir, '..')
-    }
-
-    throw new Error(`Module ${moduleName} not found in node_modules.`)
-  } catch (error) {
-    if (error instanceof Error) {
-      console.error(chalk.red(`Error finding package directory for ${moduleName}:`, error.message))
-    } else {
-      console.error(chalk.red(`Error finding package directory for ${moduleName}:`, error))
-    }
-    return null
+  for (let dir = path.resolve(baseDir); ; dir = path.dirname(dir)) {
+    const modulePath = path.join(dir, 'node_modules', moduleName)
+    if (fs.existsSync(modulePath)) return modulePath
+    if (dir === path.dirname(dir)) break
   }
+  console.error(chalk.red(`Error finding package directory for ${moduleName}: Module ${moduleName} not found in node_modules.`))
+  return null
 }
 
 /**

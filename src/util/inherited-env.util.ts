@@ -4,44 +4,58 @@ import { parseEnv } from 'node:util'
 import { buildMode } from '@src/util/bundle-entry.util.js'
 import { listed } from '@src/util/user-text.util.js'
 
+/** The mode whose .env files Bun reads for a `NODE_ENV`: `production` or `test` as given, else `development`. */
+export const envMode = (nodeEnv: string | undefined): 'production' | 'test' | 'development' =>
+  nodeEnv === 'production' || nodeEnv === 'test' ? nodeEnv : 'development'
+
 /**
- * The .env files a bot starts with, in the order Bun reads them, a later one winning: `.env`, the mode's, the local
- * one (not under `test`), and the mode's local one. The mode is `NODE_ENV`, `development` when unset.
+ * The .env files Bun reads for a `NODE_ENV`, in its order, a later one winning: `.env`, the mode's, the local one
+ * (not under `test`), and the mode's local one, the mode as {@link envMode} gives it.
  */
 export function envFiles(nodeEnv: string | undefined): string[] {
-  const mode = nodeEnv || 'development'
+  const mode = envMode(nodeEnv)
   return ['.env', `.env.${mode}`, ...(mode === 'test' ? [] : ['.env.local']), `.env.${mode}.local`]
 }
 
+/** What {@link bunDevelopmentValues} found: the variables, the files they came from, and the NODE_ENV Bun read for. */
+export interface BunEnvValues {
+  files: string[]
+  keys: string[]
+  nodeEnv?: string
+}
+
 /**
- * The variables holding a development .env file's value in a production build on Bun, and the files those came from:
- * with `NODE_ENV` unset, Bun reads the development files before any code runs, and the config's dotenv keeps a value
- * already set. One the production files give the same value is left out. Empty on Node, with `NODE_ENV` set, in any
- * other build, and when Bun read no .env files.
+ * The variables holding another mode's .env value in a production build on Bun, and the files those came from: for a
+ * `NODE_ENV` other than `production`, Bun reads that mode's files before any code runs, and the config's dotenv keeps
+ * a value already set. One the production files give the same value is left out. Empty on Node, in any other build,
+ * and when Bun read no other mode's files.
  */
 export function bunDevelopmentValues(
   env: NodeJS.ProcessEnv = process.env,
   root = process.cwd(),
   bun = process.versions.bun !== undefined,
-): { files: string[]; keys: string[] } {
-  if (!bun || env.NODE_ENV || buildMode() !== 'production') return { files: [], keys: [] }
+): BunEnvValues {
+  const none = { files: [], keys: [], nodeEnv: env.NODE_ENV }
+  if (!bun || buildMode() !== 'production') return none
   const productionFiles = envFiles('production')
   // In Bun's order, a later file winning, as the config's dotenv also settles them
   const production: Record<string, string> = Object.assign({}, ...productionFiles.map(file => read(root, file)))
   const development = new Map<string, { value: string; file: string }>()
-  for (const file of envFiles(undefined).filter(file => !productionFiles.includes(file))) {
+  for (const file of envFiles(env.NODE_ENV).filter(file => !productionFiles.includes(file))) {
     for (const [key, value] of Object.entries(read(root, file))) development.set(key, { value, file })
   }
   const loaded = [...development].filter(([key, { value }]) => env[key] === value && production[key] !== value)
-  return { files: [...new Set(loaded.map(([, { file }]) => file))].sort(), keys: loaded.map(([key]) => key) }
+  if (loaded.length === 0) return none
+  return { files: [...new Set(loaded.map(([, { file }]) => file))].sort(), keys: loaded.map(([key]) => key), nodeEnv: env.NODE_ENV }
 }
 
 /** The warning for the development values {@link bunDevelopmentValues} found, naming each file and variable. */
-export function bunDevelopmentWarning({ files, keys }: { files: readonly string[]; keys: readonly string[] }): string {
+export function bunDevelopmentWarning({ files, keys, nodeEnv }: BunEnvValues): string {
+  const mode = envMode(nodeEnv)
   return (
-    `Bun loaded ${listed(files)} because NODE_ENV is unset, and this is a production build, so ${listed(keys)} ` +
-    `${keys.length === 1 ? 'has its development value' : 'have their development values'}; set NODE_ENV=production, or ` +
-    'start with `bun --no-env-file`.'
+    `Bun loaded ${listed(files)} because NODE_ENV is ${nodeEnv || 'unset'}, and this is a production build, so ` +
+    `${listed(keys)} ${keys.length === 1 ? `has its ${mode} value` : `have their ${mode} values`}; set ` +
+    'NODE_ENV=production, or start with `bun --no-env-file`.'
   )
 }
 

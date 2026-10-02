@@ -78,11 +78,11 @@ export { load, freeModule, modules }
 })
 
 /**
- * A bundled build of an entry that imports an ES module probing for CommonJS, as lodash-es does, and a
- * CommonJS module, under an eval devtool set as an application's hook would set it; then run on Node
- * and on Bun, where the free probes would make the whole bundle CommonJS.
+ * A bundled build of an entry that imports an ES module probing for CommonJS, as lodash-es does, and a CommonJS
+ * module, with MeoCord's devtool and with an eval one an application's hook sets; then run on Node and on Bun, where
+ * the free probes would make the whole bundle CommonJS.
  */
-describe('a bundled build with an ES module that probes for CommonJS, under an eval devtool', () => {
+describe('a bundled build with an ES module that probes for CommonJS', () => {
   const fixture = mkdtempSync(path.join(tmpdir(), 'meocord-runnable-'))
   const bun = process.versions.bun ? process.execPath : 'bun'
 
@@ -118,12 +118,12 @@ describe('a bundled build with an ES module that probes for CommonJS, under an e
     rmSync(fixture, { recursive: true, force: true })
   })
 
-  async function build(mode: 'production' | 'development') {
+  async function build(mode: 'production' | 'development', devtool?: 'eval-source-map') {
     const cwd = vi.spyOn(process, 'cwd').mockReturnValue(fixture)
     try {
       const base = createRsbuildConfig({ mode, bundleDependencies: true, entry: path.join(fixture, 'src', 'main.ts') })
-      // As an application's rsbuild hook sets a devtool of its own.
-      base.tools = { ...base.tools, rspack: config => ({ ...config, devtool: 'eval-source-map' }) }
+      // As an application's rsbuild hook sets a devtool of its own
+      if (devtool) base.tools = { ...base.tools, rspack: config => ({ ...config, devtool }) }
       const rsbuild = await createRsbuild({ cwd: fixture, config: { ...base, performance: { printFileSize: false } } })
       const { stats } = await rsbuild.build()
       return stats?.toJson({ all: false, warnings: true }).warnings?.map(warning => warning.message) ?? []
@@ -135,11 +135,20 @@ describe('a bundled build with an ES module that probes for CommonJS, under an e
   const run = (runtime: string, args: string[]) =>
     JSON.parse(execFileSync(runtime, [...args, path.join(fixture, 'dist', 'main.js')], { cwd: fixture, encoding: 'utf8' }).trim())
 
-  it.each(['production', 'development'] as const)('starts on Node and on Bun from a %s build, and says it replaced the devtool', async mode => {
-    const warnings = await build(mode)
+  const expected = { esm: 'esm', cjs: 'commonjs', url: true }
+
+  // MeoCord's own devtool keeps the probes in the chunk's top scope, so this is what the free globals guard
+  it.each(['production', 'development'] as const)('starts on Node and on Bun from a %s build', async mode => {
+    await build(mode)
+
+    expect(run('node', [])).toEqual(expected)
+    expect(run(bun, ['--no-install'])).toEqual(expected)
+  })
+
+  it.each(['production', 'development'] as const)('starts on Node and on Bun from a %s build with an eval devtool, and says it replaced it', async mode => {
+    const warnings = await build(mode, 'eval-source-map')
 
     expect(warnings.join('\n')).toContain('"eval-source-map" devtool')
-    const expected = { esm: 'esm', cjs: 'commonjs', url: true }
     expect(run('node', [])).toEqual(expected)
     expect(run(bun, ['--no-install'])).toEqual(expected)
   })

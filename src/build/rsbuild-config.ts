@@ -156,12 +156,29 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
       ],
       // Rsbuild would put the bundle in dist/static/js and assets in dist/static/*. The
       // application's entry is dist/main.js, which is what `meocord start` runs.
-      distPath: { root: path.resolve(cwd, 'dist'), js: '', image: 'assets', svg: 'assets', font: 'assets', media: 'assets' },
-      // No content hash: a bot reads its assets from disk rather than serving them from a CDN,
-      // so there is no cache to bust, and stable names keep `dist/assets/` predictable. Each
-      // accepts a function too, for applications whose same-named files in different folders
-      // would otherwise collide.
-      filename: { js: '[name].js', image: '[name][ext]', svg: '[name][ext]', font: '[name][ext]', media: '[name][ext]' },
+      // Every kind an import emits, `assets` (pdf, txt and the like) and `wasm` included, lands in dist/assets
+      distPath: {
+        root: path.resolve(cwd, 'dist'),
+        js: '',
+        image: 'assets',
+        svg: 'assets',
+        font: 'assets',
+        media: 'assets',
+        assets: 'assets',
+        wasm: 'assets',
+      },
+      // No content hash: a bot reads its assets from disk rather than serving them from a CDN, so there is no cache to
+      // bust, and stable names keep `dist/assets/` predictable. Two files of one name in different folders stop the build
+      // with Rspack's conflict error; each accepts a function too, for an app that needs to keep both names.
+      filename: {
+        js: '[name].js',
+        image: '[name][ext]',
+        svg: '[name][ext]',
+        font: '[name][ext]',
+        media: '[name][ext]',
+        assets: '[name][ext]',
+        wasm: '[name][ext]',
+      },
       // What `import image from './x.png'` evaluates to at runtime. A bot passes that string
       // to fs or to a Discord attachment, so it has to be a real path on disk, which Rsbuild's
       // web-oriented default is not. The pre-entry replaces it at runtime with the bundle's own

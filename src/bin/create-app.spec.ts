@@ -77,6 +77,28 @@ describe('meocord create', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
+  // engines.node is >=22.13, so a 22 below that is older than the package installs on, not a pass
+  it.each([
+    ['22.12.0', true],
+    ['22.13.0', false],
+    ['23.0.0', false],
+  ])('on Node %s, warns that it is below the supported minimum: %s', async (node, warns) => {
+    sandbox()
+    makeInitialCommit.mockResolvedValue({ outcome: 'committed' })
+    const versions = process.versions
+    Object.defineProperty(process, 'versions', { value: { ...versions, node }, configurable: true })
+    prompts.log.warn.mockClear()
+
+    try {
+      await new MeoCordCLI().createApp('bot', { useBun: true })
+    } finally {
+      Object.defineProperty(process, 'versions', { value: versions, configurable: true })
+    }
+
+    const warned = prompts.log.warn.mock.calls.some(([text]) => String(text).includes('older than the supported minimum'))
+    expect(warned).toBe(warns)
+  })
+
   it('makes the first commit after the install, so the lockfile the install wrote is in it', async () => {
     sandbox()
     let lockfileWritten = false

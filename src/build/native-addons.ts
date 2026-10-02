@@ -163,7 +163,6 @@ export function findBundledNativeAddons(bundledFiles: Iterable<string>, root: st
  */
 export function packageNameOfRequest(request: string): string | undefined {
   if (!request || request.startsWith('.') || request.startsWith('/') || /^[a-z]+:/i.test(request)) return undefined
-  if (/^[A-Za-z]:[\\/]/.test(request)) return undefined
   const [first, second] = request.split('/')
   if (!first.startsWith('@')) return first
   return second ? `${first}/${second}` : undefined
