@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseEnv } from 'node:util'
 import { buildMode } from '@src/util/bundle-entry.util.js'
+import { listed } from '@src/util/user-text.util.js'
 
 /**
  * The .env files a bot starts with, in the order Bun reads them, a later one winning: `.env`, the mode's, the local
@@ -33,6 +34,15 @@ export function bunDevelopmentValues(
   }
   const loaded = [...development].filter(([key, { value }]) => env[key] === value && production[key] !== value)
   return { files: [...new Set(loaded.map(([, { file }]) => file))].sort(), keys: loaded.map(([key]) => key) }
+}
+
+/** The warning for the development values {@link bunDevelopmentValues} found, naming each file and variable. */
+export function bunDevelopmentWarning({ files, keys }: { files: readonly string[]; keys: readonly string[] }): string {
+  return (
+    `Bun loaded ${listed(files)} because NODE_ENV is unset, and this is a production build, so ${listed(keys)} ` +
+    `${keys.length === 1 ? 'has its development value' : 'have their development values'}; set NODE_ENV=production, or ` +
+    'start with `bun --no-env-file`.'
+  )
 }
 
 /**

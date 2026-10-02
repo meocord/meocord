@@ -12,6 +12,7 @@ import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { listed } from '@src/util/user-text.util.js'
 
 type ControllerClass = new (...args: any[]) => unknown
 
@@ -303,10 +304,6 @@ function unasked(
   const others = completed.length ? `; its options with autocomplete are ${quoted(completed)}` : ', nor any option with autocomplete on'
   return `"${commandPath}" has no option "${optionName}"${others}. Correct the option name.`
 }
-
-/** Items as a sentence lists them: `a`, `a and b`, `a, b and c`. */
-const listed = (items: readonly string[]): string =>
-  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 
 /**
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for

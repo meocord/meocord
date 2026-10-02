@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { bunDevelopmentValues, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
+import { bunDevelopmentValues, bunDevelopmentWarning, envFiles, inheritedEnvironment } from '@src/util/inherited-env.util.js'
 import { BUILD_MODE_KEY } from '@src/util/bundle-entry.util.js'
 
 let root: string
@@ -88,5 +88,14 @@ describe('bunDevelopmentValues', () => {
     rmSync(path.join(root, '.env.development.local'))
 
     expect(bunDevelopmentValues({ SHARED: 'same' }, root, true)).toEqual({ files: [], keys: [] })
+  })
+})
+
+describe('bunDevelopmentWarning', () => {
+  it('names each file and variable as a sentence lists them', () => {
+    expect(bunDevelopmentWarning({ files: ['.env.development', '.env.development.local'], keys: ['FROM_MODE', 'ONLY_DEV', 'TOKEN'] })).toBe(
+      'Bun loaded .env.development and .env.development.local because NODE_ENV is unset, and this is a production build, so ' +
+        'FROM_MODE, ONLY_DEV and TOKEN have their development values; set NODE_ENV=production, or start with `bun --no-env-file`.',
+    )
   })
 })
