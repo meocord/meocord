@@ -1,11 +1,8 @@
 import 'reflect-metadata'
-import { MetadataKey } from '@src/enum/index.js'
 import { type BuildableCommandType, type CommandBuilderBase } from '@src/interface/command-decorator.interface.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { type CommandBuilderOptions } from '@src/interface/index.js'
-
-/** Where a builder class keeps its `guilds` option, for `@Command` to copy into the handler's metadata. */
-export const BUILDER_GUILDS = Symbol('meocord:builder-guilds')
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Marks a class as a command's builder, which describes the command MeoCord registers with Discord.
@@ -42,11 +39,11 @@ export function CommandBuilder<T extends BuildableCommandType>(commandType: T, o
 
     // Define the command type metadata for the target class
     Reflect.defineMetadata(
-      MetadataKey.CommandType,
+      META.commandType,
       commandType,
       target as unknown as CommandBuilderBase<T> & { commandType: string },
     )
 
-    if (options.guilds) Reflect.defineMetadata(BUILDER_GUILDS, [...options.guilds], target)
+    if (options.guilds) Reflect.defineMetadata(META.builderGuilds, [...options.guilds], target)
   }
 }

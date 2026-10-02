@@ -7,6 +7,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { Logger } from '@src/common/logger.js'
+import { META } from '@src/util/metadata-keys.js'
 
 const logger = new Logger('Interceptor')
 
@@ -36,12 +37,6 @@ function isInterceptorWithParams(entry: unknown): entry is InterceptorWithParams
   return typeof entry === 'object'
 }
 
-/** Private metadata: the interceptors a class-level `@UseInterceptor` applies, on the class. */
-export const CLASS_INTERCEPTORS = Symbol('class_interceptors')
-
-/** Private metadata: the interceptors a method-level `@UseInterceptor` applies, on the method. */
-export const METHOD_INTERCEPTORS = Symbol('method_interceptors')
-
 /**
  * The interceptors around a handler: each class's, base first, down to the controller it is dispatched on, then the
  * method's.
@@ -50,8 +45,8 @@ export const handlerInterceptors = perHandler((prototype: object, methodName: st
   const source = sourcePrototype(prototype, methodName)
   if (!source) return []
   return [
-    ...stageClasses(prototype, methodName).flatMap(cls => (Reflect.getOwnMetadata(CLASS_INTERCEPTORS, cls) as InterceptorEntry[]) ?? []),
-    ...((Reflect.getOwnMetadata(METHOD_INTERCEPTORS, source, methodName) as InterceptorEntry[]) ?? []),
+    ...stageClasses(prototype, methodName).flatMap(cls => (Reflect.getOwnMetadata(META.classInterceptors, cls) as InterceptorEntry[]) ?? []),
+    ...((Reflect.getOwnMetadata(META.methodInterceptors, source, methodName) as InterceptorEntry[]) ?? []),
   ]
 })
 

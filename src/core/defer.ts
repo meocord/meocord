@@ -3,6 +3,7 @@ import { type InteractionResponse } from '@src/common/response/response-state.js
 import { perHandler, sourcePrototype } from '@src/core/guard-runner.js'
 import { getAutocompleteHandlers, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * How `@Defer` acknowledges an interaction and locks a component's message.
@@ -58,13 +59,10 @@ export const AUTO_DEFER_AFTER_MS = 1500
 /** The latest `'auto'` acknowledges, counted from the interaction's creation: Discord allows three seconds. */
 export const AUTO_DEFER_LIMIT_MS = 2500
 
-/** Private metadata: a handler's `@Defer` options. */
-export const DEFER_OPTIONS = Symbol('defer_options')
-
 /** The `@Defer` options of a handler, read where the handler is declared. */
 export const handlerDefer = perHandler((prototype: object, methodName: string): DeferOptions | undefined => {
   const source = sourcePrototype(prototype, methodName)
-  return source ? (Reflect.getOwnMetadata(DEFER_OPTIONS, source, methodName) as DeferOptions | undefined) : undefined
+  return source ? (Reflect.getOwnMetadata(META.deferOptions, source, methodName) as DeferOptions | undefined) : undefined
 })
 
 /** The kind of non-interaction handler a method is, if any: `@Defer` cannot apply to one. */

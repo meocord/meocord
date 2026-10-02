@@ -1,4 +1,4 @@
-import { CommandType, MetadataKey } from '@src/enum/index.js'
+import { CommandType } from '@src/enum/index.js'
 import {
   buildComponentRoutes,
   type ControllerClass,
@@ -9,6 +9,7 @@ import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { buildMessageRoutes, fitsScope, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
 import { needsGuild } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix } from '@src/interface/index.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * The command types routed by a `customId` pattern: buttons, select menus and modals.
@@ -90,7 +91,7 @@ export interface RouteConflict {
 
 /** The options `@MeoCord` declares on an application class. */
 function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions } {
-  const options = Reflect.getMetadata(MetadataKey.AppOptions, app) as
+  const options = Reflect.getMetadata(META.appOptions, app) as
     | { controllers?: ControllerClass[]; messages?: MessageCommandOptions }
     | undefined
   if (!options) throw new TypeError(`${app.name || 'The given class'} is not decorated with @MeoCord().`)

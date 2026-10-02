@@ -21,6 +21,7 @@ import {
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
+import { META } from '@src/util/metadata-keys.js'
 
 export type GuardClass = new (...args: any[]) => GuardInterface
 
@@ -34,9 +35,6 @@ export interface GuardWithParams {
 }
 
 export type GuardEntry = GuardClass | GuardWithParams
-
-/** Private metadata: marks a class `@Guard` decorated. */
-export const GUARD_CLASS = Symbol('guard_class')
 
 /** Whether a `@UseGuard` entry is a guard with params rather than a guard class. */
 export function isGuardWithParams(guard: unknown): guard is GuardWithParams {
@@ -310,9 +308,6 @@ export async function runGuards(guards: readonly GuardEntry[], call: GuardedCall
   return true
 }
 
-/** Private metadata: how many guard wrappers `@UseGuard` and `@Controller` put around one method. */
-export const GUARD_WRAPPERS = Symbol('guard_wrappers')
-
 /** The prototype on the chain that declares `methodName`, which is the function dispatch calls. */
 export function declaringPrototype(prototype: object, methodName: string): object | undefined {
   for (let current: object | null = prototype; current; current = Object.getPrototypeOf(current)) {
@@ -321,9 +316,6 @@ export function declaringPrototype(prototype: object, methodName: string): objec
   return undefined
 }
 
-/** Private metadata: the prototype whose method a class-level `@UseGuard` re-declared on a subclass. */
-export const INHERITED_FROM = Symbol('inherited_from')
-
 /**
  * The prototype that declares the handler as written, looking through methods a class-level
  * `@UseGuard` re-declared on a subclass to wrap an inherited handler.
@@ -331,7 +323,7 @@ export const INHERITED_FROM = Symbol('inherited_from')
 export function sourcePrototype(prototype: object, methodName: string): object | undefined {
   let owner = declaringPrototype(prototype, methodName)
   while (owner) {
-    const from = Reflect.getOwnMetadata(INHERITED_FROM, owner, methodName) as object | undefined
+    const from = Reflect.getOwnMetadata(META.inheritedFrom, owner, methodName) as object | undefined
     if (!from) return owner
     owner = declaringPrototype(from, methodName)
   }
@@ -351,15 +343,6 @@ export function perHandler<T>(resolve: (prototype: object, methodName: string) =
     return byMethod.get(methodName)!
   }
 }
-
-/** Private metadata: `false` when `@Controller({ inheritStages: false })` stops class stages at this class. */
-export const INHERIT_STAGES = Symbol('inherit_stages')
-
-/** Private metadata: the guards a class-level `@UseGuard` declares, kept on the class. */
-export const CLASS_LEVEL_GUARDS = Symbol('class_level_guards')
-
-/** Private metadata: the guards method-level `@UseGuard` applies to one method, in the order they run. */
-export const METHOD_GUARDS = Symbol('method_guards')
 
 /** A class a handler's class-level stages are read from. */
 export type StageClass = abstract new (...args: any[]) => unknown
@@ -388,14 +371,14 @@ export function classChain(prototype: object, source: object): StageClass[] {
     const cls = current.constructor as StageClass
     classes.push(cls)
     if (current === source) declared = true
-    if (declared && Reflect.getOwnMetadata(INHERIT_STAGES, cls) === false) break
+    if (declared && Reflect.getOwnMetadata(META.inheritStages, cls) === false) break
   }
   return classes
 }
 
 /** The guards a class-level `@UseGuard` declares on `cls`. */
 export function classLevelGuards(cls: StageClass): GuardEntry[] {
-  return (Reflect.getOwnMetadata(CLASS_LEVEL_GUARDS, cls) as GuardEntry[] | undefined) ?? []
+  return (Reflect.getOwnMetadata(META.classLevelGuards, cls) as GuardEntry[] | undefined) ?? []
 }
 
 /** Every handler a class declares or inherits: commands, components, messages, reactions, autocomplete and events. */
@@ -420,13 +403,13 @@ export const handlerGuards = perHandler((prototype: object, methodName: string):
   if (!source) return []
   return [
     ...(handlerMethods(prototype).has(methodName) ? stageClasses(prototype, methodName).flatMap(classLevelGuards) : []),
-    ...((Reflect.getOwnMetadata(METHOD_GUARDS, source, methodName) as GuardEntry[]) ?? []),
+    ...((Reflect.getOwnMetadata(META.methodGuards, source, methodName) as GuardEntry[]) ?? []),
   ]
 })
 
 const wrapperCount = perHandler((prototype: object, methodName: string): number => {
   const owner = declaringPrototype(prototype, methodName)
-  return owner ? ((Reflect.getOwnMetadata(GUARD_WRAPPERS, owner, methodName) as number | undefined) ?? 0) : 0
+  return owner ? ((Reflect.getOwnMetadata(META.guardWrappers, owner, methodName) as number | undefined) ?? 0) : 0
 })
 
 /**
@@ -465,7 +448,7 @@ export async function runDirectCall(
 ): Promise<unknown> {
   const prototype = Object.getPrototypeOf(instance) as object
   const controller = instance.constructor as new (...args: any[]) => unknown
-  const container = Reflect.getMetadata(MetadataKey.Container, controller) as Container
+  const container = Reflect.getMetadata(META.container, controller) as Container
   if (!(await runGuards(handlerGuards(prototype, methodName), { container, controller, methodName, args }))) return undefined
 
   const inner = wrapperCount(prototype, methodName) - 1

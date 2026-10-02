@@ -6,6 +6,7 @@ import { perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runne
 import { bindShared } from '@src/core/interceptor-runner.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { isConstructor } from '@src/util/value.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 export type FilterClass = new (...args: any[]) => ExceptionFilter
 
@@ -26,15 +27,6 @@ function filterClass(entry: FilterEntry): FilterClass {
   return typeof entry === 'object' ? entry.provide : entry
 }
 
-/** Private metadata: the error types a filter's `@Catch` names; empty to catch everything. */
-export const CATCH_TYPES = Symbol('catch_types')
-
-/** Private metadata: the filters a class-level `@UseFilter` applies, on the class. */
-export const CLASS_FILTERS = Symbol('class_filters')
-
-/** Private metadata: the filters a method-level `@UseFilter` applies, on the method. */
-export const METHOD_FILTERS = Symbol('method_filters')
-
 /**
  * A handler's filters by level, the level closest to the handler first: the method's, then its classes', from the
  * controller up to the top base, then the global ones.
@@ -53,17 +45,17 @@ const ownFilterLevels = perHandler((prototype: object, methodName: string) => {
   const source = sourcePrototype(prototype, methodName)
   if (!source) return { method: [] as FilterEntry[], classes: [] as FilterEntry[] }
   return {
-    method: (Reflect.getOwnMetadata(METHOD_FILTERS, source, methodName) as FilterEntry[]) ?? [],
+    method: (Reflect.getOwnMetadata(META.methodFilters, source, methodName) as FilterEntry[]) ?? [],
     classes: [...stageClasses(prototype, methodName)]
       .reverse()
-      .flatMap(cls => (Reflect.getOwnMetadata(CLASS_FILTERS, cls) as FilterEntry[]) ?? []),
+      .flatMap(cls => (Reflect.getOwnMetadata(META.classFilters, cls) as FilterEntry[]) ?? []),
   }
 })
 
 /** Binds a filter as a singleton, after checking it is one. */
 export function prepareFilter(container: Container, entry: FilterEntry): void {
   const cls = filterClass(entry)
-  if (!Reflect.hasOwnMetadata(CATCH_TYPES, cls)) {
+  if (!Reflect.hasOwnMetadata(META.catchTypes, cls)) {
     throw refuse(new Error(`${cls.name || 'A filter'}: used as an exception filter, but not decorated with @Catch().`))
   }
   bindShared(container, cls)
@@ -74,7 +66,7 @@ export function matchFilter(levels: readonly (readonly FilterEntry[])[], error: 
   for (const level of levels) {
     for (const entry of level) {
       // Every filter reaching here was checked for @Catch at startup, so its types are always recorded
-      const types = Reflect.getOwnMetadata(CATCH_TYPES, filterClass(entry)) as (abstract new (...args: any[]) => unknown)[]
+      const types = Reflect.getOwnMetadata(META.catchTypes, filterClass(entry)) as (abstract new (...args: any[]) => unknown)[]
       // Only classes match: anything else given to @Catch, warned of as it applied, matches no error
       if (types.length === 0 || types.some(type => isConstructor(type) && error instanceof type)) return entry
     }

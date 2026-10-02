@@ -5,13 +5,10 @@ import { type ExecutionContext } from '@src/common/execution-context.js'
 import { Logger } from '@src/common/logger.js'
 import { type DispatchObserver, type DispatchOutcome, type DispatchResult } from '@src/interface/observer.interface.js'
 import { bindShared } from '@src/core/interceptor-runner.js'
-import { MetadataKey } from '@src/enum/index.js'
 import { appliesTo } from '@src/core/stage-scope.js'
 import { respond, type ResponsePhase } from '@src/common/response/response-state.js'
 import { refuse } from '@src/util/refusal.util.js'
-
-/** Private metadata: marks a class `@Observer` decorated. */
-export const OBSERVER_CLASS = Symbol('observer_class')
+import { META } from '@src/util/metadata-keys.js'
 
 /** Where a container keeps the observers its calls are reported to, in order. */
 const OBSERVERS = Symbol('observers')
@@ -23,7 +20,7 @@ const logger = new Logger('Observer')
 /** Throws unless every entry is an `@Observer` class, naming where it was listed. */
 export function assertObservers(where: string, observers: readonly unknown[]): void {
   for (const observer of observers) {
-    if (typeof observer !== 'function' || !Reflect.getMetadata(OBSERVER_CLASS, observer)) {
+    if (typeof observer !== 'function' || !Reflect.getMetadata(META.observerClass, observer)) {
       const name = typeof observer === 'function' ? observer.name : String(observer)
       throw refuse(new Error(`${where} takes classes decorated with @Observer(), not ${name}.`))
     }
@@ -32,7 +29,7 @@ export function assertObservers(where: string, observers: readonly unknown[]): v
 
 /** The observers `@MeoCord({ observers })` declares on an application class. */
 export function appObservers(app: object): ObserverClass[] {
-  const options = Reflect.getMetadata(MetadataKey.AppOptions, app) as { observers?: ObserverClass[] } | undefined
+  const options = Reflect.getMetadata(META.appOptions, app) as { observers?: ObserverClass[] } | undefined
   return [...(options?.observers ?? [])]
 }
 

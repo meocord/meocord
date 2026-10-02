@@ -18,7 +18,7 @@ import {
   type PartialUser,
   type User,
 } from 'discord.js'
-import { MetadataKey, ReactionHandlerAction } from '@src/enum/index.js'
+import { ReactionHandlerAction } from '@src/enum/index.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { missingTranslatorError, Translator } from '@src/common/translator.js'
@@ -87,6 +87,7 @@ import {
 } from '@src/core/providers.js'
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * What a testing module is built from: the classes a test needs, and the app whose global stages apply.
@@ -742,7 +743,7 @@ function throwFailures(hook: 'onReady' | 'onShutdown', failures: readonly { name
 
 /** The app's `messages` options, when the testing module is given an app. */
 function messagesOf(app: object | undefined): MessageCommandOptions | undefined {
-  return app && (Reflect.getMetadata(MetadataKey.AppOptions, app) as { messages?: MessageCommandOptions } | undefined)?.messages
+  return app && (Reflect.getMetadata(META.appOptions, app) as { messages?: MessageCommandOptions } | undefined)?.messages
 }
 
 /**
@@ -967,7 +968,7 @@ export class TestingModuleBuilder {
     for (const [token, override] of this.overrides) providers.set(token, override)
     const services = this.wiring?.services ?? []
     const appOptions = this.options.app
-      ? (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as
+      ? (Reflect.getMetadata(META.appOptions, this.options.app) as
           | { cooldownStore?: new (...args: any[]) => CooldownStore; cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }
           | undefined)
       : undefined
@@ -1012,7 +1013,7 @@ export class TestingModuleBuilder {
     if (appOptions && !container.isBound(COOLDOWN_POLICY)) container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(appOptions))
 
     // The app's translator, unless a provider stands in for it
-    const i18n = this.options.app && (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as { i18n?: Translator })?.i18n
+    const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
     if (i18n && !providers.has(Translator)) {
       container.bind(Translator).toConstantValue(i18n)
       bindsOwnToken(container, Translator)
@@ -1052,7 +1053,7 @@ export class TestingModuleBuilder {
     for (const ctrl of this.options.controllers ?? []) {
       bindClass(ctrl)
       // Stamp container on controller class so @UseGuard works in tests too
-      Reflect.defineMetadata(MetadataKey.Container, container, ctrl)
+      Reflect.defineMetadata(META.container, container, ctrl)
     }
     for (const service of services) bindClass(service)
 
@@ -1068,7 +1069,7 @@ export class TestingModuleBuilder {
       }),
     )
     assertProvided(container, providers, [...appClasses, ...(store ? [store] : [])], "the testing module's providers")
-    for (const cls of appClasses) Reflect.defineMetadata(MetadataKey.Container, container, cls)
+    for (const cls of appClasses) Reflect.defineMetadata(META.container, container, cls)
     prepareHandlerStages(container, appClasses)
     const messages = messagesOf(this.options.app)
     // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
@@ -1109,7 +1110,7 @@ export class TestingModuleBuilder {
       })
     }
 
-    const warnUnanswered = this.options.app && (Reflect.getMetadata(MetadataKey.AppOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
+    const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
 
     return new TestingModule(
       container,
@@ -1224,7 +1225,7 @@ export class MeoCordTestingModule {
    * ```
    */
   static fromApp(app: new (...args: any[]) => unknown, options: FromAppOptions = {}): TestingModuleBuilder {
-    const appOptions = Reflect.getMetadata(MetadataKey.AppOptions, app) as
+    const appOptions = Reflect.getMetadata(META.appOptions, app) as
       | {
           controllers: (new (...args: any[]) => any)[]
           services?: (new (...args: any[]) => unknown)[]

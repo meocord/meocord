@@ -1,10 +1,11 @@
 import 'reflect-metadata'
 import { type InterceptorOptions } from '@src/interface/stage-options.interface.js'
 import { type InterceptorInterface } from '@src/interface/index.js'
-import { CLASS_INTERCEPTORS, type InterceptorEntry, METHOD_INTERCEPTORS } from '@src/core/interceptor-runner.js'
+import { type InterceptorEntry } from '@src/core/interceptor-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Marks a class as an interceptor, which wraps a handler to act before and after it.
@@ -88,11 +89,11 @@ export function UseInterceptor<const T extends readonly unknown[]>(
     assertStageEntries('@UseInterceptor', 'interceptor', where, interceptors)
     // Decorators apply bottom-up, so a higher decorator's interceptors go first, as with @UseGuard.
     if (propertyKey === undefined) {
-      const existing: InterceptorEntry[] = Reflect.getOwnMetadata(CLASS_INTERCEPTORS, target) ?? []
-      Reflect.defineMetadata(CLASS_INTERCEPTORS, [...interceptors, ...existing], target)
+      const existing: InterceptorEntry[] = Reflect.getOwnMetadata(META.classInterceptors, target) ?? []
+      Reflect.defineMetadata(META.classInterceptors, [...interceptors, ...existing], target)
     } else {
-      const existing: InterceptorEntry[] = Reflect.getOwnMetadata(METHOD_INTERCEPTORS, target, propertyKey) ?? []
-      Reflect.defineMetadata(METHOD_INTERCEPTORS, [...interceptors, ...existing], target, propertyKey)
+      const existing: InterceptorEntry[] = Reflect.getOwnMetadata(META.methodInterceptors, target, propertyKey) ?? []
+      Reflect.defineMetadata(META.methodInterceptors, [...interceptors, ...existing], target, propertyKey)
     }
   } as ClassDecorator & MethodDecorator
 }

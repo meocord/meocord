@@ -1,6 +1,5 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
-import { MetadataKey } from '@src/enum/index.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
 import { setPresenter } from '@src/common/response/presenter.js'
@@ -48,6 +47,7 @@ import {
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { appliesTo } from '@src/core/stage-scope.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /** The stages that run around one handler, in the order they run. */
 export interface HandlerStages {
@@ -78,7 +78,7 @@ const GLOBAL_STAGES = Symbol('global_stages')
 
 /** The global stages declared by `@MeoCord` on an application class. */
 export function appStages(app: object): GlobalStages {
-  const options = Reflect.getMetadata(MetadataKey.AppOptions, app) as
+  const options = Reflect.getMetadata(META.appOptions, app) as
     | {
         guards?: GuardEntry[]
         interceptors?: InterceptorEntry[]
@@ -108,7 +108,7 @@ export function appStages(app: object): GlobalStages {
  * the one `respond()` uses for interactions `client` receives. Returns it, or `undefined` without one.
  */
 export function bindAppPresenter(container: Container, app: object, client?: object): ResponsePresenter | undefined {
-  const options = Reflect.getMetadata(MetadataKey.AppOptions, app) as { presenter?: new (...args: any[]) => ResponsePresenter } | undefined
+  const options = Reflect.getMetadata(META.appOptions, app) as { presenter?: new (...args: any[]) => ResponsePresenter } | undefined
   if (!options?.presenter) return undefined
   bindShared(container, options.presenter)
   const presenter = container.get<ResponsePresenter>(options.presenter)

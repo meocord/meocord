@@ -7,6 +7,7 @@ import { type HandlerExecutionContext } from '@src/common/execution-context.js'
 import { prepareInterceptor } from '@src/core/interceptor-runner.js'
 import { perHandler, sourcePrototype } from '@src/core/guard-runner.js'
 import { consumeCooldowns, handlerCooldowns } from '@src/core/cooldown-runner.js'
+import { META } from '@src/util/metadata-keys.js'
 
 export type PipeClass = new (...args: any[]) => PipeInterface
 
@@ -24,12 +25,6 @@ export interface ValidationMetadata {
   pipes: Record<string, PipeEntry | readonly PipeEntry[]>
 }
 
-/** Private metadata: the `@Validate` schema and inline pipes of a method. */
-export const METHOD_VALIDATION = Symbol('method_validation')
-
-/** Private metadata: the `@UsePipe` pipes of a method, in declaration order. */
-export const METHOD_PIPES = Symbol('method_pipes')
-
 function isPipeWithParams(entry: PipeEntry): entry is PipeWithParams {
   // Entries are checked when @UsePipe or @Validate applies, so an object here is always { provide, params? }
   return typeof entry === 'object'
@@ -46,9 +41,9 @@ export const handlerInputStages = perHandler((prototype: object, methodName: str
   const source = sourcePrototype(prototype, methodName)
   if (!source) return { pipes: [] }
 
-  const validation = Reflect.getOwnMetadata(METHOD_VALIDATION, source, methodName) as ValidationMetadata | undefined
+  const validation = Reflect.getOwnMetadata(META.methodValidation, source, methodName) as ValidationMetadata | undefined
   const inline = Object.entries(validation?.pipes ?? {}).flatMap(([key, entries]) => asList(entries).map(entry => ({ key, entry })))
-  const used = (Reflect.getOwnMetadata(METHOD_PIPES, source, methodName) as { key: string; entry: PipeEntry }[]) ?? []
+  const used = (Reflect.getOwnMetadata(META.methodPipes, source, methodName) as { key: string; entry: PipeEntry }[]) ?? []
   return { schema: validation?.schema, pipes: [...inline, ...used] }
 })
 

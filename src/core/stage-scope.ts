@@ -2,9 +2,7 @@ import 'reflect-metadata'
 import { type ExecutionContextType } from '@src/common/execution-context.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { describeValue, isConstructor } from '@src/util/value.util.js'
-
-/** The context types a guard, interceptor or observer class declared it runs for, such as `@Guard({ types })`. */
-const STAGE_TYPES = Symbol('stage_types')
+import { META } from '@src/util/metadata-keys.js'
 
 /** A stage entry as the pipeline lists it: a class, or `{ provide, params? }`. */
 type StageEntry = (new (...args: any[]) => unknown) | { provide: new (...args: any[]) => unknown }
@@ -32,7 +30,7 @@ export function defineStageTypes(
         `handlers. List the types it should run for instead.`,
     ))
   }
-  Reflect.defineMetadata(STAGE_TYPES, [...types], cls)
+  Reflect.defineMetadata(META.stageTypes, [...types], cls)
 }
 
 /** Why an entry is not a class or `{ provide: Class, params? }`, or undefined when it is one. */
@@ -80,7 +78,7 @@ export function stageClass(entry: StageEntry): new (...args: any[]) => unknown {
 
 /** The context types a stage declared, or `undefined` when it runs for every type. */
 export function stageTypes(entry: StageEntry): readonly ExecutionContextType[] | undefined {
-  return Reflect.getMetadata(STAGE_TYPES, stageClass(entry)) as ExecutionContextType[] | undefined
+  return Reflect.getMetadata(META.stageTypes, stageClass(entry)) as ExecutionContextType[] | undefined
 }
 
 /** Whether a stage runs for a call of `type`. */

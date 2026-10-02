@@ -25,12 +25,7 @@ import {
   type ThemeScope,
   useTheme,
 } from '@src/core/theme-scope.js'
-
-/** Private metadata: the theme layer a class-level `@UseTheme` sets, kept on the class. */
-export const CLASS_THEME = Symbol('class_theme')
-
-/** Private metadata: the theme layer a method-level `@UseTheme` sets. */
-export const METHOD_THEME = Symbol('method_theme')
+import { META } from '@src/util/metadata-keys.js'
 
 /** Classes with a `@UseTheme`, on the class or one of its methods. */
 export const THEMED_CLASSES = new WeakSet<object>()
@@ -129,10 +124,10 @@ function handlerTheme(themes: AppThemes, prototype: object, methodName: string):
   theme = themes.app
   // Base first, so a subclass's layer goes over its base class's
   for (const cls of stageClasses(prototype, methodName)) {
-    theme = mergeTheme(theme, Reflect.getOwnMetadata(CLASS_THEME, cls) as ThemeOverride | undefined)
+    theme = mergeTheme(theme, Reflect.getOwnMetadata(META.classTheme, cls) as ThemeOverride | undefined)
   }
   const source = sourcePrototype(prototype, methodName)
-  if (source) theme = mergeTheme(theme, Reflect.getOwnMetadata(METHOD_THEME, source, methodName) as ThemeOverride | undefined)
+  if (source) theme = mergeTheme(theme, Reflect.getOwnMetadata(META.methodTheme, source, methodName) as ThemeOverride | undefined)
   byMethod.set(methodName, theme)
   return theme
 }
