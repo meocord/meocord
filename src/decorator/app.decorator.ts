@@ -1,5 +1,4 @@
 import 'reflect-metadata'
-import { MetadataKey } from '@src/enum/index.js'
 import {
   type MessageCommandOptions,
 } from '@src/interface/index.js'
@@ -14,6 +13,7 @@ import { assertValidTheme } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { timeoutProblem } from '@src/util/timer-limit.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /** Refuses a `messages` option of the wrong type where the app is declared, rather than at the first message. */
 function assertMessageOptions(appName: string, messages: MessageCommandOptions | undefined, i18n: Translator<any> | undefined): void {
@@ -122,7 +122,7 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     if (theme !== undefined) assertValidTheme(theme, `${target.name}: @MeoCord({ theme })`)
     makeInjectable(target)
 
-    Reflect.defineMetadata(MetadataKey.AppOptions, theme === undefined ? options : { ...options, theme }, target)
+    Reflect.defineMetadata(META.appOptions, theme === undefined ? options : { ...options, theme }, target)
   }
 }
 

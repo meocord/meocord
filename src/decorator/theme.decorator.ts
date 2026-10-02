@@ -1,9 +1,10 @@
 import 'reflect-metadata'
 import { type ThemeOverride } from '@src/interface/index.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
-import { CLASS_THEME, METHOD_THEME, THEMED_CLASSES } from '@src/core/theme-runtime.js'
+import { THEMED_CLASSES } from '@src/core/theme-runtime.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Sets part of the theme for a controller's handlers, or for one handler.
@@ -41,7 +42,7 @@ export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator
     const owner = (onClass ? target : target.constructor) as { name: string }
     const where = `${owner.name}${onClass ? '' : `.${String(propertyKey)}`}: @UseTheme`
     assertValidTheme(theme, where)
-    const key = onClass ? CLASS_THEME : METHOD_THEME
+    const key = onClass ? META.classTheme : META.methodTheme
     const existing = onClass ? Reflect.getOwnMetadata(key, target) : Reflect.getOwnMetadata(key, target, propertyKey!)
     if (existing !== undefined) throw refuse(new Error(`${where}: there is one already; give it one, with every role it changes.`))
     const layer = copyLayer(theme)

@@ -1,7 +1,8 @@
 import 'reflect-metadata'
-import { CLASS_COOLDOWNS, type CooldownOptions, METHOD_COOLDOWNS, type StoredCooldown } from '@src/core/cooldown-runner.js'
+import { type CooldownOptions, type StoredCooldown } from '@src/core/cooldown-runner.js'
 import { type Handler, type NoInput, type ParamsOf } from '@src/decorator/validation.decorator.js'
 import { decoratedName, refuse } from '@src/util/refusal.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Allows the descriptor when the handler's params give `by` what it reads. Params `by` leaves
@@ -88,11 +89,11 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
     if (problem) throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${problem}`))
     // Decorators apply bottom-up; prepending keeps them in the order they read.
     if (propertyKey === undefined) {
-      const existing = (Reflect.getOwnMetadata(CLASS_COOLDOWNS, target) as StoredCooldown[]) ?? []
-      Reflect.defineMetadata(CLASS_COOLDOWNS, [cooldown, ...existing], target)
+      const existing = (Reflect.getOwnMetadata(META.classCooldowns, target) as StoredCooldown[]) ?? []
+      Reflect.defineMetadata(META.classCooldowns, [cooldown, ...existing], target)
     } else {
-      const existing = (Reflect.getOwnMetadata(METHOD_COOLDOWNS, target, propertyKey) as StoredCooldown[]) ?? []
-      Reflect.defineMetadata(METHOD_COOLDOWNS, [cooldown, ...existing], target, propertyKey)
+      const existing = (Reflect.getOwnMetadata(META.methodCooldowns, target, propertyKey) as StoredCooldown[]) ?? []
+      Reflect.defineMetadata(META.methodCooldowns, [cooldown, ...existing], target, propertyKey)
     }
   } as ClassDecorator & MethodDecorator
 }

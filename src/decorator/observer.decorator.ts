@@ -1,10 +1,10 @@
 import 'reflect-metadata'
 import { type ObserverOptions } from '@src/interface/stage-options.interface.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
-import { OBSERVER_CLASS } from '@src/core/observer-runner.js'
 import { type DispatchObserver } from '@src/interface/index.js'
 import { defineStageTypes } from '@src/core/stage-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Marks a class as a dispatch observer, told about every call once it has settled, for metrics and audit logs.
@@ -48,6 +48,6 @@ export function Observer(
     }
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Observer')
-    Reflect.defineMetadata(OBSERVER_CLASS, true, target)
+    Reflect.defineMetadata(META.observerClass, true, target)
   }
 }

@@ -7,7 +7,6 @@ import { MeoCordApp } from '@src/core/meocord.app.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
 import { assertBuiltForThisPlatform } from '@src/util/platform.util.js'
-import { MetadataKey } from '@src/enum/index.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { missingTranslatorError, Translator } from '@src/common/translator.js'
@@ -57,6 +56,7 @@ import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
 import { endFailedShard } from '@src/core/shard-exit.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Recursively binds a class and all its constructor dependencies to the container in singleton scope.
@@ -168,7 +168,7 @@ export class MeoCordFactory {
   }
 
   private static createApplication(target: ServiceIdentifier): MeoCordApplication {
-    const options = Reflect.getMetadata(MetadataKey.AppOptions, target)
+    const options = Reflect.getMetadata(META.appOptions, target)
 
     if (!options) {
       throw refuse(new Error(`${typeof target === 'function' ? target.name : String(target)}: not decorated with @MeoCord(), so there is no app to create.`))
@@ -324,7 +324,7 @@ export class MeoCordFactory {
 
     // Stamp each class with the container so @UseGuard can resolve guards on a direct call
     for (const cls of appClasses) {
-      Reflect.defineMetadata(MetadataKey.Container, container, cls)
+      Reflect.defineMetadata(META.container, container, cls)
     }
 
     prepareHandlerStages(container, appClasses)

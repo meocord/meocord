@@ -6,6 +6,7 @@ import { BaseInteraction, ChatInputCommandInteraction, Message } from 'discord.j
 import { Command } from '@src/decorator/controller.decorator.js'
 import { CommandType } from '@src/enum/index.js'
 import { createMockInteraction } from '@src/testing/index.js'
+import { META } from '@src/util/metadata-keys.js'
 
 function makeFakeInteraction(): BaseInteraction {
   return Object.create(BaseInteraction.prototype) as BaseInteraction
@@ -240,9 +241,9 @@ describe('@UseGuard metadata', () => {
 
   it('keeps the class and method lists out of the public enum', () => {
     const keys = Reflect.getOwnMetadataKeys(TestController.prototype, 'ping')
-    expect(keys.filter(key => typeof key === 'string')).toEqual(expect.arrayContaining([MetadataKey.Guards]))
-    expect(keys.filter(key => typeof key === 'symbol').map(key => key.description)).toEqual(
-      expect.arrayContaining(['class_guards', 'method_guards']),
-    )
+    expect(keys).toEqual(expect.arrayContaining([MetadataKey.Guards, META.classGuards, META.methodGuards]))
+    const published: string[] = [MetadataKey.Container, MetadataKey.AppOptions, MetadataKey.Guards, MetadataKey.CommandType]
+    expect(published).not.toContain(META.classGuards)
+    expect(published).not.toContain(META.methodGuards)
   })
 })

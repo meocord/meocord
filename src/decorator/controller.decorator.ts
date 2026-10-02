@@ -26,7 +26,6 @@ import {
   type CommandMeta,
 } from '@src/interface/command-decorator.interface.js'
 import { interactionClassName, isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
-import { BUILDER_GUILDS } from '@src/decorator/command-builder.decorator.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
@@ -34,6 +33,7 @@ import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/s
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
+import { META, type MetaKey } from '@src/util/metadata-keys.js'
 
 /** What a handler was given in place of its interaction: another interaction's class, or what the value is. */
 function givenInstead(value: unknown): string {
@@ -42,20 +42,13 @@ function givenInstead(value: unknown): string {
   return `; it was given ${describeValue(value)}`
 }
 
-const COMMAND_METADATA_KEY = Symbol('commands')
-const MESSAGE_HANDLER_METADATA_KEY = Symbol('message_handlers')
-const REACTION_HANDLER_METADATA_KEY = Symbol('reaction_handlers')
-const AUTOCOMPLETE_METADATA_KEY = Symbol('autocomplete_handlers')
-/** The routes a class's own handler decorators declare, by method, beside those it inherits. */
-const DECLARED_ROUTES_KEY = Symbol('declared_routes')
-
 const logger = new Logger('Command')
 
 /**
  * The class's own handler list, started from a copy of the inherited one, so a subclass's
  * handlers never land in its base class's metadata.
  */
-export function ownHandlerList<T>(key: symbol, target: object): T[] {
+export function ownHandlerList<T>(key: MetaKey, target: object): T[] {
   return Reflect.getOwnMetadata(key, target) ?? [...(Reflect.getMetadata(key, target) ?? [])]
 }
 
@@ -83,14 +76,14 @@ const autocompleteRoute = (method: string, commandPath: string, optionName: stri
 
 /** Records a route a class's own decorator declares for a method, which the startup check reads. */
 function declareRoute(target: object, declared: HandlerRoute): void {
-  const routes: HandlerRoute[] = Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, target) ?? []
+  const routes: HandlerRoute[] = Reflect.getOwnMetadata(META.declaredRoutes, target) ?? []
   routes.push(declared)
-  Reflect.defineMetadata(DECLARED_ROUTES_KEY, routes, target)
+  Reflect.defineMetadata(META.declaredRoutes, routes, target)
 }
 
 /** The routes a class's own handler decorators declare, without those it inherits. */
 export function getDeclaredRoutes(prototype: object): readonly HandlerRoute[] {
-  return Reflect.getOwnMetadata(DECLARED_ROUTES_KEY, prototype) ?? []
+  return Reflect.getOwnMetadata(META.declaredRoutes, prototype) ?? []
 }
 
 /** Every route a class's handlers answer, inherited ones included. */
@@ -107,7 +100,7 @@ export function getHandlerRoutes(prototype: object): HandlerRoute[] {
  * Adds a handler the class's own decorator declares. One it inherits for the same method and route is replaced where
  * it stands, so the class's own options apply and the routes keep their order.
  */
-function addOwnHandler<T>(key: symbol, target: object, entry: T, sameRoute: (other: T) => boolean): void {
+function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (other: T) => boolean): void {
   const handlers = ownHandlerList<T>(key, target)
   const inherited: T[] = Reflect.getMetadata(key, Object.getPrototypeOf(target) as object) ?? []
   const index = handlers.findIndex(other => inherited.includes(other) && sameRoute(other))
@@ -118,10 +111,10 @@ function addOwnHandler<T>(key: symbol, target: object, entry: T, sameRoute: (oth
 
 /** The class's own command map, started from a copy of the inherited one, for the same reason. */
 function ownCommandMap(target: object): Record<string, CommandMeta[]> {
-  const own: Record<string, CommandMeta[]> | undefined = Reflect.getOwnMetadata(COMMAND_METADATA_KEY, target)
+  const own: Record<string, CommandMeta[]> | undefined = Reflect.getOwnMetadata(META.commands, target)
   if (own) return own
 
-  const inherited: Record<string, CommandMeta[]> = Reflect.getMetadata(COMMAND_METADATA_KEY, target) ?? {}
+  const inherited: Record<string, CommandMeta[]> = Reflect.getMetadata(META.commands, target) ?? {}
   return Object.fromEntries(Object.entries(inherited).map(([name, metas]) => [name, [...metas]]))
 }
 
@@ -281,7 +274,7 @@ export function MessageHandler(pattern?: string, options: MessageHandlerOptions 
     }
     const method = propertyKey.toString()
     const declared = { pattern: pattern || undefined, method, options }
-    addOwnHandler<MessageHandlerMetadata>(MESSAGE_HANDLER_METADATA_KEY, target, declared, other => other.method === method && other.pattern === declared.pattern)
+    addOwnHandler<MessageHandlerMetadata>(META.messageHandlers, target, declared, other => other.method === method && other.pattern === declared.pattern)
     declareRoute(target, messageRoute(method, declared.pattern))
   }
 }
@@ -358,7 +351,7 @@ export function ReactionHandler(
   return function (target: object, propertyKey: string) {
     const method = propertyKey.toString()
     addOwnHandler<ReactionHandlerMetadata>(
-      REACTION_HANDLER_METADATA_KEY,
+      META.reactionHandlers,
       target,
       { emoji, method, settings: own },
       other => other.method === method && other.emoji === emoji,
@@ -387,7 +380,7 @@ export function matchesEmoji(declared: string, emoji: { id?: string | null; name
  * @returns The reaction handlers, with their emoji and settings.
  */
 export function getReactionHandlers(controller: any): ReactionHandlerMetadata[] {
-  return Reflect.getMetadata(REACTION_HANDLER_METADATA_KEY, controller) || []
+  return Reflect.getMetadata(META.reactionHandlers, controller) || []
 }
 
 /**
@@ -397,7 +390,7 @@ export function getReactionHandlers(controller: any): ReactionHandlerMetadata[] 
  * @returns The message handlers, with their patterns and options.
  */
 export function getMessageHandlers(controller: any): MessageHandlerMetadata[] {
-  return Reflect.getMetadata(MESSAGE_HANDLER_METADATA_KEY, controller) || []
+  return Reflect.getMetadata(META.messageHandlers, controller) || []
 }
 
 // `{name}`, or `{name:type}` with the type read as far as the brace, so a type no segment can hold is named
@@ -707,7 +700,7 @@ export function Command<
       const where = `${target.constructor.name}.${propertyKey}`
       // A subcommand is part of its command's builder, which belongs on the command's own name
       const subcommandPath =
-        Reflect.getMetadata(MetadataKey.CommandType, builderOrType) === CommandType.SLASH && commandName.includes(' ')
+        Reflect.getMetadata(META.commandType, builderOrType) === CommandType.SLASH && commandName.includes(' ')
       const command = commandName.split(' ')[0]
       const declareInstead =
         `Declare the handler with @Command('${commandName}', CommandType.SLASH), and give the builder to ` +
@@ -746,8 +739,8 @@ export function Command<
             `builder of its command, "${command}", describes it. ${declareInstead}`,
         )
       }
-      guilds = Reflect.getMetadata(BUILDER_GUILDS, builderOrType)
-      commandType = Reflect.getMetadata(MetadataKey.CommandType, builderOrType) as CommandType
+      guilds = Reflect.getMetadata(META.builderGuilds, builderOrType)
+      commandType = Reflect.getMetadata(META.commandType, builderOrType) as CommandType
       if (!(commandType in CommandType)) {
         throw refuse(new Error(`${where}: the builder ${builderOrType.name} is not decorated with @CommandBuilder, so there is no command type to register.`))
       }
@@ -788,7 +781,7 @@ export function Command<
     if (replaced === -1) metas.push(declared)
     else metas[replaced] = declared
 
-    Reflect.defineMetadata(COMMAND_METADATA_KEY, commands, target)
+    Reflect.defineMetadata(META.commands, commands, target)
     declareRoute(target, commandRoute(propertyKey, commandType, commandName))
   }
 }
@@ -804,7 +797,7 @@ const CONTEXT_MENU_INTERACTIONS = new Map<unknown, { kind: ApplicationCommandTyp
  * the decorator metadata an app emits. A handler typed with the union, or without that metadata, is not checked.
  */
 function assertContextMenuKind(target: object, propertyKey: string, builderName: string, commandName: string, built: unknown): void {
-  const declared = CONTEXT_MENU_INTERACTIONS.get((Reflect.getMetadata('design:paramtypes', target, propertyKey) as unknown[] | undefined)?.[0])
+  const declared = CONTEXT_MENU_INTERACTIONS.get((Reflect.getMetadata(MetadataKey.ParamTypes, target, propertyKey) as unknown[] | undefined)?.[0])
   const registered = (built as { type?: ApplicationCommandType } | undefined)?.type
   if (!declared || registered === undefined || declared.kind === registered) return
   const kind = registered === ApplicationCommandType.User ? 'user' : 'message'
@@ -822,7 +815,7 @@ function assertContextMenuKind(target: object, propertyKey: string, builderName:
  * @returns A record containing command metadata indexed by command names.
  */
 export function getCommandMap<T extends string>(controller: any): Record<string, CommandMeta<T>[]> {
-  return Reflect.getMetadata(COMMAND_METADATA_KEY, controller)
+  return Reflect.getMetadata(META.commands, controller)
 }
 
 /**
@@ -874,7 +867,7 @@ export function Autocomplete<_R = unknown>(commandPath: string, optionName?: str
   ) {
     const methodName = propertyKey.toString()
     addOwnHandler<AutocompleteMeta>(
-      AUTOCOMPLETE_METADATA_KEY,
+      META.autocompleteHandlers,
       target,
       { commandPath, optionName, methodName },
       other => other.methodName === methodName && other.commandPath === commandPath && other.optionName === optionName,
@@ -888,7 +881,7 @@ export function Autocomplete<_R = unknown>(commandPath: string, optionName?: str
  * @param controller - The controller instance.
  */
 export function getAutocompleteHandlers(controller: any): AutocompleteMeta[] {
-  const handlers: AutocompleteMeta[] = Reflect.getMetadata(AUTOCOMPLETE_METADATA_KEY, controller) || []
+  const handlers: AutocompleteMeta[] = Reflect.getMetadata(META.autocompleteHandlers, controller) || []
   return [...handlers].sort((a, b) => Number(Boolean(b.optionName)) - Number(Boolean(a.optionName)))
 }
 

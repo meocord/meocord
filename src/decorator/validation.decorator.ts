@@ -3,11 +3,12 @@ import { type ValidateOptions, type ValidatePipes } from '@src/interface/stage-o
 import { type PipeInterface } from '@src/interface/index.js'
 import { type InferSchemaOutput, type StandardSchemaV1 } from '@src/interface/standard-schema.interface.js'
 import { type Unpiped } from '@src/decorator/piped.js'
-import { METHOD_PIPES, METHOD_VALIDATION, type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.js'
+import { type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 export type Handler = (interaction: any, params: any, ...rest: any[]) => unknown
 
@@ -88,7 +89,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends Validat
         ),
       )
     }
-    if (Reflect.hasOwnMetadata(METHOD_VALIDATION, target, propertyKey)) {
+    if (Reflect.hasOwnMetadata(META.methodValidation, target, propertyKey)) {
       throw refuse(new Error(
         `${target.constructor.name}.${propertyKey}: more than one @Validate; one @Validate per handler: combine the schemas into one.`,
       ))
@@ -96,7 +97,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends Validat
     const inlinePipes = Object.values(options.pipes ?? {}).flatMap(entries => (Array.isArray(entries) ? entries : [entries]))
     assertStageEntries('@Validate', 'pipe', `${target.constructor.name}.${propertyKey}`, inlinePipes)
     const metadata: ValidationMetadata = { schema, pipes: (options.pipes ?? {}) as ValidationMetadata['pipes'] }
-    Reflect.defineMetadata(METHOD_VALIDATION, metadata, target, propertyKey)
+    Reflect.defineMetadata(META.methodValidation, metadata, target, propertyKey)
   }
 }
 
@@ -152,8 +153,8 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
   ): void {
     assertStageEntries('@UsePipe', 'pipe', `${target.constructor.name}.${propertyKey}`, pipes)
     // Decorators apply bottom-up, so a higher @UsePipe's pipes go first, in the order they read.
-    const existing = (Reflect.getOwnMetadata(METHOD_PIPES, target, propertyKey) as { key: string; entry: PipeEntry }[]) ?? []
-    Reflect.defineMetadata(METHOD_PIPES, [...pipes.map(entry => ({ key, entry: entry as PipeEntry })), ...existing], target, propertyKey)
+    const existing = (Reflect.getOwnMetadata(META.methodPipes, target, propertyKey) as { key: string; entry: PipeEntry }[]) ?? []
+    Reflect.defineMetadata(META.methodPipes, [...pipes.map(entry => ({ key, entry: entry as PipeEntry })), ...existing], target, propertyKey)
   }
 }
 

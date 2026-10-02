@@ -1,8 +1,7 @@
 import 'reflect-metadata'
 import { type ClientEvents } from 'discord.js'
 import { ownHandlerList } from '@src/decorator/controller.decorator.js'
-
-const EVENT_HANDLER_METADATA_KEY = Symbol('event_handlers')
+import { META } from '@src/util/metadata-keys.js'
 
 /** One `@On` or `@Once` declaration: the event, the method handling it, and whether it runs only once. */
 export interface EventHandlerMetadata {
@@ -18,9 +17,9 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<F>,
   ) {
-    const handlers = ownHandlerList<EventHandlerMetadata>(EVENT_HANDLER_METADATA_KEY, target)
+    const handlers = ownHandlerList<EventHandlerMetadata>(META.eventHandlers, target)
     handlers.push({ event, method: propertyKey, once })
-    Reflect.defineMetadata(EVENT_HANDLER_METADATA_KEY, handlers, target)
+    Reflect.defineMetadata(META.eventHandlers, handlers, target)
   }
 }
 
@@ -92,5 +91,5 @@ export function Once<E extends keyof ClientEvents>(event: E) {
  * @returns The declarations, in the order they were made.
  */
 export function getEventHandlers(target: object): EventHandlerMetadata[] {
-  return Reflect.getMetadata(EVENT_HANDLER_METADATA_KEY, target) ?? []
+  return Reflect.getMetadata(META.eventHandlers, target) ?? []
 }

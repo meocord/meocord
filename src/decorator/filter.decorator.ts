@@ -1,12 +1,13 @@
 import 'reflect-metadata'
 import { type ExceptionFilter } from '@src/interface/index.js'
-import { CATCH_TYPES, CLASS_FILTERS, type FilterEntry, METHOD_FILTERS } from '@src/core/filter-runner.js'
+import { type FilterEntry } from '@src/core/filter-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
 import { Logger } from '@src/common/logger.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { describeValue, isConstructor } from '@src/util/value.util.js'
+import { META } from '@src/util/metadata-keys.js'
 
 /**
  * Marks a class as an exception filter for the given error types.
@@ -50,7 +51,7 @@ export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[
         'an error class, such as @Catch(CooldownError),',
       )
     })
-    Reflect.defineMetadata(CATCH_TYPES, errorTypes, target)
+    Reflect.defineMetadata(META.catchTypes, errorTypes, target)
   }
 }
 
@@ -97,11 +98,11 @@ export function UseFilter<const T extends readonly unknown[]>(
     assertStageEntries('@UseFilter', 'filter', where, filters)
     // Decorators apply bottom-up, so a higher decorator's filters are tried first.
     if (propertyKey === undefined) {
-      const existing: FilterEntry[] = Reflect.getOwnMetadata(CLASS_FILTERS, target) ?? []
-      Reflect.defineMetadata(CLASS_FILTERS, [...filters, ...existing], target)
+      const existing: FilterEntry[] = Reflect.getOwnMetadata(META.classFilters, target) ?? []
+      Reflect.defineMetadata(META.classFilters, [...filters, ...existing], target)
     } else {
-      const existing: FilterEntry[] = Reflect.getOwnMetadata(METHOD_FILTERS, target, propertyKey) ?? []
-      Reflect.defineMetadata(METHOD_FILTERS, [...filters, ...existing], target, propertyKey)
+      const existing: FilterEntry[] = Reflect.getOwnMetadata(META.methodFilters, target, propertyKey) ?? []
+      Reflect.defineMetadata(META.methodFilters, [...filters, ...existing], target, propertyKey)
     }
   } as ClassDecorator & MethodDecorator
 }
