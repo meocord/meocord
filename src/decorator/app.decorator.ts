@@ -11,7 +11,7 @@ import { BUILT_IN_TYPES } from '@src/core/message-params.js'
 import { assertObservers } from '@src/core/observer-runner.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { deprecatedOnMethod, refuse } from '@src/util/refusal.util.js'
 import { timeoutProblem } from '@src/util/timer-limit.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -103,8 +103,9 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  */
 export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(
   options: MeoCordOptions<G, I, F>,
-): (target: any) => void {
-  return (target: any): void => {
+): (target: any, propertyKey?: string | symbol) => void {
+  return (target: any, propertyKey?: string | symbol): void => {
+    if (deprecatedOnMethod('@MeoCord', target, propertyKey)) return
     assertStageEntries('@MeoCord({ guards })', 'guard', target.name, options.guards ?? [])
     assertStageEntries('@MeoCord({ interceptors })', 'interceptor', target.name, options.interceptors ?? [])
     assertStageEntries('@MeoCord({ filters })', 'filter', target.name, options.filters ?? [])

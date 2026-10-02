@@ -7,7 +7,7 @@ import { type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
-import { refuse, refuseOnClass } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass, refuseOnMethod } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 export type Handler = (interaction: any, params: any, ...rest: any[]) => unknown
@@ -187,7 +187,8 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
  * @see {@link https://meocord.dev/docs/4.1/validation | Validation and pipes}
  */
 export function Pipe() {
-  return function (target: new (...args: any[]) => PipeInterface) {
+  return function (target: new (...args: any[]) => PipeInterface, propertyKey?: string | symbol) {
+    refuseOnMethod('@Pipe', target, propertyKey)
     makeInjectable(target)
   }
 }

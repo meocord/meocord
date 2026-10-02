@@ -1,4 +1,5 @@
 import path from 'path'
+import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { isExplainedError } from '@src/common/explained-error.js'
 import { Logger } from '@src/common/logger.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
@@ -40,6 +41,22 @@ export function decoratedName(target: object, propertyKey?: string | symbol): st
  */
 export function refuseOnClass(decorator: string, target: object, propertyKey: string | symbol | undefined, place = 'a method'): void {
   if (propertyKey === undefined) throw refuse(new Error(`${decoratedName(target)}: ${decorator} goes on ${place}, not on a class.`))
+}
+
+/** Refuses a decorator that goes only on a class where it is applied to a method, directly or through `applyDecorators`. */
+export function refuseOnMethod(decorator: string, target: object, propertyKey: string | symbol | undefined): void {
+  if (propertyKey !== undefined) throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${decorator} goes on a class, not on a method.`))
+}
+
+/**
+ * Whether a decorator that goes only on a class, and that 4.0 let pass on a method doing nothing, is applied to a
+ * method. If so it warns once that 5.0 refuses it, and the decorator applies nothing, as in 4.0.
+ */
+export function deprecatedOnMethod(decorator: string, target: object, propertyKey: string | symbol | undefined): boolean {
+  if (propertyKey === undefined) return false
+  const old = `${decorator} on the method ${decoratedName(target, propertyKey)}`
+  warnDeprecatedBehaviour(new Logger(decorator.slice(1)), old, 'is refused', `${decorator} on a class`)
+  return true
 }
 
 /** Whether an error is one MeoCord raised for code it refuses. */

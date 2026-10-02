@@ -6,6 +6,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
+import { deprecatedOnMethod } from '@src/util/refusal.util.js'
 
 /**
  * Adds guards to a method's class or method list, then republishes the effective list under
@@ -120,7 +121,8 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
 export function Guard(
   options: GuardOptions = {},
 ) {
-  return function (target: any) {
+  return function (target: any, propertyKey?: string | symbol) {
+    if (deprecatedOnMethod('@Guard', target, propertyKey)) return
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Guard')
     Reflect.defineMetadata(META.guardClass, true, target)

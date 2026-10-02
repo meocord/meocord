@@ -3,7 +3,7 @@ import { type ObserverOptions } from '@src/interface/stage-options.interface.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { type DispatchObserver } from '@src/interface/index.js'
 import { defineStageTypes } from '@src/core/stage-scope.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, refuseOnMethod } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -42,7 +42,8 @@ import { META } from '@src/util/metadata-keys.js'
 export function Observer(
   options: ObserverOptions = {},
 ) {
-  return function (target: new (...args: any[]) => DispatchObserver) {
+  return function (target: new (...args: any[]) => DispatchObserver, propertyKey?: string | symbol) {
+    refuseOnMethod('@Observer', target, propertyKey)
     if (typeof (target.prototype as Partial<DispatchObserver>).onSettled !== 'function') {
       throw refuse(new Error(`${target.name}: an @Observer needs an onSettled method, and it has none.`))
     }
