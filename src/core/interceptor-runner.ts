@@ -178,8 +178,8 @@ class Continuation extends Promise<unknown> {
 /**
  * Runs `handler` inside `interceptors`, the first outermost, each with the call's context and its own params. A level
  * ends once its interceptor has settled and every run it left on a chain that ends unhandled has; that run's rejection
- * fails the call. `returnedEarly` is told of each interceptor as it settles while a run it started is still going, or
- * without starting one.
+ * fails the call. `returnedEarly` is told of an interceptor that settles while a run it started is still going, or
+ * without starting one, when it is outside every one told of before, so the last it is told of is the outermost.
  */
 export async function runInterceptors(
   interceptors: readonly InterceptorEntry[],
@@ -188,6 +188,8 @@ export async function runInterceptors(
   handler: () => Promise<unknown>,
   returnedEarly?: (cls: InterceptorClass) => void,
 ): Promise<unknown> {
+  // The outermost level returnedEarly has been told of; an inner one that settles later is not the one that ended the call
+  let earliest = interceptors.length
   const run = async (index: number): Promise<unknown> => {
     if (index === interceptors.length) return handler()
 
@@ -218,7 +220,10 @@ export async function runInterceptors(
       outcome = { error }
     }
     ended = true
-    if (started.length === 0 || started.some(({ done }) => !done)) returnedEarly?.(cls)
+    if ((started.length === 0 || started.some(({ done }) => !done)) && index < earliest) {
+      earliest = index
+      returnedEarly?.(cls)
+    }
     // A run it took on, as a timeout racing it does, and that fails once the call has ended reaches nobody: said here
     for (const taken of started) {
       if (taken.done || taken.open > 0) continue
