@@ -38,7 +38,7 @@ export const isListable = (route: MessageRoute): boolean =>
 
 /**
  * A message asking the built-in help, after a prefix or mention: the start it used and what follows the help word.
- * A message with no start asks nothing, as chat is never taken for a command.
+ * A message with no start asks nothing, so chat that begins with the help word is never taken for help.
  */
 export function matchHelpRequest(
   content: string,
@@ -186,7 +186,10 @@ export function helpInvocation(start: string, help: MessageCommandOptions['help'
   return start + (helpWords(help)[0] ?? HELP_WORD)
 }
 
-/** The built-in help's reply, in the voice of the usage reply and in the language `render` writes: a heading line, one line per command. */
+/**
+ * The built-in help's reply, in the voice of the usage reply and in the language `render` writes: the list of commands,
+ * one command's block, a parent's usages, or a one-line answer.
+ */
 export function renderMessageHelp(help: MessageHelp, render: Render = textRenderer(undefined, undefined)): string {
   const text = (key: string, params?: Record<string, TextParam>) => render({ key: `meocord.help.${key}`, params })
   switch (help.kind) {

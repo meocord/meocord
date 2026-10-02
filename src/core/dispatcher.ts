@@ -219,7 +219,7 @@ export class Dispatcher {
 
   /**
    * Every pattern-matched route, most specific first, built once, as the app is created. The ordering lets
-   * `gi-profile/summary/{ownerId}/{uid}` win over `gi-profile/{uuid}/{uid}` regardless of registration order.
+   * `gi-profile/summary/{uid}` win over `gi-profile/{uuid}/{uid}` regardless of registration order.
    */
   private componentRoutes?: ComponentRoute[]
 
@@ -324,7 +324,7 @@ export class Dispatcher {
   /**
    * The names a command interaction can be handled under, most specific first.
    *
-   * Empty for anything that is not a registered command, which is how a component
+   * Empty for anything that is not a command, which is how a component
    * whose customId matched no pattern falls through to the unmatched warning instead
    * of being looked up under a name it does not have.
    */
@@ -365,10 +365,10 @@ export class Dispatcher {
     await observeUnclaimed(this.container, [interaction], this.runOptions(call))
   }
 
-  /** Handler and name pairs already warned about, so a colliding modal warns once rather than per submit. */
+  /** Handler and name pairs already warned about, so a collision warns once, not on every submit or selection. */
   private readonly warnedCollisions = new Set<string>()
 
-  /** Tells a developer that a modal field is hidden by a customId param of the same name. */
+  /** Warns, in development, that a modal field or select menu choice is hidden by a customId param of the same name. */
   private warnCollisions(methodName: string, names: string[]): void {
     if (process.env.NODE_ENV !== 'development') return
 
@@ -466,11 +466,10 @@ export class Dispatcher {
   }
 
   /**
-   * Runs the most specific patterned handler the message matches, then every listener. Its typed params
-   * are resolved before its guards, and a message that names a command but does not fit its pattern gets
-   * the command's usage, through that handler's filters. One that names only a command's leading words gets
-   * its unguarded subcommands' usage, and a failure to read the prefixes, through the global filters, then
-   * the fallback; the listeners still run.
+   * Runs the most specific patterned handler the message matches, then every listener. Its typed params are read
+   * before its guards and fetched after them; a message that names a command but does not fit its pattern gets its
+   * usage through that handler's filters. A bare parent's unguarded subcommands' usage, and a failure to read the
+   * prefixes, go through the global filters, then the fallback; the listeners still run.
    */
   async message(message: Message, record?: DispatchRecorder): Promise<void> {
     if (message.author.bot || !message.content?.trim()) return

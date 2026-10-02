@@ -95,7 +95,7 @@ describe('message patterns', () => {
     expect(capture('x {a:int?} {b:bool?} {c...?}', 'x 3 more')).toEqual({ a: '3', c: 'more' })
   })
 
-  it('reads flags anywhere in the message, apart from the words', () => {
+  it('reads flags anywhere after the command word, apart from the words', () => {
     const purge = 'purge {count:int} {--bots} {--from:user?}'
     expect(capture(purge, 'purge --bots 50')).toEqual({ count: '50', bots: '' })
     expect(capture(purge, 'purge 50 --from=<@1> --BOTS')).toEqual({ count: '50', from: '<@1>', bots: '' })

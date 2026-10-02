@@ -163,13 +163,11 @@ const isRef = (value: unknown): value is EntityRef<unknown> =>
   typeof value === 'object' && value !== null && 'cached' in value && typeof (value as EntityRef<unknown>).resolve === 'function'
 
 /**
- * The params a matched route's guards see, read from the words with no request to Discord: each typed
- * param's word turned into its value, each typed list's words into a list, its flags into `true`, `false` or
- * their values, and each member, user, role or channel into an {@link EntityRef}, filled from the cache.
+ * The params a matched route's guards see, read from the words with no request to Discord: typed params and lists as
+ * values, flags as `true`, `false` or their values, and members, users, roles and channels as {@link EntityRef}s.
  *
- * @throws MessageUsageError naming each word that is not a value of its type, each flag the command does not
- *   have or that lacks its value, or saying the command works only in a server, when a param's type needs one
- *   and the message was sent elsewhere.
+ * @throws MessageUsageError naming each word not of its type and each flag unknown, left out or without a valid value,
+ *   or saying the command works only in a server, when a param's type needs one and the message was sent elsewhere.
  */
 export async function parseMessageParams(
   route: MessageRoute,
@@ -253,12 +251,12 @@ export async function parseMessageParams(
 }
 
 /**
- * The params the handler receives: each ref in the parsed params replaced by what it names. Nothing a
- * cache holds is fetched, and what is fetched goes out once however many refs, messages and guards ask at
- * the same time (see {@link resolveRefs}). Before the first request, `checkCooldowns` can refuse the call; it
- * is not called when everything is cached.
+ * The params the handler receives: each ref replaced by what it names, fetched once however many ask at the same time
+ * (see {@link resolveRefs}). Before the first request, `checkCooldowns` can refuse the call; it is not called when
+ * everything is cached.
  *
- * @throws MessageUsageError naming each member, user or channel the message named that does not exist.
+ * @throws MessageUsageError naming each ref that names nothing: no such member, user, role or channel, or no value of
+ *   an app type.
  */
 export async function fetchMessageParams(parsed: ParsedMessageParams, checkCooldowns?: () => Promise<void>): Promise<Record<string, unknown>> {
   const { refs, usage, quiet } = parsed
@@ -318,7 +316,7 @@ export async function resolveMessageParams(
 
 /**
  * The two steps a matched message command's params take around its guards, for the pipeline: `parseArgs`
- * before them reads the words, refuses a message sent where the command does not work or missing params,
+ * before them reads the words, refuses a message sent where the command does not work or one that does not fit,
  * and gives entities as refs, with no request to Discord; `fetchArgs`, once the guards let the call through,
  * fetches what the refs name, checking the cooldowns first when there is anything to fetch.
  */
@@ -372,8 +370,8 @@ export function subcommandUsageError(listing: readonly { route: MessageRoute; st
 
 /**
  * Reads a message's flags into params: a flag without a type as `true` or `false`, a typed one's value as a
- * word to resolve. The issues are the flags the command does not have, and a typed flag missing or given no
- * value. Given twice, a flag takes its last value.
+ * word to resolve. The issues are the flags the command does not have, a flag without a type given a value that is not
+ * yes or no, and a typed flag missing or given no value. Given twice, a flag takes its last value.
  */
 function readFlags(route: MessageRoute, message: Message, start: string, params: Record<string, unknown>, items: Item[]): MessageUsageIssue[] {
   const issues: MessageUsageIssue[] = []

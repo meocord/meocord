@@ -66,7 +66,7 @@ describe('component routes', () => {
     expect(buildComponentRoutes([Feedback])).toHaveLength(2)
   })
 
-  it('still only reports patterns that overlap without being the same', () => {
+  it('reports two patterns that overlap without being the same', () => {
     @Controller()
     class Overlap {
       @Command('a/{x}/c', CommandType.BUTTON)
@@ -79,7 +79,7 @@ describe('component routes', () => {
     expect(findComponentRouteConflicts(routes)).toEqual([{ type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'] }])
   })
 
-  // As in 4.0; the startup warning about the pair names the one that runs
+  // Until 5.0; the startup warning about the pair names the one that runs
   it('ranks two equally specific overlapping patterns in the order their controllers are listed', () => {
     @Controller()
     class XC {

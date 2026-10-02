@@ -25,7 +25,7 @@ class Trade {
 }
 
 describe('a guard with declared params', () => {
-  it('reads them whole as this.params, and each as its own property as before', async () => {
+  it('reads them whole as this.params, and each as its own property', async () => {
     const module = MeoCordTestingModule.create({ controllers: [Trade] }).compile()
 
     await module.invoke(Trade, 'trade', createMockInteraction(ButtonInteraction, { customId: 'trade/1' }))

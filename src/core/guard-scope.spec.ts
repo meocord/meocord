@@ -151,7 +151,7 @@ describe('class-level @UseGuard on inherited handlers', () => {
     expect(log).toEqual([...run, ...run])
   })
 
-  it('leaves the base controller guarded as before', async () => {
+  it('leaves the base controller only its own guards', async () => {
     const { client } = await startApp(BaseController)
 
     await client.emit('interactionCreate', slash('ping'))
@@ -223,7 +223,7 @@ describe('global guards from @MeoCord({ guards })', () => {
     expect(log).toEqual(['deny'])
   })
 
-  it('do not run on a direct call, which runs only the method\'s own guards', async () => {
+  it('do not run on a direct call, which runs the handler\'s class and method guards', async () => {
     const module = MeoCordTestingModule.create({ app: GuardedApp, controllers: [BaseController] }).compile()
 
     await module.get(BaseController).ping(slash('ping'))

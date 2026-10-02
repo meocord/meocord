@@ -75,7 +75,7 @@ export function untypedParameter(cls: object): number {
   const metadata = Reflect.getMetadata(INVERSIFY_CLASS_METADATA, cls) as
     | { constructorArguments?: (InjectedElement | null | undefined)[] }
     | undefined
-  // Once bound, inversify records each parameter here too: an @Inject token, or the parameter's type
+  // Once the class is injectable, inversify records each parameter here too: an @Inject token, or the parameter's class
   const tokens = types.map((type, index) => metadata?.constructorArguments?.[index]?.value ?? type)
   return tokens.findIndex(token => token === undefined || token === Object)
 }
@@ -303,7 +303,7 @@ export async function runGuards(guards: readonly GuardEntry[], call: GuardedCall
   return true
 }
 
-/** Private metadata: how many guard wrappers `@UseGuard` put around one method. */
+/** Private metadata: how many guard wrappers `@UseGuard` and `@Controller` put around one method. */
 export const GUARD_WRAPPERS = Symbol('guard_wrappers')
 
 /** The prototype on the chain that declares `methodName`, which is the function dispatch calls. */
@@ -358,11 +358,10 @@ export const METHOD_GUARDS = Symbol('method_guards')
 export type StageClass = abstract new (...args: any[]) => unknown
 
 /**
- * The classes whose class-level stages apply to a handler, outermost first: the top of the chain, then each class
- * that extends it, down to the class the handler is dispatched on, the chain cut above a class with
- * `@Controller({ inheritStages: false })` at or above the declaring class. A base so wraps everything that extends it,
- * as global stages wrap controllers. Guards, interceptors and cooldowns go in this order; filters are tried in
- * reverse, from the innermost class out.
+ * The classes whose class-level stages apply to a handler, outermost first: the top of the chain down to the class it
+ * is dispatched on, cut above a class with `@Controller({ inheritStages: false })` at or above the declaring one, so a
+ * base wraps everything that extends it, as global stages wrap controllers. Guards, interceptors and cooldowns go in
+ * this order; filters are tried in reverse.
  */
 export const stageClasses = perHandler(
   (prototype: object, methodName: string): readonly StageClass[] => {
@@ -371,7 +370,10 @@ export const stageClasses = perHandler(
   },
 )
 
-/** {@link stageClasses}, uncached, for a handler `source` declares: read while classes are still being decorated. */
+/**
+ * The classes of {@link stageClasses}, innermost first and uncached, for a handler `source` declares: read while classes
+ * are still being decorated.
+ */
 export function classChain(prototype: object, source: object): StageClass[] {
   const classes: StageClass[] = []
   let declared = false

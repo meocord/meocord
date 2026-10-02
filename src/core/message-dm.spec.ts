@@ -111,7 +111,7 @@ afterEach(() => {
 })
 
 describe('without dmOnError or dmOnCooldown', () => {
-  it('tells nobody of an error or a cooldown, and logs the error as before', async () => {
+  it('tells nobody of an error or a cooldown, and logs the error', async () => {
     const module = MeoCordTestingModule.fromApp(QuietApp).compile()
     const failed = messageOf('!boom')
     await expect(module.dispatch(failed)).rejects.toThrow('database down')
@@ -238,7 +238,8 @@ describe('a cooldown store that is down', () => {
     expect(first.author.send).not.toHaveBeenCalled()
   })
 
-  // An outage ends 30 seconds after its last failure; the next one is new, and tells its authors again
+  // An outage ends when the store answers 30 seconds or more after its last failure; the next one tells its authors
+  // again
   it('tells the same author again in a later outage', async () => {
     let failing = true
     const flaky = {
@@ -399,7 +400,7 @@ describe('dmOnCooldown', () => {
   })
 })
 
-describe('with both on, what was answered before', () => {
+describe('with both on, what is answered in the channel', () => {
   it('still answers a guard, a usage error and a UserError in the channel, and DMs none of them', async () => {
     const module = MeoCordTestingModule.fromApp(TellingApp).compile()
     const denied = messageOf('!secret')

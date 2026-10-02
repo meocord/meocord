@@ -73,7 +73,7 @@ describe('stages shared across calls', () => {
     gates.b = gate()
   })
 
-  it('give each of two overlapping calls its own params, before, after and on error', async () => {
+  it('give each of two overlapping calls its own params, in the interceptor, the pipe and the filter', async () => {
     const module = MeoCordTestingModule.create({ controllers: [SharedController] }).compile()
     const button = (customId: string) => createMockInteraction(ButtonInteraction, { customId })
 

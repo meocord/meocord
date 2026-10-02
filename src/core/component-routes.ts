@@ -76,7 +76,7 @@ export function literalFirst(a: string, b: string): boolean {
   return false
 }
 
-/** A component type as an error names it: `button`, `modal submit`, `string select menu`. */
+/** A component type as an error names it: `button`, `modal submit`, `select menu`. */
 const typeLabel = (type: CommandType): string => type.toLowerCase().replaceAll('_', ' ')
 
 /**

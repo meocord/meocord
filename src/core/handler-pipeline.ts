@@ -57,14 +57,17 @@ export interface HandlerStages {
   readonly filters: readonly (readonly FilterEntry[])[]
 }
 
-/** The stages `@MeoCord` applies to every handler, which run before the controller's and method's. */
+/**
+ * The stages `@MeoCord` applies to every handler: its guards and interceptors run before the controller's and method's,
+ * and its filters are tried after theirs.
+ */
 export interface GlobalStages {
   guards: readonly GuardEntry[]
   interceptors: readonly InterceptorEntry[]
   filters: readonly FilterEntry[]
   /** The app's `@MeoCord({ theme })`, as `@MeoCord` checked and copied it, beneath every `@UseTheme`. */
   theme?: ThemeOverride
-  /** The app's `@MeoCord({ themeFor })`, with its cache's options. */
+  /** The app's `@MeoCord({ themeFor })`, with its cache's options and lookup timeout. */
   themeFor?: ThemeResolverOptions
 }
 
@@ -141,8 +144,9 @@ export interface HandlerOutcome {
 }
 
 /**
- * The stages dispatch runs for `methodName`: the global ones, then the controller's metadata. Resolved
- * once per set of global stages and handler, then shared, so the lists must not be changed.
+ * The stages dispatch runs for `methodName`: guards and interceptors global first, then the controller's and method's;
+ * filters method, class, then global. Resolved once per set of global stages and handler, then shared, so the lists
+ * must not be changed.
  */
 export function handlerStages(
   prototype: object,
@@ -166,8 +170,9 @@ export function handlerStages(
 const stagesByGlobals = new WeakMap<GlobalStages, (prototype: object, methodName: string) => HandlerStages>()
 
 /**
- * Binds the interceptors and filters every handler of `controllers` uses, and the global ones, as
- * singletons, so one that cannot be shared, or a filter without `@Catch`, fails at startup.
+ * Binds the interceptors, filters and pipes every handler of `controllers` uses, and the global ones, as singletons, so
+ * one that cannot be shared, or a filter without `@Catch`, fails at startup; refuses there `@Defer`, `@Validate`,
+ * `@UsePipe` and `@Cooldown` where they cannot apply, and two classes that keep state under one name.
  */
 export function prepareHandlerStages(container: Container, controllers: readonly (new (...args: any[]) => unknown)[]): void {
   assertDistinctNamesWhereKeyed(controllers)
@@ -228,7 +233,7 @@ function assertDistinctNamesWhereKeyed(classes: readonly (new (...args: any[]) =
   }
 }
 
-/** Refuses `@Validate` and `@UsePipe` on handlers that have no params to check. */
+/** Refuses `@Validate` and `@UsePipe` on handlers with no params to check, and `@Cooldown` on ones it never counts. */
 function assertInputStagesOnInteractions(controller: new (...args: any[]) => unknown, prototype: object): void {
   const others: [string, string][] = [
     ...getMessageHandlers(prototype)
@@ -268,7 +273,10 @@ export interface AdmittedCall {
   checkCooldowns(): Promise<void>
 }
 
-/** How a pipeline run ends an error: the fallback to answer one no filter handles, if any. */
+/**
+ * How a caller runs a call through the pipeline: its fallback, the argument steps around the guards, its context type,
+ * and what the observers and the unanswered warning are told.
+ */
 export interface RunOptions {
   /** Answers an error no filter handled. Without it, such an error rejects the call. */
   fallback?: Fallback
@@ -378,7 +386,7 @@ async function handleError(
  * Runs one handler through the pipeline, inside its filters: the global guards, then the handler's
  * own; then the interceptors, global first, around the handler, which is called with the dispatch
  * marks set. Dispatch and `TestingModule.invoke` both call this, so a test runs what production runs.
- * The context is built only when an interceptor applies or an error reaches the filters.
+ * The context is built only when a stage needs it: an interceptor, a pipe, a cooldown, an observer or a filter.
  */
 export async function runHandler(
   container: Container,
@@ -497,8 +505,8 @@ async function runPipeline(
 }
 
 /**
- * Handles an error raised for a call no handler was reached for: an interaction no route matched, or
- * one that failed before routing. Only global filters apply, then the fallback.
+ * Handles an error raised for an interaction or a message no handler was reached for: one no route matched, or one that
+ * failed before routing. Only global filters apply, then the fallback.
  */
 export async function handleUnroutedError(
   container: Container,

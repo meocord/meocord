@@ -39,7 +39,7 @@ class AccountPipe implements PipeInterface<string, Account> {
 
 @Controller()
 class CheckInController {
-  // The issue's case: once an hour per user, per game account
+  // Once an hour per user, per game account
   @Command('check-in/{ownerId}/{uid}', CommandType.BUTTON)
   @Cooldown({ seconds: 3600, by: (_context, { uid }: { ownerId: string; uid: string }) => uid })
   async checkIn(_interaction: ButtonInteraction, { uid }: { ownerId: string; uid: string }) {
@@ -183,7 +183,7 @@ describe('@Cooldown({ by })', () => {
   it('encodes the value, so one holding a colon cannot pass for another key', async () => {
     const { module, keys } = recording()
 
-    // Unencoded, both would count under `…:by:a:by:b`
+    // Unencoded, the first value's colons would read as parts of the key: `…:by:a:by:b`
     await module.invoke(CheckInController, 'checkIn', press('check-in/ada/a:by:b'))
     await module.invoke(CheckInController, 'checkIn', press('check-in/ada/a%3Aby%3Ab'))
 

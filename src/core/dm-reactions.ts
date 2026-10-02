@@ -17,14 +17,10 @@ interface ReactionPayload {
 }
 
 /**
- * Delivers reactions in direct messages discord.js drops. A reaction's gateway event names its channel by id alone,
- * and since discord.js 14.26.2 a channel it has not cached is made only when the event says it is a DM, which a
- * reaction's does not; so a reaction in a DM the bot has not seen since it started never reaches a listener, even
- * with `Partials.Channel`. This fetches such a channel once, then hands the event back to discord.js, which emits
- * it as usual. A reaction discord.js delivered itself is left alone, so this does nothing once discord.js does.
- *
- * It needs the `DirectMessageReactions` intent, without which no DM reaction arrives, and the actions discord.js
- * handles reaction events with; without them it warns once and does nothing.
+ * Delivers DM reactions discord.js drops: from discord.js 14.26.2 it makes an uncached channel only for an event marked
+ * as a DM, which a reaction's is not, so a reaction in a DM unseen since startup reaches no listener, even with
+ * `Partials.Channel`. This fetches such a channel once and hands the event back; one discord.js delivered is left
+ * alone. Without the `DirectMessageReactions` intent it does nothing; without the reaction actions it expects, warns.
  */
 export function deliverUncachedDmReactions(client: Client, logger: Logger): void {
   const intents = client.options?.intents
