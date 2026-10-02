@@ -325,6 +325,10 @@ jobs:
       - name: Check the built declarations
         run: bun run check:dist-types
 
+      # The CommonJS build loads with Node's require() and logs, as a project that require()s meocord runs it
+      - name: Check the CommonJS build
+        run: bun run check:dist-cjs
+
       # Every JSDoc example that follows the standard in CONTRIBUTING.md, compiled against the build
       - name: Compile the JSDoc examples
         run: bun run check:jsdoc-examples
