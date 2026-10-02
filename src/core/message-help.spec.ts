@@ -39,6 +39,7 @@ async function startApp(options: {
   messages?: MessageCommandOptions
   presenter?: new () => ResponsePresenter
   guards?: (new () => GuardInterface)[]
+  services?: any[]
 }): Promise<Client> {
   const clients: Client[] = []
   vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client) {
@@ -359,6 +360,31 @@ describe('HandlerRegistry.messageHelp', () => {
     expect(replies(await send(client, '!help'))).toEqual(['config get, config set, help, mute, purge'])
     expect(replies(await send(client, '!help m'))).toEqual(['!mute <target> [duration] [reason…]'])
     expect(replies(await send(client, '!help nope'))).toEqual(['unknown'])
+  })
+
+  it('reads the routes dispatch reads, not a handler on a service, which no message reaches', async () => {
+    @Service()
+    class Stats {
+      @MessageHandler('stats', { description: 'Shows the stats.' })
+      stats() {}
+    }
+    @Controller()
+    class Help {
+      constructor(
+        private readonly handlers: HandlerRegistry,
+        readonly stats: Stats,
+      ) {}
+
+      @MessageHandler('help {command...?}')
+      async help(message: Message, { command }: { command?: string }) {
+        const help = await this.handlers.messageHelp(message, command)
+        await message.reply(help.kind === 'list' ? help.commands.map(entry => entry.command).join(', ') : help.kind)
+      }
+    }
+    const client = await startApp({ controllers: [Moderation, Help], messages: { prefix: '!' }, services: [Stats] })
+
+    expect(replies(await send(client, '!help'))).toEqual(['config get, config set, help, mute, purge'])
+    expect(replies(await send(client, '!help stats'))).toEqual(['unknown'])
   })
 })
 

@@ -53,6 +53,7 @@ import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback, noteInvocation } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
 import { runGuards } from '@src/core/guard-runner.js'
+import { HandlerRegistry, shareMessageRoutes } from '@src/core/handler-registry.js'
 import {
   buildMessageRoutes,
   commandWordsOf,
@@ -162,6 +163,8 @@ export class Dispatcher {
     this.fallback = options.fallback
     // Built now, so a pattern that cannot be read or two that match the same messages stop the bot before login
     this.messageRoutes = buildMessageRoutes([...this.controllerClasses], this.messageOptions)
+    // The app's own help command reads this table too, so it lists the commands dispatch reaches
+    if (this.container.isBound(HandlerRegistry)) shareMessageRoutes(this.container.get(HandlerRegistry), this.messageRoutes)
     this.warnUnreachableHelp()
     this.messageListeners = this.controllerClasses.flatMap(controllerClass =>
       getMessageHandlers(controllerClass.prototype)
