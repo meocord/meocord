@@ -327,8 +327,9 @@ async function sendUsage(message: Message, body: PresentedReply, seconds: number
 /**
  * The built-in fallback: logs an error no filter handled and answers the call. An interaction that can still take an
  * answer gets its error view, and an autocomplete an empty menu. A message command gets its usage or a guard's or
- * validation's reason as a reply, any call on a message a `UserError`'s message, and with `dmOnError` or `dmOnCooldown`
- * a command's author a direct message for other errors and cooldown refusals. Anything else is only logged.
+ * validation's reason as a reply, as the built-in help and a parent's subcommand list get an app guard's reason, any
+ * call on a message a `UserError`'s message, and with `dmOnError` or `dmOnCooldown` a command's author a direct message
+ * for other errors and cooldown refusals. Anything else is only logged.
  */
 export function createFallback(
   logger: Logger,
