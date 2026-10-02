@@ -194,7 +194,7 @@ export function prepareHandlerStages(container: Container, controllers: readonly
     ])
     for (const method of methods) {
       const kind = handlerDefer(prototype, method) ? nonInteractionHandler(prototype, method) : undefined
-      if (kind) throw deferMisuseError(controller.name, method, kind)
+      if (kind) throw refuse(deferMisuseError(controller.name, method, kind))
       for (const entry of handlerInterceptors(prototype, method)) prepareInterceptor(container, entry)
       for (const entry of handlerFilterLevels(prototype, method, []).flat()) prepareFilter(container, entry)
       for (const { entry } of handlerInputStages(prototype, method).pipes) preparePipe(container, entry)
