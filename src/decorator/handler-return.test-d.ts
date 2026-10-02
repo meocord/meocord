@@ -14,7 +14,7 @@ import { CommandType } from '@src/enum/index.js'
  * whatever its type: an interceptor receives it from `next.handle()`, and nothing else reads it.
  */
 describe('a handler that returns a value', () => {
-  it('compiles for every handler decorator, sync or async, with each arity', () => {
+  it('compiles for every command, message, reaction and autocomplete handler, sync or async, with each arity', () => {
     class Handlers {
       @MessageHandler()
       async every(message: Message) {
@@ -69,7 +69,7 @@ describe('a handler that returns a value', () => {
     void Handlers
   })
 
-  it('compiles @Autocomplete with the type argument 4.0 took', () => {
+  it('compiles @Autocomplete with its unused type argument', () => {
     class Handlers {
       @Autocomplete<void>('search', 'query')
       async complete(interaction: AutocompleteInteraction) {

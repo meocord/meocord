@@ -37,9 +37,10 @@ export interface MessageToResolve {
   /** The bot's user id, so a mention of it counts as a start when the app accepts one. */
   botId?: string
   /**
-   * Whether the message is a direct message, where only handlers whose scope fits run, and `mention: 'only'`
-   * does not apply. Without it the message may be from anywhere, and a mention alone starts what it starts in a
-   * server.
+   * Whether the message is a direct message, where `mention: 'only'` does not apply and a handler whose scope fits
+   * is chosen first; one whose scope does not fit is returned only when none that fits matches, and dispatch answers
+   * it with its usage rather than running it. Without it the message may be from anywhere, and a mention alone
+   * starts what it starts in a server.
    */
   dm?: boolean
 }
@@ -112,7 +113,7 @@ function controllersOf(app: ControllerClass): ControllerClass[] {
  *
  * @param app - The application class decorated with `@MeoCord`.
  * @param input - The component type and its `customId`, or the message's content with its prefix and the bot's id.
- * @returns The handler that runs, with the params it captures, or `undefined` when no route handles the input.
+ * @returns The handler the input reaches, with the params it captures, or `undefined` when no route handles the input.
  * @throws TypeError for a message to an app whose prefix is a function, when no `prefix` is given.
  *
  * @example

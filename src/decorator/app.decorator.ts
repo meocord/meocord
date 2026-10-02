@@ -116,8 +116,8 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     if (options.warnUnanswered !== undefined && typeof options.warnUnanswered !== 'boolean') {
       throw refuse(new TypeError(`${target.name}: @MeoCord({ warnUnanswered }) takes true or false.`))
     }
-    // Copied first, so what is checked is what the app runs with, whatever happens to the object afterwards
     assertThemeFor(target.name, options)
+    // Copied first, so what is checked is what the app runs with, whatever happens to the object afterwards
     const theme = options.theme === undefined ? undefined : copyLayer(options.theme)
     if (theme !== undefined) assertValidTheme(theme, `${target.name}: @MeoCord({ theme })`)
     makeInjectable(target)

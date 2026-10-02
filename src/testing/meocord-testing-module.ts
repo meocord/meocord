@@ -109,7 +109,7 @@ export interface TestingModuleOptions {
   app?: new (...args: any[]) => unknown
 
   /**
-   * `@Observer` classes told about each call `invoke` and `emit` make, after the `app`'s own. The
+   * `@Observer` classes told about each call `invoke`, `dispatch` and `emit` make, after the `app`'s own. The
    * module waits for them before a call resolves, so a test sees what they were told.
    */
   observers?: (new (...args: any[]) => DispatchObserver)[]
@@ -158,7 +158,8 @@ export type HandlerName<C extends new (...args: any[]) => unknown> = {
   string
 
 /**
- * The handler's arguments, or the interaction alone, whose params `invoke` then builds as dispatch does.
+ * The handler's arguments, or its first alone, an interaction or a message, whose params `invoke` then builds as
+ * dispatch does.
  * A handler that declares no parameters still takes what dispatch passes, such as the interaction.
  */
 type HandlerArgs<C extends new (...args: any[]) => unknown, M extends HandlerName<C>> =
@@ -303,7 +304,7 @@ export class TestingModule {
 
   /**
    * Resolves the module's `useFactory` providers, awaiting those that return a promise, in dependency
-   * order. `invoke` and `emit` call it first; call it yourself before `get` resolves anything that
+   * order. `invoke`, `dispatch` and `emit` call it first; call it yourself before `get` resolves anything that
    * depends on an asynchronous factory. Calling it again does nothing more.
    *
    * With `{ ready: true }`, it then runs every `onReady` hook once, as the bot does once it is online:
@@ -415,7 +416,7 @@ export class TestingModule {
    *
    * @example
    * ```ts
-   * const guild = vi.fn(() => ({ colors: { primary: '#26A042' } }))
+   * const guild = vi.fn(() => ({ colors: { primary: '#26A042' as const } }))
    * const module = MeoCordTestingModule.create({ app: App, controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
    *
    * await module.dispatch(interaction)
@@ -468,7 +469,7 @@ export class TestingModule {
    * To test what the bot does with an input, which handler it reaches and what the user is sent, use
    * {@link dispatch}.
    *
-   * @param controller - A controller passed to `MeoCordTestingModule.create`.
+   * @param controller - A controller of the module: one given to `create`, or one of the app `fromApp` built it from.
    * @param methodName - The handler method's name.
    * @param args - The arguments dispatch would pass: the interaction, message or reaction, then the
    *   handler's params. With an interaction alone, the params are built as dispatch builds them: a
@@ -501,9 +502,9 @@ export class TestingModule {
    * await expect(module.invoke(ModerationController, 'kick', interaction)).rejects.toThrow(GuardDeniedError)
    *
    * // dispatch answers it as the bot does, and resolves with the outcome
-   * const { ran, error } = await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'kick' }))
-   * expect(ran).toBe(false)
-   * expect(error).toBeInstanceOf(GuardDeniedError)
+   * const outcome = await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'kick' }))
+   * expect(outcome.ran).toBe(false)
+   * expect(outcome.error).toBeInstanceOf(GuardDeniedError)
    * ```
    */
   async invoke<C extends new (...args: any[]) => unknown, M extends HandlerName<C>>(
@@ -901,7 +902,7 @@ export class TestingModuleBuilder {
    * @throws TypeError when a resolver is not a function, or is neither `guild` nor `user`.
    * @example
    * ```ts
-   * const guild = vi.fn(() => ({ colors: { primary: '#26A042' } }))
+   * const guild = vi.fn(() => ({ colors: { primary: '#26A042' as const } }))
    * const module = MeoCordTestingModule.create({ app: App, controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
    * ```
    */

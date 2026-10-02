@@ -62,7 +62,7 @@ function strayParams(translation: unknown, original: unknown): string[] {
  *
  * @example
  * ```ts
- * import { it } from 'vitest'
+ * import { expect, it } from 'vitest'
  *
  * const t = createTranslator({
  *   default: 'en-US',
@@ -71,8 +71,8 @@ function strayParams(translation: unknown, original: unknown): string[] {
  * it('translates every message', () => {
  *   expectCompleteCatalog(t)
  * })
- * it("translates MeoCord's own texts too", () => {
- *   expectCompleteCatalog(t, { meocord: true })
+ * it("names MeoCord's texts a locale has not translated", () => {
+ *   expect(() => expectCompleteCatalog(t, { meocord: true })).toThrow('missing meocord.')
  * })
  * ```
  *

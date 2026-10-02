@@ -28,8 +28,9 @@ export interface CooldownByDecorator<P> {
 /**
  * Limits how often a handler runs, counted per user, server, channel or for everyone.
  *
- * Use it to rate-limit a command, a component or a message command: a call over the limit is answered only
- * to the caller, with how long to wait. For a check that is not about how often, use a {@link Guard}.
+ * Use it to rate-limit a command, a component or a message command: an interaction over the limit is answered only
+ * to its caller, with how long to wait, and a message command's is ignored, or told in a direct message with
+ * `@MeoCord({ messages: { dmOnCooldown: true } })`. For a check that is not about how often, use a {@link Guard}.
  *
  * @remarks
  * The window slides, so each use comes back `seconds` after it was spent. Stacked cooldowns are checked

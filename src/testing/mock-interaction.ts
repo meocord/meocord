@@ -78,8 +78,8 @@ import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 /**
  * A mock of `T`: every method a mock function, and every nested object mocked in turn, five levels deep.
  *
- * It is what the mock factories return. It is assignable wherever `T` is expected, since the mock is built on `T`'s
- * real prototype, and each method takes `mockResolvedValue` and the rest of {@link MockInstance}.
+ * It is what the mock factories return. It is assignable wherever `T` is expected, and each method takes
+ * `mockResolvedValue` and the rest of {@link MockInstance}.
  *
  * @remarks
  * Properties `T` declares `readonly` cannot be assigned on the mock. Pass them to the factory as {@link MockProps}.
@@ -102,8 +102,8 @@ export type DeepMocked<T, Depth extends number[] = []> = Depth['length'] extends
 /**
  * Property values a mock factory sets as it builds the mock.
  *
- * Use it for anything the discord.js class declares `readonly`, such as `ModalSubmitInteraction#customId` or
- * `MessageComponentInteraction#message`, which the returned mock does not let you assign.
+ * Use it for anything the discord.js class declares `readonly`, such as `ModalSubmitInteraction#customId`, which the
+ * returned mock does not let you assign.
  *
  * @remarks
  * `authorizingIntegrationOwners` also takes the plain map Discord sends, such as
@@ -129,7 +129,7 @@ export type MockProps<T> = {
 }
 
 // ---------------------------------------------------------------------------
-// stubDeep — Proxy that auto-creates a mock fn on any property access
+// stubDeep — Proxy that answers each property it lacks: a mock fn for a method, a default, or a nested stub
 // ---------------------------------------------------------------------------
 
 const SKIP = new Set(['constructor', 'toString', 'valueOf', 'toJSON', 'then'])
@@ -198,7 +198,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>): obj
 
     // defineProperty rather than assignment: many discord.js properties are
     // prototype getters with no setter (targetUser, targetMessage, createdAt),
-    // and a plain write against one of those is a silent no-op. Defining an own
+    // and a plain write against one of those throws. Defining an own
     // data property shadows the accessor, which is what test setup means.
     set(target, prop, value) {
       Object.defineProperty(target, prop, { value, writable: true, enumerable: true, configurable: true })
@@ -271,7 +271,8 @@ const guildOf = (manager: object): Guild | undefined => {
   return guild instanceof Guild ? guild : undefined
 }
 
-// The item each manager fetches, creates and edits: with the id asked for, when there is one, in the manager's guild
+// The item each manager fetches, creates and edits: with the id asked for, but for a ban or a thread member, and a
+// member or channel in the manager's guild
 const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: object) => object][] = [
   [UserManager, id => createMockUser(id ? { id } : {})],
   [GuildManager, id => createMockGuild(id ? { id } : {})],
@@ -313,10 +314,10 @@ function fetchedId(args: unknown[]): string | undefined {
 }
 
 /**
- * The mock function for a method found on a discord.js prototype. A method that returns a promise in
- * discord.js resolves: to a message for `send` and its kin, to the item for a manager's `fetch`,
- * `create` and `edit` (an empty collection for a list fetch), to the structure itself for its own
- * `edit`, `fetch` and setters, and to `undefined` otherwise. Any other method returns `undefined`.
+ * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
+ * `createDM` to the user's DM channel, `send` and its kin to a message, a manager's `fetch`, `create` and `edit` to its
+ * item (an empty collection for a list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `pin`, `timeout` and
+ * setters to the structure, and the rest to `undefined`. Any other method returns `undefined`.
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
   if (!returnsPromise(key, method)) return createMockFn()
@@ -410,9 +411,7 @@ const TYPE_GUARD_METHODS = [
   'isMentionableSelectMenu',
   'isChannelSelectMenu',
   'isAnySelectMenu',
-  // `isSelectMenu` is intentionally absent: discord.js deprecated it in favour of
-  // `isStringSelectMenu`, and wiring it here would emit a deprecation warning on every
-  // mock that has it on its prototype.
+  // `isSelectMenu` is left out: discord.js deprecates it in favour of `isStringSelectMenu`, and warns when it is called
   'isModalSubmit',
   'isAutocomplete',
   'isRepliable',
@@ -603,7 +602,7 @@ export function createMockInteraction<T extends object>(
 
   // Guild checks read the mock's own data, since discord.js resolves `guild` through a client the
   // mock lacks: a guildId is a guild, a guild object with it a cached one, neither a DM. A member
-  // not given is the auto-stub, so only one set to null or undefined fails the check.
+  // not given is the user's on an interaction, and the auto-stub elsewhere, so only one set to null or undefined fails.
   const own = (key: string) => (Object.prototype.hasOwnProperty.call(instance, key) ? instance[key] : undefined)
   const hasMember = () => !Object.prototype.hasOwnProperty.call(instance, 'member') || Boolean(instance.member)
   const guildChecks = {
@@ -626,9 +625,8 @@ export function createMockInteraction<T extends object>(
     const alreadyReplied = () => new Error('The reply to this interaction has already been sent or deferred.')
     const notYetReplied = (method: string) => new Error(`Cannot call ${method}() before replying or deferring.`)
 
-    // Only `flags` is read: the `ephemeral: true` reply option is deprecated in
-    // discord.js, and honouring it here would let a test pass against a call the
-    // library has stopped supporting.
+    // Only `flags` is read: discord.js deprecates the `ephemeral: true` reply option, and honouring it here would let
+    // a test pass against a deprecated call.
     const hasEphemeralFlag = (options?: Record<string, unknown>): boolean => {
       if (!options) return false
       const { flags } = options
@@ -894,6 +892,8 @@ function stubCallable(): Mock {
  * Use it for a provider a testing module injects in place of the real one, or for a discord.js type the other
  * factories do not build. For a discord.js class, {@link createMockInteraction} keeps its prototype.
  *
+ * @param props - Values the mock returns as given, such as the data the code reads; see {@link MockProps}.
+ *
  * @remarks
  * Every property is a mock function created on first access, and the result is assignable to `T`. Values passed as
  * `props` are used as given rather than wrapped in mock functions.
@@ -960,7 +960,7 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
 /**
  * Creates a mock {@link User}: a person, not a bot, with an id of its own.
  *
- * Use it for the member a command acts on, such as a user option's value, or a message's author.
+ * Use it for the user a command acts on, such as a user option's value, or a message's author.
  *
  * @param props - Values for the user's properties, such as `{ bot: true }` for a bot; see {@link MockProps}.
  *
@@ -987,7 +987,8 @@ export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
  * Creates a mock {@link Client}, with `users`, `channels`, `guilds` and `application.commands` ready to stub.
  *
  * Use it when code under test reaches the client, such as to DM a user or fetch a channel, or to address messages to
- * the bot. A mock message or interaction built without one gets a client of its own.
+ * the bot. A mock message built without one gets a client of its own; give an interaction its `client` when the code
+ * under test reaches it.
  *
  * @remarks
  * Its managers' methods resolve as discord.js's do: `users.send()` to a mock message, `users.fetch(id)` and
@@ -1063,15 +1064,18 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  * Use it for the server a message or an interaction came from, with the members, roles and channels a handler looks
  * up in it.
  *
+ * @param overrides - The guild's id, name and preferred locale, and the members, roles and channels in its caches; see
+ *   {@link MockGuildOverrides}.
+ *
  * @remarks
- * A manager's `fetch(id)` resolves to its cached item with that id, as discord.js looks there first, or to a new one with
- * that id, in this guild, which it caches; `create()` and `edit()` resolve to a mock of its item, and a list fetch to an
- * empty collection. Members, roles and channels given are put in their managers' caches, where dispatch looks first when it
- * resolves a message's typed params; a member {@link createMockMember} made without a server is in this one. Its
- * `roles.everyone` is the role given with the guild's id, or else an @everyone role of its own at position 0 with no
- * permissions, in `roles.cache` as Discord has it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'`
- * unless given,
- * so `t.forGuild(guild)` translates as for a new English server.
+ * A manager's `fetch(id)` resolves to its cached item with that id, as discord.js looks there first, or to a new one it
+ * caches under that id: a member or channel in this guild, a role with that id, or a ban; `create()` and `edit()`
+ * resolve to a mock of its item, and a list fetch to an empty collection. Members, roles and channels given are put in
+ * their managers' caches, where dispatch looks first when it resolves a message's typed params; a member
+ * {@link createMockMember} made without a server is in this one. Its `roles.everyone` is the role given with the
+ * guild's id, or else an @everyone role of its own at position 0 with no permissions, in `roles.cache` as Discord has
+ * it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given, so `t.forGuild(guild)`
+ * translates as for a new English server.
  *
  * @example
  * ```ts
@@ -1640,9 +1644,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
   // Constructor-assigned — set as prototype-based stubs; a user rather than a bot, as dispatch handles only those
   instance.author = overrides.author ?? mockUser()
 
-  // Getters on the prototype — the proxy sees them as functions and returns
-  // a mock fn, which is wrong. Pre-initialize as own properties to shadow
-  // the prototype getters.
+  // Getters on the prototype, which the proxy would answer with a stub object: own properties shadow them
   // A channel given says where the message was sent, unless its guild is given too
   const place = overrides.channel
     ? placeOf(overrides.channel, overrides.guild === undefined ? undefined : (overrides.guild?.id ?? null), () => {
@@ -1843,6 +1845,9 @@ function buildOptionData(
  * Use it for the `options` of a mock `ChatInputCommandInteraction`, including an autocomplete's `focused` option. The
  * options are nested under the subcommand and group as Discord sends them, so the handler's params build as in the bot.
  *
+ * @param opts - Each option's value by its name, with the `subcommandGroup`, `subcommand` and `focused` option; see
+ *   {@link ChatInputOptions}.
+ *
  * @remarks
  * Every method is a mock function, and methods not listed, such as `getAttachment`, are stubbed automatically. An
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
@@ -1956,9 +1961,8 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     return getFull === true ? { ...option, focused: true } : option.value
   })
 
-  // `data` is what the framework reads to build a handler's params, and it is the one
-  // part of the resolver that is not a method — so it has to be materialised here
-  // rather than auto-stubbed, or every params assertion would see an empty record.
+  // `data` is what the framework reads to build a handler's params, so it is materialised here rather than
+  // auto-stubbed, or every params assertion would see an empty record.
   base.data = buildOptionData(subcommandGroup, subcommand, values, memberOf)
 
   const resolver = stubDeep(base)

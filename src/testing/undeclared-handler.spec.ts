@@ -29,7 +29,7 @@ describe('a name no class declares', () => {
     expect(inspection.cooldowns).toEqual([])
   })
 
-  it('runs through invoke with its arguments untouched, when it is an instance function', async () => {
+  it('runs through invoke when it is an instance function', async () => {
     const module = MeoCordTestingModule.create({ controllers: [Plain] }).compile()
     const params = { untouched: true }
 

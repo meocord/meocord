@@ -90,7 +90,7 @@ describe('expectCompleteCatalog', () => {
     )
   })
 
-  it("takes a translation that leaves a param out, reorders them, or leaves {count} out of a plural's form", () => {
+  it("takes a translation that leaves a param out, or leaves {count} out of a plural's form", () => {
     const id = { ban: { description: 'Blokir anggota', done: 'Diblokir.' }, warnings: { one: 'Satu', other: 'Peringatan: {count}' } }
     const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: id as never } })
 
@@ -149,7 +149,7 @@ describe('the translator in a testing module', () => {
     expect(module.get(PingService).translator).toBe(t)
   })
 
-  it('is refused, with what to pass, when nothing provides it', () => {
+  it('is refused, naming the class, when nothing provides it', () => {
     expect(() => MeoCordTestingModule.create({ controllers: [PingController] }).compile()).toThrow(
       'PingService: it injects Translator, but @MeoCord has no i18n',
     )

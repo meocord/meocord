@@ -198,7 +198,7 @@ describe('createMockMessage', () => {
     createMockMessage({ flags: ['Loud'] })
     // @ts-expect-error content is text
     createMockMessage({ content: 42 })
-    // @ts-expect-error an option the mock does not take
+    // @ts-expect-error author is a User, not a name
     createMockMessage({ author: 'someone' })
   })
 })

@@ -18,6 +18,7 @@ import { refuse } from '@src/util/refusal.util.js'
  * as it begins. The call waits for neither, and one that throws is logged. One instance is resolved from the
  * container, so it injects services, and both methods receive the call's `ExecutionContext`.
  *
+ * @param options - `types`, the context types the observer is told about; every type unless given.
  * @throws Error when the class has no `onSettled` method, or `types` is empty, as the decorator applies.
  *
  * @example

@@ -102,7 +102,7 @@ describe('handler decorators', () => {
     void Handlers
   })
 
-  it('accept a validated handler that ignores its input', () => {
+  it('accept a validated or piped handler that ignores its input', () => {
     class Handlers {
       @Command('remind', CommandType.SLASH)
       @Validate(minutes)

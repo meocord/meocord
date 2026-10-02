@@ -9,14 +9,15 @@ import { refuse } from '@src/util/refusal.util.js'
  * or an API. For a handler that shows a modal, which must be the first answer, leave it out.
  *
  * @remarks
- * First, at once and before the guards, it defers: a reply for a command, an invisible update for a
- * component. Then, once the guards, validation and pipes allow the call, it disables the component's
+ * First, before the guards, it defers, at once or, with `mode: 'auto'`, once `after` passes unanswered: a reply
+ * for a command, an invisible update for a component. Then, once the guards, validation and pipes allow the call, it disables the component's
  * controls, shows the loading emoji on the clicked button and adds the presenter's loading view. Answering
  * with `respond(interaction).send()` without `components` puts the message back; a guard that denies the call
  * leaves nothing behind.
  *
  * @param options - Whether the reply is private, what to disable, and whether to acknowledge at once.
- * @throws Error on a message, reaction, event or autocomplete handler, as the decorator applies.
+ * @throws Error on a message, reaction, event or autocomplete handler: as the decorator applies when it is written
+ *   above the handler's decorator, and as the app is created otherwise.
  *
  * @example
  * ```ts

@@ -342,7 +342,7 @@ describe("a factory's overrides", () => {
     expect(createMockMessage().guild!.bans.cache.size).toBe(0)
   })
 
-  it('apply every field a message and a guild take', () => {
+  it("apply a message's id, content, flags, guild, client, users and editedTimestamp, and a guild's id, name and locale", () => {
     const client = createMockClient()
     const users = [createMockUser()]
     const guild = createMockGuild({ id: '100000000000000011', name: 'Kopi', preferredLocale: Locale.Indonesian, members: [], roles: [], channels: [] })

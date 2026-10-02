@@ -159,7 +159,7 @@ describe('@Validate with a separate @UsePipe', () => {
     void Controller
   })
 
-  it('rejects an unmarked piped key, pointing at the marker', () => {
+  it('rejects an unmarked piped key', () => {
     class Controller {
       // @ts-expect-error mark uid Piped<Account>, or give the pipe to @Validate
       @Validate(profile)

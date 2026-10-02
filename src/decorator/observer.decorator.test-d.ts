@@ -91,7 +91,7 @@ describe('@Observer', () => {
     expectTypeOf<DispatchObserver['onStart']>().toEqualTypeOf<((context: ExecutionContext) => void) | undefined>()
   })
 
-  it('is listed by @MeoCord and the testing module, which take observers only', () => {
+  it('is listed by @MeoCord and the testing module, which refuses a class that is not an observer', () => {
     @Observer()
     class Audit implements DispatchObserver {
       onSettled(): void {
@@ -109,7 +109,7 @@ describe('@Observer', () => {
     MeoCordTestingModule.create({ observers: [Plain] })
   })
 
-  it("compiles DispatchObserver's JSDoc example", () => {
+  it('compiles an observer that injects a service and records each call', () => {
     @Observer()
     class MetricsObserver implements DispatchObserver {
       constructor(private readonly metrics: MetricsService) {}
@@ -121,7 +121,7 @@ describe('@Observer', () => {
     void MetricsObserver
   })
 
-  it("compiles @Observer's JSDoc example", () => {
+  it('compiles an observer listed in @MeoCord that audits the calls that did not run', () => {
     @Observer()
     class AuditObserver implements DispatchObserver {
       constructor(private readonly audit: AuditService) {}

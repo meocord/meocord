@@ -410,9 +410,9 @@ export const PARAM_SEPARATOR = '/'
 const escapeLiteral = (literal: string): string => literal.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')
 
 /**
- * Compiles a pattern into a regex, its parameter names and its specificity. A `{name}` matches up to
- * the next `/`, so a uuid is captured whole and `profile/{uuid}` never overlaps `profile/{uuid}/{id}`;
- * `-`-separated patterns can, which {@link findAmbiguousRoutes} reports at registration.
+ * Compiles a pattern into a regex, its parameter names, their types and its specificity. A `{name}` takes a
+ * whole `/`-separated segment, so a uuid is captured whole and `profile/{uuid}` never overlaps
+ * `profile/{uuid}/{id}`; a param that shares a segment with literal text is refused.
  */
 export function createRegexFromPattern(pattern: string): {
   regex: RegExp
@@ -469,8 +469,8 @@ export function createRegexFromPattern(pattern: string): {
 
   // Literal text is the signal: a pattern spelling out more of the id describes it
   // more exactly than one leaving it to a parameter. Fewer parameters breaks a tie
-  // between equal-length patterns; the order the controllers and handlers are listed
-  // in settles what is left, and the startup warning names the pair.
+  // between equal-length patterns, then narrower typed params; the order the controllers
+  // and handlers are listed in settles what is left, and the startup warning names the pair.
   const specificity = routeSpecificity({
     literals: literalLength,
     params: params.length,
@@ -622,7 +622,7 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * In the next major version (5.0), the one that spells out the first segment where two equally specific patterns
  * differ runs instead, and the warning names the pairs that changes. A context menu handler receives the kind its
  * builder's `setType()` names, and one declaring the other kind fails to compile; when the compiler cannot tell the
- * kind, the bot checks it as it starts. A subclass that re-declares an inherited handler on the same name or pattern
+ * kind, `@Command` checks the parameter type it emits as it applies. A subclass that re-declares an inherited handler on the same name or pattern
  * takes its own builder and options; on another it still answers the inherited one too, which the bot warns about
  * as it starts. In the next major version (5.0) the subclass's own declarations replace the inherited ones.
  *
@@ -631,7 +631,9 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  *   `CommandType` for a handler that registers nothing: a component, or a subcommand its command's builder
  *   describes.
  * @throws Error when the builder throws as it is made or as it builds, naming the handler, the builder and the
- *   command, and on a subcommand path saying the builder of the path's command describes it.
+ *   command, and on a subcommand path saying the builder of the path's command describes it; and, as the decorator
+ *   applies, when the method has no implementation, the builder is not a `@CommandBuilder`, a context menu handler
+ *   declares the other kind than its builder registers, or a customId pattern cannot be read.
  *
  * @example
  * ```ts
@@ -831,7 +833,7 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  *
  * @remarks
  * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs
- * its class and global guards and its filters, but no interceptors; a guard must not answer, and returning
+ * its guards, the global ones, its class's and its own, and its filters, but no interceptors; a guard must not answer, and returning
  * `false` closes the menu with an empty list. The bot warns as it starts about a handler Discord never asks, such as
  * one for an option registered without autocomplete, and about one that completes what an earlier handler already
  * does, since only the first runs; the next major version (5.0) refuses to start with either. A subclass that
@@ -842,8 +844,8 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
  * @param optionName - The option to complete. Leave it out to handle every option, branching on
  *   `interaction.options.getFocused(true)`.
- * @typeParam _R - Not used: the handler's return type is inferred. It stays so that code written for 4.0 as
- *   `@Autocomplete<void>(…)` still compiles, and goes in 5.0.
+ * @typeParam _R - Not used: the handler's return type is inferred. It is kept so `@Autocomplete<void>(…)` still
+ *   compiles, and goes in 5.0.
  *
  * @example
  * ```ts

@@ -118,6 +118,7 @@ export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: an
  * `GuardDeniedError` tells the user why. A new instance is made for every call unless the guard is bound
  * once, in `services` or `providers`, when each call still reads its own `params`.
  *
+ * @param options - `types`, the context types the guard runs for; every type unless given.
  * @throws Error when `types` is empty, as the decorator applies.
  *
  * @example

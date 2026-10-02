@@ -50,7 +50,7 @@ describe('what a refused decorator names', () => {
   })
 
   it('refuses a composite that includes a refused decorator where it is applied, naming the handler', () => {
-    // Built at module scope, as a composite decorator is; nothing is refused until it applies
+    // Built before it applies, as a module-scope composite is; nothing is refused until it applies
     const Limited = applyDecorators(Cooldown({ seconds: 0 }))
 
     expect(onBuy(Limited)).toThrow('Shop.buy: @Cooldown needs a number of seconds from 0.001 to 4320000000000, not 0.')

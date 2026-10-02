@@ -226,7 +226,7 @@ describe('TestingModule.dispatch', () => {
     expect(calls).toEqual([])
   })
 
-  it('runs a reaction handler, adding by default, which emit never reaches', async () => {
+  it('runs a reaction handler, adding by default', async () => {
     const reaction = createMock<MessageReaction>({ emoji: { name: '👍' } as never, message: createMockMessage() as never })
     const user = createMockUser()
 

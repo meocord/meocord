@@ -10,8 +10,9 @@ import { makeInjectable } from '@src/util/injectable.util.js'
  * share, such as database access, belongs in a service it injects.
  *
  * @remarks
- * A controller's class-level guards, interceptors, filters and cooldowns apply to every handler it declares or
- * inherits, and to every handler of a class that extends it. A base wraps what extends it: guards and interceptors
+ * A controller's class-level guards and filters apply to every handler it declares or inherits, its interceptors to
+ * all but autocomplete, and its cooldowns to its command, component and message handlers; each also applies to the
+ * handlers of a class that extends it. A base wraps what extends it: guards and interceptors
  * run the top base's first, then each subclass's, then the method's, and filters are tried the other way, the
  * method's first. `inheritStages: false` keeps the handlers a subclass declares to its own stages.
  *
