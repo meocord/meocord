@@ -84,7 +84,8 @@ export interface MeoCordOptions<
 
   /**
    * Guards run before every dispatched handler, ahead of the controller's and the method's own guards: guard classes,
-   * or `{ provide, params? }`. A controller method called directly runs only its own guards.
+   * or `{ provide, params? }`. They also run before the built-in help and a parent command's list of subcommands
+   * answer a message. A controller method called directly runs only its own guards.
    */
   guards?: { [K in keyof G]: CheckedEntry<G[K], new (...args: any[]) => GuardInterface> }
 

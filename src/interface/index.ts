@@ -689,11 +689,11 @@ export interface MessageCommandOptions {
    */
   dmOnCooldown?: boolean
   /**
-   * Answers `!help` with the message commands that work here, leaving out hidden ones and those with guards, since
-   * help runs no guards, and `!help <command>` with the one it names, listed or not, from the `description` each
-   * handler gives. `true` uses the word `help`; `{ command, aliases }` names other words. It
-   * answers only after a prefix or a mention, and an app's own handler for the word runs instead. The reply's text
-   * comes from the presenter's `messageHelp` when it has one.
+   * Answers `!help` with the message commands that work here, leaving out hidden ones and those with guards of their
+   * own, since help runs only the app's guards, and `!help <command>` with the one it names, listed or not, from the
+   * `description` each handler gives. `true` uses the word `help`; `{ command, aliases }` names other words. It
+   * answers only after a prefix or a mention, once the app's `@MeoCord({ guards })` allow it, and an app's own handler
+   * for the word runs instead. The reply's text comes from the presenter's `messageHelp` when it has one.
    * @defaultValue `false`
    */
   help?: boolean | MessageHelpOptions

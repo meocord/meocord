@@ -352,8 +352,9 @@ export function createFallback(
       }
       if (error instanceof GuardDeniedError || error instanceof ValidationError) {
         logger.debug(`${error instanceof GuardDeniedError ? 'Denied' : 'Invalid input for'} ${describeCall(context)}: ${escapeForLog(error.message)}`)
-        // A command's sender addressed the bot, so is told why, as with the usage; a listener's or a reaction's guard only filters
-        if (isCommand(context)) await answerUsage(error, context, logger, messageOptions(), answering)
+        // A command's sender addressed the bot, so is told why, as with the usage, as is one asking the built-in help
+        // or a parent's subcommands, the calls no handler takes; a listener's or a reaction's guard only filters
+        if (isCommand(context) || !context.getController()) await answerUsage(error, context, logger, messageOptions(), answering)
         return
       }
       const replies = messageOptions()

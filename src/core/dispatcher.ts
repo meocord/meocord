@@ -37,6 +37,7 @@ import {
 } from '@src/core/component-routes.js'
 import {
   appPresenterOf,
+  globalStagesOf,
   handleUnroutedError,
   type HandlerOutcome,
   observeUnclaimed,
@@ -51,6 +52,7 @@ import { Translator } from '@src/common/translator.js'
 import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback, noteInvocation } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
+import { runGuards } from '@src/core/guard-runner.js'
 import {
   buildMessageRoutes,
   commandWordsOf,
@@ -468,8 +470,8 @@ export class Dispatcher {
   /**
    * Runs the most specific patterned handler the message matches, then every listener. Its typed params are read
    * before its guards and fetched after them; a message that names a command but does not fit its pattern gets its
-   * usage through that handler's filters. A bare parent's unguarded subcommands' usage, and a failure to read the
-   * prefixes, go through the global filters, then the fallback; the listeners still run.
+   * usage through that handler's filters. A bare parent's unguarded subcommands' usage, once the app's guards allow
+   * it, and a failure to read the prefixes, go through the global filters, then the fallback; the listeners still run.
    */
   async message(message: Message, record?: DispatchRecorder): Promise<void> {
     if (message.author.bot || !message.content?.trim()) return
@@ -485,10 +487,10 @@ export class Dispatcher {
           if (named) target = { ...named, params: {} }
         }
         // No handler took it: the built-in help, then a parent with no handler of its own, which lists its
-        // subcommands; one a guard protects is left out, since neither runs guards nor may name what they refuse
+        // subcommands. Both run only the app's guards, so a handler a guard of its own protects is left out
         const answered = !target && (await this.answerHelp(message, usesAppPrefix(this.messageRoutes) ? starts : undefined))
         const listing = target || answered ? undefined : matchMessageSubcommands(this.messageRoutes, message.content, starts, isListable)
-        if (listing) throw subcommandUsageError(listing)
+        if (listing && (await this.appGuardsAllow(message))) throw subcommandUsageError(listing)
       } else await this.answerHelp(message)
     } catch (error) {
       await handleUnroutedError(this.container, [message], error, this.runOptions(call))
@@ -507,8 +509,9 @@ export class Dispatcher {
 
   /**
    * Answers a message that asks the built-in help, when `messages.help` is on and no handler took the message:
-   * through the presenter's `messageHelp` when it has one, else in plain text. `known` is the message's starts
-   * when they hold the app's prefixes already. Whether it answered.
+   * through the presenter's `messageHelp` when it has one, else in plain text, once the app's guards allow it.
+   * `known` is the message's starts when they hold the app's prefixes already. Whether it answered, or a
+   * guard refused the request.
    */
   private async answerHelp(message: Message, known?: MessageStarts): Promise<boolean> {
     const words = helpWords(this.messageOptions.help)
@@ -516,6 +519,7 @@ export class Dispatcher {
     const starts = known ?? (await messageStarts(this.messageOptions, message, this.options.botUserId(message)))
     const request = matchHelpRequest(message.content, starts, words, this.messageOptions.caseSensitive ?? false)
     if (!request) return false
+    if (!(await this.appGuardsAllow(message))) return true
     // In the server's language, as the channel reads it, or the default in a DM
     const render = textRenderer(this.container.isBound(Translator) ? this.container.get(Translator) : undefined, messageLocale(message))
     const help = computeMessageHelp(
@@ -535,6 +539,14 @@ export class Dispatcher {
       }
     })
     return true
+  }
+
+  /**
+   * Whether the app's guards let a message no handler takes be answered, as the built-in help or a parent's
+   * list of subcommands is. A guard that throws refuses it as it would a command, through the global filters.
+   */
+  private appGuardsAllow(message: Message): Promise<boolean> {
+    return runGuards(globalStagesOf(this.container).guards, { container: this.container, args: [message], type: 'message' })
   }
 
   /** The built-in help's text, begun with the theme's info emoji when `replyEmoji` is on, as usage replies begin with its warning. */
