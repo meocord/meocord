@@ -65,7 +65,7 @@ function displayStart(route: MessageRoute, start: string, starts: MessageStarts)
 }
 
 /** Where a route works: its scope, narrowed to servers by a `member`, `role` or `channel` param or flag. */
-function effectiveScope(route: MessageRoute): MessageScope {
+export function effectiveScope(route: Pick<MessageRoute, 'scope' | 'tokens' | 'flags'>): MessageScope {
   if (route.scope !== 'any') return route.scope
   const guildOnly =
     route.tokens.some(token => 'param' in token && token.type !== undefined && isGuildType(token.type)) ||

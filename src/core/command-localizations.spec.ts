@@ -48,10 +48,15 @@ describe('localizationProblems', () => {
     expect(localizationProblems('ban', slash({ name_localizations: { tr: 'İptal' } }))).toHaveLength(1)
   })
 
+  // Its value is not checked: the locale is the problem, named once
   it('names a key that is not a Discord locale, even a malformed one, without throwing', () => {
-    expect(localizationProblems('ban', slash({ name_localizations: { en_US: 'ban', '!!': 'ban' } }))).toEqual([
+    const tooLong = 'a'.repeat(101)
+    expect(
+      localizationProblems('ban', slash({ name_localizations: { en_US: tooLong, '!!': 'ban' }, description_localizations: { xx: tooLong } })),
+    ).toEqual([
       '"ban" name_localizations.en_US: "en_US" is not a Discord locale',
       '"ban" name_localizations.!!: "!!" is not a Discord locale',
+      '"ban" description_localizations.xx: "xx" is not a Discord locale',
     ])
   })
 

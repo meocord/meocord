@@ -26,6 +26,7 @@ import {
   ChatInputCommandInteraction,
   ComponentType,
   MentionableSelectMenuInteraction,
+  type Message,
   MessageFlags,
   MessageReaction,
   ModalSubmitFields,
@@ -37,11 +38,12 @@ import {
   UserSelectMenuInteraction,
 } from 'discord.js'
 import { Logger } from '@src/common/index.js'
-import { createChatInputOptions, createMockInteraction, createModalFields, resolveRoute } from '@src/testing/index.js'
+import { createChatInputOptions, createMockInteraction, createMockMessage, createMockUser, createModalFields, resolveRoute } from '@src/testing/index.js'
 import { Autocomplete, Command, Controller, MeoCord, MessageHandler, ReactionHandler, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordApp, shutdownAndExit } from '@src/core/meocord.app.js'
-import { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } from '@src/util/dev-runner.util.js'
+import { DEV_RUNNER_ENV } from '@src/util/dev-runner.util.js'
+import { PARENT_SEND_TIMEOUT_MS } from '@src/util/parent-send.util.js'
 import { isRefusal } from '@src/util/refusal.util.js'
 
 /** The text of the error embed the first call to a reply method sent. */
@@ -216,7 +218,7 @@ describe('MeoCordApp', () => {
 
           const started = app.start()
           const rejected = expect(started).rejects.toThrow('An invalid token was provided.')
-          await vi.advanceTimersByTimeAsync(DEV_RUNNER_SEND_TIMEOUT_MS)
+          await vi.advanceTimersByTimeAsync(PARENT_SEND_TIMEOUT_MS)
           await rejected
           expect(process.exitCode).toBe(1)
           vi.useRealTimers()
@@ -274,29 +276,26 @@ describe('MeoCordApp', () => {
   })
 
   describe('messageCreate', () => {
-    it('ignores messages from bots', async () => {
-      const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token')
+    // Dispatch drops a bot's message and an empty one before reading any handler, and runs a person's
+    it("ignores a bot's message and an empty one, and runs a person's", async () => {
+      const calls: string[] = []
+
+      @Controller()
+      class EchoController {
+        @MessageHandler()
+        async echo(message: Message) {
+          calls.push(message.content)
+        }
+      }
+
+      const app = new MeoCordApp([EchoController] as any, createMockContainer() as any, mockClient as any, 't')
       await app.start()
+      const [listener] = mockClient.listenersFor('messageCreate')
+      await listener(createMockMessage({ content: 'from a bot', author: createMockUser({ bot: true }) }))
+      await listener(createMockMessage({ content: '   ' }))
+      await listener(createMockMessage({ content: 'from a person' }))
 
-      mockClient.emit('messageCreate', {
-        author: { bot: true },
-        content: 'hello',
-      })
-
-      // No controllers — just verifying no crash
-      expect(mockClient.login).toHaveBeenCalled()
-    })
-
-    it('ignores messages with empty content', async () => {
-      const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token')
-      await app.start()
-
-      mockClient.emit('messageCreate', {
-        author: { bot: false },
-        content: '   ',
-      })
-
-      expect(mockClient.login).toHaveBeenCalled()
+      expect(calls).toEqual(['from a person'])
     })
   })
 

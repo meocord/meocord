@@ -99,8 +99,9 @@ export interface MeoCordApplication {
    * Retrying it after a failed login is deprecated; in the next major version (5.0) it rejects. Use
    * `MeoCordFactory.create` to make a new app instead. A retry after a provider's factory failed stays supported.
    *
-   * A shard whose start fails exits 1 once the rejection is handled, and its manager restarts it. When MeoCord refuses
-   * the app, which it would in every shard, the manager logs why, stops every shard and exits 1 instead.
+   * A shard whose start fails exits 1 once the rejection is handled, and its manager restarts it. When the failure is one
+   * every shard would meet, MeoCord refusing the app or Discord refusing the login for good (an invalid token, or
+   * intents it disallows or does not know), the manager logs why, stops every shard and exits 1 instead.
    *
    * @returns A promise that resolves once the bot is logged in, or every shard has been spawned.
    * @throws For a bot in one process, the error of a provider's factory that failed, or the login
@@ -110,10 +111,10 @@ export interface MeoCordApplication {
   start(): Promise<void>
 
   /**
-   * Stops the bot without ending the process: runs the `onShutdown` hooks under the configured `shutdownTimeout`
-   * and closes the client, or with process sharding, asks every shard to shut down and waits for it. Called in a shard,
-   * it asks the manager to stop every shard. A stop while the bot starts ends that start, a call after the first waits
-   * for it, and a stopped app does not start again.
+   * Stops the bot: runs the `onShutdown` hooks under the configured `shutdownTimeout` and closes the client, or with
+   * process sharding, asks every shard to shut down and waits for it. It ends no process of its own accord, except that
+   * called in a shard, it asks the manager to stop every shard, which then shuts that shard's process down too. A stop
+   * while the bot starts ends that start, a call after the first waits for it, and a stopped app does not start again.
    *
    * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged, and sets
    *   `process.exitCode` to 1 unless another code is already set.

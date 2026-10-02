@@ -20,7 +20,9 @@ import {
   messageStarts,
   parseMessagePattern,
 } from '@src/core/message-routes.js'
-import { computeMessageHelp, helpInvocation } from '@src/core/message-help.js'
+import { computeMessageHelp, effectiveScope, helpInvocation } from '@src/core/message-help.js'
+import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
+import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
 import { type Translator } from '@src/common/translator.js'
 import { usageOf } from '@src/core/message-params.js'
@@ -47,11 +49,21 @@ interface HandlerEntryBase {
    * `ExecutionContext.get` does.
    */
   get<T>(metadata: MetadataDecorator<T>): T | undefined
-  /** Reads the value stored under a metadata key for the handler, the method's before the controller's. */
+  /**
+   * Reads the value stored under a metadata key for the handler, the method's before the controller's.
+   *
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `get(metadata)` instead. Its `metadata` is
+   * a decorator made by `createMetadata`, whose value is typed and whose key cannot collide with another.
+   */
   get<T = unknown>(key: string | symbol): T | undefined
   /** Reads every value a metadata decorator declared for the handler, the method's first, then the controller's. */
   getAll<T>(metadata: MetadataDecorator<T>): T[]
-  /** Reads every value stored under a metadata key for the handler, the method's first, then the controller's. */
+  /**
+   * Reads every value stored under a metadata key for the handler, the method's first, then the controller's.
+   *
+   * @deprecated Since 4.1, and removed in the next major version (5.0). Use `getAll(metadata)` instead. Its `metadata`
+   * is a decorator made by `createMetadata`, whose values are typed and whose key cannot collide with another.
+   */
   getAll<T = unknown>(key: string | symbol): T[]
 }
 
@@ -137,7 +149,7 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
   aliases: readonly string[]
   /** What the command does, from its `description` option. */
   description: string | undefined
-  /** Where the command works, from its `scope` option. */
+  /** Where the command works: its `scope` option, narrowed to servers by a `member`, `role` or `channel` param or flag. */
   scope: MessageScope
   /** Whether its `hidden` option leaves it out of help's lists, including a parent's list of subcommands. */
   hidden: boolean
@@ -213,12 +225,14 @@ export interface HandlerFilter<K extends HandlerKind = HandlerKind> {
 
 const COMMAND_TYPES = new Set<CommandType>([CommandType.SLASH, CommandType.CONTEXT_MENU, CommandType.PRIMARY_ENTRY_POINT])
 
-/** A builder's JSON, or `undefined` for none, or for a builder missing a field, which registration reports. */
-function builderJson(builder: unknown): RESTPostAPIApplicationCommandsJSONBody | undefined {
-  const toJSON = (builder as { toJSON?: () => RESTPostAPIApplicationCommandsJSONBody } | undefined)?.toJSON
-  if (typeof toJSON !== 'function') return undefined
+/**
+ * What a builder registers, from discord.js's builder or the REST body it returns, or `undefined` for none, or for a
+ * builder missing a field, which registration reports.
+ */
+function builderJson(builder: CommandMeta['builder']): RESTPostAPIApplicationCommandsJSONBody | undefined {
+  if (!builder) return undefined
   try {
-    return toJSON.call(builder)
+    return serialise(builder) as RESTPostAPIApplicationCommandsJSONBody
   } catch {
     return undefined
   }
@@ -262,7 +276,7 @@ function messageCommand(
     command: command || undefined,
     aliases,
     description: options.description,
-    scope: options.scope ?? 'any',
+    scope: effectiveScope({ scope: options.scope ?? 'any', tokens: parsed?.tokens ?? [], flags: parsed?.flags ?? [] }),
     hidden: options.hidden ?? false,
     usage: (prefix = '') => parsed && usageOf(parsed, prefix),
     matches: words => names.has(key(words)),
@@ -380,15 +394,19 @@ export class HandlerRegistry {
   }
 
   private collect(): HandlerEntry[] {
+    // Each built command by type and name, as Discord tells them apart, for the handlers with no builder of their own
     const commandJson = new Map<string, RESTPostAPIApplicationCommandsJSONBody>()
     for (const cls of this.classes) {
-      for (const metas of Object.values(getCommandMap(cls.prototype) ?? {})) {
+      for (const [name, metas] of Object.entries(getCommandMap(cls.prototype) ?? {})) {
         for (const { builder } of metas) {
           const json = builderJson(builder)
-          if (json && !commandJson.has(json.name)) commandJson.set(json.name, json)
+          const key = json && registrationKey(json, name)
+          if (key && !commandJson.has(key)) commandJson.set(key, json)
         }
       }
     }
+    const builtFor = (type: CommandType, name: string) =>
+      (SENT_AS[type] ?? []).map(sentAs => commandJson.get(`${sentAs}:${commandNameOf(type, name)}`)).find(Boolean)
 
     const entries: HandlerEntry[] = []
     for (const controller of this.classes) {
@@ -406,7 +424,7 @@ export class HandlerRegistry {
       for (const [name, metas] of Object.entries(getCommandMap(prototype) ?? {})) {
         for (const { methodName, type, builder } of metas) {
           if (COMMAND_TYPES.has(type)) {
-            const command = builderJson(builder) ?? commandJson.get(name.split(' ')[0])
+            const command = builderJson(builder) ?? builtFor(type, name)
             const description = describe(command, name)
             entries.push({ ...base(methodName), kind: 'command', commandType: type, name, command, description })
           } else if (type === CommandType.MODAL_SUBMIT) {

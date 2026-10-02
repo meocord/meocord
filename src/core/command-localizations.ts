@@ -28,14 +28,18 @@ export function localizationProblems(commandName: string, body: LocalizedNode): 
   const problems: string[] = []
   const chatInput = body.type === undefined || body.type === ApplicationCommandType.ChatInput
 
+  // Each entry of a map with a Discord locale; an unknown one is the problem, and its value is not read, as lowercasing
+  // for a malformed tag could throw
+  const known = (map: unknown, at: string): [string, unknown, string][] =>
+    entriesOf(map).flatMap(([locale, value]): [string, unknown, string][] => {
+      const field = `${at}.${locale}`
+      if (DISCORD_LOCALES.has(locale)) return [[locale, value, field]]
+      problems.push(`"${commandName}" ${field}: "${locale}" is not a Discord locale`)
+      return []
+    })
+
   const check = (path: string, node: LocalizedNode, rules: { chatInputName: boolean; descriptions: boolean }) => {
-    for (const [locale, value] of entriesOf(node.name_localizations)) {
-      const field = `${path}name_localizations.${locale}`
-      // An unknown locale is the problem to report; lowercasing for it could throw on a malformed tag.
-      if (!DISCORD_LOCALES.has(locale)) {
-        problems.push(`"${commandName}" ${field}: "${locale}" is not a Discord locale`)
-        continue
-      }
+    for (const [locale, value, field] of known(node.name_localizations, `${path}name_localizations`)) {
       if (value === null) continue
       if (typeof value !== 'string' || value.length < 1 || value.length > (rules.chatInputName ? 32 : 100)) {
         problems.push(`"${commandName}" ${field}: ${describeLength(value)} (1 to ${rules.chatInputName ? 32 : 100})`)
@@ -45,9 +49,7 @@ export function localizationProblems(commandName: string, body: LocalizedNode): 
     }
 
     if (!rules.descriptions) return
-    for (const [locale, value] of entriesOf(node.description_localizations)) {
-      const field = `${path}description_localizations.${locale}`
-      if (!DISCORD_LOCALES.has(locale)) problems.push(`"${commandName}" ${field}: "${locale}" is not a Discord locale`)
+    for (const [, value, field] of known(node.description_localizations, `${path}description_localizations`)) {
       if (value === null) continue
       if (typeof value !== 'string' || value.length < 1 || value.length > 100) {
         problems.push(`"${commandName}" ${field}: ${describeLength(value)} (1 to 100)`)

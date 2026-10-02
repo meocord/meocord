@@ -33,7 +33,8 @@ const {
 } = await import('@src/core/shard-manager.js')
 const { MAX_SHUTDOWN_TIMEOUT_MS, SHUTDOWN_MARGIN_MS } = await import('@src/util/shutdown-timeout.util.js')
 const { BUNDLE_ENTRY_KEY } = await import('@src/util/bundle-entry.util.js')
-const { DEV_RUNNER_ENV, DEV_RUNNER_SEND_TIMEOUT_MS } = await import('@src/util/dev-runner.util.js')
+const { DEV_RUNNER_ENV } = await import('@src/util/dev-runner.util.js')
+const { PARENT_SEND_TIMEOUT_MS } = await import('@src/util/parent-send.util.js')
 const { describeRefusal } = await import('@src/util/refusal.util.js')
 
 /** A shard as the manager uses it: spawn, send, kill, and the events discord.js emits. */
@@ -240,7 +241,7 @@ describe('ShardManager', () => {
 
   it('restarts a shard that exits, doubling the delay up to the cap, and resets after a stable run', async () => {
     vi.useFakeTimers()
-    const { manager, shards } = setup({ shards: 1 })
+    const { manager, shards, clock } = setup({ shards: 1 })
     await manager.start()
     const [shard] = shards
 
@@ -253,7 +254,8 @@ describe('ShardManager', () => {
     expect(delays).toEqual([1, 2, 4, 8, 16, 32, 60, 60].map(s => s * RESPAWN_BASE_MS))
     expect(shard.spawns).toBe(9)
 
-    await vi.advanceTimersByTimeAsync(RESPAWN_RESET_MS)
+    // The manager's own clock decides a stable run, as it does a repeated signal
+    clock.now += RESPAWN_RESET_MS
     shard.die(1)
     expect(logged.warn.at(-1)).toContain(`restarting it in ${RESPAWN_BASE_MS} ms`)
   })
@@ -435,6 +437,38 @@ describe('ShardManager', () => {
       await expect(manager.start()).rejects.toThrow('This app was stopped')
     })
 
+    it('sets exit code 1 from stop() when a shard had to be killed, unless another code is set', async () => {
+      vi.useFakeTimers()
+      for (const [before, after] of [
+        [undefined, 1],
+        [0, 1],
+        [2, 2],
+      ] as const) {
+        const { manager, shards } = setup({ shards: 1, shutdownTimeout: 1_000 })
+        await manager.start()
+        process.exitCode = before
+
+        const stopped = manager.stop()
+        await vi.advanceTimersByTimeAsync(1_000 + SHUTDOWN_MARGIN_MS)
+        await stopped
+
+        expect(shards[0].process).toBeNull()
+        expect(process.exitCode).toBe(after)
+      }
+      process.exitCode = undefined
+    })
+
+    it('leaves the exit code alone when every shard stops from stop()', async () => {
+      const { manager, shards } = setup({ shards: 1 })
+      await manager.start()
+
+      const stopped = manager.stop()
+      shards[0].die(0)
+      await stopped
+
+      expect(process.exitCode).toBeUndefined()
+    })
+
     it('asks every shard to shut down, waits for them, and exits 0', async () => {
       const { manager, shards, exit } = setup({ shards: 2 })
       await manager.start()
@@ -535,6 +569,23 @@ describe('ShardManager', () => {
 
       expect(shards[0].sent).toEqual([{ meocord: 'shutdown' }])
     })
+
+    // The dev runner's stop is no stop the user asked for, so their first Ctrl+C during it joins it, as in one process
+    it('takes a first signal during a stop from meocord start --dev as joining it, however late', async () => {
+      const { manager, shards, exit, clock } = setup({ shards: 2 })
+      await manager.start()
+
+      devRunnerStops.at(-1)?.()
+      clock.now += REPEAT_SIGNAL_WINDOW_MS
+      process.emit('SIGINT')
+
+      expect(shards.every(shard => shard.process !== null)).toBe(true)
+      expect(exit).not.toHaveBeenCalled()
+      shards.forEach(shard => shard.die(0))
+      await manager.stop()
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+      expect(exit).toHaveBeenCalledTimes(1)
+    })
   })
 
   // `meocord start --dev` is told of a failed login, which it reports as it waits for a change to the code or `.env`
@@ -573,7 +624,7 @@ describe('ShardManager', () => {
       expect(process.exitCode).toBe(1)
       expect(exit).not.toHaveBeenCalled()
 
-      await vi.advanceTimersByTimeAsync(DEV_RUNNER_SEND_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(PARENT_SEND_TIMEOUT_MS)
       await started
       expect(exit).toHaveBeenCalledWith(1)
     })

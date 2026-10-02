@@ -1,11 +1,14 @@
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { REFUSED_CODE, type ShardMessage } from '@src/core/shard-messages.js'
+import { sendToParent } from '@src/util/parent-send.util.js'
 import { describeRefusal, handOffRefusal, isRefusal } from '@src/util/refusal.util.js'
 
-/** Sends a message to this shard's manager and waits until it is sent; nothing in a process no manager spawned. */
+/**
+ * Sends a message to this shard's manager and waits until it is sent, or until the manager is taken to be gone; nothing
+ * in a process no manager spawned.
+ */
 export async function tellManager(message: ShardMessage): Promise<void> {
-  if (!process.send) return
-  await new Promise<void>(resolve => process.send!(message, undefined, {}, () => resolve()))
+  await sendToParent(message)
 }
 
 /** Whether this shard is already ending, so a failure reported twice, as one going on uncaught is, ends it once. */

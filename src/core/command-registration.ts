@@ -50,6 +50,18 @@ export function serialise(builder: Builder): CollectedCommand['body'] {
     : (builder as CollectedCommand['body'])
 }
 
+/** The application command types Discord sends a handler of each name-routed type. */
+export const SENT_AS: Partial<Record<CommandType, readonly ApplicationCommandType[]>> = {
+  [CommandType.SLASH]: [ApplicationCommandType.ChatInput],
+  [CommandType.CONTEXT_MENU]: [ApplicationCommandType.User, ApplicationCommandType.Message],
+  [CommandType.PRIMARY_ENTRY_POINT]: [ApplicationCommandType.PrimaryEntryPoint],
+}
+
+/** The command a handler's name is registered as: a slash command's first word, any other's whole name. */
+export function commandNameOf(type: CommandType, name: string): string {
+  return type === CommandType.SLASH ? name.split(' ')[0] : name
+}
+
 /**
  * The identity Discord gives a command. The numeric type leads, so the halves never read apart
  * wrongly; an absent type is the chat input one Discord infers, so untyped slash builders collide.

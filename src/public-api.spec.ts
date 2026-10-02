@@ -303,6 +303,8 @@ const DEPRECATED = [
   'CommandMetadata',
   'ExecutionContext.get',
   'ExecutionContext.getAll',
+  'HandlerEntryBase.get',
+  'HandlerEntryBase.getAll',
   'MetadataKey',
   'ReactionHandlerOptions',
   'ResponsePayload.ephemeral',

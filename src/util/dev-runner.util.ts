@@ -1,4 +1,5 @@
 // Relative, and nothing else imported: the bundle's pre-entry, which is copied rather than compiled, loads this module
+import { sendToParent } from './parent-send.util.js'
 import { isShardProcess } from './shard-process.util.js'
 
 /** Set by `meocord start --dev` on the application it runs, which it gives an IPC channel. */
@@ -59,31 +60,11 @@ export function underDevRunner(): boolean {
   return process.env[DEV_RUNNER_ENV] === '1' && !!process.send && !isShardProcess()
 }
 
-/** How long a message to `meocord start --dev` may take to be sent before the dev runner is taken to be gone. */
-export const DEV_RUNNER_SEND_TIMEOUT_MS = 1000
-
 /**
- * Tells `meocord start --dev`, when it runs this process, whether the bot could log in, and waits until it is sent.
- * A shard tells its manager instead, which tells the dev runner in turn.
+ * Tells `meocord start --dev`, when it runs this process, whether the bot could log in, and waits until it is sent, or
+ * until the dev runner is taken to be gone. A caller sets the exit code before sending, so it holds however the send
+ * ends. A shard tells its manager instead, which tells the dev runner in turn.
  */
 export async function tellDevRunner(message: DevRunnerMessage): Promise<void> {
-  if (!underDevRunner()) return
-  // A closed channel means the dev runner is gone, so there is no one left to tell
-  const sent = new Promise<void>(resolve => {
-    try {
-      process.send!(message, undefined, {}, () => resolve())
-    } catch {
-      resolve()
-    }
-  })
-  let timer: NodeJS.Timeout | undefined
-  const timedOut = new Promise<void>(resolve => {
-    timer = setTimeout(resolve, DEV_RUNNER_SEND_TIMEOUT_MS)
-    timer.unref()
-  })
-  // Bun does not call back once the dev runner is gone, where Node calls back with an error, so the wait is
-  // bounded while the process runs. The timer is unref'd and never keeps the process alive by itself; a caller
-  // sets the exit code before sending, so it holds however the send ends.
-  await Promise.race([sent, timedOut])
-  clearTimeout(timer)
+  if (underDevRunner()) await sendToParent(message)
 }
