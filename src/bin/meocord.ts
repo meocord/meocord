@@ -468,7 +468,10 @@ copies or substantial portions of the Software.
     } else {
       fs.rmSync(path.join(dist, PLATFORM_MANIFEST), { force: true })
     }
-    if (copied.length > 0) this.logger.info(`dist/node_modules holds ${copied.length} packages; nothing else to install.`)
+    if (copied.length > 0) {
+      const count = copied.length === 1 ? '1 package' : `${copied.length} packages`
+      this.logger.info(`dist/node_modules holds ${count}; nothing else to install.`)
+    }
   }
 
   /** Builds the application in the given mode. */
