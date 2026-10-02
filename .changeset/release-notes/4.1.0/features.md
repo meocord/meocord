@@ -17,7 +17,7 @@
 - **Gateway events**: `@On` and `@Once` handle any discord.js client event, on a controller or a service, through the same pipeline. See [Gateway events](https://meocord.dev/docs/4.1/gateway-events).
 - **`HandlerRegistry`** lists every handler with its metadata, for a help command or generated docs. See [Handler discovery](https://meocord.dev/docs/4.1/handler-discovery).
 - **`applyDecorators`** combines decorators into one. See [Custom decorators](https://meocord.dev/docs/4.1/custom-decorators).
-- **Startup checks** name, before the bot logs in, a handler Discord never sends an interaction to, and two handlers or builders of which only one could ever run. A mistake MeoCord refuses as the app loads is reported in one line naming the class and method, and the bot exits 1.
+- **Startup checks** name, before the bot logs in, a handler Discord never sends an interaction to, two handlers or builders of which only one could ever run, and a message, reaction or `@On` handler whose intents or partials `clientOptions` lacks, with what to add. A mistake MeoCord refuses as the app loads is reported in one line naming the class and method, and the bot exits 1.
 
 ### Theming
 
