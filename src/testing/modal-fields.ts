@@ -7,7 +7,8 @@ import { Attachment, Collection, ComponentType, ModalSubmitFields } from 'discor
  * cannot build one directly.
  *
  * @param values - Each field's value, keyed by its customId: a string for a text input, an array of strings for a
- *   select's chosen values, or an array of `Attachment`s for a file upload.
+ *   select's chosen values, or an array of `Attachment`s for a file upload. An empty array is a select with nothing
+ *   chosen.
  * @returns Fields that `getTextInputValue`, `getStringSelectValues`, `getUploadedFiles` and a handler's params all
  *   read.
  *
