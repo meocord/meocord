@@ -35,10 +35,6 @@ vi.mock('fs', () => ({
 
 vi.mock('os', async importOriginal => ({ ...(await importOriginal<typeof import('os')>()), hostname: mockHostname }))
 
-vi.mock('@src/util/meocord-config-loader.util.js', () => ({
-  loadMeoCordConfig: vi.fn().mockReturnValue(null),
-}))
-
 const { prepareModifiedTsConfig } = await import('@src/util/tsconfig.util.js')
 
 // The module as a new process loads it, before it has made its directory

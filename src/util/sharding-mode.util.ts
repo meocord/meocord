@@ -3,7 +3,7 @@ import { type MeoCordConfig } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { isShardProcess } from '@src/util/shard-process.util.js'
 
-// From a module of its own, which the dev runner the pre-entry loads imports without this module's imports
+// Kept in a module of their own, so the dev runner, which the pre-entry loads, imports them without this module's imports
 export { isShardProcess, SHARDING_MANAGER_ENV } from '@src/util/shard-process.util.js'
 
 /** What this process is, as far as sharding goes. */

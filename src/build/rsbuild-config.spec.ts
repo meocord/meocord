@@ -147,13 +147,9 @@ describe('createRsbuildConfig', () => {
     it('writes assets under dist/assets without a content hash', () => {
       const config = createRsbuildConfig({ mode: 'production' })
 
-      expect(config.output?.distPath).toMatchObject({ image: 'assets', svg: 'assets', font: 'assets', media: 'assets' })
-      expect(config.output?.filename).toMatchObject({
-        image: '[name][ext]',
-        svg: '[name][ext]',
-        font: '[name][ext]',
-        media: '[name][ext]',
-      })
+      const kinds = ['image', 'svg', 'font', 'media', 'assets', 'wasm']
+      expect(config.output?.distPath).toMatchObject(Object.fromEntries(kinds.map(kind => [kind, 'assets'])))
+      expect(config.output?.filename).toMatchObject(Object.fromEntries(kinds.map(kind => [kind, '[name][ext]'])))
     })
   })
 

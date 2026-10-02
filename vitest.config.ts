@@ -43,9 +43,8 @@ export default defineConfig({
       tsconfig: './tsconfig.test.json',
     },
     coverage: {
-      // istanbul (not v8) — v8 coverage needs Node's inspector API, which Bun
-      // doesn't implement. Istanbul instruments at transform time and works
-      // under Bun, which is what CI uses to run the suite.
+      // istanbul rather than v8: it instruments at transform time, so coverage is the same
+      // whichever runtime runs the suite.
       provider: 'istanbul',
       // Naming `include` is what pulls in files no test ever imported, so a module with
       // no spec at all is reported at zero rather than left out of the percentage. They

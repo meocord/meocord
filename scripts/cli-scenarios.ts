@@ -45,7 +45,7 @@ interface Scenario {
    * empty directory, or the directory holding the apps.
    */
   cwd?: 'app' | 'npm-app' | 'pnpm-app' | 'empty' | 'parent'
-  /** Files written before it runs, relative to cwd; `null` deletes. Restored afterwards, but a deleted directory. */
+  /** Files written before it runs, relative to cwd; `null` deletes. Restored afterwards, except a deleted directory. */
   files?: Record<string, string | null>
   /** The CLI's arguments. */
   argv?: string[]
@@ -1519,7 +1519,7 @@ const scenarios: Scenario[] = [
       timeoutMs: 60_000,
       expect: { code: 0, says: ['Ready with GREETING=first GONE=here', 'Ready with GREETING=second GONE=undefined'] },
     },
-    // .env.local wins over .env. Bun reads it itself; a bot on node is given it by the CLI, which watches it either way
+    // .env.local wins over .env. The bot reads it as it starts, on either runtime, and the CLI watches it
     ...([
       ['', {}],
       [', with the bot on node', { MEOCORD_RUNTIME: 'node' }],
@@ -1546,6 +1546,22 @@ const scenarios: Scenario[] = [
         expect: { code: 0, says: ['Ready with GREETING=first GONE=here', 'Ready with GREETING=second GONE=here'] },
       }),
     ),
+    // The development build's config reads the development files, so watch mode runs, watches and reloads the bot on
+    // them whatever NODE_ENV the shell holds
+    {
+      name: `start --dev on ${runtime} with NODE_ENV=production in the shell reads and watches the development .env files`,
+      tier: runtime === 'node' ? 'fast' : 'slow',
+      platforms: ['linux', 'darwin'],
+      runtime,
+      env: { NODE_ENV: 'production' },
+      files: { ...ENV_FILES, 'src/app.ts': readyApp, 'src/ready.service.ts': envFilesService },
+      discord: { readyDelayMs: 0 },
+      argv: ['start', '--dev'],
+      edits: [{ after: 'Ready with FROM_LOCAL=local FROM_MODE=development', files: { '.env.development': () => 'FROM_MODE=edited\n' } }],
+      signal: { name: 'SIGINT', after: 'Ready with FROM_LOCAL=local FROM_MODE=edited' },
+      timeoutMs: 60_000,
+      expect: { code: 0, says: ['Ready with FROM_LOCAL=local FROM_MODE=development', 'Ready with FROM_LOCAL=local FROM_MODE=edited'], never: ['FROM_MODE=production'] },
+    },
     // A failed build emits a bundle that throws its errors; the bot keeps running the last good one, which the mended
     // file builds again, so nothing restarts
     ...(['src/ready.service.ts', 'src/main.ts'] as const).map(
@@ -1887,25 +1903,34 @@ const scenarios: Scenario[] = [
       expect: { code: 0, says: [`Ready with FROM_LOCAL=local FROM_MODE=${mode}`], never: [BUN_DEVELOPMENT_ENV] },
     }),
   ),
-  {
-    name: 'a production build started with bun and no NODE_ENV says Bun loaded .env.development',
-    tier: 'slow',
-    platforms: ['linux', 'darwin'],
-    before: [['build', '--prod']],
-    command: [runtimeBinary('bun'), '--no-install', 'dist/main.js'],
-    files: { ...ENV_FILES, 'src/app.ts': readyApp, 'src/ready.service.ts': envFilesService },
-    discord: { readyDelayMs: 0 },
-    signal: { name: 'SIGINT', after: 'Ready with' },
-    timeoutMs: 60_000,
-    expect: {
-      code: 0,
-      says: [
-        'Bun loaded .env.development because NODE_ENV is unset, and this is a production build, so FROM_MODE has its ' +
-          'development value; set NODE_ENV=production, or start with `bun --no-env-file`.',
-        'Ready with FROM_LOCAL=local FROM_MODE=development',
-      ],
-    },
-  },
+  // Bun reads the development files for any NODE_ENV but production and test, before the config's dotenv runs
+  ...(
+    [
+      ['no NODE_ENV', {}, 'unset'],
+      ['NODE_ENV=staging', { NODE_ENV: 'staging' }, 'staging'],
+    ] as const
+  ).map(
+    ([how, env, shown]): Scenario => ({
+      name: `a production build started with bun and ${how} says Bun loaded .env.development`,
+      tier: 'slow',
+      platforms: ['linux', 'darwin'],
+      before: [['build', '--prod']],
+      command: [runtimeBinary('bun'), '--no-install', 'dist/main.js'],
+      env,
+      files: { ...ENV_FILES, 'src/app.ts': readyApp, 'src/ready.service.ts': envFilesService },
+      discord: { readyDelayMs: 0 },
+      signal: { name: 'SIGINT', after: 'Ready with' },
+      timeoutMs: 60_000,
+      expect: {
+        code: 0,
+        says: [
+          `Bun loaded .env.development because NODE_ENV is ${shown}, and this is a production build, so FROM_MODE has ` +
+            'its development value; set NODE_ENV=production, or start with `bun --no-env-file`.',
+          'Ready with FROM_LOCAL=local FROM_MODE=development',
+        ],
+      },
+    }),
+  ),
   {
     name: 'start --dev exits 1 when its first build cannot start',
     tier: 'fast',

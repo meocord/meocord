@@ -20,6 +20,8 @@ describe('envFiles', () => {
     [undefined, ['.env', '.env.development', '.env.local', '.env.development.local']],
     ['production', ['.env', '.env.production', '.env.local', '.env.production.local']],
     ['test', ['.env', '.env.test', '.env.test.local']],
+    // Measured on Bun: any other NODE_ENV reads the development files
+    ['staging', ['.env', '.env.development', '.env.local', '.env.development.local']],
   ])('lists the files for NODE_ENV %s', (nodeEnv, files) => {
     expect(envFiles(nodeEnv)).toEqual(files)
   })
@@ -71,23 +73,32 @@ describe('bunDevelopmentValues', () => {
     })
   })
 
+  // Bun reads the development files for any NODE_ENV but production and test
+  it('names them too when NODE_ENV is set to another mode, with that NODE_ENV', () => {
+    expect(bunDevelopmentValues({ ...bunLoaded, NODE_ENV: 'staging' }, root, true)).toEqual({
+      files: ['.env.development', '.env.development.local'],
+      keys: ['MODE', 'ONLY_DEV', 'LOCAL_DEV'],
+      nodeEnv: 'staging',
+    })
+  })
+
   it.each([
     // bun --no-env-file: only the config's dotenv read the files, the production ones
     ['when Bun read no .env files', { MODE: 'production', SHARED: 'same' }, true, 'production'],
-    ['with NODE_ENV set', { ...bunLoaded, NODE_ENV: 'production' }, true, 'production'],
+    ['with NODE_ENV=production', { ...bunLoaded, NODE_ENV: 'production' }, true, 'production'],
     ['on Node', bunLoaded, false, 'production'],
     ['in a development build', bunLoaded, true, 'development'],
   ])('is empty %s', (_case, env: NodeJS.ProcessEnv, bun, mode) => {
     ;(globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY] = mode
 
-    expect(bunDevelopmentValues(env, root, bun)).toEqual({ files: [], keys: [] })
+    expect(bunDevelopmentValues(env, root, bun)).toMatchObject({ files: [], keys: [] })
   })
 
   it('is empty when the development files agree with the production ones', () => {
     writeFileSync(path.join(root, '.env.development'), 'SHARED=same\n')
     rmSync(path.join(root, '.env.development.local'))
 
-    expect(bunDevelopmentValues({ SHARED: 'same' }, root, true)).toEqual({ files: [], keys: [] })
+    expect(bunDevelopmentValues({ SHARED: 'same' }, root, true)).toMatchObject({ files: [], keys: [] })
   })
 })
 
@@ -96,6 +107,13 @@ describe('bunDevelopmentWarning', () => {
     expect(bunDevelopmentWarning({ files: ['.env.development', '.env.development.local'], keys: ['FROM_MODE', 'ONLY_DEV', 'TOKEN'] })).toBe(
       'Bun loaded .env.development and .env.development.local because NODE_ENV is unset, and this is a production build, so ' +
         'FROM_MODE, ONLY_DEV and TOKEN have their development values; set NODE_ENV=production, or start with `bun --no-env-file`.',
+    )
+  })
+
+  it('names the NODE_ENV Bun read for, and the mode whose values it loaded', () => {
+    expect(bunDevelopmentWarning({ files: ['.env.test'], keys: ['FROM_MODE'], nodeEnv: 'test' })).toBe(
+      'Bun loaded .env.test because NODE_ENV is test, and this is a production build, so FROM_MODE has its test value; ' +
+        'set NODE_ENV=production, or start with `bun --no-env-file`.',
     )
   })
 })
