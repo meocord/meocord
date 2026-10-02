@@ -6,7 +6,8 @@ import { BaseInteraction, Message, MessageReaction } from 'discord.js'
 /** What a handler requires, read by {{className}}Guard: `@{{className}}(['value'])` on a controller or handler. */
 export const {{className}} = createMetadata<string[]>('{{kebabCaseName}}')
 
-// Runs for every kind of handler; limit it with @Guard({ types: ['interaction', 'message', 'reaction', 'event'] })
+// Runs for every kind of handler;
+// limit it with @Guard({ types: ['interaction', 'autocomplete', 'message', 'reaction', 'event'] })
 @Guard()
 export class {{className}}Guard implements GuardInterface {
   constructor(private readonly context: ExecutionContext) {}

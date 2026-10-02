@@ -1,12 +1,8 @@
 /**
- * Checks MeoCord against real Discord, with an application and a server kept for testing; see
- * "Checking against real Discord" in CONTRIBUTING.md. Run after `bun run build`.
- *
- * It installs the smoke app in test/e2e/app from the packed build, runs it as the test bot and checks
- * login and the onReady hooks, registration in the test server, clearOther, SIGINT and onShutdown,
- * process sharding and, with a helper bot, a message and a reaction. Without MEOCORD_E2E_BOT_TOKEN and
- * MEOCORD_E2E_GUILD_ID it skips and exits 0. `--manual` starts the smoke app with the checklist's
- * commands registered globally and leaves it running until Ctrl+C.
+ * Checks MeoCord against real Discord (see "Checking against real Discord" in CONTRIBUTING.md), after `bun run build`:
+ * the smoke app, installed from the packed build, logs in, registers, shards, calls across shards, shuts down and
+ * answers a helper bot, theme included. Skips without MEOCORD_E2E_BOT_TOKEN and MEOCORD_E2E_GUILD_ID; `--manual`
+ * leaves it running with the checklist's commands registered globally.
  */
 
 import { type ChildProcess, spawn, spawnSync } from 'child_process'
@@ -133,7 +129,7 @@ class Bot {
     return redact(text.split('\n').slice(-lines).map(line => `        | ${line}`).join('\n'))
   }
 
-  /** Sends a signal to the CLI alone, as Docker, pm2 and systemd do. */
+  /** Sends a signal to the CLI alone, as Docker does. */
   stop(signal: NodeJS.Signals = 'SIGINT'): void {
     this.child.kill(signal)
   }
@@ -267,7 +263,7 @@ async function themeChecks(bot: Bot, helper: DiscordApi): Promise<void> {
   }
 }
 
-/** The helper bot posts a message and reacts to it, and the smoke app must see both. */
+/** The helper bot posts a message and reacts to it, which the smoke app must see, then runs the theme checks. */
 async function helperChecks(bot: Bot): Promise<void> {
   if (!helperToken || !channelId) {
     const name = 'a message, a reaction and the theme showcase from the helper bot'

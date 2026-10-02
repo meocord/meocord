@@ -27,7 +27,7 @@ const { createJiti } = await import('jiti')
 describe('loadMeoCordSourceConfig', () => {
   // The compiled copy in dist is the previous build's output. A build that read it would run on
   // the config as it was last time.
-  it('reads meocord.config.ts even when a compiled config exists', () => {
+  it('reads meocord.config.ts through jiti', () => {
     mockExistsSync.mockReturnValue(true)
     mockReadFileSync.mockReturnValue('{}')
     mockLoadMeoCordConfig.mockReturnValue({ discordToken: 'compiled, stale' })

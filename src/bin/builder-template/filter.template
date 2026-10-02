@@ -9,7 +9,7 @@ export class {{className}}Error extends Error {}
 export class {{className}}Filter implements ExceptionFilter<{{className}}Error> {
   // One instance serves every call: keep per-call state in local variables
   async catch(error: {{className}}Error, context: ExecutionContext): Promise<void> {
-    // TODO: Decide what the user is told; response is undefined for messages, reactions and events
+    // TODO: Decide what the user is told; response is undefined for messages, reactions, events and autocomplete
     await context.response?.error(error, { message: error.message, visibility: 'private' })
   }
 }

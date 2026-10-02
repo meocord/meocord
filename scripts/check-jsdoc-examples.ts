@@ -1,10 +1,7 @@
 /**
- * Compiles the `@example` of every public symbol that follows the JSDoc standard (it has a `@group`), against the
- * built package: the names it uses from meocord's entry points, discord.js or the fixtures are imported for it, and a
- * snippet of class members is compiled inside a controller. Run after `bun run build`.
- *
- * `--coverage` also lists the public symbols still missing a `@group`, a summary or, unless a type, an example.
- * `--fix` first moves every link to the documentation onto the package's own line, as a new minor version needs.
+ * Checks the JSDoc of every public symbol with a `@group` and compiles its `@example`, and the README's blocks, against
+ * the built package, after `bun run build`. `--coverage` lists the symbols still missing parts; `--fix` moves every
+ * documentation link onto the package's own line, as a new minor version needs.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'

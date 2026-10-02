@@ -21,7 +21,7 @@ describe('the build stamp', () => {
     expect(() => assertFreshBuild(root)).not.toThrow()
   })
 
-  it('refuses dist with no stamp, as one built before stamps were written', () => {
+  it('refuses dist with no stamp', () => {
     expect(() => assertFreshBuild(root)).toThrow(STALE_BUILD)
   })
 

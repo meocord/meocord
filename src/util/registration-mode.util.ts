@@ -9,7 +9,7 @@ export const REGISTER_ONLY_ENV = 'MEOCORD_REGISTER_ONLY'
 /** Set by `meocord register --guild <id>`: register every command to that guild only. */
 export const REGISTER_GUILD_ENV = 'MEOCORD_REGISTER_GUILD'
 
-/** Set by `meocord start --dev --force-register` and by `meocord register`: send even an unchanged payload. */
+/** Set by `meocord start --force-register` and by `meocord register`: send even an unchanged payload. */
 export const FORCE_REGISTER_ENV = 'MEOCORD_FORCE_REGISTER'
 
 /** Whether this process was started to register commands and exit. */

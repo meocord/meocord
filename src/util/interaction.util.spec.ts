@@ -59,7 +59,7 @@ describe('matchesCommandType', () => {
     expect([...Object.values(CommandType)].filter(type => !covered.has(type))).toEqual([])
   })
 
-  // Four select menus share a customId shape and a base class, so telling them apart
+  // Five select menus share a customId shape and a base class, so telling them apart
   // is the whole reason each has its own command type.
   it('does not accept one select menu for another', () => {
     const userSelect = createMockInteraction(UserSelectMenuInteraction)

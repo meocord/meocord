@@ -20,10 +20,9 @@ describe('ControllerGeneratorHelper', () => {
     expect(rendered).not.toContain('{{className}}')
   })
 
-  // The generated spec file imports `<Name><Type>Controller`, derived from the type
-  // rather than read from the template. A template that names its class anything else
+  // Each type's spec imports `<Name><Type>Controller`; a template that names its class anything else
   // produces a spec that does not compile.
-  it.each(Object.values(ControllerType))('names the %s controller class the way its spec imports it', type => {
+  it.each(Object.values(ControllerType))('names the %s controller class <Name><Type>Controller', type => {
     const expected = `Sample${toClassName(type.replace(/-/g, ' '))}Controller`
 
     expect(helper.buildControllerTemplate('Sample', type)).toContain(`export class ${expected}`)

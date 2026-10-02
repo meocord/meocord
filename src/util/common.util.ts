@@ -97,12 +97,8 @@ export async function assertConfigShape(config: unknown) {
 }
 
 /**
- * Ensures the config a command runs the bot with has a Discord token: the one {@link compileAndValidateConfig} or
- * {@link validateRunConfig} returned for it.
- *
- * Kept apart from {@link compileAndValidateConfig} because producing a bundle needs no
- * credentials — only connecting to the gateway does. Requiring one to build would stop a
- * freshly created application from building until it has a token.
+ * Exits unless the config {@link compileAndValidateConfig} or {@link validateRunConfig} returned has a Discord token.
+ * Starting or registering needs one and building does not, so a new app builds before it has a token.
  */
 export async function validateDiscordToken(config: MeoCordConfig | undefined) {
   if (!config?.discordToken) {

@@ -49,23 +49,12 @@ import { FORCE_REGISTER_ENV, REGISTER_GUILD_ENV, REGISTER_ONLY_ENV } from '@src/
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-/**
- * A Command Line Interface (CLI) for managing the MeoCord application.
- */
-/**
- * Oldest Node the framework supports, mirroring `engines.node`.
- *
- * A test holds the two together, since a floor that drifted from the manifest would warn
- * about versions npm is happy to install on.
- */
+/** Oldest Node major the framework supports; `engines.node` also requires 22.13 or later within it. */
 export const MINIMUM_NODE_MAJOR = 22
 
 /**
- * Warns when the running Node is older than the framework supports.
- *
- * Advisory only. Comparing against the newest LTS release meant warning about being a
- * patch behind, and reaching the network to find out meant a failed request could stop
- * the command outright — for a check whose only outcome is a warning.
+ * Warns when the running Node is older than the framework supports. Offline and advisory: a warning is its only
+ * outcome, so nothing in it can stop the command.
  */
 function warnIfNodeIsBelowSupported(): void {
   const major = Number.parseInt(process.versions.node.split('.')[0], 10)
@@ -79,10 +68,8 @@ function warnIfNodeIsBelowSupported(): void {
 }
 
 /**
- * The package manager's own complaint, which `execSync` buries on the thrown object.
- *
- * Its `message` says only that a command exited non-zero, which is never the part worth
- * reading.
+ * The package manager's own complaint: the stderr `execSync` keeps on the thrown error, without the
+ * "Command failed: <command>" line its `message` starts with.
  */
 function installFailure(error: unknown): Error {
   const { stderr, message } = (error ?? {}) as { stderr?: Buffer | string; message?: string }
@@ -112,7 +99,7 @@ export function emittedDigest(stats: Rspack.Stats | Rspack.MultiStats): string {
   return digest.digest('hex')
 }
 
-
+/** A Command Line Interface (CLI) for managing the MeoCord application. */
 export class MeoCordCLI {
   private readonly appName = 'MeoCord'
   readonly logger = new Logger(this.appName)
@@ -122,10 +109,7 @@ export class MeoCordCLI {
   private readonly appGeneratorHelper = new AppGeneratorHelper()
   private readonly version = resolveOwnVersion(__dirname, packageJson.version)
 
-  /**
-   * Binary the application is spawned with, so it runs on the same runtime as the CLI
-   * rather than on whichever one happens to be named in the source.
-   */
+  /** Binary the application is spawned with: the runtime the user chose, as {@link resolveRuntime} finds it. */
   private readonly runtime = resolveRuntime(process.env, process.execPath)
   /** What a bot this CLI starts inherits, taken before any config is loaded; see {@link inheritedEnvironment}. */
   private readonly inheritedEnv = inheritedEnvironment(process.env, this.projectRoot)
@@ -341,10 +325,7 @@ copies or substantial portions of the Software.
         initialValue: defaultPM,
       })
 
-      // `select` types its cancel sentinel as plain `symbol`, while `isCancel` narrows only
-      // that sentinel's own `unique symbol` — so the guard leaves `symbol` in its false
-      // branch and `pm` stops being a PackageManager. The prompt returns a symbol in no
-      // other case, so the cancel is detected on that instead.
+      // The prompt returns a symbol only when it is cancelled
       if (typeof selected === 'symbol') {
         p.cancel('Operation cancelled.')
         process.exit(0)
@@ -514,9 +495,10 @@ copies or substantial portions of the Software.
   }
 
   /**
-   * Compiles meocord.config.ts to dist/meocord.config.mjs so the config
-   * can be loaded at runtime without jiti, tsconfig, or source files.
+   * Compiles meocord.config.ts to dist/meocord.config.mjs in the build's mode, so a bot loads it without jiti,
+   * tsconfig or sources.
    *
+   * @param options.mode - The build's mode, which the bundler writes in for `process.env.NODE_ENV`.
    * @param options.exitOnFailure - Exits 1 when it fails; a watch session reloading the config keeps running instead.
    * @returns Whether the config compiled, or there was none to compile.
    */
@@ -554,7 +536,7 @@ copies or substantial portions of the Software.
             filename: { js: '[name].mjs' },
             minify: { js: false },
             sourceMap: false,
-            // Runs beside the application build in the same dist; cleaning would delete it.
+            // The staging folder is new, so there is nothing to clean
             cleanDistPath: false,
           },
           // Its table would name the staging folder; the line after the build says where the config went
@@ -571,7 +553,7 @@ copies or substantial portions of the Software.
     } catch (error) {
       if (staging) fs.rmSync(staging, { recursive: true, force: true })
       this.logger.error(`Failed to compile meocord.config.ts: ${error instanceof Error ? error.message : error}`)
-      // The built application reads only the compiled config, so without it the bot cannot start
+      // The built application reads only the compiled config, so after a failed compile it runs the last good one, or none
       if (exitOnFailure) {
         await wait(100)
         process.exit(1)
@@ -615,11 +597,9 @@ copies or substantial portions of the Software.
   }
 
   /**
-   * Passes SIGINT and SIGTERM on to the application: sent to the CLI alone, as Docker, pm2 and systemd
-   * send them, they would otherwise stop the CLI and leave the bot running. A copy within
-   * `REPEAT_SIGNAL_WINDOW_MS` is the same request. A repeat after it is passed on too, for the application
-   * to stop at once; if it has not after `FORCE_STOP_GRACE_MS`, it is killed and the CLI exits 1.
-   *
+   * Passes SIGINT and SIGTERM on to the application, so one sent to the CLI alone does not leave the bot running. A
+   * copy within `REPEAT_SIGNAL_WINDOW_MS` is the same request; a later repeat is passed on too, and a bot still running
+   * `FORCE_STOP_GRACE_MS` after it is killed and the CLI exits 1.
    * @param stopping - Runs on the first request, before the signal is passed on.
    */
   private relayStopSignals(app: () => ChildProcess | null, stopping?: () => void): void {
@@ -666,13 +646,8 @@ copies or substantial portions of the Software.
   private endDevSession: (code: number) => void = code => process.exit(code)
 
   /**
-   * Replaces the running application with one built from the current sources.
-   *
-   * The replacement is spawned only once the previous process has exited. Both would
-   * hold the same gateway session, and claiming it before the first lets go produces a
-   * login conflict rather than a reload. Builds that finish while it exits start nothing
-   * more: the replacement runs `dist/main.js` as it stands at launch, the latest build.
-   *
+   * Replaces the running application once it has exited, since two would contend for one gateway session. Builds that
+   * finish meanwhile start nothing more: the replacement runs `dist/main.js` as it stands at launch, the latest build.
    * @param build - The digest of the build asking for it; the output the running bot was launched from leaves it running.
    */
   private restartApp(build?: string): void {
@@ -696,11 +671,8 @@ copies or substantial portions of the Software.
   }
 
   /**
-   * Stops a running application as SIGTERM would, through its own shutdown, and calls `exited` once it has. The
-   * request goes over its channel rather than as a signal: on Windows kill() ends a process outright, skipping its
-   * onShutdown hooks. The application gives up on those hooks after shutdownTimeout; one still running after that and
-   * a grace period would never exit, so it is killed.
-   *
+   * Stops the application through its own shutdown, over its channel (on Windows kill() skips onShutdown), else with a
+   * signal, and calls `exited` once it has. One still running `FORCE_STOP_GRACE_MS` after its shutdownTimeout is killed.
    * @param then - What the stop is for, as the warning about killing it says.
    */
   private stopApp(app: ChildProcess, then: string, exited: () => void): void {
@@ -747,7 +719,7 @@ copies or substantial portions of the Software.
   }
 
   /**
-   * Runs the built application. Both start modes use it, so watch mode launches the bundle exactly as production does.
+   * Runs the built application. Both start modes use it, so watch mode runs the bundle with the command production uses.
    *
    * @param options.devRunner - Gives the application a channel to tell watch mode whether the bot could log in.
    */
@@ -800,7 +772,7 @@ copies or substantial portions of the Software.
 
       // Inputs the bundler does not see: the config, and tsconfig.json, which the build reads through a copy MeoCord
       // writes and the bundler never watches. A change rebuilds from them, and the rebuild restarts the application.
-      // The .env files need no build: the bot is given them as it starts, so a change restarts it.
+      // The .env files need no build: the bot reads them as it starts, so a change restarts it.
       const restarts = envFiles(process.env.NODE_ENV)
       const reloads: Record<string, string> = {
         'meocord.config.ts': 'MeoCord config change detected, reloading config...',
@@ -825,7 +797,7 @@ copies or substantial portions of the Software.
           // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
           if (files.has('meocord.config.ts') && !(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
           isRunning = false
-          // What the bot was launched from is no longer what it runs: the new build restarts it, whatever its output
+          // The new build restarts the bot, whatever its output: the config it was launched with has changed
           this.launchedFrom = undefined
           try {
             await watch()

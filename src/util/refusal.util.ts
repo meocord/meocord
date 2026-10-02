@@ -64,13 +64,9 @@ export function describeRefusal(error: Error, root: string, windows = process.pl
 }
 
 /**
- * Reports a refusal the application doesn't catch as one line, with where it is in the source, and exits 1. A
- * monitor, so any other error keeps the runtime's own report. Installed by the first refusal in a built application;
- * a test or script that throws one gets the error as it is.
- *
- * Bun emits no monitor event for an unhandled rejection, so there a rejection listener reports a refusal instead. Any
- * other reason is rejected again with the listener gone, for Bun to report as it would have. While the application
- * listens for rejections itself, every rejection is its own to handle, as under Node.
+ * Reports a refusal nothing catches as one line, with its source file, and exits 1; other errors keep the runtime's
+ * report. Installed by the first refusal in a built application. Bun has no monitor event for a rejection, so there a
+ * listener reports a refused rejection and rejects any other again without itself, unless the app listens itself.
  */
 export function reportRefusals(
   log: (text: string) => void = text => new Logger('MeoCord').error(text),

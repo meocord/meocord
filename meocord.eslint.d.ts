@@ -30,8 +30,8 @@ export declare const typescriptConfig: Linter.Config
  * ```ts
  * import meocordESLint from 'meocord/eslint'
  *
- * // Coverage reports are generated, so they are not linted
- * export default [...meocordESLint, { ignores: ['coverage'] }]
+ * // Generated code is not linted
+ * export default [...meocordESLint, { ignores: ['src/generated/**'] }]
  * ```
  *
  * @group Configuration

@@ -1,7 +1,7 @@
 /**
- * Generates an application and every component with the built CLI, installs it from the packed
- * framework, and runs the application's own checks: both tsconfigs, tests, coverage, both builds and
- * lint without `--fix`. Run after `bun run build`; packing covers the `files` list and `exports` map.
+ * Renders the app template against the packed framework, generates every component with the built CLI, installs it,
+ * and runs the app's own checks: both tsconfigs, tests, coverage, both builds and lint without `--fix`. Run after
+ * `bun run build`; packing covers the `files` list and `exports` map.
  */
 
 import { spawnSync } from 'child_process'
@@ -87,11 +87,11 @@ function createApp(tarball: string): void {
 
 /**
  * Runs every generator inside the application, so its lint, tsconfigs and tests cover the
- * generated guards, interceptors, filters, pipes, services and controllers too.
+ * generated guards, interceptors, filters, pipes, services, observers and controllers too.
  */
 function generateComponents(): void {
-  // Each kind under three names, one nested under a folder named like another: a generated component
-  // must never collide with another, nor with the samples the template ships
+  // Each kind under three names, a nested one ending like a flat one: a generated component must never
+  // collide with another, nor with the samples the template ships
   const commands = ['Generated', 'second', 'admin/second'].flatMap(name => [
     ...Object.values(ControllerType).map(type => ['g', 'co', type, name]),
     ['g', 's', name],

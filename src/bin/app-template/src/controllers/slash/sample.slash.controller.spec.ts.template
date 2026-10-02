@@ -21,7 +21,7 @@ describe('SampleSlashController', () => {
     expect(answer?.payload).toMatchObject({ content: 'This is sample reply of slash command.' })
   })
 
-  it('defers privately, then edits the reply', async () => {
+  it('defers, then edits the reply', async () => {
     const interaction = slash()
 
     await module.invoke(SampleSlashController, 'handleSampleSlashTwo', interaction)

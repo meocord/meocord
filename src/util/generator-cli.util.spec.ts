@@ -108,7 +108,7 @@ describe('validateAndFormatName', () => {
     exitSpy.mockRestore()
   })
 
-  // Shared by controllers, services and guards, so the message names none of them.
+  // Shared by every generator, so the message names no kind of component
   it('names no particular kind of component when the name is missing', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     mockLoggerError.mockClear()
@@ -261,7 +261,7 @@ describe('formatGeneratedFiles', () => {
     mockLoggerWarn.mockClear()
   })
 
-  // One run builds the project's type information once, where a run per file built it for each, side by side.
+  // One run builds the project's type information once; a run per file would build it for each
   // On Windows a .cmd shim can't be spawned without a shell, so the script runs with this runtime there too.
   it.each(['linux', 'win32'])("formats every generated file in one run of the project's eslint, by this runtime, on %s", async platform => {
     const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform as NodeJS.Platform)

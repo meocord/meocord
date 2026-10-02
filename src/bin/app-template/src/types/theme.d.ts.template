@@ -1,15 +1,6 @@
 import 'meocord/interface'
 
-// The app's own theme tokens, beside MeoCord's. The import above makes this an augmentation: without it, the
-// declaration would replace meocord/interface instead of extending it. Add a role to a group MeoCord defines, or a
-// group of your own, then set its value in @MeoCord({ theme }), which requires it:
-//
-//   import { type ColorResolvable } from 'discord.js'
-//
-//   interface ThemeColors {
-//     vip: ColorResolvable
-//   }
-//   interface MeoCordTheme {
-//     charts: { axis: ColorResolvable; series: ColorResolvable[] }
-//   }
+// The app's own theme tokens, beside MeoCord's: add a role to ThemeColors, ThemeEmojis or ThemeButtons, or a group to
+// MeoCordTheme, then set it in @MeoCord({ theme }), which requires it. The import above makes this an augmentation:
+// without it, the declaration would replace meocord/interface instead of extending it.
 declare module 'meocord/interface' {}

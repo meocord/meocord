@@ -84,7 +84,7 @@ describe('compileConfig', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
-  it('keeps the last good config, and no staging, when a compile fails', async () => {
+  it('keeps the last good config, and exits 1, when a compile fails', async () => {
     mkdirSync(dist())
     writeFileSync(path.join(dist(), 'meocord.config.mjs'), 'last good')
     const cli = new MeoCordCLI()

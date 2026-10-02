@@ -1,10 +1,7 @@
 /**
- * Checks that matching a message stays within its budget, under Bun and under Node: every message in every
- * server is matched, so an accidental cost per route would slow a busy bot's whole event loop. A message's
- * cost is measured against a reference workload run on the same machine in the same run, so the budgets
- * hold on a laptop and on a shared CI runner alike. A scan over the routes, which costs hundreds of times
- * more at 1000 routes than at 10, fails the flatness check whatever the machine. Also checks what typed
- * patterns cost the type checker, which every app with message commands pays on each build.
+ * Checks that matching a message stays within budget under Bun and Node, measured against a reference workload in the
+ * same run so it holds on any machine, and flat from 10 to 1000 routes, since every message in every server is
+ * matched. Also checks what typed patterns cost the type checker, which every app with message commands pays.
  */
 import { spawnSync } from 'child_process'
 import { mkdtempSync, rmSync } from 'fs'

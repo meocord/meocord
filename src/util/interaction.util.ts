@@ -20,8 +20,8 @@ import { quoteForLog } from '@src/util/user-text.util.js'
 import { withArticle } from '@src/util/value.util.js'
 
 /**
- * The discord.js interaction class each command type handles, shared by `@Command`, the dispatcher and
- * `CommandInteractionType`. A `CommandType` without an entry here fails to compile. Their constructors are private
+ * The discord.js interaction class each command type handles, shared by `@Command`, the dispatcher and the testing
+ * module's handler input. A `CommandType` without an entry here fails to compile. Their constructors are private
  * in discord.js's typings, so each is typed by what is read of it: its prototype and its name.
  */
 const INTERACTION_CLASSES: Record<CommandType, { readonly prototype: object; readonly name: string }> = {
@@ -168,7 +168,7 @@ export function focusedOptionName(interaction: AutocompleteInteraction): string 
 /**
  * Identifies an interaction in a log line, by whichever field would have routed it.
  *
- * @param interaction - The interaction that matched no handler.
+ * @param interaction - The interaction the log line is about.
  */
 export function describeInteraction(interaction: Interaction): string {
   // Captured before the narrowing below: the guards cover every member of the union,

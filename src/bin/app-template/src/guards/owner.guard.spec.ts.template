@@ -30,7 +30,7 @@ describe('OwnerGuard', () => {
     expect(ran).toBe(true)
   })
 
-  it('denies anyone else, with a reason the user is shown', async () => {
+  it('denies anyone else with a GuardDeniedError', async () => {
     await expect(module.invoke(CardController, 'open', clickBy('stranger'))).rejects.toThrow(GuardDeniedError)
   })
 })

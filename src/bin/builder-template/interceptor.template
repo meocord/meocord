@@ -2,7 +2,8 @@ import { Interceptor } from 'meocord/decorator'
 import { type CallHandler, type InterceptorInterface } from 'meocord/interface'
 import { type ExecutionContext, Logger } from 'meocord/common'
 
-// Runs for every kind of handler; limit it with @Interceptor({ types: ['interaction', 'message', 'reaction', 'event'] })
+// Runs for every kind of handler but autocomplete;
+// limit it with @Interceptor({ types: ['interaction', 'message', 'reaction', 'event'] })
 @Interceptor()
 export class {{className}}Interceptor implements InterceptorInterface {
   private readonly logger = new Logger({{className}}Interceptor.name)

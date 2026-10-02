@@ -49,9 +49,8 @@ export function bundledModuleFiles(stats: StatsLike | undefined): string[] {
     all: false,
     modules: true,
     nestedModules: true,
-    // A production build concatenates most of node_modules into a few modules, and the members
-    // of a concatenation are orphans -- hidden from stats unless asked for. Without this every
-    // concatenated package, sharp included, is invisible here.
+    // Members of a concatenated module are orphans, hidden from stats unless asked for. MeoCord's build concatenates
+    // nothing, but an app's tools.rspack can turn it on, and a package such as sharp would then be invisible here.
     orphanModules: true,
     modulesSpace: Infinity,
     nestedModulesSpace: Infinity,
@@ -159,8 +158,8 @@ export function findBundledNativeAddons(bundledFiles: Iterable<string>, root: st
 }
 
 /**
- * The package a bare import request names, or undefined for a relative path, an absolute path, or
- * a Node builtin -- none of which live in node_modules.
+ * The package a bare import request names, or undefined for a relative or absolute path or a scheme such as `node:`.
+ * A bare builtin such as `fs` comes back as itself, and resolves to no installed package.
  */
 export function packageNameOfRequest(request: string): string | undefined {
   if (!request || request.startsWith('.') || request.startsWith('/') || /^[a-z]+:/i.test(request)) return undefined

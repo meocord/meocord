@@ -290,7 +290,7 @@ describe('prepareModifiedTsConfig', () => {
     expect(written.compilerOptions).toEqual({ strict: true })
   })
 
-  // The build used to rewrite the project's tsconfig.json to repair it, dropping the user's comments
+  // Rewriting the project's tsconfig.json would drop the user's comments
   it("never writes the project's tsconfig.json, however it is formatted", () => {
     mockExistsSync.mockReturnValue(true)
     mockReadFileSync.mockReturnValue('{ // mine\n "compilerOptions": { "noEmit": true, }, }' as any)
