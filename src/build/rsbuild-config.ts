@@ -113,6 +113,9 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
         // `[name][ext]` would give every module one name. A hash keeps them apart, in the folder wasm assets go to
         const wasmDir = environment.config.output.distPath.wasm
         chain.output.webassemblyModuleFilename(path.posix.join(wasmDir, '[contenthash:10].module.wasm'))
+        // `new URL('./file', import.meta.url)` stays a URL relative to the bundle. Through the asset prefix, a disk path,
+        // it would parse as a URL of scheme `c:` on Windows rather than a file: URL
+        chain.module.parser.merge({ javascript: { url: 'new-url-relative' } })
         // The pre-entry records the bundle's own path from import.meta.url, which the bundler would otherwise fix at
         // build time to the pre-entry's source file. In every mode: a process manager such as pm2 starts the bundle
         // from a wrapper of its own, so process.argv[1] names that wrapper, not the bundle

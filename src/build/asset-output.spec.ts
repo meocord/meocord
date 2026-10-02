@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { createRsbuild } from '@rsbuild/core'
@@ -87,5 +87,7 @@ describe('asset imports in a build', () => {
     expect([math, text]).toEqual([['f'], ['g']])
     expect(path.relative(path.join(root, 'dist'), table).replace(/\\/g, '/')).toBe('assets/table.wasm')
     expect(readdirSync(path.join(root, 'dist', 'assets'))).toContain('table.wasm')
+    // Built on the asset prefix, the URL would still resolve from a POSIX path; on Windows `C:/` reads as a scheme
+    expect(readFileSync(path.join(root, 'dist', 'main.js'), 'utf8')).toMatch(/new URL\("\.\/assets\/table\.wasm",\s*import\.meta\.url\)/)
   }, 60_000)
 })
