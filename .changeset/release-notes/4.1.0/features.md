@@ -21,6 +21,7 @@
 ### Theming
 
 - **Themes** name colours, emojis and button styles by role, set with `@MeoCord({ theme })`, `@UseTheme` or per server and user with `themeFor` and `ThemeCache`; `useTheme()` reads them, and apps add roles ([docs](https://meocord.dev/docs/4.1/theming)).
+- **`ThemeResolver` classes** look themes up with the app's services: `themeFor` takes one, resolved from the container, cached as the functions are ([docs](https://meocord.dev/docs/4.1/theming)).
 - **`respond()` fills in colour**: an answer without one takes `primary`, error views take `warning` or `danger`, and `{ fill: false }` sends as written.
 
 ### Cooldowns
