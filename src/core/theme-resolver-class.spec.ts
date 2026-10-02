@@ -271,14 +271,22 @@ describe('a ThemeResolver class', () => {
     expect(handled()).toEqual([colours])
   })
 
-  it('with neither method is refused where the app is declared, and by overrideThemeFor, in one line', () => {
+  it.each([
+    ['methods of other names', class Other { server() {} }, ''],
+    ['arrow-function properties only', class Arrows { user = () => undefined }, ' Declare them as methods: arrow-function properties are not on the class.'],
+  ])('with neither method, declaring %s, is refused in one line', (_declaring, Resolver, hint) => {
+    expect(() => appWith(Resolver)).toThrow(
+      new TypeError(`App: @MeoCord({ themeFor }): ${Resolver.name} has neither a guild() nor a user() method, so it gives no theme.${hint}`),
+    )
+  })
+
+  it('with neither method is refused by overrideThemeFor too, and a function is refused where the app is declared', () => {
     class Empty {}
-    expect(() => appWith(Empty)).toThrow(/^App: @MeoCord\(\{ themeFor \}\): Empty has neither a guild\(\) nor a user\(\) method, so it gives no theme\.$/)
     expect(() => appWith(() => ({ colors: { primary: '#0000E4' } }))).toThrow(
       'App: @MeoCord({ themeFor }) takes { guild?, user? }, each a function returning part of a theme, or a class implementing ThemeResolver.',
     )
     expect(() => MeoCordTestingModule.create({ controllers: [Panel] }).overrideThemeFor(Empty as never)).toThrow(
-      'overrideThemeFor: Empty has neither a guild() nor a user() method, so it gives no theme.',
+      'overrideThemeFor: Empty has neither a guild() nor a user() method, so it gives no theme. Declare them as methods: arrow-function properties are not on the class.',
     )
   })
 
