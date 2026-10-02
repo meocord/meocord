@@ -834,9 +834,10 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * its class and global guards and its filters, but no interceptors; a guard must not answer, and returning
  * `false` closes the menu with an empty list. The bot warns as it starts about a handler Discord never asks, such as
  * one for an option registered without autocomplete, and about one that completes what an earlier handler already
- * does, since only the first runs; the next major version (5.0) refuses to start with either. A subclass that re-declares an inherited handler on another command
- * path or option still completes the inherited one too, which the bot warns about as it starts. In the next major
- * version (5.0) the subclass's own declarations replace the inherited ones.
+ * does, since only the first runs; the next major version (5.0) refuses to start with either. A subclass that
+ * re-declares an inherited handler on another command path or option still completes the inherited one too, which
+ * the bot warns about as it starts. In the next major version (5.0) the subclass's own declarations replace the
+ * inherited ones.
  *
  * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
  * @param optionName - The option to complete. Leave it out to handle every option, branching on
