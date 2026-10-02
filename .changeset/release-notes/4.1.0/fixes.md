@@ -16,10 +16,8 @@
   - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
 - **Handler types**
   - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
-  - A `@Command` handler called with the wrong kind of interaction, as a direct call in a test can be, names the handler, the decorator and the kind it takes, rather than "Invalid interaction type passed to @Command".
 - **Builds**
   - A production build keeps every class's own name. When two modules declared a class of one name, one was renamed, such as `Shop` to `shop_controller_Shop`, in errors and logs and wherever the code read its `name`.
-  - An imported asset and the built config are found beside the bundle wherever `dist` is run from, as when it's built in CI and copied to a server, or started by pm2 or systemd from another directory. Rebuild to pick this up.
   - Every imported file lands in `dist/assets` under its own name, as images, fonts and media already did.
   - A `tsconfig.json` that uses `extends`, `files`, `typeRoots`, comments, or `paths` under a `baseUrl` builds as TypeScript reads it, and `meocord build` no longer rewrites the file. Builds that run at the same time no longer read each other's copy of it.
   - A self-contained build runs under Bun, and in a pnpm project packs the packages an external depends on and a native package's per-platform binary.
@@ -37,4 +35,4 @@
   - Log lines quote what a user sent, such as a message's text or a reaction's emoji, escaping line breaks and control characters, and shorten a long message's text, with its length.
   - The CLI and tests no longer read the app's name, or its `.env`, from a `dist` an earlier build left.
 - **Testing**
-  - Mocks read as discord.js reads them: each has its own snowflake id and an `'en-US'` locale, an interaction without a `guildId` is a DM, `inGuild()` answers, and a method that returns a promise in discord.js resolves. A test that relied on an old default changes with it; nothing changes in a bot.
+  - Mocks answer where 4.0's returned a stub: an interaction has an `'en-US'` locale, `inGuild()` answers from its `guildId`, and a method that returns a promise in discord.js resolves. Nothing changes in a bot.
