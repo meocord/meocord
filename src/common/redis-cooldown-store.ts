@@ -249,7 +249,7 @@ export class RedisCooldownStore extends CooldownStore {
     const giveBack = () =>
       Promise.all(
         releases.map(release =>
-          release().catch((failure: unknown) => logger.debug(`Could not give back a use a refused call counted: ${String(failure)}`)),
+          release().catch((failure: unknown) => logger.debug(`Could not give back a use the call counted: ${String(failure)}`)),
         ),
       )
     for (const [index, entry] of entries.entries()) {
@@ -324,7 +324,8 @@ function verdictOf(reply: unknown, count: number): CooldownBatchVerdict {
     (allowed === 1 && blocked === -1) || (allowed === 0 && Number.isInteger(blocked) && blocked >= 0 && blocked < count)
   if (!valid || !Number.isFinite(retryAfterMs)) {
     throw new Error(
-      `RedisCooldownStore's script replied ${JSON.stringify(reply)}, where it returns [allowed, retryAfterMs, index], and when refused the wait's end. ` +
+      `RedisCooldownStore's script replied ${JSON.stringify(reply)}, where it returns [allowed, retryAfterMs, index], ` +
+        "with the wait's end after them when refused. " +
         'Check that the function given to RedisCooldownStore.using resolves to what the client’s eval returns.',
     )
   }
