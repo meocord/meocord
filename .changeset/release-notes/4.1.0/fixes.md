@@ -19,7 +19,7 @@
   - A subclass with its own constructor gets its own dependencies.
   - `@inject(Token)` on an interface-typed parameter works, not "missing metadata on type Object".
   - An injection cycle is refused naming it, not "Circular dependency found: (No dependency trace)".
-  - A parameter with no runtime type is refused naming the class and parameter, not inversify's `emitDecoratorMetadata` error.
+  - A constructor parameter with no runtime type is refused naming the class and parameter, not inversify's `emitDecoratorMetadata` error.
   - A guard in `services` or `providers`, or injected into a service, reads each call's own `params`; one with a setter param or a sealed instance shares them, with a warning.
 - **Handler types**
   - A handler may return a value or take fewer parameters, not "Unable to resolve signature of method decorator".
@@ -32,9 +32,9 @@
   - Self-contained builds run under Bun and pack each package's installed dependency versions, npm-nested and pnpm-store dependencies, and per-platform binaries, fixing "Cannot find module". Rebuild.
 - **The CLI**
   - `meocord start` forwards SIGINT and SIGTERM, so Docker, pm2 and systemd stop the bot cleanly.
-  - `start --dev` runs one bot at a time, restarts it through its own shutdown on Windows and after it exits on its own, which one Ctrl+C then stops, and keeps it running when a save doesn't compile or an `rsbuild` hook throws.
+  - `start --dev` runs one bot at a time, restarts it through its own shutdown on Windows, starts it again on the next rebuild after it exits on its own, which one Ctrl+C then stops, and keeps it running when a save doesn't compile or an `rsbuild` hook throws.
   - `start --dev --build` builds once, and `start --dev` exits 1 when watching can't start.
-  - `create` keeps the app when git can't commit, joins an enclosing Git repository, quotes any app name, and refuses a name with no letters, not `Directory "" already exists`.
+  - `create` keeps the app when git can't commit, joins an enclosing Git repository, quotes any app name, and refuses a name with no letters or digits, not `Directory "" already exists`.
   - A created app passes `lint` and `test` on pnpm and installs on pnpm 11+ and npm 11.16+ without warnings; `create` warns on Node.js 22.0 to 22.12.
   - `generate` works on Windows, writes lint-clean files formatted in one ESLint run, and refuses a name outside `src/`, with `\` separating folders on Windows.
   - `build` and `start --prod` don't clear the screen, `start --dev` keeps scrollback, and no command writes screen-clearing codes into piped output.
