@@ -5,7 +5,7 @@
   - `SetMetadata`: declare the decorator with `createMetadata`, and read it with `ExecutionContext.get(decorator)`; reading a string or symbol key is deprecated too. Each logs a warning once. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#setmetadata-and-string-metadata-keys-are-deprecated).
   - `ReactionHandlerOptions`: use `ReactionEvent`, the same type under a new name. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#reactionhandleroptions-is-now-reactionevent).
   - `MetadataKey`, `CommandMetadata` and `AutocompleteMetadata`: internal, with nothing to replace them; drop the import. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#metadatakey-commandmetadata-and-autocompletemetadata-are-deprecated).
-  - `@Autocomplete<void>(…)`: its type parameter goes; write `@Autocomplete(…)`.
+- **`@Autocomplete<void>(…)`** still compiles, and its type parameter goes in 5.0. The lint rule doesn't flag it, so search for `@Autocomplete<` and write `@Autocomplete(…)`.
 - **Retrying `start()` after a failed login** logs in again with the handlers it has, and warns once; in 5.0 it rejects. Create a new app with `MeoCordFactory.create` for each attempt. A retry after a provider's factory failed stays supported. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#retrying-start-after-a-failed-login-is-deprecated).
 - **`@MessageHandler('')`** still runs for every message and logs a warning; 5.0 refuses it. Write `@MessageHandler()`. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#messagehandler-logs-a-warning).
 - **Startup warnings about handlers that never run.** 4.1 starts with these, naming each handler and what to do, and 5.0 refuses to start:
