@@ -37,6 +37,11 @@ function isInterceptorWithParams(entry: unknown): entry is InterceptorWithParams
   return typeof entry === 'object'
 }
 
+/** The interceptor class an entry names. */
+export function interceptorClass(entry: InterceptorEntry): InterceptorClass {
+  return isInterceptorWithParams(entry) ? entry.provide : entry
+}
+
 /**
  * The interceptors around a handler: each class's, base first, down to the controller it is dispatched on, then the
  * method's.

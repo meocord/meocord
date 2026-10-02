@@ -14,7 +14,7 @@ import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.j
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
-import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages } from '@src/core/handler-pipeline.js'
+import { appStages, bindAppPresenter, bindGlobalStages, classDecorators, prepareHandlerStages } from '@src/core/handler-pipeline.js'
 import { appObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
@@ -34,7 +34,6 @@ import {
 } from '@src/core/providers.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
-import { meocordClasses } from '@src/core/meocord-classes.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
 import {
@@ -226,9 +225,12 @@ export class MeoCordFactory {
     }
 
     // Before binding, where inversify would otherwise fail first with an error about compiler options
-    assertTypedParameters(reachableClasses(roots, providers), meocordClasses())
+    // Its stage classes too, which the container resolves only at their first call
+    const stages = appStages(target as object)
+    const decorators = classDecorators(options.controllers, stages)
+    assertTypedParameters(reachableClasses([...roots, ...decorators.keys()], providers), decorators)
     const container = new Container()
-    bindGlobalStages(container, appStages(target as object))
+    bindGlobalStages(container, stages)
 
     // Bind the Discord client as a constant value
     const discordClient = new Client(clientOptionsWithSharding(this.effectiveConfig(meocordConfig), options.clientOptions))

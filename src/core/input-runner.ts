@@ -25,6 +25,11 @@ export interface ValidationMetadata {
   pipes: Record<string, PipeEntry | readonly PipeEntry[]>
 }
 
+/** The pipe class an entry names. */
+export function pipeClass(entry: PipeEntry): unknown {
+  return isPipeWithParams(entry) ? entry.provide : entry
+}
+
 function isPipeWithParams(entry: PipeEntry): entry is PipeWithParams {
   // Entries are checked when @UsePipe or @Validate applies, so an object here is always { provide, params? }
   return typeof entry === 'object'

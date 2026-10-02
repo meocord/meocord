@@ -28,6 +28,7 @@ import {
   appStages,
   bindAppPresenter,
   bindGlobalStages,
+  classDecorators,
   type GlobalStages,
   prepareHandlerStages,
   type RunOptions,
@@ -64,7 +65,7 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
-import { meocordClasses } from '@src/core/meocord-classes.js'
+import { adviseInPlaceOfInjecting } from '@src/core/meocord-classes.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
@@ -992,7 +993,10 @@ export class TestingModuleBuilder {
       ...(this.options.observers ?? []),
     ]
     const reachable = reachableClasses(roots, providers)
-    assertTypedParameters(reachable, meocordClasses())
+    // Its stage classes too, as the app checks them, except those an override stands in for
+    const decorators = classDecorators(this.options.controllers ?? [], stages)
+    for (const stub of [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()]) decorators.delete(stub)
+    assertTypedParameters(reachableClasses([...roots, ...decorators.keys()], providers), decorators)
     // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
     const needClient = reachable.filter(cls => injectedTokens(cls).includes(Client))
     if (needClient.length > 0 && !providers.has(Client)) {
@@ -1251,3 +1255,7 @@ export class MeoCordTestingModule {
     )
   }
 }
+
+// Built by MeoCordTestingModule, never injected; registered here, as meocord/core does not load the testing module
+adviseInPlaceOfInjecting(TestingModuleBuilder, 'build it with MeoCordTestingModule.create(…) or MeoCordTestingModule.fromApp(…)')
+adviseInPlaceOfInjecting(TestingModule, 'make it with MeoCordTestingModule.create(…).compile()')
