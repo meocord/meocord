@@ -54,6 +54,7 @@ import { assertValidTheme } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
 import {
   assertDistinctCommands,
+  warnHandlersOffControllers,
   warnInheritedRoutes,
   warnOverlappingPatterns,
   warnUnregisteredCommands,
@@ -1078,6 +1079,7 @@ export class TestingModuleBuilder {
     warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
     warnInheritedRoutes(this.options.controllers ?? [])
     warnOverlappingPatterns(this.options.controllers ?? [])
+    warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
     if (this.options.app) bindAppPresenter(container, this.options.app)
     const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
     assertObservers("the testing module's observers", observers)
