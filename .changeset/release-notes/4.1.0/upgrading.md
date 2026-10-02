@@ -24,7 +24,7 @@
 - **No `eval` devtool.** Development builds use `cheap-module-source-map`, and `eval-*` becomes its non-eval form with a warning. Set `sourceMappedStacks: false` for trackers that apply uploaded source maps ([docs](https://meocord.dev/docs/4.1/configuration#stack-traces)).
 - **`meocord/eslint` flags unawaited promises.** `await`, `return` or `void` them, or turn the rule off ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
 - **The generated rate-limit guard never limited.** Move its map to module level, or use `@Cooldown` ([guide](https://meocord.dev/docs/4.1/migrating#the-generated-rate-limit-guard-limits)).
-- **What a 4.0 app can copy.** New apps read every `.env` file and type asset imports; add the `swc` `include` for coverage of untested files. A pnpm app adds `reflect-metadata` and `@types/node` to `devDependencies`, and on pnpm 11 a `pnpm-workspace.yaml` setting `@swc/core` and `unrs-resolver` to `false` under `allowBuilds` and `meocord` under `minimumReleaseAgeExclude`. On npm 11.16+, `"allowScripts": { "@swc/core": false, "fsevents": false, "unrs-resolver": false }` in `package.json` installs without a warning ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
+- **What a 4.0 app can copy.** New apps read every `.env` file and type asset imports; add the `swc` `include` for coverage of untested files. An app created for pnpm adds `reflect-metadata`, `@types/node` and a `pnpm-workspace.yaml`, and one installed with npm 11.16+ adds `allowScripts` to `package.json` ([guide](https://meocord.dev/docs/4.1/migrating#installing-with-pnpm-or-npm-1116-and-later)).
 
 ### Upgrading your tests
 
