@@ -5,7 +5,9 @@ import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import {
   type CooldownBatchVerdict,
   type CooldownEntry,
+  type CooldownLimit,
   CooldownStore,
+  type CooldownVerdict,
   createTranslator,
   GuardDeniedError,
   MemoryCooldownStore,
@@ -378,6 +380,33 @@ describe('dmOnCooldown', () => {
     await sendAt(0)
 
     expect([await sendAt(1_000), await sendAt(30_000), await sendAt(61_000), await sendAt(62_000)]).toEqual([1, 0, 0, 1])
+  })
+
+  // A store that keeps the default consumeMany counts a notice's keys one after another, until one refuses
+  it('DMs a later wait whose notice a late retry on such a store reached first', async () => {
+    let lag = 0
+    class SequentialStore extends CooldownStore {
+      private readonly memory = new MemoryCooldownStore()
+      async consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
+        const { retryTimestamp: _end, ...verdict } = await this.memory.consume(key, limit)
+        if (!key.includes(':notice:')) vi.setSystemTime(Date.now() + lag)
+        return verdict
+      }
+    }
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.create({ app: TellingApp, controllers: [Commands], providers: [{ provide: CooldownStore, useValue: new SequentialStore() }] }).compile()
+    const sendAt = async (ms: number, late = 0) => {
+      vi.setSystemTime(ms)
+      lag = late
+      const message = messageOf('!draw')
+      await module.dispatch(message)
+      return vi.mocked(message.author.send).mock.calls.length
+    }
+    for (const ms of [0, 200, 400]) await sendAt(ms)
+
+    // The first wait ends at 60 s, the retry's answer comes back a moment late, and once the call at 0 s leaves the
+    // window, a new wait ends at 60.2 s, a tenth of a second after the late one
+    expect([await sendAt(1_000), await sendAt(2_000, 150), await sendAt(60_050), await sendAt(60_100)]).toEqual([1, 0, 0, 1])
   })
 
   it('keeps each author’s wait to themselves', async () => {
