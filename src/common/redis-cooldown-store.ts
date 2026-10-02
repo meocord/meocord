@@ -245,15 +245,23 @@ export class RedisCooldownStore extends CooldownStore {
   private async consumeEach(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
     const releases: (() => Promise<void>)[] = []
     const releaseAll = async () => void (await Promise.all(releases.map(release => release())))
+    // The refusal or failure stands either way: a failed give-back leaves those keys counted, as one script never would
+    const giveBack = () =>
+      Promise.all(
+        releases.map(release =>
+          release().catch((failure: unknown) => logger.debug(`Could not give back a use a refused call counted: ${String(failure)}`)),
+        ),
+      )
     for (const [index, entry] of entries.entries()) {
-      const verdict = await this.consumeMany([entry])
+      let verdict: CooldownBatchVerdict
+      try {
+        verdict = await this.consumeMany([entry])
+      } catch (error) {
+        await giveBack()
+        throw error
+      }
       if (!verdict.allowed) {
-        // The refusal stands either way: a give-back that fails leaves those keys counted, as one script never would
-        await Promise.all(
-          releases.map(release =>
-            release().catch((failure: unknown) => logger.debug(`Could not give back a use a refused call counted: ${String(failure)}`)),
-          ),
-        )
+        await giveBack()
         return { ...verdict, blocked: index }
       }
       if (verdict.release) releases.push(verdict.release)
@@ -316,7 +324,7 @@ function verdictOf(reply: unknown, count: number): CooldownBatchVerdict {
     (allowed === 1 && blocked === -1) || (allowed === 0 && Number.isInteger(blocked) && blocked >= 0 && blocked < count)
   if (!valid || !Number.isFinite(retryAfterMs)) {
     throw new Error(
-      `RedisCooldownStore's script replied ${JSON.stringify(reply)}, where it returns [allowed, retryAfterMs, index]. ` +
+      `RedisCooldownStore's script replied ${JSON.stringify(reply)}, where it returns [allowed, retryAfterMs, index], and when refused the wait's end. ` +
         'Check that the function given to RedisCooldownStore.using resolves to what the client’s eval returns.',
     )
   }

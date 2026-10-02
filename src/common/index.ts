@@ -51,6 +51,7 @@ export type {
   ResponseEditPayload,
   ResponseErrorOptions,
   ResponseFlags,
+  ResponseLockOptions,
   ResponsePayload,
   ResponsePhase,
   ResponseSendOptions,

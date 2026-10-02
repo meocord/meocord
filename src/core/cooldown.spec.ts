@@ -2,6 +2,7 @@ import { ButtonInteraction, ChatInputCommandInteraction, Message, type MessageRe
 import { vi } from 'vitest'
 import { Command, Controller, Cooldown, MessageHandler, On, Once, Pipe, ReactionHandler, UsePipe, Validate } from '@src/decorator/index.js'
 import { handlerCooldowns, methodCooldowns } from '@src/core/cooldown-runner.js'
+import { heldKeys, sweepStore } from '@src/common/cooldown-store.js'
 import { CommandType } from '@src/enum/index.js'
 import { type CooldownOptions, type PipeInterface, type StandardSchemaV1 } from '@src/interface/index.js'
 import {
@@ -489,7 +490,7 @@ describe('a cooldown key', () => {
     for (let call = 0; call < 4; call++) results.push(await module.invoke(Twice, 'twice', slash()).then(() => 'ran', () => 'refused'))
 
     expect(results).toEqual(['ran', 'ran', 'ran', 'refused'])
-    expect(store.size).toBe(1)
+    expect(heldKeys(store)).toBe(1)
   })
 
   // Each records only the calls whose own value it gives; one key would count a channel and a server of one ID together
@@ -614,7 +615,7 @@ describe('MemoryCooldownStore', () => {
 
     vi.advanceTimersByTime(60_000)
 
-    expect(store.size).toBe(1)
+    expect(heldKeys(store)).toBe(1)
   })
 })
 
@@ -798,12 +799,12 @@ describe('MemoryCooldownStore, sweeping', () => {
     vi.advanceTimersByTime(50_000)
     await store.consume('k', { uses: 3, windowMs: 60_000 })
 
-    store.sweep(start + 61_000)
-    expect(store.size).toBe(1)
-    store.sweep(start + 50_000 + 60_000 - 1)
-    expect(store.size).toBe(1)
-    store.sweep(start + 50_000 + 60_000)
-    expect(store.size).toBe(0)
+    sweepStore(store, start + 61_000)
+    expect(heldKeys(store)).toBe(1)
+    sweepStore(store, start + 50_000 + 60_000 - 1)
+    expect(heldKeys(store)).toBe(1)
+    sweepStore(store, start + 50_000 + 60_000)
+    expect(heldKeys(store)).toBe(0)
   })
 
   it('runs one sweeper however many keys it counts', async () => {

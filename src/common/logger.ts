@@ -76,11 +76,11 @@ const redact = (text: string): string => {
  * @remarks
  * A string prints in its tag's colour. Any other argument, a Symbol or a BigInt included, is printed as `console.log`
  * prints it, an object four levels deep: its non-enumerable properties stay unprinted, and an error prints its stack,
- * its own properties and its `cause`. The bot's credentials print as
- * `[redacted]` wherever they appear in a line. A line prints when its level is at or above the threshold: `debug`,
- * then `log` (with `info` and `verbose`, tagged `[INFO]` and `[VERBOSE]`), `warn`, `error`. Warnings and errors print
- * to stderr and the rest to stdout, each in colour only where its stream is a terminal, so no colour code goes to a file or
- * a log collector, unless `FORCE_COLOR` asks for it.
+ * its own properties and its `cause`. The bot's credentials print as `[redacted]` wherever they appear in a line. A
+ * line prints when its level is at or above the threshold: `debug`, then `log` (with `info` and `verbose`, tagged
+ * `[INFO]` and `[VERBOSE]`), `warn`, `error`. Warnings and errors print to stderr and the rest to stdout, each in
+ * colour only where its stream is a terminal, so no colour code goes to a file or a log collector, unless `FORCE_COLOR`
+ * asks for it.
  *
  * @example
  * ```ts

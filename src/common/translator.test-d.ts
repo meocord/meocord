@@ -253,6 +253,7 @@ describe("MeoCord's own texts", () => {
     expectTypeOf<Issues<{ usage: { headng: 'x' }; helpp: { list: 'y' } }>>().toEqualTypeOf<
       `meocord.usage.headng is not one of MeoCord's texts` | `meocord.helpp is not one of MeoCord's texts`
     >()
+    expectTypeOf<Issues<{ usage: 'x' }>>().toEqualTypeOf<`meocord.usage is a group, not a text`>()
     expectTypeOf<Issues<{ usage: { heading: 'Cara pakai: {usage}' }; types: { int: string } }>>().toEqualTypeOf<never>()
   })
 

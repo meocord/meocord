@@ -10,6 +10,7 @@ import {
   Logger,
   MemoryCooldownStore,
 } from '@src/common/index.js'
+import { heldKeys } from '@src/common/cooldown-store.js'
 import { HandlerExecutionContext } from '@src/common/execution-context.js'
 import { COOLDOWN_POLICY, consumeCooldowns, handlerCooldowns, peekCooldowns } from '@src/core/cooldown-runner.js'
 import { Command, Controller, Cooldown } from '@src/decorator/index.js'
@@ -224,7 +225,7 @@ describe('peekCooldowns', () => {
 
     await store.peekMany([{ key: 'never-consumed', limit: { uses: 1, windowMs: 60_000 } }])
 
-    expect(store.size).toBe(0)
+    expect(heldKeys(store)).toBe(0)
   })
 
   it('lets every call through with a store that does not peek, leaving the refusal to consume', async () => {

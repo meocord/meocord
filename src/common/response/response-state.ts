@@ -125,7 +125,11 @@ export interface ResponseErrorOptions {
   visibility?: 'reply' | 'private'
 }
 
-/** Options for {@link ResponseState.lock}. */
+/**
+ * Options for {@link ResponseState.lock}.
+ *
+ * @group Responses
+ */
 export interface ResponseLockOptions {
   /**
    * Which controls to disable: every control on the message (`'all'`, the default), only the one the
@@ -234,7 +238,10 @@ function editedSince(stamp: number | null | undefined, ours: number | undefined)
 interface MessageLock {
   /** The message with no call holding it: before the first lock, then as the last settled call left it. */
   original: Snapshot
-  /** The message's own attachments when it was first locked, which an edit lists to keep them as a loading view's files come and go. */
+  /**
+   * The message's own attachments when it was first locked, which an edit lists to keep them as a loading view's files
+   * come and go.
+   */
   attachments: unknown[]
   /** Whether a loading view put files of its own on it, which putting it back has to leave out. */
   drawn?: boolean
@@ -413,8 +420,9 @@ export interface ResponseState {
   modal(modal: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData): Promise<void>
 
   /**
-   * Presents an error, styled by the application's presenter, and never throws. A delivery Discord refuses, such
-   * as for a missing permission, is logged at debug level; a presenter that fails, or any other failure, as an error.
+   * Presents an error, styled by the application's presenter, and never throws. A delivery Discord refuses for what it
+   * reports, such as a missing permission, is logged at debug level; one whose body Discord could not read, a
+   * presenter that fails, or any other failure, as an error.
    *
    * - Unanswered: a private reply.
    * - A command whose reply is deferred: `'reply'` edits that reply into the error; `'private'` edits a

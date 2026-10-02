@@ -154,6 +154,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'ResponseErrorOptions',
     'ResponseFlags',
     'ResponsePayload',
+    'ResponseLockOptions',
     'ResponsePhase',
     'ResponseSendOptions',
     'ResponseState',

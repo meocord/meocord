@@ -104,7 +104,10 @@ describe('plurals', () => {
   it('falls back to `other` for a category the message lacks', () => {
     const items = createTranslator({
       default: 'en-US',
-      locales: { 'en-US': { items: { one: '{count} item', other: '{count} items' } }, ru: { items: { one: '{count} предмет', other: '{count} предметов' } } },
+      locales: {
+        'en-US': { items: { one: '{count} item', other: '{count} items' } },
+        ru: { items: { one: '{count} предмет', other: '{count} предметов' } },
+      },
     })
 
     // Russian's rules select `few` for 3, which this message has no form for
