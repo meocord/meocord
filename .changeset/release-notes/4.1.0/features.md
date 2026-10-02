@@ -12,11 +12,10 @@
 - **Interceptors** run around a handler, for timing, logging, caching or mapping errors. See [Interceptors](https://meocord.dev/docs/4.1/interceptors).
 - **Exception filters** decide what the user is told when a call throws, and **`UserError`** tells the user about their own mistake: privately for an interaction, in a reply that doesn't ping for a message. See [Exception filters](https://meocord.dev/docs/4.1/exception-filters).
 - **`@Validate`** checks a handler's input with any Standard Schema library, such as zod or valibot, and **pipes** turn it into what the handler works with. See [Validation](https://meocord.dev/docs/4.1/validation).
-- **Stage params**: a guard, interceptor, filter or pipe declares the params it takes, and every `{ provide, params }` for it is checked against them when the code compiles.
+- **Typed options**: a guard, interceptor, filter or pipe declares the params it takes, and every `{ provide, params }` for it is checked against them when the code compiles. `MeoCordOptions` from `meocord/decorator` names what `@MeoCord` takes, for a base two app classes share.
 - **Observers** are told as each call starts and once it settles, with how it ended and how long it took, for metrics, audit logs and tracing. See [Observers](https://meocord.dev/docs/4.1/observers).
 - **Gateway events**: `@On` and `@Once` handle any discord.js client event, on a controller or a service, through the same pipeline. See [Gateway events](https://meocord.dev/docs/4.1/gateway-events).
 - **`HandlerRegistry`** lists every handler with its metadata, for a help command or generated docs. See [Handler discovery](https://meocord.dev/docs/4.1/handler-discovery).
-- **`applyDecorators`** combines decorators into one. See [Custom decorators](https://meocord.dev/docs/4.1/custom-decorators).
 - **Startup checks** name, before the bot logs in, a handler Discord never sends an interaction to, two handlers or builders of which only one could ever run, and a message, reaction or `@On` handler whose intents or partials `clientOptions` lacks, with what to add. A mistake MeoCord refuses as the app loads is reported in one line naming the class and method, and the bot exits 1.
 
 ### Theming
@@ -68,7 +67,7 @@
 
 ### The CLI and builds
 
-- **Command registration**: `commands` in `meocord.config.ts` registers globally or to servers, to a development server under `--dev`, at startup or only with `meocord register`, which registers over REST without logging in. See [Registering commands](https://meocord.dev/docs/4.1/slash-commands#registering-commands).
+- **Command registration**: `commands` in `meocord.config.ts` registers globally or to servers, to a development server under `--dev`, at startup or only with `meocord register`, which registers over REST without logging in. In development, commands unchanged since the last start aren't sent again; `meocord start --dev --force-register` sends them anyway. See [Registering commands](https://meocord.dev/docs/4.1/slash-commands#registering-commands).
 - **`meocord create`** commits the app's lockfile with it, and the app starts with `npm start`. Its samples use 4.1's patterns, and their specs test what each handler answers.
 - **`meocord generate`** writes observers, exception filters, interceptors and pipes, and gives each component a customId from its name. A controller's spec tests what its handler answers.
 - **`meocord start --dev`** rebuilds and restarts the bot on changes to the source, `meocord.config.ts`, `tsconfig.json` and the development `.env` files, one bot at a time, through the bot's own shutdown, and keeps the last good build running while the code doesn't compile. See [The CLI](https://meocord.dev/docs/4.1/cli).
