@@ -23,7 +23,10 @@ import {
   ChannelSelectMenuInteraction,
   Client,
   ClientUser,
+  type ChannelType,
   Collection,
+  DiscordjsErrorCodes,
+  DiscordjsTypeError,
   CommandInteractionOptionResolver,
   ComponentType,
   DMMessageManager,
@@ -511,6 +514,13 @@ function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[
 
 /** The interaction a mock options resolver was given to, for the server a user option's member is in. */
 const optionOwners = new WeakMap<object, { guildId?: unknown; guild?: unknown }>()
+
+/** An error as discord.js's options resolver throws it: a `TypeError` with discord.js's code and message. */
+const optionError = (code: DiscordjsErrorCodes, ...args: unknown[]): DiscordjsTypeError =>
+  new (DiscordjsTypeError as unknown as new (code: DiscordjsErrorCodes, ...args: unknown[]) => DiscordjsTypeError)(code, ...args)
+
+// In discord.js's error codes, though missing from its typings
+const INVALID_CHANNEL_TYPE = 'CommandInteractionOptionInvalidChannelType' as DiscordjsErrorCodes
 
 /** Records the interaction a mock options resolver belongs to. */
 const ownOptions = (interaction: object, options: unknown): void => {
@@ -1869,7 +1879,7 @@ function buildOptionData(
  *   {@link ChatInputOptions}.
  *
  * @remarks
- * Every method is a mock function, and methods not listed, such as `getMessage`, are stubbed automatically. An
+ * Every method is a mock function, and throws discord.js's own errors, each a `DiscordjsTypeError` with its code. An
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
  * and in a server its `member` too. A user option's
  * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
@@ -1905,37 +1915,35 @@ export function createChatInputOptions<Cached extends CacheType = any>(
 
   function resolveOrThrow<U>(name: string, value: U | null, required?: boolean): U | null {
     if (value === null) {
-      if (required === true) throw new Error(`Required option "${name}" not found.`)
+      if (required === true) throw optionError(DiscordjsErrorCodes.CommandInteractionOptionNotFound, name)
       return null
     }
     return value
   }
 
-  function resolveSubEntry(field: string | null, label: string, required?: boolean): string | null {
-    if (field === null) {
-      if (required === true) throw new Error(`No ${label} found.`)
-      return null
-    }
+  function resolveSubEntry(field: string | null, code: DiscordjsErrorCodes, required: boolean): string | null {
+    if (field === null && required) throw optionError(code)
     return field
   }
 
-  // Use a real prototype instance so unlisted methods (e.g. getMessage)
+  // Use a real prototype instance so unlisted methods
   // are found on the prototype chain and auto-stubbed as a mock fn
   const base = Object.create(CommandInteractionOptionResolver.prototype)
 
-  base.getSubcommandGroup = createMockFn((required?: boolean) =>
-    resolveSubEntry(subcommandGroup, 'subcommand group', required),
+  // As in discord.js, a subcommand is required unless told otherwise, and a group is not
+  base.getSubcommandGroup = createMockFn((required = false) =>
+    resolveSubEntry(subcommandGroup, DiscordjsErrorCodes.CommandInteractionOptionNoSubcommandGroup, required),
   )
-  base.getSubcommand = createMockFn<(required?: boolean) => string | null>((required?: boolean) =>
-    resolveSubEntry(subcommand, 'subcommand', required),
+  base.getSubcommand = createMockFn<(required?: boolean) => string | null>((required = true) =>
+    resolveSubEntry(subcommand, DiscordjsErrorCodes.CommandInteractionOptionNoSubcommand, required),
   )
   // As discord.js reads an option by its type: another type throws its type error, required or not. A value whose
   // option may be of the getter's type, as a user may be a mentionable option's, reads as null if the getter doesn't
   // take it, and throws when required
-  const readOption = <V>(name: string, expected: readonly ApplicationCommandOptionType[], takes: (value: object | string | number | boolean) => boolean, required?: boolean): V | null => {
+  const readOption = <V>(name: string, expected: readonly (ApplicationCommandOptionType | '_MESSAGE')[], takes: (value: object | string | number | boolean) => boolean, required?: boolean): V | null => {
     const value = values[name]
     if (value === undefined || value === null) return resolveOrThrow<V>(name, null, required)
-    const typeError = () => new Error(`Option "${name}" is of type: ${optionTypeOf(value)}; expected ${expected.join(', ')}.`)
+    const typeError = () => optionError(DiscordjsErrorCodes.CommandInteractionOptionType, name, optionTypeOf(value), expected.join(', '))
     if (!possibleTypesOf(value).some(type => expected.includes(type))) throw typeError()
     if (takes(value)) return value as V
     if (required === true) throw typeError()
@@ -1980,8 +1988,14 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getRole = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
     readOption(name, [ROLE, MENTIONABLE], plainOr(Role), required),
   )
-  base.getChannel = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
-    readOption(name, [CHANNEL], plainOr(BaseChannel), required),
+  base.getChannel = createMockFn<(name: string, required?: boolean, channelTypes?: readonly ChannelType[]) => { id: string } | null>(
+    (name: string, required?: boolean, channelTypes: readonly ChannelType[] = []) => {
+      const channel = readOption<{ id: string; type?: ChannelType }>(name, [CHANNEL], plainOr(BaseChannel), required)
+      if (channel?.type !== undefined && channelTypes.length > 0 && !channelTypes.includes(channel.type)) {
+        throw optionError(INVALID_CHANNEL_TYPE, name, channel.type, channelTypes.join(', '))
+      }
+      return channel
+    },
   )
   base.getMember = createMockFn<(name: string) => object | null>((name: string) => {
     const value = readOption<object>(name, [USER, MENTIONABLE], plainOr(User, GuildMember))
@@ -1993,9 +2007,17 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getAttachment = createMockFn<(name: string, required?: boolean) => Attachment | null>((name: string, required?: boolean) =>
     readOption(name, [ATTACHMENT], plainOr(Attachment), required),
   )
+  base.get = createMockFn<(name: string, required?: boolean) => CommandInteractionOption | null>((name: string, required?: boolean) => {
+    const value = values[name]
+    return value === undefined || value === null ? resolveOrThrow(name, null, required) : toOptionData(name, value, memberOf)
+  })
+  // A message option is a message context menu's own, never a slash command's
+  base.getMessage = createMockFn<(name: string, required?: boolean) => null>((name: string, required?: boolean) =>
+    readOption(name, ['_MESSAGE'], () => false, required),
+  )
 
   base.getFocused = createMockFn((getFull?: boolean) => {
-    if (focused === null) throw new Error('No focused option found.')
+    if (focused === null) throw optionError(DiscordjsErrorCodes.AutocompleteInteractionOptionNoFocusedOption)
     const option = toOptionData(focused, values[focused] ?? null, memberOf)
     return getFull === true ? { ...option, focused: true } : option.value
   })
