@@ -23,7 +23,8 @@ export type FilterContext = ExecutionContext & {
   withParams(params: Record<string, unknown> | undefined): ExecutionContext
 }
 
-function filterClass(entry: FilterEntry): FilterClass {
+/** The filter class an entry names. */
+export function filterClass(entry: FilterEntry): FilterClass {
   return typeof entry === 'object' ? entry.provide : entry
 }
 

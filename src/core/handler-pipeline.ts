@@ -5,10 +5,11 @@ import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from 
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
 import { deferMisuseError, handlerDefer, nonInteractionHandler, startDefer } from '@src/core/defer.js'
-import { callGuardedHandler, type GuardEntry, handlerGuards, perHandler, runGuards } from '@src/core/guard-runner.js'
+import { callGuardedHandler, type GuardEntry, handlerGuards, isGuardWithParams, perHandler, runGuards } from '@src/core/guard-runner.js'
 import {
   bindShared,
   handlerInterceptors,
+  interceptorClass,
   type InterceptorClass,
   type InterceptorEntry,
   prepareInterceptor,
@@ -26,12 +27,13 @@ import {
   callFilter,
   type FilterContext,
   type FilterEntry,
+  filterClass,
   handlerFilterLevels,
   matchFilter,
   prepareFilter,
 } from '@src/core/filter-runner.js'
 import { type Fallback } from '@src/core/fallback.js'
-import { handlerInputStages, prepareHandlerArgs, preparePipe } from '@src/core/input-runner.js'
+import { handlerInputStages, pipeClass, prepareHandlerArgs, preparePipe } from '@src/core/input-runner.js'
 import { hasObservers, notifyObservers, notifyStart, outcomeOf, responsePhaseOf } from '@src/core/observer-runner.js'
 import { type DispatchOutcome, type DispatchResult } from '@src/interface/observer.interface.js'
 import { handlerCooldowns, methodCooldowns, peekCooldowns } from '@src/core/cooldown-runner.js'
@@ -169,6 +171,46 @@ export function handlerStages(
 
 const stagesByGlobals = new WeakMap<GlobalStages, (prototype: object, methodName: string) => HandlerStages>()
 
+/** The names of a controller's handler methods, of every kind. */
+function handlerMethods(prototype: object): Set<string> {
+  return new Set<string>([
+    ...Object.values(getCommandMap(prototype) ?? {})
+      .flat()
+      .map(command => command.methodName),
+    ...getMessageHandlers(prototype).map(handler => handler.method),
+    ...getReactionHandlers(prototype).map(handler => handler.method),
+    ...getAutocompleteHandlers(prototype).map(handler => handler.methodName),
+    ...getEventHandlers(prototype).map(handler => handler.method),
+  ])
+}
+
+/**
+ * The decorator each class an app runs from its metadata takes: `@Controller()` for `controllers`, and for the global
+ * stages and each handler's guards, interceptors, filters and pipes, theirs. Read before the app is bound, so a class
+ * that cannot be created is refused by name as the app starts rather than at its first call.
+ */
+export function classDecorators(controllers: readonly object[], globals: GlobalStages = NO_GLOBAL_STAGES): Map<unknown, string> {
+  const decorators = new Map<unknown, string>()
+  const add = (cls: unknown, decorator: string) => {
+    if (!decorators.has(cls)) decorators.set(cls, decorator)
+  }
+  const guard = (entry: GuardEntry) => (isGuardWithParams(entry) ? entry.provide : entry)
+  for (const controller of controllers) add(controller, '@Controller()')
+  for (const entry of globals.guards) add(guard(entry), '@Guard()')
+  for (const entry of globals.interceptors) add(interceptorClass(entry), '@Interceptor()')
+  for (const entry of globals.filters) add(filterClass(entry), '@Catch()')
+  for (const controller of controllers) {
+    const prototype = (controller as { prototype: object }).prototype
+    for (const method of handlerMethods(prototype)) {
+      for (const entry of handlerGuards(prototype, method)) add(guard(entry), '@Guard()')
+      for (const entry of handlerInterceptors(prototype, method)) add(interceptorClass(entry), '@Interceptor()')
+      for (const entry of handlerFilterLevels(prototype, method, []).flat()) add(filterClass(entry), '@Catch()')
+      for (const { entry } of handlerInputStages(prototype, method).pipes) add(pipeClass(entry), '@Pipe()')
+    }
+  }
+  return decorators
+}
+
 /**
  * Binds the interceptors, filters and pipes every handler of `controllers` uses, and the global ones, as singletons, so
  * one that cannot be shared, or a filter without `@Catch`, fails at startup; refuses there `@Defer`, `@Validate`,
@@ -183,16 +225,7 @@ export function prepareHandlerStages(container: Container, controllers: readonly
 
   for (const controller of controllers) {
     const prototype = controller.prototype as object
-    const methods = new Set<string>([
-      ...Object.values(getCommandMap(prototype) ?? {})
-        .flat()
-        .map(command => command.methodName),
-      ...getMessageHandlers(prototype).map(handler => handler.method),
-      ...getReactionHandlers(prototype).map(handler => handler.method),
-      ...getAutocompleteHandlers(prototype).map(handler => handler.methodName),
-      ...getEventHandlers(prototype).map(handler => handler.method),
-    ])
-    for (const method of methods) {
+    for (const method of handlerMethods(prototype)) {
       const kind = handlerDefer(prototype, method) ? nonInteractionHandler(prototype, method) : undefined
       if (kind) throw refuse(deferMisuseError(controller.name, method, kind))
       for (const entry of handlerInterceptors(prototype, method)) prepareInterceptor(container, entry)

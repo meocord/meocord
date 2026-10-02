@@ -14,7 +14,9 @@ vi.mock('@src/common/logger.js', async importOriginal => ({
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'test-token' }) }))
 
 const { MeoCordFactory } = await import('@src/core/meocord-factory.js')
-const { MeoCord, Controller, Service, Inject } = await import('@src/decorator/index.js')
+const { MeoCord, Controller, Service, Inject, Command, UseGuard, UseInterceptor, UsePipe } = await import('@src/decorator/index.js')
+const { CommandType } = await import('@src/enum/index.js')
+const { meocordClasses, meocordClassAdvice } = await import('@src/core/meocord-classes.js')
 const { MeoCordTestingModule } = await import('@src/testing/meocord-testing-module.js')
 
 // What a class's constructor types read as when one is an interface, an `import type`, or a class
@@ -28,8 +30,8 @@ const explanation = (cls: string, injectedBy?: string) =>
   `injects import each other${injectedBy ? ` (${injectedBy})` : ''}, or the parameter is typed with an interface ` +
   'or an `import type`. Move what they both need into a third service, or inject the parameter with @Inject(token).'
 
-function appWith(options: { controllers?: any[]; services?: any[]; providers?: any[] }) {
-  @MeoCord({ controllers: options.controllers ?? [], services: options.services, providers: options.providers, clientOptions: { intents: [] } })
+function appWith(options: { controllers?: any[]; services?: any[]; providers?: any[]; guards?: any[]; interceptors?: any[]; filters?: any[] }) {
+  @MeoCord({ controllers: [], ...options, clientOptions: { intents: [] } })
   class App {}
   return App
 }
@@ -127,9 +129,9 @@ describe('a constructor parameter with no runtime type', () => {
 })
 
 describe('a class with no decorator', () => {
-  const undecorated = (cls: string) =>
+  const undecorated = (cls: string, advice = 'Decorate it with @Service(), or give a class from a package a provider in @MeoCord({ providers }).') =>
     `${cls}: its constructor takes parameters, but ${cls} has no decorator, so TypeScript recorded none of their types ` +
-    'and it cannot be created. Decorate it with @Service().'
+    `and it cannot be created. ${advice}`
 
   @Service()
   class Clock {
@@ -149,13 +151,46 @@ describe('a class with no decorator', () => {
   }
 
   it.each([
-    ['MeoCordFactory.create', (services: any[]) => MeoCordFactory.create(appWith({ services }))],
-    ['the testing module', (services: any[]) => MeoCordTestingModule.fromApp(appWith({ services })).compile()],
+    ['MeoCordFactory.create', (options: object) => MeoCordFactory.create(appWith(options))],
+    ['the testing module', (options: object) => MeoCordTestingModule.fromApp(appWith(options)).compile()],
   ])('is refused by %s when its constructor injects, naming it and the decorator to add', (_where, create) => {
-    expect(() => create([Reminders])).toThrow(new Error(undecorated('Reminders')))
+    expect(() => create({ services: [Reminders] })).toThrow(new Error(undecorated('Reminders')))
   })
 
-  it('is refused when it has a constructor of its own over a decorated base, whose types it does not share', () => {
+  it('is refused naming @Controller() when it is listed as a controller', () => {
+    class Panel {
+      constructor(readonly clock: Clock) {}
+      @Command('panel', CommandType.BUTTON)
+      panel() {}
+    }
+    expect(() => MeoCordFactory.create(appWith({ controllers: [Panel] }))).toThrow(new Error(undecorated('Panel', 'Decorate it with @Controller().')))
+  })
+
+  // A guard runs per call, so without this it fails only at the first call; the others as the app is created
+  it.each([
+    ['a guard on a handler', '@Guard()', (cls: any) => ({ controllers: [handlerUsing(UseGuard(cls) as MethodDecorator)] })],
+    ['a global guard', '@Guard()', (cls: any) => ({ guards: [cls] })],
+    ['an interceptor', '@Interceptor()', (cls: any) => ({ controllers: [handlerUsing(UseInterceptor(cls) as MethodDecorator)] })],
+    ['a pipe', '@Pipe()', (cls: any) => ({ controllers: [handlerUsing((UsePipe as any)('value', cls) as MethodDecorator)] })],
+    ['a global filter', '@Catch()', (cls: any) => ({ filters: [cls] })],
+  ])('is refused naming %s\'s decorator, before any call', (_role, decorator, options) => {
+    class Stage {
+      constructor(readonly clock: Clock) {}
+      canActivate() {
+        return true
+      }
+      intercept(_context: unknown, next: { handle(): unknown }) {
+        return next.handle()
+      }
+      transform(value: unknown) {
+        return value
+      }
+      catch() {}
+    }
+    expect(() => MeoCordTestingModule.fromApp(appWith(options(Stage))).compile()).toThrow(new Error(undecorated('Stage', `Decorate it with ${decorator}.`)))
+  })
+
+  it('is refused when it has a constructor of its own over a decorated base, taking more than the base records', () => {
     class Later extends Base {
       constructor(
         clock: Clock,
@@ -184,6 +219,14 @@ describe('a class with no decorator', () => {
       },
     ],
     ['no constructor of its own over a decorated base, whose types it takes', class Inherits extends Base {}],
+    [
+      'a constructor of its own over a decorated base, taking the same types',
+      class Same extends Base {
+        constructor(clock: Clock) {
+          super(clock)
+        }
+      },
+    ],
   ] as [string, new (...args: any[]) => object][])('is created as before with %s', (_case, cls) => {
     const module = MeoCordTestingModule.fromApp(appWith({ services: [cls] })).compile()
     expect(module.get(cls)).toBeInstanceOf(cls)
@@ -199,4 +242,33 @@ describe('a class with no decorator', () => {
     expect(module.get(Decorated).clock).toBe(module.get(Clock))
     expect(module.get(Base).clock).toBe(module.get(Clock))
   })
+
+  // Every exported class the check would refuse is one MeoCord binds itself, or one with advice of its own
+  it("knows every one of MeoCord's exported classes it would refuse, by the class itself", async () => {
+    const entries: Record<string, unknown>[] = await Promise.all([
+      import('@src/core/index.js'),
+      import('@src/decorator/index.js'),
+      import('@src/common/index.js'),
+      import('@src/interface/index.js'),
+      import('@src/enum/index.js'),
+      import('@src/testing/index.js'),
+    ])
+    const refused = entries
+      .flatMap(entry => Object.values(entry))
+      .filter((value): value is new (...args: any[]) => unknown => typeof value === 'function' && /^class[\s{]/.test(Function.prototype.toString.call(value)))
+      .filter(cls => cls.length > ((Reflect.getMetadata('design:paramtypes', cls) as unknown[] | undefined)?.length ?? 0))
+    expect(refused.length).toBeGreaterThan(0)
+    for (const cls of refused) expect([cls.name, meocordClasses().includes(cls) || meocordClassAdvice(cls) !== undefined]).toEqual([cls.name, true])
+  })
 })
+
+/** A controller whose one handler `decorator` decorates. */
+function handlerUsing(decorator: MethodDecorator) {
+  @Controller()
+  class Staged {
+    @Command('staged', CommandType.BUTTON)
+    staged() {}
+  }
+  decorator(Staged.prototype, 'staged', Object.getOwnPropertyDescriptor(Staged.prototype, 'staged')!)
+  return Staged
+}

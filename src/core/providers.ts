@@ -1,6 +1,7 @@
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { injectedTokens, undecoratedConstructor, untypedParameter } from '@src/core/guard-runner.js'
+import { meocordClassAdvice, meocordClasses } from '@src/core/meocord-classes.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import {
@@ -171,7 +172,8 @@ export function assertProvided(container: Container, providers: ProviderMap, cla
 export function reachableClasses(roots: readonly unknown[], providers: ProviderMap): AnyClass[] {
   const found: AnyClass[] = []
   const visit = (token: unknown) => {
-    if (!isAppClassToken(token) || found.includes(token)) return
+    // MeoCord's own classes it makes itself, which no walk treats as the app's
+    if (!isAppClassToken(token) || meocordClasses().includes(token) || found.includes(token)) return
     const provider = providers.get(token)
     if (provider && !(isClassProvider(provider) && provider.useClass === token)) return
     found.push(token)
@@ -189,14 +191,17 @@ export function reachableClasses(roots: readonly unknown[], providers: ProviderM
  * Throws for the first of `classes` that cannot be created: one with no decorator whose constructor injects, or one
  * with a parameter of no runtime type and no `@Inject` token, naming the classes that inject it, the likely other half
  * when two classes import each other. Either way, rather than leaving inversify's error to point at compiler options.
- * `meocordClasses` are MeoCord's own, which it makes itself.
+ * `decorators` names the decorator each controller and stage class takes; any other class is a service.
  */
-export function assertTypedParameters(classes: readonly AnyClass[], meocordClasses: readonly unknown[]): void {
+export function assertTypedParameters(classes: readonly AnyClass[], decorators: ReadonlyMap<unknown, string>): void {
   for (const cls of classes) {
-    if (!meocordClasses.includes(cls) && undecoratedConstructor(cls)) {
+    const instead = meocordClassAdvice(cls)
+    if (instead && undecoratedConstructor(cls)) throw refuse(new Error(`${cls.name}: MeoCord does not inject it; ${instead}.`))
+    if (undecoratedConstructor(cls)) {
+      const decorator = decorators.get(cls)
       throw refuse(new Error(
         `${cls.name}: its constructor takes parameters, but ${cls.name} has no decorator, so TypeScript recorded none of ` +
-          'their types and it cannot be created. Decorate it with @Service().',
+          `their types and it cannot be created. ${decorator ? `Decorate it with ${decorator}.` : 'Decorate it with @Service(), or give a class from a package a provider in @MeoCord({ providers }).'}`,
       ))
     }
     const index = untypedParameter(cls)

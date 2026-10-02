@@ -64,14 +64,16 @@ export function injectedTokens(cls: object): unknown[] {
 }
 
 /**
- * Whether a class's own constructor takes parameters TypeScript recorded no types for, as for a class with no
- * decorator. Its own record, not one inherited from a decorated base whose constructor it replaces; a parameter with a
- * default value and a rest parameter are not counted in `length`, so they are not asked for.
+ * Whether a class's constructor takes more parameters than the types inversify will read for it: its recorded
+ * `design:paramtypes`, its own or a decorated base's, and its `@Inject` tokens, as for a class with no decorator. A
+ * parameter with a default value and a rest parameter are not in `length`, so they are not asked for.
  */
 export function undecoratedConstructor(cls: abstract new (...args: any[]) => unknown): boolean {
-  if (cls.length === 0 || Reflect.getOwnMetadata(MetadataKey.ParamTypes, cls) !== undefined) return false
-  const metadata = Reflect.getOwnMetadata(INVERSIFY_CLASS_METADATA, cls) as { constructorArguments?: (InjectedElement | null | undefined)[] } | undefined
-  return Array.from({ length: cls.length }, (_, index) => metadata?.constructorArguments?.[index]?.value).some(token => token === undefined)
+  const types = (Reflect.getMetadata(MetadataKey.ParamTypes, cls) as unknown[] | undefined) ?? []
+  const metadata = Reflect.getMetadata(INVERSIFY_CLASS_METADATA, cls) as { constructorArguments?: (InjectedElement | null | undefined)[] } | undefined
+  return Array.from({ length: Math.max(cls.length - types.length, 0) }, (_, index) => metadata?.constructorArguments?.[types.length + index]?.value).some(
+    token => token === undefined,
+  )
 }
 
 /**
