@@ -44,13 +44,14 @@ import {
   type InterceptorInterface,
   type MessageCommandOptions,
   type ThemeOverride,
+  type ThemeResolver,
   type ThemeResolvers,
 } from '@src/interface/index.js'
-import { ThemeCache } from '@src/core/theme-resolvers.js'
+import { ThemeCache, type ThemeResolverClass, themeResolverClass } from '@src/core/theme-resolvers.js'
 import { claimAmbientAppTheme, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
-import { assertValidTheme } from '@src/core/theme-validation.js'
+import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
 import {
   assertDistinctCommands,
@@ -786,7 +787,7 @@ export class TestingModuleBuilder {
   /** The layer `overrideTheme` gives, over the app's `@MeoCord({ theme })`. */
   private themeOverride?: ThemeOverride
   /** The resolvers `overrideThemeFor` gives, in place of the app's `@MeoCord({ themeFor })`. */
-  private themeForOverride?: { resolvers: ThemeResolvers | undefined }
+  private themeForOverride?: { resolvers: ThemeResolvers | ThemeResolverClass | undefined }
 
   constructor(
     private readonly options: TestingModuleOptions,
@@ -898,19 +899,23 @@ export class TestingModuleBuilder {
   /**
    * Replaces the app's `@MeoCord({ themeFor })` for this module, or removes it with `undefined`. The app's
    * `themeCache` and `themeForTimeoutMs` still apply, and the results are cached in {@link TestingModule.themeCache},
-   * as the bot caches them. A mock resolver shows each lookup.
+   * as the bot caches them. A mock resolver shows each lookup. A class implementing {@link ThemeResolver} is bound as
+   * the app binds one, so `overrideProvider` replaces it or what it injects.
    *
-   * @param resolvers - The server's and the user's resolvers, or `undefined` for none.
-   * @throws TypeError when a resolver is not a function, or is neither `guild` nor `user`.
+   * @param resolvers - The server's and the user's resolvers, a class implementing `ThemeResolver`, or `undefined`
+   *   for none.
+   * @throws TypeError when a resolver is not a function, or is neither `guild` nor `user`, or a class has neither
+   *   method.
    * @example
    * ```ts
    * const guild = vi.fn(() => ({ colors: { primary: '#26A042' as const } }))
    * const module = MeoCordTestingModule.create({ app: App, controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
    * ```
    */
-  overrideThemeFor(resolvers: ThemeResolvers | undefined): TestingModuleBuilder {
-    assertResolvers(resolvers)
-    this.themeForOverride = { resolvers: resolvers && { ...resolvers } }
+  overrideThemeFor(resolvers: ThemeResolvers | (new (...args: any[]) => ThemeResolver) | undefined): TestingModuleBuilder {
+    const problem = resolvers === undefined ? undefined : themeForProblem(resolvers, 'overrideThemeFor', 'a class implementing ThemeResolver, or undefined for none.')
+    if (problem) throw new TypeError(problem)
+    this.themeForOverride = { resolvers: typeof resolvers === 'function' ? resolvers : resolvers && { ...resolvers } }
     return this
   }
 
@@ -975,9 +980,12 @@ export class TestingModuleBuilder {
     // The app's own store, as the bot binds it, whether the module is given the app or built from it; none when the
     // test provides the CooldownStore, so nothing builds the app's or asks for what it injects
     const store = providers.has(CooldownStore) ? undefined : appOptions?.cooldownStore
+    // The themeFor class this module runs, the app's or overrideThemeFor's, bound on its own as the app binds it
+    const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
     const roots = [
       ...(this.options.controllers ?? []),
       ...services,
+      ...(themeResolver ? [themeResolver] : []),
       ...(store ? [store] : []),
       ...(this.options.app ? appObservers(this.options.app) : []),
       ...(this.options.observers ?? []),
@@ -1056,10 +1064,11 @@ export class TestingModuleBuilder {
       Reflect.defineMetadata(META.container, container, ctrl)
     }
     for (const service of services) bindClass(service)
+    if (themeResolver) bindClass(themeResolver)
 
     // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
     // controllers, and what they inject; factories resolve in the same order
-    const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(this.options.controllers ?? [])], {
+    const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(themeResolver ? [themeResolver] : []), ...(this.options.controllers ?? [])], {
       followOwnTokens: false,
     })
     appClasses.push(
@@ -1093,6 +1102,7 @@ export class TestingModuleBuilder {
       ...(boundStore ? [boundStore] : []),
       ...providers.keys(),
       ...services,
+      ...(themeResolver ? [themeResolver] : []),
       ...(this.options.controllers ?? []),
       ...observers,
     ]).map(token => ({
@@ -1238,19 +1248,5 @@ export class MeoCordTestingModule {
       { app, controllers, providers: options.providers, observers: options.observers, shutdownTimeout: options.shutdownTimeout },
       { providers: appOptions.providers ?? [], services: appOptions.services ?? [] },
     )
-  }
-}
-
-/** Refuses resolvers the runtime cannot call, as `@MeoCord({ themeFor })` does. */
-function assertResolvers(resolvers: unknown): void {
-  if (resolvers === undefined) return
-  if (resolvers === null || typeof resolvers !== 'object') {
-    throw new TypeError('overrideThemeFor takes { guild?, user? }, each a function returning part of a theme, or undefined for none.')
-  }
-  for (const [key, resolver] of Object.entries(resolvers)) {
-    if (key !== 'guild' && key !== 'user') throw new TypeError(`overrideThemeFor has no resolver '${key}': give guild or user.`)
-    if (resolver !== undefined && typeof resolver !== 'function') {
-      throw new TypeError(`overrideThemeFor: ${key} must be a function returning part of a theme.`)
-    }
   }
 }

@@ -52,6 +52,7 @@ import {
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { registerClientTheme } from '@src/core/theme-runtime.js'
+import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
 import { endFailedShard } from '@src/core/shard-exit.js'
@@ -182,10 +183,13 @@ export class MeoCordFactory {
     // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
     assertDistinctCommands(options.controllers)
     const providers = providerMap(options.providers ?? [], '@MeoCord({ providers })')
+    // A themeFor class is bound on its own, as the cooldown store is, and resolved like a service
+    const themeResolver = themeResolverClass(options.themeFor)
     // The app's classes and every class they inject, which the container binds
     const roots = [
       ...options.controllers,
       ...(options.services ?? []),
+      ...(themeResolver ? [themeResolver] : []),
       ...(options.cooldownStore ? [options.cooldownStore] : []),
       ...appObservers(target as object),
     ]
@@ -273,6 +277,7 @@ export class MeoCordFactory {
     for (const svc of (options.services ?? []) as any[]) {
       bindDependencies(container, svc, providers)
     }
+    if (themeResolver) bindDependencies(container, themeResolver, providers)
     // Observers are services too: bound here so their lifecycle hooks run in dependency order
     const observers = appObservers(target as object)
     for (const observer of observers) bindDependencies(container, observer, providers)
@@ -281,7 +286,7 @@ export class MeoCordFactory {
     const order = resolutionOrder(
       container,
       providers,
-      [...providers.keys(), ...(options.services ?? []), ...options.controllers, ...observers],
+      [...providers.keys(), ...(options.services ?? []), ...(themeResolver ? [themeResolver] : []), ...options.controllers, ...observers],
       { followOwnTokens: false },
     )
     appClasses.push(

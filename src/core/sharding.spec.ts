@@ -54,13 +54,14 @@ type Loaded = Awaited<ReturnType<typeof load>>
 
 function appClass(
   loaded: Loaded,
-  options: { controllers?: any[]; services?: any[]; providers?: any[]; intents?: number[]; cooldownStore?: any } = {},
+  options: { controllers?: any[]; services?: any[]; providers?: any[]; intents?: number[]; cooldownStore?: any; themeFor?: any } = {},
 ) {
   @loaded.MeoCord({
     controllers: options.controllers ?? [],
     services: options.services,
     providers: options.providers,
     cooldownStore: options.cooldownStore,
+    themeFor: options.themeFor,
     clientOptions: { intents: options.intents ?? [] },
   })
   class App {}
@@ -432,6 +433,47 @@ describe('sharding', () => {
       await listener(client)
 
       expect(register).not.toHaveBeenCalled()
+    })
+
+    it('gives each shard of one app its own themeFor class and cache', async () => {
+      const loaded = await load()
+      const asked: string[] = []
+      let made = 0
+
+      @loaded.Service()
+      class Themes {
+        readonly shard = ++made
+        guild({ guild }: { guild: { id: string } }) {
+          asked.push(`shard ${this.shard} asked for ${guild.id}`)
+          return undefined
+        }
+      }
+
+      @loaded.Controller()
+      class Ping {
+        @loaded.Command('ping', CommandType.SLASH)
+        ping() {}
+      }
+
+      const clients: Client[] = []
+      vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
+        clients.push(this)
+        return Promise.resolve('token')
+      })
+      // Two processes' apps, as two shards of one bot are
+      const App = appClass(loaded, { controllers: [Ping], themeFor: Themes })
+      await loaded.MeoCordFactory.create(App).start()
+      await loaded.MeoCordFactory.create(App).start()
+      const ping = () => {
+        const interaction = Object.create(loaded.discord.ChatInputCommandInteraction.prototype)
+        return Object.assign(interaction, { commandName: 'ping', guildId: '1', user: { id: '2' }, isChatInputCommand: () => true, isRepliable: () => true })
+      }
+      for (const client of [...clients, ...clients]) {
+        await Promise.all(client.listeners('interactionCreate').map(listener => listener(ping())))
+      }
+
+      expect(made).toBe(2)
+      expect(asked).toEqual(['shard 1 asked for 1', 'shard 2 asked for 1'])
     })
 
     it('marks primary only the shard holding shard 0', async () => {

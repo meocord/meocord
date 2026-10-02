@@ -251,3 +251,57 @@ export interface ThemeResolvers {
   /** The theme for calls from a user, in a server or a DM. */
   user?: (target: UserThemeTarget) => ThemeOverride | null | undefined | Promise<ThemeOverride | null | undefined>
 }
+
+/**
+ * A class that looks themes up with the app's services, as `@MeoCord({ themeFor })` takes it in place of
+ * {@link ThemeResolvers}.
+ *
+ * Its methods are the resolvers: `guild()` for a server's theme and `user()` for a user's, each optional. The class is
+ * resolved from the app's container, so its constructor injects the app's services and providers, and it runs
+ * `OnReady` and `OnShutdown` as a service does.
+ *
+ * @remarks
+ * Its results are cached, timed out and logged as the functions' are; inject `ThemeCache` to clear one when the choice
+ * behind it changes.
+ *
+ * @example
+ * ```ts
+ * @Service()
+ * export class PrefsService {
+ *   private readonly choices = new Map<string, ThemeOverride>()
+ *
+ *   constructor(private readonly themes: ThemeCache) {}
+ *
+ *   async themeOf(userId: string): Promise<ThemeOverride | undefined> {
+ *     return this.choices.get(userId)
+ *   }
+ *
+ *   async choose(userId: string, theme: ThemeOverride) {
+ *     this.choices.set(userId, theme)
+ *     // The user's next call looks their theme up again
+ *     this.themes.invalidateUser(userId)
+ *   }
+ * }
+ *
+ * @Service()
+ * export class UserThemes implements ThemeResolver {
+ *   constructor(private readonly prefs: PrefsService) {}
+ *
+ *   user({ user }: UserThemeTarget) {
+ *     return this.prefs.themeOf(user.id)
+ *   }
+ * }
+ *
+ * @MeoCord({ controllers: [], clientOptions: { intents: [] }, themeFor: UserThemes })
+ * export class App {}
+ * ```
+ *
+ * @group Configuration
+ * @category App options
+ */
+export interface ThemeResolver {
+  /** The theme for calls from a server; not asked for a call from a DM. */
+  guild?(target: GuildThemeTarget): ThemeOverride | null | undefined | Promise<ThemeOverride | null | undefined>
+  /** The theme for calls from a user, in a server or a DM. */
+  user?(target: UserThemeTarget): ThemeOverride | null | undefined | Promise<ThemeOverride | null | undefined>
+}

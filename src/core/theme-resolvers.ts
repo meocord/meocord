@@ -1,5 +1,5 @@
 import { Logger } from '@src/common/logger.js'
-import { type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
+import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@src/interface/index.js'
 import { themeProblems } from '@src/core/theme-validation.js'
 import { copyLayer, outsideThemeScope } from '@src/core/theme-scope.js'
 
@@ -41,9 +41,17 @@ class Burst {
   }
 }
 
+/** A class `@MeoCord({ themeFor })` takes, resolved from the app's container. */
+export type ThemeResolverClass = new (...args: any[]) => ThemeResolver
+
+/** The class `themeFor` names, which the app binds and runs the hooks of, or `undefined` for functions or none. */
+export function themeResolverClass(themeFor: ThemeResolvers | ThemeResolverClass | undefined): ThemeResolverClass | undefined {
+  return typeof themeFor === 'function' ? themeFor : undefined
+}
+
 /** How `@MeoCord` configures its resolvers' caches. */
 export interface ThemeResolverOptions {
-  resolvers: ThemeResolvers
+  resolvers: ThemeResolvers | ThemeResolverClass
   cache?: { ttlSeconds?: number; maxGuilds?: number; maxUsers?: number }
   timeoutMs?: number
 }
@@ -244,9 +252,25 @@ export interface ThemeResolverCaches {
   user?: ResolverCache
 }
 
-/** The caches for an app's `themeFor`, or `undefined` when it sets no resolver. */
-export function resolverCaches(options: ThemeResolverOptions | undefined): ThemeResolverCaches | undefined {
-  const { guild, user } = options?.resolvers ?? {}
+/**
+ * A resolver class's methods as functions, each asking the instance `instance` gives when it is called, so the class
+ * is made only once a call needs it, and a method an override's instance lacks gives no theme.
+ */
+function classResolvers(cls: ThemeResolverClass, instance: () => ThemeResolver): ThemeResolvers {
+  const { guild, user } = cls.prototype as ThemeResolver
+  return {
+    ...(typeof guild === 'function' && { guild: target => instance().guild?.(target) }),
+    ...(typeof user === 'function' && { user: target => instance().user?.(target) }),
+  }
+}
+
+/** The caches for an app's `themeFor`, or `undefined` when it sets no resolver; `instanceOf` gives a class's instance. */
+export function resolverCaches(
+  options: ThemeResolverOptions | undefined,
+  instanceOf: (cls: ThemeResolverClass) => ThemeResolver,
+): ThemeResolverCaches | undefined {
+  const cls = themeResolverClass(options?.resolvers)
+  const { guild, user } = cls ? classResolvers(cls, () => instanceOf(cls)) : ((options?.resolvers as ThemeResolvers | undefined) ?? {})
   if (!guild && !user) return undefined
   const ttlMs = (options?.cache?.ttlSeconds ?? DEFAULT_THEME_TTL_SECONDS) * 1000
   const timeoutMs = options?.timeoutMs ?? DEFAULT_THEME_FOR_TIMEOUT_MS
