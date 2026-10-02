@@ -47,15 +47,11 @@ export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator
 
 const logger = new Logger('SetMetadata')
 
-/** The keys MeoCord and inversify keep their own metadata under, which a user's value would replace. */
-const RESERVED_KEYS: ReadonlySet<string> = new Set([
-  MetadataKey.Injectable,
-  MetadataKey.Container,
-  MetadataKey.AppOptions,
-  MetadataKey.ParamTypes,
-  MetadataKey.Guards,
-  MetadataKey.CommandType,
-])
+/** The prefix of every key MeoCord keeps its own metadata under. */
+const MEOCORD_PREFIX = 'meocord:'
+
+/** The keys dependency injection reads a class's setup from, which a user's value would replace. */
+const INJECTION_KEYS: ReadonlySet<string> = new Set([MetadataKey.Injectable, MetadataKey.ParamTypes])
 
 /**
  * Attaches a value to a controller or a handler under a string key of your choosing.
@@ -66,8 +62,8 @@ const RESERVED_KEYS: ReadonlySet<string> = new Set([
  * @param metadataKey - The key to store the value under.
  * @param metadataValue - The value to store.
  * @returns A decorator for a class or a method.
- * @throws Error when `metadataKey` is one MeoCord reserves, such as `'guards'`, as the decorator applies: a value
- *   there would replace what the framework stores.
+ * @throws Error when `metadataKey` begins with `meocord:`, where MeoCord keeps its own metadata, or is a key dependency
+ *   injection reads, as the decorator applies: a value there would replace what the framework stores.
  *
  * @example
  * ```ts
@@ -91,12 +87,16 @@ export function SetMetadata<V = any>(metadataKey: string, metadataValue: V): Cla
   warnDeprecated(logger, 'SetMetadata', 'createMetadata')
   return function (target: any, propertyKey?: string | symbol): void {
     // Checked where it applies, so the refusal names the handler or controller
-    if (RESERVED_KEYS.has(metadataKey)) {
+    const owner = metadataKey.startsWith(MEOCORD_PREFIX)
+      ? `MeoCord keeps its own metadata under keys beginning "${MEOCORD_PREFIX}"`
+      : INJECTION_KEYS.has(metadataKey)
+        ? 'dependency injection reads how to make the class from it'
+        : undefined
+    if (owner) {
       throw refuse(
         new Error(
-          `${decoratedName(target, propertyKey)}: SetMetadata cannot use the key "${metadataKey}": MeoCord stores its own ` +
-            `metadata under it, and a value there would replace it. Choose another key, or declare the decorator with ` +
-            `createMetadata, whose key is unique.`,
+          `${decoratedName(target, propertyKey)}: SetMetadata cannot use the key "${metadataKey}": ${owner}, and a value ` +
+            `there would replace it. Choose another key, or declare the decorator with createMetadata, whose key is unique.`,
         ),
       )
     }

@@ -1,13 +1,14 @@
-import { type ChatInputCommandInteraction } from 'discord.js'
+import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js'
 import { applyDecorators, SetMetadata } from '@src/common/index.js'
-import { Command, Controller, UseGuard, Guard } from '@src/decorator/index.js'
-import { CommandType } from '@src/enum/index.js'
+import { Command, CommandBuilder, Controller, UseGuard, Guard } from '@src/decorator/index.js'
+import { getCommandMap } from '@src/decorator/controller.decorator.js'
+import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
-import { inspectHandler } from '@src/testing/index.js'
+import { createExecutionContext, createMockInteraction, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
 
 describe('SetMetadata', () => {
-  it.each(['guards', 'commandType', 'design:paramtypes', 'inversify:container', 'meocord:app-options', '@inversifyjs/core/classIsInjectableFlagReflectKey'])(
-    'refuses the key MeoCord keeps its own metadata under, %s',
+  it.each(['meocord:guards', 'meocord:anything', MetadataKey.Injectable, MetadataKey.ParamTypes])(
+    'refuses %s, a key MeoCord or dependency injection keeps its own metadata under',
     key => {
       const applied = () => {
         @SetMetadata(key, [])
@@ -19,23 +20,50 @@ describe('SetMetadata', () => {
     },
   )
 
-  // Written above @UseGuard, a value under 'guards' would replace the list dispatch reads, so the guard would never run
-  it('cannot empty the guards a handler runs', () => {
+  // 'guards' was a key of MeoCord's own; a 4.0 bot that set it keeps its value, and its guards still run
+  it.each(['above', 'below'])("stores 'guards' written %s @UseGuard, and the handler's guards still run", async order => {
+    const ran: string[] = []
     @Guard()
-    class Deny implements GuardInterface {
+    class Audit implements GuardInterface {
       canActivate() {
-        return false
+        ran.push('Audit')
+        return true
       }
     }
+    @Controller()
+    class Shop {
+      @Command('buy', CommandType.SLASH)
+      @applyDecorators(...(order === 'above' ? [SetMetadata('guards', ['staff']), UseGuard(Audit)] : [UseGuard(Audit), SetMetadata('guards', ['staff'])]))
+      async buy(_interaction: ChatInputCommandInteraction) {}
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Shop] }).compile()
 
-    expect(() => {
-      class Controller {
-        @SetMetadata('guards', [])
-        @UseGuard(Deny)
-        async ping() {}
+    const { ran: handlerRan } = await module.invoke(Shop, 'buy', createMockInteraction(ChatInputCommandInteraction, { commandName: 'buy' }))
+
+    expect(handlerRan).toBe(true)
+    expect(ran).toEqual(['Audit'])
+    expect(createExecutionContext(Shop, 'buy').get('guards')).toEqual(['staff'])
+  })
+
+  // On a builder class, 'commandType' was the key @CommandBuilder kept the command's type under
+  it("stores 'commandType', leaving the type @CommandBuilder gives its builder", () => {
+    @SetMetadata('commandType', CommandType.BUTTON)
+    @CommandBuilder(CommandType.SLASH)
+    class PingBuilder {
+      build() {
+        return new SlashCommandBuilder().setName('ping').setDescription('Ping')
       }
-      return Controller
-    }).toThrow('SetMetadata cannot use the key "guards"')
+    }
+    @Controller()
+    class Pinger {
+      @Command('ping', PingBuilder)
+      @SetMetadata('commandType', 'mine')
+      async ping(_interaction: ChatInputCommandInteraction) {}
+    }
+
+    expect(getCommandMap(Pinger.prototype).ping?.[0]?.type).toBe(CommandType.SLASH)
+    expect(Reflect.getMetadata('commandType', PingBuilder)).toBe(CommandType.BUTTON)
+    expect(createExecutionContext(Pinger, 'ping').get('commandType')).toBe('mine')
   })
 
   it('stores any other key', () => {
@@ -45,6 +73,38 @@ describe('SetMetadata', () => {
     }
 
     expect(Reflect.getMetadata('audit', Tagged.prototype, 'method')).toBe(true)
+  })
+})
+
+// MeoCord's own keys, as the framework writes and reads them
+describe('MetadataKey', () => {
+  it('names the keys MeoCord keeps its guard list, command type and container under', () => {
+    @Guard()
+    class Allow implements GuardInterface {
+      canActivate() {
+        return true
+      }
+    }
+    @CommandBuilder(CommandType.SLASH)
+    class PingBuilder {
+      build() {
+        return new SlashCommandBuilder().setName('ping').setDescription('Ping')
+      }
+    }
+    @Controller()
+    class Pinger {
+      @Command('ping', PingBuilder)
+      @UseGuard(Allow)
+      async ping(_interaction: ChatInputCommandInteraction) {}
+    }
+    MeoCordTestingModule.create({ controllers: [Pinger] }).compile()
+
+    expect(Reflect.getMetadata(MetadataKey.Guards, Pinger.prototype, 'ping')).toEqual([Allow])
+    expect(Reflect.getMetadata(MetadataKey.CommandType, PingBuilder)).toBe(CommandType.SLASH)
+    expect(Reflect.getMetadata(MetadataKey.Container, Pinger)).toBeDefined()
+    for (const key of [MetadataKey.Guards, MetadataKey.CommandType, MetadataKey.Container, MetadataKey.AppOptions]) {
+      expect(key.startsWith('meocord:')).toBe(true)
+    }
   })
 })
 

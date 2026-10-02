@@ -1,5 +1,6 @@
 /**
- * The reflect-metadata keys MeoCord reads and writes, its own and the ones Inversify and TypeScript set.
+ * The reflect-metadata keys MeoCord reads and writes: its own, all under `meocord:`, and the ones Inversify and
+ * TypeScript set.
  *
  * @deprecated Since 4.1, and removed in the next major version (5.0). Internal: nothing replaces it. Read and write
  * your own metadata with `createMetadata` and `ExecutionContext.get`.
@@ -16,7 +17,7 @@ export const enum MetadataKey {
    * Stores the Inversify `Container` instance on a controller class.
    * Set by `MeoCordFactory.create()`, read by `@UseGuard` at runtime.
    */
-  Container = 'inversify:container',
+  Container = 'meocord:container',
 
   /**
    * Stores the `@MeoCord()` options object on the app class.
@@ -34,10 +35,10 @@ export const enum MetadataKey {
    * The guards `@UseGuard` runs before a method, stored on the method: class-level guards first,
    * then method-level ones, in the order they run.
    */
-  Guards = 'guards',
+  Guards = 'meocord:guards',
 
   /**
    * Stores the `CommandType` on a `@CommandBuilder` class.
    */
-  CommandType = 'commandType',
+  CommandType = 'meocord:command-type',
 }

@@ -25,7 +25,7 @@ describe('what a refused decorator names', () => {
   it.each([
     ['@Cooldown', () => Cooldown({ seconds: 0 }), 'Shop.buy: @Cooldown needs a number of seconds from 0.001 to 4320000000000, not 0.'],
     ['@Validate', () => Validate({} as never), 'Shop.buy: @Validate takes a Standard Schema'],
-    ['SetMetadata', () => SetMetadata('guards', []), 'Shop.buy: SetMetadata cannot use the key "guards"'],
+    ['SetMetadata', () => SetMetadata('meocord:guards', []), 'Shop.buy: SetMetadata cannot use the key "meocord:guards"'],
   ])('%s names the handler it is on', (_name, decorator, message) => {
     const error = refusalOf(decorator() as MethodDecorator)
 

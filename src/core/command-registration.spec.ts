@@ -6,7 +6,7 @@ import { ApplicationCommandType, EntryPointCommandHandlerType, type PrimaryEntry
 import { createTranslator } from '@src/common/index.js'
 import { vi } from 'vitest'
 import { Command, CommandBuilder, Controller } from '@src/decorator/index.js'
-import { CommandType } from '@src/enum/index.js'
+import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
 import { collectCommands, planTargets, registerCommands } from '@src/core/command-registration.js'
 
@@ -47,7 +47,7 @@ describe('collectCommands', () => {
     class SettingsBuilder {
       build = () => builder as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, SettingsBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, SettingsBuilder)
 
     @Controller()
     class SettingsController {
@@ -69,7 +69,7 @@ describe('collectCommands', () => {
     class PingBuilder {
       build = () => builderFor('ping') as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, PingBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, PingBuilder)
 
     @Controller()
     class PingController {
@@ -96,7 +96,7 @@ describe('collectCommands', () => {
           },
         }) as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, BrokenBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, BrokenBuilder)
 
     @Controller()
     class BrokenController {
@@ -142,8 +142,8 @@ describe('collectCommands', () => {
       class SecondBuilder {
         build = () => menu(second) as any
       }
-      Reflect.defineMetadata('commandType', CommandType.CONTEXT_MENU, FirstBuilder)
-      Reflect.defineMetadata('commandType', CommandType.CONTEXT_MENU, SecondBuilder)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.CONTEXT_MENU, FirstBuilder)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.CONTEXT_MENU, SecondBuilder)
 
       @Controller()
       class ProfileController {
@@ -179,8 +179,8 @@ describe('collectCommands', () => {
     class SecondBuilder {
       build = () => ({ toJSON: () => ({ name: 'settings', options: [] }) }) as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, FirstBuilder)
-    Reflect.defineMetadata('commandType', CommandType.SLASH, SecondBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, FirstBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, SecondBuilder)
 
     @Controller()
     class SettingsController {
@@ -201,7 +201,7 @@ describe('collectCommands', () => {
       class RawBuilder {
         build = () => body as any
       }
-      Reflect.defineMetadata('commandType', CommandType.SLASH, RawBuilder)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, RawBuilder)
 
       @Controller()
       class RawController {
@@ -404,7 +404,7 @@ describe('registerCommands', () => {
     class BrokenBuilder {
       build = () => ({ toJSON: () => { throw new Error('bad') } }) as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, BrokenBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, BrokenBuilder)
     @Controller()
     class BrokenController {
       @Command('broken', BrokenBuilder as any)
@@ -725,7 +725,7 @@ function controllerBuilding(entries: { name: string; body: object; method?: stri
     class RawBuilder {
       build = () => ({ toJSON: () => body }) as any
     }
-    Reflect.defineMetadata('commandType', CommandType.SLASH, RawBuilder)
+    Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, RawBuilder)
     Object.defineProperty(BuiltController.prototype, method, { value: async () => {}, writable: true, configurable: true })
     Command(name, RawBuilder as any)(BuiltController.prototype, method, Object.getOwnPropertyDescriptor(BuiltController.prototype, method)! as any)
   }
@@ -771,7 +771,7 @@ describe('registration, message by message', () => {
       class BrokenBuilder {
         build = () => ({ toJSON: () => { throw new Error('description is required') } }) as any
       }
-      Reflect.defineMetadata('commandType', CommandType.SLASH, BrokenBuilder)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, BrokenBuilder)
       @Controller()
       class BrokenController {
         @Command('broken', BrokenBuilder as any)
@@ -816,7 +816,7 @@ describe('registration, message by message', () => {
       class SharedBuilder {
         build = () => builder as any
       }
-      Reflect.defineMetadata('commandType', CommandType.SLASH, SharedBuilder)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, SharedBuilder)
       @Controller()
       class SettingsController {
         // The subcommand first, so the command is first met under a route that is not its name
@@ -837,8 +837,8 @@ describe('registration, message by message', () => {
         }
       const First = broken('one')
       const Second = broken('two')
-      Reflect.defineMetadata('commandType', CommandType.SLASH, First)
-      Reflect.defineMetadata('commandType', CommandType.SLASH, Second)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, First)
+      Reflect.defineMetadata(MetadataKey.CommandType, CommandType.SLASH, Second)
       @Controller()
       class BrokenController {
         @Command('first', First as any)
