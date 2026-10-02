@@ -57,7 +57,7 @@
 
 - **`invoke` and `dispatch`** run a handler, or route an interaction, a message or a reaction, through everything the bot runs around it, and **`getResponse`** reports what the user was sent. See [Invoke and dispatch](https://meocord.dev/docs/4.1/invoke-and-dispatch).
 - **`MeoCordTestingModule.fromApp(App)`** builds a module from the whole app, wired as the bot wires it, with `override*()` to replace a part. `init({ ready: true })`, `close()` and `emit()` run the lifecycle hooks and gateway events. See [Testing](https://meocord.dev/docs/4.1/testing).
-- **Mocks** answer as discord.js does, with members, roles, permissions, channels and locales, and `createMockMember`, `createMockUser` and `createMockChannel` take values for their properties. See [Mocks](https://meocord.dev/docs/4.1/mocks).
+- **Mocks** answer as discord.js does, with members, roles, permissions, channels and locales. `createMockMember`, `createMockUser`, `createMockChannel` and `createMockMessage` take values for their properties, a message its `author`, `content` and components, and `createMockInteraction` takes `authorizingIntegrationOwners` as the map Discord sends. See [Mocks](https://meocord.dev/docs/4.1/mocks).
 - **Checks**: `inspectHandler` lists the stages a handler runs, in order, and `resolveRoute` the handler an interaction or a message reaches. `expectCompleteCatalog` checks a translation catalog, and `testCooldownStore` a cooldown store. `resetAllMocks()` resets every mock MeoCord made.
 
 ### Localisation
