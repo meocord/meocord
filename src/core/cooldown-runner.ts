@@ -406,13 +406,14 @@ export async function claimCooldownNotice(container: Container, refusal: Cooldow
   // The cooldown's own window, which outlasts the wait and, unlike the wait left, stays the same for every retry
   const limit = { uses: 1, windowMs: refused.windowMs }
   // The store's own end of the wait is exact. Without one, each retry works it out from the wait left and the time
-  // the refusal was made, a moment off; a notice then takes that tenth of a second and the one before, so a retry
-  // landing either side of one still finds it taken, while a wait that ends a moment after the last has its own.
+  // the refusal was made, a moment off. A notice takes that tenth of a second and the one before, the earlier first: a
+  // retry landing a moment late is refused on the earlier, which its wait holds, before taking the later, which a wait
+  // ending then needs for its own notice.
   const bucket = Math.floor(refusal.retryAt.getTime() / NOTICE_BUCKET_MS)
   const notices =
     refused.endsAt !== undefined
       ? [{ key: `${refused.key}:notice:at:${refused.endsAt}`, limit }]
-      : [bucket, bucket - 1].map(at => ({ key: `${refused.key}:notice:${at}`, limit }))
+      : [bucket - 1, bucket].map(at => ({ key: `${refused.key}:notice:${at}`, limit }))
   try {
     return (await askWithin(container, cooldownStoreOf(container), notices, cooldownPolicyOf(container).timeoutMs, false)).allowed
   } catch (error) {
