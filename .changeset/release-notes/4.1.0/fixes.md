@@ -20,6 +20,7 @@
   - A controller or service that injects with `@inject(Token)` on a parameter typed as an interface is created, where 4.0 bound `Object` in place of the token and failed with "missing metadata on type Object".
   - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
   - A constructor parameter with no runtime type, as when two classes import each other or it's typed with an interface or `import type`, is refused as the app is created, naming the class and the parameter, rather than with inversify's error about `emitDecoratorMetadata`.
+  - A guard listed in `@MeoCord({ services })` or injected elsewhere reads each call's own `params`.
 - **Handler types**
   - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
   - `applyDecorators` passes on the method or class a decorator returns in place of the one it was given, as a wrapping decorator does, where 4.0 dropped it and kept the original.
