@@ -106,9 +106,13 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
     },
     tools: {
       // Set here, not in tools.rspack, which an app's hook may replace.
-      bundlerChain: chain => {
+      bundlerChain: (chain, { environment }) => {
         // MeoCord's own generated files never start a rebuild
         chain.watchOptions({ ...chain.get('watchOptions'), ignored: (file: string) => path.resolve(file).startsWith(generated) })
+        // Rsbuild names an imported WebAssembly module with the wasm asset name, of which Rspack expands only a hash, so
+        // `[name][ext]` would give every module one name. A hash keeps them apart, in the folder wasm assets go to
+        const wasmDir = environment.config.output.distPath.wasm
+        chain.output.webassemblyModuleFilename(path.posix.join(wasmDir, '[contenthash:10].module.wasm'))
         // The pre-entry records the bundle's own path from import.meta.url, which the bundler would otherwise fix at
         // build time to the pre-entry's source file. In every mode: a process manager such as pm2 starts the bundle
         // from a wrapper of its own, so process.argv[1] names that wrapper, not the bundle
@@ -169,7 +173,8 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
       },
       // No content hash: a bot reads its assets from disk rather than serving them from a CDN, so there is no cache to
       // bust, and stable names keep `dist/assets/` predictable. Two files of one name in different folders stop the build
-      // with Rspack's conflict error; each accepts a function too, for an app that needs to keep both names.
+      // with Rspack's conflict error; each but `wasm` accepts a function too, for an app that needs to keep both names.
+      // `wasm` names a wasm file read through `new URL()`; an imported module is named in tools.bundlerChain.
       filename: {
         js: '[name].js',
         image: '[name][ext]',
