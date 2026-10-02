@@ -12,6 +12,7 @@ import {
   getMessageHandlers,
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
+import { messageDecorator, reactionDecorator } from '@src/core/command-conflicts.js'
 
 
 import { ReactionHandlerAction } from '@src/enum/controller.enum.js'
@@ -546,11 +547,15 @@ export class MeoCordApp implements MeoCordApplication {
     }
   }
 
-  /** Warns about handlers whose events the client options will not deliver, once per missing intent or partial. */
+  /**
+   * Warns about handlers whose events the client options will not deliver, once per missing intent or partial. Only a
+   * controller's message and reaction handlers are counted, as only those run.
+   */
   private warnAboutMissingRequirements(): void {
     const options = this.bot.options
     if (!options?.intents) return
 
+    const controllers = new Set<object>(this.controllerClasses)
     const handlers: RequiringHandler[] = []
     for (const lifecycleClass of this.lifecycleClasses) {
       const prototype = lifecycleClass.prototype
@@ -560,16 +565,15 @@ export class MeoCordApp implements MeoCordApplication {
           requirements: eventRequirements(event),
         })
       }
+      if (!controllers.has(lifecycleClass)) continue
       for (const handler of getMessageHandlers(prototype)) {
-        const decorator = handler.pattern === undefined ? '@MessageHandler()' : `@MessageHandler('${handler.pattern}')`
         handlers.push({
-          label: `${decorator} in ${lifecycleClass.name}.${handler.method}`,
+          label: `${messageDecorator(handler.pattern)} in ${lifecycleClass.name}.${handler.method}`,
           requirements: messageHandlerRequirements(handler, this.messageOptions ?? {}),
         })
       }
       for (const { emoji, method } of getReactionHandlers(prototype)) {
-        const decorator = emoji === undefined ? '@ReactionHandler()' : `@ReactionHandler('${emoji}')`
-        handlers.push({ label: `${decorator} in ${lifecycleClass.name}.${method}`, requirements: REACTION_HANDLER_REQUIREMENTS })
+        handlers.push({ label: `${reactionDecorator(emoji)} in ${lifecycleClass.name}.${method}`, requirements: REACTION_HANDLER_REQUIREMENTS })
       }
     }
 

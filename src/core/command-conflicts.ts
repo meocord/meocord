@@ -5,6 +5,8 @@ import {
   getCommandMap,
   getDeclaredRoutes,
   getHandlerRoutes,
+  getMessageHandlers,
+  getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { registrationKey, serialise } from '@src/core/command-registration.js'
 import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts, literalFirst } from '@src/core/component-routes.js'
@@ -200,6 +202,43 @@ export function warnUnregisteredCommands(controllerClasses: readonly ControllerC
   logger.warn(
     `${problems.length} command ${one ? 'handler never runs' : 'handlers never run'}:\n${problems.join('\n')}\n` +
       'The next major version (5.0) refuses to start with these.',
+  )
+}
+
+/** A message handler's decorator as written, for a warning that names it. */
+export const messageDecorator = (pattern: string | undefined) => (pattern === undefined ? '@MessageHandler()' : `@MessageHandler('${pattern}')`)
+
+/** A reaction handler's decorator as written, for a warning that names it. */
+export const reactionDecorator = (emoji: string | undefined) => (emoji === undefined ? '@ReactionHandler()' : `@ReactionHandler('${emoji}')`)
+
+/**
+ * Warns, in one message, of the message, reaction, command and autocomplete handlers on those of `classes` that are not
+ * among `controllerClasses`, such as a service's: MeoCord dispatches only to controllers, so they never run. `@On` and
+ * `@Once` handlers run on every bound class, and are left alone.
+ */
+export function warnHandlersOffControllers(controllerClasses: readonly ControllerClass[], classes: readonly ControllerClass[]): void {
+  const controllers = new Set<unknown>(controllerClasses)
+  const problems: string[] = []
+  for (const cls of new Set(classes)) {
+    if (controllers.has(cls)) continue
+    const { name, prototype } = cls
+    for (const handler of getMessageHandlers(prototype)) problems.push(`  ${name}.${handler.method}: ${messageDecorator(handler.pattern)}`)
+    for (const { emoji, method } of getReactionHandlers(prototype)) problems.push(`  ${name}.${method}: ${reactionDecorator(emoji)}`)
+    for (const [command, metas] of Object.entries(getCommandMap(prototype) ?? {})) {
+      for (const { methodName } of metas) problems.push(`  ${name}.${methodName}: @Command('${command}')`)
+    }
+    for (const { commandPath, optionName, methodName } of getAutocompleteHandlers(prototype)) {
+      const option = optionName === undefined ? '' : `, '${optionName}'`
+      problems.push(`  ${name}.${methodName}: @Autocomplete('${commandPath}'${option})`)
+    }
+  }
+  if (problems.length === 0) return
+
+  const one = problems.length === 1
+  logger.warn(
+    `${problems.length} ${one ? 'handler in a class that is not a controller never runs' : 'handlers in classes that are not controllers never run'}` +
+      `: MeoCord dispatches only to @MeoCord({ controllers }).\n${problems.join('\n')}\n` +
+      'Move them to a controller. The next major version (5.0) refuses to start with these.',
   )
 }
 

@@ -39,6 +39,7 @@ import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
 import {
   assertDistinctCommands,
+  warnHandlersOffControllers,
   warnInheritedRoutes,
   warnOverlappingPatterns,
   warnUnregisteredCommands,
@@ -180,11 +181,20 @@ export class MeoCordFactory {
 
     // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
     assertDistinctCommands(options.controllers)
+    const providers = providerMap(options.providers ?? [], '@MeoCord({ providers })')
+    // The app's classes and every class they inject, which the container binds
+    const roots = [
+      ...options.controllers,
+      ...(options.services ?? []),
+      ...(options.cooldownStore ? [options.cooldownStore] : []),
+      ...appObservers(target as object),
+    ]
     // A shard's manager runs the same checks, so a sharded bot warns once
     if (!isShardProcess()) {
       warnUnregisteredCommands(options.controllers)
       warnInheritedRoutes(options.controllers)
       warnOverlappingPatterns(options.controllers)
+      warnHandlersOffControllers(options.controllers, reachableClasses(roots, providers))
       const developmentEnv = bunDevelopmentValues()
       if (developmentEnv.keys.length > 0) {
         this.logger.warn(bunDevelopmentWarning(developmentEnv))
@@ -210,14 +220,7 @@ export class MeoCordFactory {
       })
     }
 
-    const providers = providerMap(options.providers ?? [], '@MeoCord({ providers })')
     // Before binding, where inversify would otherwise fail first with an error about compiler options
-    const roots = [
-      ...options.controllers,
-      ...(options.services ?? []),
-      ...(options.cooldownStore ? [options.cooldownStore] : []),
-      ...appObservers(target as object),
-    ]
     assertTypedParameters(reachableClasses(roots, providers))
     const container = new Container()
     bindGlobalStages(container, appStages(target as object))

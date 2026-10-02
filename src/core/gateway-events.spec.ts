@@ -653,6 +653,25 @@ describe('gateway event handlers', () => {
       expect(warnings[0]).toContain('privileged')
     })
 
+    // They never run, which another warning says, so no intent or partial is asked for them
+    it('leaves out the message and reaction handlers of a class that is not a controller', async () => {
+      @Service()
+      class Stats {
+        @MessageHandler('stats')
+        stats(_message: Message) {}
+        @ReactionHandler('👍')
+        like(_reaction: MessageReaction) {}
+        @On('guildMemberAdd')
+        greet() {}
+      }
+
+      await startApp({ services: [Stats] }, { intents: [GatewayIntentBits.Guilds] })
+
+      expect(logged.warn.map(args => String(args[0])).filter(text => text.includes('in Stats.'))).toEqual([
+        expect.stringContaining("@On('guildMemberAdd') in Stats.greet"),
+      ])
+    })
+
     it('checks @MessageHandler for MessageContent and @ReactionHandler for its partials', async () => {
       @Controller()
       class Chat {
