@@ -44,6 +44,7 @@
 - **Logging**
   - `Logger` prints any value, a `Symbol` included, and colours a line only when its own stream is a terminal.
   - Log lines escape what a user sent, and shorten long message text, with its length.
+  - A project that loads meocord with `require()`, as CommonJS code or Jest in CommonJS mode does, logs again: every `Logger` method threw `chalk.bold is not a function`. Built bots were not affected.
   - The CLI and tests no longer read the app's name or `.env` from a stale `dist`.
 - **Testing**
   - Mocks have an `'en-US'` locale, `createdTimestamp` and `createdAt`, a working `inGuild()` and resolving promise methods.
