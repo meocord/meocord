@@ -402,6 +402,9 @@ something you have to arrange.
 
 Publishing uses npm trusted publishing — the registry issues short-lived credentials to the
 workflow, so no npm token is stored anywhere — and every release carries a provenance attestation.
+The package is built and packed in a job of its own, which cannot publish; the job that publishes
+receives that tarball and publishes it as it was packed. On a pull request, the `Package dry run`
+check publishes the same kind of tarball with `--dry-run` and compares its files with packing in place.
 
 The release pull request is opened by the workflow. With only the workflow's own token, GitHub holds
 its CI runs until a maintainer approves them from the pull request's Checks tab, and branch
