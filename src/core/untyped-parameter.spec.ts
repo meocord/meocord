@@ -30,7 +30,7 @@ const explanation = (cls: string, injectedBy?: string) =>
   `injects import each other${injectedBy ? ` (${injectedBy})` : ''}, or the parameter is typed with an interface ` +
   'or an `import type`. Move what they both need into a third service, or inject the parameter with @Inject(token).'
 
-function appWith(options: { controllers?: any[]; services?: any[]; providers?: any[]; guards?: any[]; interceptors?: any[]; filters?: any[] }) {
+function appWith(options: { controllers?: any[]; services?: any[]; providers?: any[]; guards?: any[]; interceptors?: any[]; filters?: any[]; themeFor?: any }) {
   @MeoCord({ controllers: [], ...options, clientOptions: { intents: [] } })
   class App {}
   return App
@@ -155,6 +155,16 @@ describe('a class with no decorator', () => {
     ['the testing module', (options: object) => MeoCordTestingModule.fromApp(appWith(options)).compile()],
   ])('is refused by %s when its constructor injects, naming it and the decorator to add', (_where, create) => {
     expect(() => create({ services: [Reminders] })).toThrow(new Error(undecorated('Reminders')))
+  })
+
+  it('is refused as a themeFor class, which the app resolves like a service', () => {
+    class Themes {
+      constructor(readonly clock: Clock) {}
+      user() {
+        return undefined
+      }
+    }
+    expect(() => MeoCordTestingModule.fromApp(appWith({ themeFor: Themes } as object)).compile()).toThrow(new Error(undecorated('Themes')))
   })
 
   it('is refused naming @Controller() when it is listed as a controller', () => {
