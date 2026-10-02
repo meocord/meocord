@@ -1,17 +1,17 @@
 ### Deprecations
 
-- **Deprecated names, which still work in 4.x and go in the next major version (5.0).** Each one's JSDoc names its replacement, and `@typescript-eslint/no-deprecated`, which a new app's ESLint config sets to warn outside specs, finds their uses.
-  - `Theme` and its colours: read `useTheme().colors`, and set colours in `@MeoCord({ theme })`. Reading or assigning a `Theme` colour logs a warning once. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#theme-is-deprecated-and-its-colours-changed).
-  - `SetMetadata`: declare the decorator with `createMetadata`, and read it with `ExecutionContext.get(decorator)`; reading a string or symbol key is deprecated too. Each logs a warning once. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#setmetadata-and-string-metadata-keys-are-deprecated).
-  - `ReactionHandlerOptions`: use `ReactionEvent`, the same type under a new name. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#reactionhandleroptions-is-now-reactionevent).
-  - `MetadataKey`, `CommandMetadata` and `AutocompleteMetadata`: internal, with nothing to replace them; drop the import. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#metadatakey-commandmetadata-and-autocompletemetadata-are-deprecated).
-- **`@Autocomplete<void>(…)`** still compiles, and its type parameter goes in 5.0. The lint rule doesn't flag it, so search for `@Autocomplete<` and write `@Autocomplete(…)`.
-- **Retrying `start()` after a failed login** logs in again with the handlers it has, and warns once; in 5.0 it rejects. Create a new app with `MeoCordFactory.create` for each attempt. A retry after a provider's factory failed stays supported. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#retrying-start-after-a-failed-login-is-deprecated).
-- **`@MessageHandler('')`** still runs for every message and logs a warning; 5.0 refuses it. Write `@MessageHandler()`. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#messagehandler-logs-a-warning).
-- **Startup warnings about handlers that never run.** 4.1 starts with these, naming each handler and what to do, and 5.0 refuses to start:
-  - a command or autocomplete handler Discord never sends, such as a subcommand path its builder doesn't register, a builder named differently from its `@Command`, or an option without autocomplete on. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#a-command-handler-discord-never-sends-logs-a-warning);
-  - a second `@Autocomplete` for one option, which never runs. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#a-second-autocomplete-for-one-option-logs-a-warning);
-  - a `@MessageHandler`, `@ReactionHandler`, `@Command` or `@Autocomplete` on a class that isn't one of the app's controllers. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#a-handler-on-a-class-that-isnt-a-controller-logs-a-warning).
-- **Behaviour that changes in 5.0, with a warning now:**
-  - a handler a subclass re-declares on another route still answers the one it inherits; in 5.0 its own routes replace the inherited ones. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#a-re-declared-handler-that-keeps-its-inherited-route-logs-a-warning);
-  - between two equally specific component patterns that can match one customId, the one listed first runs; in 5.0, the one that spells out more does. See [the upgrade guide](https://meocord.dev/docs/4.1/migrating#overlapping-component-patterns-meocord-5-prefers-the-one-that-spells-out-more).
+- **Names removed in 5.0.** Each still works and its JSDoc names the replacement; `@typescript-eslint/no-deprecated` finds them outside specs.
+  - `Theme`: use `useTheme().colors` and `@MeoCord({ theme })`; reading or setting a colour warns once ([guide](https://meocord.dev/docs/4.1/migrating#theme-is-deprecated-and-its-colours-changed)).
+  - `SetMetadata` and string metadata keys: use `createMetadata` and `ExecutionContext.get(decorator)`; each warns once ([guide](https://meocord.dev/docs/4.1/migrating#setmetadata-and-string-metadata-keys-are-deprecated)).
+  - `ReactionHandlerOptions`: renamed `ReactionEvent` ([guide](https://meocord.dev/docs/4.1/migrating#reactionhandleroptions-is-now-reactionevent)).
+  - `MetadataKey`, `CommandMetadata`, `AutocompleteMetadata`: internal; drop the import ([guide](https://meocord.dev/docs/4.1/migrating#metadatakey-commandmetadata-and-autocompletemetadata-are-deprecated)).
+- **`@Autocomplete<void>` loses its type parameter in 5.0.** Lint misses it: search for `@Autocomplete<` and write `@Autocomplete(…)`.
+- **Retrying `start()` after a failed login warns,** logging in again with its handlers, and rejects in 5.0. Make a new app with `MeoCordFactory.create` per attempt; retrying after a provider failure stays supported ([guide](https://meocord.dev/docs/4.1/migrating#retrying-start-after-a-failed-login-is-deprecated)).
+- **`@MessageHandler('')` warns,** and 5.0 refuses it. Write `@MessageHandler()` ([guide](https://meocord.dev/docs/4.1/migrating#messagehandler-logs-a-warning)).
+- **Handlers that never run warn at startup,** and 5.0 refuses to start:
+  - a command or autocomplete handler Discord never sends, such as an unregistered subcommand path, a renamed builder or an option without autocomplete ([guide](https://meocord.dev/docs/4.1/migrating#a-command-handler-discord-never-sends-logs-a-warning));
+  - a second `@Autocomplete` for one option ([guide](https://meocord.dev/docs/4.1/migrating#a-second-autocomplete-for-one-option-logs-a-warning));
+  - a handler on a class that isn't a controller ([guide](https://meocord.dev/docs/4.1/migrating#a-handler-on-a-class-that-isnt-a-controller-logs-a-warning)).
+- **Changes in 5.0, warned now:**
+  - a re-declared handler on another route still answers its inherited one; in 5.0 its own routes replace it ([guide](https://meocord.dev/docs/4.1/migrating#a-re-declared-handler-that-keeps-its-inherited-route-logs-a-warning));
+  - between equally specific overlapping patterns, the first listed runs; in 5.0, the more spelled-out one does ([guide](https://meocord.dev/docs/4.1/migrating#overlapping-component-patterns-meocord-5-prefers-the-one-that-spells-out-more)).
