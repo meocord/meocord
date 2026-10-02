@@ -19,13 +19,16 @@ const { mockLoadConfig } = vi.hoisted(() => ({ mockLoadConfig: vi.fn() }))
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: mockLoadConfig }))
 
 import {
+  Attachment,
   AutocompleteInteraction,
   ButtonInteraction,
   ChannelSelectMenuInteraction,
   ChatInputCommandInteraction,
+  ComponentType,
   MentionableSelectMenuInteraction,
   MessageFlags,
   MessageReaction,
+  ModalSubmitFields,
   ModalSubmitInteraction,
   PrimaryEntryPointCommandInteraction,
   RoleSelectMenuInteraction,
@@ -977,6 +980,24 @@ describe('MeoCordApp', () => {
       await dispatch({ body: 'It crashed' })
 
       expect(received).toEqual([{ topic: 'bugs', body: 'It crashed' }])
+    })
+
+    it("passes a file upload's attachments, as discord.js resolves them from the submit", async () => {
+      const resolved = {
+        attachments: { '111': { id: '111', filename: 'crash.png', size: 10, url: 'https://cdn.discordapp.com/attachments/1/111/crash.png' } },
+      }
+      const label = { type: ComponentType.Label, id: 1, component: { type: ComponentType.FileUpload, id: 2, custom_id: 'screenshot', values: ['111'] } }
+      // How discord.js builds a submit's fields from the gateway payload; neither step is in its typings
+      const transform = (ModalSubmitInteraction as unknown as { transformComponent: (raw: unknown, resolved: unknown) => unknown }).transformComponent
+      const Fields = ModalSubmitFields as unknown as new (components: unknown[]) => ModalSubmitFields
+      const fields = new Fields([transform.call(ModalSubmitInteraction, label, resolved)])
+
+      await mockClient.listenersFor('interactionCreate')[0](createMockInteraction(ModalSubmitInteraction, { customId: 'feedback/bugs', fields }))
+
+      const { screenshot } = received[0] as { screenshot: Attachment[] }
+      expect(screenshot).toHaveLength(1)
+      expect(screenshot[0]).toBeInstanceOf(Attachment)
+      expect(screenshot[0]).toMatchObject({ id: '111', name: 'crash.png' })
     })
 
     it('keeps the customId param over a field of the same name, and warns once in development', async () => {
