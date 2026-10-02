@@ -1786,6 +1786,22 @@ function optionTypeOf(value: unknown): ApplicationCommandOptionType {
 const ENTITY_CLASSES = [User, GuildMember, Role, BaseChannel, Attachment] as const
 type EntityClass = (typeof ENTITY_CLASSES)[number]
 
+/**
+ * Every option type a value may be sent as: a number as an Integer or a Number, as `getInteger()` reads a fraction as
+ * `null`, and a user or a role as a mentionable too. A plain `{ id }` may be any entity.
+ */
+function possibleTypesOf(value: unknown): readonly ApplicationCommandOptionType[] {
+  const T = ApplicationCommandOptionType
+  if (typeof value === 'string') return [T.String]
+  if (typeof value === 'boolean') return [T.Boolean]
+  if (typeof value === 'number') return [T.Integer, T.Number]
+  if (value instanceof User || value instanceof GuildMember) return [T.User, T.Mentionable]
+  if (value instanceof Role) return [T.Role, T.Mentionable]
+  if (value instanceof BaseChannel) return [T.Channel]
+  if (value instanceof Attachment) return [T.Attachment]
+  return [T.User, T.Role, T.Channel, T.Mentionable, T.Attachment]
+}
+
 /** A user option's member: the user's in the server of the interaction the options are given to, or none in a DM. */
 type MemberOf = (name: string, user: User) => object | null
 
@@ -1857,8 +1873,9 @@ function buildOptionData(
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
  * and in a server its `member` too. A user option's
  * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
- * a member given resolves `getUser()` to its user. An entity getter reads only its own kinds: another is `null`, and
- * with `required` throws discord.js's type error; a plain `{ id }` reads as any kind.
+ * a member given resolves `getUser()` to its user. A getter throws discord.js's type error for an option of another
+ * type, as discord.js does, required or not. Only a user or member read as a role, or a role read as a user or member,
+ * is `null`, or that error when required, as the option may be a mentionable one; a plain `{ id }` reads as any entity.
  * A whole number is an Integer option and a fraction a Number one, so
  * `getInteger()` reads only a whole number, and `getNumber()` reads either.
  *
@@ -1902,8 +1919,6 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     return field
   }
 
-  const isObjectOption = (v: unknown): v is { id: string } => typeof v === 'object' && v !== null && 'id' in v
-
   // Use a real prototype instance so unlisted methods (e.g. getMessage)
   // are found on the prototype chain and auto-stubbed as a mock fn
   const base = Object.create(CommandInteractionOptionResolver.prototype)
@@ -1914,33 +1929,36 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getSubcommand = createMockFn<(required?: boolean) => string | null>((required?: boolean) =>
     resolveSubEntry(subcommand, 'subcommand', required),
   )
-  base.getString = createMockFn<(name: string, required?: boolean) => string | null>(
-    (name: string, required?: boolean) =>
-      resolveOrThrow(name, typeof values[name] === 'string' ? (values[name] as string) : null, required),
-  )
-  base.getNumber = createMockFn<(name: string, required?: boolean) => number | null>(
-    (name: string, required?: boolean) =>
-      resolveOrThrow(name, typeof values[name] === 'number' ? (values[name] as number) : null, required),
-  )
-  // A fraction is only ever a Number option's value
-  base.getInteger = createMockFn<(name: string, required?: boolean) => number | null>(
-    (name: string, required?: boolean) =>
-      resolveOrThrow(name, Number.isInteger(values[name]) ? (values[name] as number) : null, required),
-  )
-  base.getBoolean = createMockFn<(name: string, required?: boolean) => boolean | null>(
-    (name: string, required?: boolean) =>
-      resolveOrThrow(name, typeof values[name] === 'boolean' ? (values[name] as boolean) : null, required),
-  )
-
-  // An entity of another kind is null, or discord.js's type error when required; a plain `{ id }` may be any kind
-  const getObjectOption = (name: string, kinds: readonly EntityClass[], expected: readonly ApplicationCommandOptionType[], required?: boolean) => {
+  // As discord.js reads an option by its type: another type throws its type error, required or not. A value whose
+  // option may be of the getter's type, as a user may be a mentionable option's, reads as null if the getter doesn't
+  // take it, and throws when required
+  const readOption = <V>(name: string, expected: readonly ApplicationCommandOptionType[], takes: (value: object | string | number | boolean) => boolean, required?: boolean): V | null => {
     const value = values[name]
-    if (!isObjectOption(value)) return resolveOrThrow(name, null, required)
-    if (kinds.some(Kind => value instanceof Kind) || !ENTITY_CLASSES.some(Kind => value instanceof Kind)) return value
-    if (required === true) throw new Error(`Option "${name}" is of type: ${optionTypeOf(value)}; expected ${expected.join(', ')}.`)
+    if (value === undefined || value === null) return resolveOrThrow<V>(name, null, required)
+    const typeError = () => new Error(`Option "${name}" is of type: ${optionTypeOf(value)}; expected ${expected.join(', ')}.`)
+    if (!possibleTypesOf(value).some(type => expected.includes(type))) throw typeError()
+    if (takes(value)) return value as V
+    if (required === true) throw typeError()
     return null
   }
-  const { User: USER, Role: ROLE, Channel: CHANNEL, Mentionable: MENTIONABLE } = ApplicationCommandOptionType
+  const { String: STRING, Integer: INTEGER, Number: NUMBER, Boolean: BOOLEAN, User: USER, Role: ROLE, Channel: CHANNEL, Mentionable: MENTIONABLE, Attachment: ATTACHMENT } =
+    ApplicationCommandOptionType
+  // A plain `{ id }` may be any entity
+  const plainOr = (...kinds: EntityClass[]) => (value: unknown) => kinds.some(Kind => value instanceof Kind) || !ENTITY_CLASSES.some(Kind => value instanceof Kind)
+
+  base.getString = createMockFn<(name: string, required?: boolean) => string | null>((name: string, required?: boolean) =>
+    readOption(name, [STRING], () => true, required),
+  )
+  base.getNumber = createMockFn<(name: string, required?: boolean) => number | null>((name: string, required?: boolean) =>
+    readOption(name, [NUMBER], () => true, required),
+  )
+  // A fraction is only ever a Number option's value
+  base.getInteger = createMockFn<(name: string, required?: boolean) => number | null>((name: string, required?: boolean) =>
+    readOption(name, [INTEGER], Number.isInteger, required),
+  )
+  base.getBoolean = createMockFn<(name: string, required?: boolean) => boolean | null>((name: string, required?: boolean) =>
+    readOption(name, [BOOLEAN], () => true, required),
+  )
 
   // A user option carries both the user and, in a server, its member, whichever of the two the test gave
   // Kept apart, so a member read before the options belong to an interaction is not what one in a DM reads later
@@ -1957,24 +1975,24 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   }
 
   base.getUser = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) => {
-    const value = getObjectOption(name, [User, GuildMember], [USER, MENTIONABLE], required)
+    const value = readOption<{ id: string }>(name, [USER, MENTIONABLE], plainOr(User, GuildMember), required)
     return value instanceof GuildMember ? value.user : value
   })
   base.getRole = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
-    getObjectOption(name, [Role], [ROLE, MENTIONABLE], required),
+    readOption(name, [ROLE, MENTIONABLE], plainOr(Role), required),
   )
   base.getChannel = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
-    getObjectOption(name, [BaseChannel], [CHANNEL], required),
+    readOption(name, [CHANNEL], plainOr(BaseChannel), required),
   )
   base.getMember = createMockFn<(name: string) => object | null>((name: string) => {
-    const value = getObjectOption(name, [User, GuildMember], [USER, MENTIONABLE])
+    const value = readOption<object>(name, [USER, MENTIONABLE], plainOr(User, GuildMember))
     return value instanceof User ? memberOf(name, value) : value
   })
   base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
-    getObjectOption(name, [User, GuildMember, Role], [MENTIONABLE], required),
+    readOption(name, [MENTIONABLE], plainOr(User, GuildMember, Role), required),
   )
   base.getAttachment = createMockFn<(name: string, required?: boolean) => Attachment | null>((name: string, required?: boolean) =>
-    resolveOrThrow(name, values[name] instanceof Attachment ? values[name] : null, required),
+    readOption(name, [ATTACHMENT], plainOr(Attachment), required),
   )
 
   base.getFocused = createMockFn((getFull?: boolean) => {

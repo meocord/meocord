@@ -782,25 +782,19 @@ describe('createChatInputOptions', () => {
     })
   })
 
-  describe('wrong type returns null', () => {
-    it('getNumber returns null for a string value', () => {
-      const options = createChatInputOptions({ name: 'hutao' })
-      expect(options.getNumber('name')).toBeNull()
-    })
-
-    it('getString returns null for a number value', () => {
-      const options = createChatInputOptions({ uid: 12345678 })
-      expect(options.getString('uid')).toBeNull()
-    })
-
-    it('getBoolean returns null for a string value', () => {
-      const options = createChatInputOptions({ name: 'hutao' })
-      expect(options.getBoolean('name')).toBeNull()
-    })
-
-    it('getUser returns null for a string value', () => {
-      const options = createChatInputOptions({ name: 'hutao' })
-      expect(options.getUser('name')).toBeNull()
+  describe('an option of another type', () => {
+    // discord.js reads an option by its type and throws its type error for another, required or not
+    it.each([
+      ['getNumber', 'hutao', 'Option "x" is of type: 3; expected 10.'],
+      ['getInteger', 'hutao', 'Option "x" is of type: 3; expected 4.'],
+      ['getString', 12345678, 'Option "x" is of type: 4; expected 3.'],
+      ['getBoolean', 'hutao', 'Option "x" is of type: 3; expected 5.'],
+      ['getUser', 'hutao', 'Option "x" is of type: 3; expected 6, 9.'],
+      ['getAttachment', true, 'Option "x" is of type: 5; expected 11.'],
+    ] as const)('%s throws for %j, with or without required', (getter, value, message) => {
+      const options = createChatInputOptions({ x: value })
+      expect(() => options[getter]('x')).toThrow(message)
+      expect(() => options[getter]('x', true)).toThrow(message)
     })
 
     // A whole number may be an Integer or a Number option; a fraction is only ever a Number
@@ -819,15 +813,22 @@ describe('createChatInputOptions', () => {
       return { user: createMockUser(), role: guild.roles.cache.get(guild.id)!, channel: createMockChannel(TextChannel) }
     }
 
-    // discord.js reads an option by its type: another kind is no value, and a required one throws its type error
+    // A user or a role may be a mentionable option's, which discord.js reads as null for the other kind
     it.each([
       ['getUser', 'role', 'Option "x" is of type: 8; expected 6, 9.'],
       ['getRole', 'user', 'Option "x" is of type: 6; expected 8, 9.'],
-      ['getChannel', 'user', 'Option "x" is of type: 6; expected 7.'],
-      ['getMentionable', 'channel', 'Option "x" is of type: 7; expected 9.'],
     ] as const)('%s reads a %s option as null, and throws when required', (getter, kind, message) => {
       const options = createChatInputOptions({ x: entities()[kind] })
       expect(options[getter]('x')).toBeNull()
+      expect(() => options[getter]('x', true)).toThrow(message)
+    })
+
+    it.each([
+      ['getChannel', 'user', 'Option "x" is of type: 6; expected 7.'],
+      ['getMentionable', 'channel', 'Option "x" is of type: 7; expected 9.'],
+    ] as const)('%s throws for a %s option, with or without required', (getter, kind, message) => {
+      const options = createChatInputOptions({ x: entities()[kind] })
+      expect(() => options[getter]('x')).toThrow(message)
       expect(() => options[getter]('x', true)).toThrow(message)
     })
 
