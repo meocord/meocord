@@ -398,12 +398,12 @@ describe('respond()', () => {
   })
 
   describe('install contexts', () => {
-    const fifteenMinutesAgo = Date.now() - 16 * 60 * 1000
+    const pastTokenLifetime = Date.now() - 16 * 60 * 1000
 
     it('edits through the channel only once the token has expired, where the bot is present', async () => {
       const message = messageWith()
       const interaction = button(message)
-      Object.assign(interaction, { createdTimestamp: fifteenMinutesAgo, context: InteractionContextType.Guild })
+      Object.assign(interaction, { createdTimestamp: pastTokenLifetime, context: InteractionContextType.Guild })
       await respond(interaction).acknowledge()
       interaction.editReply.mockRejectedValueOnce(createDiscordError(50027))
 
@@ -432,7 +432,7 @@ describe('respond()', () => {
         context: InteractionContextType.Guild,
         authorizingIntegrationOwners: { [ApplicationIntegrationType.UserInstall]: 'user' },
       })
-      Object.assign(interaction, { createdTimestamp: fifteenMinutesAgo })
+      Object.assign(interaction, { createdTimestamp: pastTokenLifetime })
       await respond(interaction).acknowledge()
       interaction.editReply.mockRejectedValueOnce(createDiscordError(50027))
 

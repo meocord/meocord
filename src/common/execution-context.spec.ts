@@ -59,7 +59,7 @@ describe('ExecutionContext', () => {
   })
 
   describe('getHandlerParams', () => {
-    it('reads an interaction’s second argument, and nothing for a message without one, a reaction or an event', () => {
+    it('reads an interaction’s second argument, and none for a bare message, a reaction or an event', () => {
       const interaction = createMockInteraction(ButtonInteraction)
       const reaction = Object.create(MessageReaction.prototype) as MessageReaction
 

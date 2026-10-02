@@ -213,6 +213,23 @@ export function forgetRecorded(store: CooldownStore, recorded: readonly Recorded
   }
 }
 
+/** Drops every key whose calls have all left their window at `now`. */
+function sweep(calls: Map<string, CallTimes>, now: number): void {
+  for (const [key, entry] of calls) {
+    const newest = entry.times[entry.times.length - 1]
+    if (newest === undefined || now - newest >= entry.windowMs) calls.delete(key)
+  }
+}
+
+/** How many keys a memory store holds, for specs of what it keeps. */
+export const heldKeys = (store: MemoryCooldownStore): number => callsOf.get(store)?.size ?? 0
+
+/** Runs a memory store's sweep at `now`, as its interval does, for specs of what it drops. */
+export function sweepStore(store: MemoryCooldownStore, now: number): void {
+  const calls = callsOf.get(store)
+  if (calls) sweep(calls, now)
+}
+
 /** Drops one call recorded at `at`, if it is still in the window; any of several at one time counts the same. */
 function forget(entry: CallTimes, at: number): void {
   const index = entry.times.lastIndexOf(at)
@@ -322,26 +339,10 @@ export class MemoryCooldownStore extends CooldownStore {
     })
   }
 
-  /** The number of keys held, for tests of the sweep. */
-  get size(): number {
-    return this.calls.size
-  }
-
-  /**
-   * Drops every key whose calls have all left their window. It runs once a minute from the store's first call.
-   *
-   * @param now - The time to measure the windows from, the current time by default.
-   */
-  sweep(now = Date.now()): void {
-    for (const [key, entry] of this.calls) {
-      const newest = entry.times[entry.times.length - 1]
-      if (newest === undefined || now - newest >= entry.windowMs) this.calls.delete(key)
-    }
-  }
-
+  /** Drops the keys whose calls have all left their window, once a minute from the store's first call. */
   private startSweeping(): void {
     if (this.sweeper) return
-    this.sweeper = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS)
+    this.sweeper = setInterval(() => sweep(this.calls, Date.now()), SWEEP_INTERVAL_MS)
     // A cooldown must never be what keeps a stopping bot alive.
     this.sweeper.unref?.()
   }

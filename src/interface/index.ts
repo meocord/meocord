@@ -719,8 +719,9 @@ export interface MessageHelpOptions {
 /**
  * What the built-in help command found, for a presenter's `messageHelp` to write.
  *
- * `list` is every command that works here, but for hidden ones and those with guards; `command` is the one a `!help <command>` names; `parent` is the
- * subcommands of the words it names; `unknown` is a name no command has; `empty` is nothing to list.
+ * `list` is every command that works here, but for hidden ones and those with guards; `command` is the one a
+ * `!help <command>` names; `parent` is the subcommands of the words it names; `unknown` is a name no command has;
+ * `empty` is nothing to list.
  *
  * @example
  * ```ts
