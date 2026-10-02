@@ -3,9 +3,11 @@
 - **Running the bot**
   - Calling `app.start()` again after a failed login no longer attaches every handler a second time, which ran each command, message and reaction twice.
   - A bot started without the CLI, as with `node dist/main.js`, has the values `meocord.config.ts` loads from `.env` before its modules run, so an option such as `@MeoCord({ activities: [{ name: process.env.STATUS! }] })` reads them. Rebuild to pick this up.
-  - A privileged intent Discord refuses at login, and a token Discord refuses or an empty one, are each explained in one line: the intents the bot asks for and where to enable them, or where to get a new token. A new app's `main.ts` logs that line alone; one made with 4.0 still prints discord.js's error after it.
+  - A privileged intent Discord refuses at login, and a token Discord refuses or an empty one, are each explained in one line: the intents the bot asks for and where to enable them, or where to get a new token.
   - A command builder that can't be built is named, with its command, in the error that stops registration, where 4.0 logged only discord.js's error. As in 4.0, no command is sent until it is fixed.
   - A process adds one SIGINT and one SIGTERM listener however many apps it creates, so a test suite that creates many apps no longer triggers Node's `MaxListenersExceededWarning`.
+  - A SIGINT or SIGTERM while the bot is still logging in stops it at once, with "Bot has shut down", where 4.0 did nothing until a second one forced exit 1.
+  - A built config that is missing or fails to load is reported once, naming the file, the reason and what to do, where 4.0 printed its error up to three times.
   - A reaction in a DM the bot hasn't cached since it started reaches its handlers again; from discord.js 14.26.2, it was dropped before any listener saw it.
 - **Routing and dispatch**
   - A button, select menu or modal that a discord.js collector answers is no longer answered "Command not found!" first.
@@ -18,18 +20,22 @@
   - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
 - **Handler types**
   - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
+  - `applyDecorators` passes on the method or class a decorator returns in place of the one it was given, as a wrapping decorator does, where 4.0 dropped it and kept the original.
 - **Builds**
   - A production build keeps every class's own name. When two modules declared a class of one name, one was renamed, such as `Shop` to `shop_controller_Shop`, in errors and logs and wherever the code read its `name`.
   - Every imported file lands in `dist/assets` under its own name, as images, fonts and media already did.
   - A `tsconfig.json` that uses `extends`, `files`, `typeRoots`, comments, or `paths` under a `baseUrl` builds as TypeScript reads it, and `meocord build` no longer rewrites the file. Builds that run at the same time no longer read each other's copy of it.
-  - A self-contained build runs under Bun, and in a pnpm project packs the packages an external depends on and a native package's per-platform binary.
+  - A self-contained build runs under Bun, packs each package with the dependency versions it was installed with, and what a package npm nested under another needs, and in a pnpm project packs the packages an external depends on and a native package's per-platform binary. 4.0 gave every package the first version it copied, and could fail with "Cannot find module". Rebuild to pick this up.
 - **The CLI**
   - `meocord start` passes SIGINT and SIGTERM on to the bot, as Docker, pm2 and systemd send them to the CLI alone, so the bot shuts down cleanly rather than being left running.
-  - `meocord start --dev` runs one bot at a time, restarts it through its own shutdown on Windows too, where it was killed outright, stops on the first Ctrl+C during login, and keeps the bot running when a save doesn't compile.
-  - `meocord create` keeps the app when git can't make its first commit, writes any app name into `meocord.config.ts` as a valid string, installs on pnpm 11 and later and on npm 11.16 and later without warnings, and warns on Node.js 22.0 to 22.12, below the version the package requires.
+  - `meocord start --dev` runs one bot at a time, restarts it through its own shutdown on Windows too, where it was killed outright, and starts it again on the next rebuild after it exited on its own, where it stayed stopped. It keeps the bot running when a save doesn't compile, or when a saved `meocord.config.ts`'s `rsbuild` hook throws, where it ended the session and left the bot running in the background.
+  - `meocord start --dev --build` builds once, where it built twice, and `meocord start --dev` exits 1 when watch mode can't start, as `build` does.
+  - `meocord create` keeps the app when git can't make its first commit, leaves the app to the Git repository it is created in, where 4.0 made a repository within it, and writes any app name into `meocord.config.ts` as a valid string. A name with no letters or digits is refused, where 4.0 reported `Directory "" already exists`.
+  - An app `meocord create` makes passes its own `lint` and `test` on pnpm, installs on pnpm 11 and later and on npm 11.16 and later without warnings, and `create` warns on Node.js 22.0 to 22.12, below the version the package requires.
   - `meocord generate` works on Windows in npm, Yarn and pnpm projects, writes files that pass the app's lint as written, formats them with one ESLint run, and refuses a name that would write outside `src/`. On Windows, `\` separates folders in a name.
-  - `meocord build` and `start --prod` no longer clear the screen, and no command writes colour codes into piped output, such as CI logs or `docker logs`.
+  - `meocord build` and `start --prod` no longer clear the screen, `start --dev` clears it only in a terminal and keeps the scrollback, and no command writes screen-clearing codes into piped output, such as CI logs or `docker logs`.
   - `meocord --help` no longer prints "No available choices." for an argument that has none.
+  - The CLI runs in a project at the filesystem root, as with `WORKDIR /` in a container, where it stopped with "Cannot locate the "MeoCord" package directory".
   - `require('meocord/package.json')` resolves, for a tool that reads the installed version.
   - `meocord/eslint` ignores `coverage/`.
 - **Logging**
@@ -37,4 +43,4 @@
   - Log lines quote what a user sent, such as a message's text or a reaction's emoji, escaping line breaks and control characters, and shorten a long message's text, with its length.
   - The CLI and tests no longer read the app's name, or its `.env`, from a `dist` an earlier build left.
 - **Testing**
-  - Mocks answer where 4.0's returned a stub: an interaction has an `'en-US'` locale, `inGuild()` answers from its `guildId`, and a method that returns a promise in discord.js resolves. Nothing changes in a bot.
+  - Mocks answer where 4.0's returned a stub: an interaction has an `'en-US'` locale and a `createdTimestamp` and `createdAt`, `inGuild()` answers from its `guildId`, and a method that returns a promise in discord.js resolves. Nothing changes in a bot.
