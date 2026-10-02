@@ -17,10 +17,10 @@ interface ReactionPayload {
 }
 
 /**
- * Delivers DM reactions discord.js drops: from discord.js 14.26.2 it makes an uncached channel only for an event marked
- * as a DM, which a reaction's is not, so a reaction in a DM unseen since startup reaches no listener, even with
- * `Partials.Channel`. This fetches such a channel once and hands the event back; one discord.js delivered is left
- * alone. Without the `DirectMessageReactions` intent it does nothing; without the reaction actions it expects, warns.
+ * Delivers DM reactions discord.js drops: from 14.26.2 it makes an uncached channel only for an event marked as a DM,
+ * which a reaction's is not, so a reaction in a DM unseen since startup reaches no listener, even with
+ * `Partials.Channel`. This fetches such a channel once and hands the event back. Without the `DirectMessageReactions`
+ * intent it does nothing; without the reaction actions it expects, it warns and does nothing.
  */
 export function deliverUncachedDmReactions(client: Client, logger: Logger): void {
   const intents = client.options?.intents
