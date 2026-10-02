@@ -129,7 +129,10 @@ export function themeForProblem(themeFor: unknown, where: string, takes: string)
     const prototype = (themeFor as { prototype?: Record<string, unknown> }).prototype
     if (!prototype) return `${where} takes { guild?, user? }, each a function returning part of a theme, ${takes}`
     if (typeof prototype.guild !== 'function' && typeof prototype.user !== 'function') {
-      return `${where}: ${themeFor.name} has neither a guild() nor a user() method, so it gives no theme.`
+      // A class with no methods at all most likely wrote them as arrow-function properties, which only its instances have
+      const methods = Object.getOwnPropertyNames(prototype).filter(name => name !== 'constructor' && typeof Object.getOwnPropertyDescriptor(prototype, name)?.value === 'function')
+      const hint = methods.length === 0 ? ' Declare them as methods: arrow-function properties are not on the class.' : ''
+      return `${where}: ${themeFor.name} has neither a guild() nor a user() method, so it gives no theme.${hint}`
     }
     return undefined
   }
