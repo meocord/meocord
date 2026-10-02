@@ -135,7 +135,9 @@ describe('overrideThemeFor', () => {
     const builder = MeoCordTestingModule.create({ controllers: [Shop] })
     expect(() => builder.overrideThemeFor({ server: () => undefined } as never)).toThrow("overrideThemeFor has no resolver 'server': give guild or user.")
     expect(() => builder.overrideThemeFor({ guild: '#0000D3' } as never)).toThrow('overrideThemeFor: guild must be a function returning part of a theme.')
-    expect(() => builder.overrideThemeFor(null as never)).toThrow('overrideThemeFor takes { guild?, user? }, each a function returning part of a theme, or undefined for none.')
+    expect(() => builder.overrideThemeFor(null as never)).toThrow(
+      'overrideThemeFor takes { guild?, user? }, each a function returning part of a theme, a class implementing ThemeResolver, or undefined for none.',
+    )
   })
 })
 

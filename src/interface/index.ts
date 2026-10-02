@@ -1389,6 +1389,7 @@ export type {
   ThemeColors,
   ThemeEmojis,
   ThemeOverride,
+  ThemeResolver,
   ThemeResolvers,
   UserThemeTarget,
 } from './theme.interface.js'

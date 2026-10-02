@@ -9,7 +9,7 @@ import { type MeoCordOptions } from '@src/decorator/app-options.js'
 import { providerMap } from '@src/core/providers.js'
 import { BUILT_IN_TYPES } from '@src/core/message-params.js'
 import { assertObservers } from '@src/core/observer-runner.js'
-import { assertValidTheme } from '@src/core/theme-validation.js'
+import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 import { deprecatedOnMethod, refuse } from '@src/util/refusal.util.js'
 import { timeoutProblem } from '@src/util/timer-limit.util.js'
@@ -132,17 +132,8 @@ function assertThemeFor(
   appName: string,
   { themeFor, themeCache, themeForTimeoutMs }: { themeFor?: unknown; themeCache?: unknown; themeForTimeoutMs?: unknown },
 ): void {
-  if (themeFor !== undefined) {
-    if (themeFor === null || typeof themeFor !== 'object') {
-      throw refuse(new TypeError(`${appName}: @MeoCord({ themeFor }) takes { guild?, user? }, each a function returning part of a theme.`))
-    }
-    for (const [key, resolver] of Object.entries(themeFor)) {
-      if (key !== 'guild' && key !== 'user') throw refuse(new TypeError(`${appName}: @MeoCord({ themeFor }) has no resolver '${key}': give guild or user.`))
-      if (resolver !== undefined && typeof resolver !== 'function') {
-        throw refuse(new TypeError(`${appName}: @MeoCord({ themeFor }): ${key} must be a function returning part of a theme.`))
-      }
-    }
-  }
+  const problem = themeFor === undefined ? undefined : themeForProblem(themeFor, `${appName}: @MeoCord({ themeFor })`, 'or a class implementing ThemeResolver.')
+  if (problem) throw refuse(new TypeError(problem))
   const whole = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value > 0
   if (themeCache !== undefined) {
     if (themeCache === null || typeof themeCache !== 'object') {

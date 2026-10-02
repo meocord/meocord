@@ -55,7 +55,14 @@ type Loaded = Awaited<ReturnType<typeof load>>
 /** Starts an app built by the factory, with a client that logs in without a network. */
 async function startApp(
   loaded: Loaded,
-  options: { controllers: any[]; services?: any[]; cooldownStore?: any; cooldownStoreTimeoutMs?: number; cooldownStoreFailure?: 'deny' | 'allow' },
+  options: {
+    controllers: any[]
+    services?: any[]
+    cooldownStore?: any
+    cooldownStoreTimeoutMs?: number
+    cooldownStoreFailure?: 'deny' | 'allow'
+    themeFor?: any
+  },
 ) {
   const clients: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
@@ -70,6 +77,7 @@ async function startApp(
     cooldownStore: options.cooldownStore,
     cooldownStoreTimeoutMs: options.cooldownStoreTimeoutMs,
     cooldownStoreFailure: options.cooldownStoreFailure,
+    themeFor: options.themeFor,
     clientOptions: { intents: [] },
   })
   class App {}
@@ -940,6 +948,58 @@ describe('lifecycle hooks', () => {
   })
 
   // MeoCord asks the store on every call with a cooldown, so it opens before the first and closes after the last
+  describe('of a themeFor class', () => {
+    it('runs onReady after the service it injects and onShutdown before it, and answers a call through that service', async () => {
+      const loaded = await load()
+      const events: string[] = []
+
+      @loaded.Service()
+      class Prefs implements OnReady, OnShutdown {
+        onReady() {
+          events.push('prefs ready')
+        }
+        onShutdown() {
+          events.push('prefs shutdown')
+        }
+        colour(): `#${string}` {
+          return '#0000D1'
+        }
+      }
+
+      @loaded.Service()
+      class PrefsThemes implements OnReady, OnShutdown {
+        constructor(readonly prefs: Prefs) {}
+        onReady() {
+          events.push('themes ready')
+        }
+        onShutdown() {
+          events.push('themes shutdown')
+        }
+        user() {
+          events.push(`themes asked for ${this.prefs.colour()}`)
+          return { colors: { primary: this.prefs.colour() } }
+        }
+      }
+      Reflect.defineMetadata('design:paramtypes', [Prefs], PrefsThemes)
+
+      @loaded.Controller()
+      class Daily {
+        @loaded.Command('daily', loaded.CommandType.SLASH)
+        claim() {
+          events.push('call runs')
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [Daily], themeFor: PrefsThemes })
+      await becomeReady(client)
+      const interaction = loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'daily' })
+      await Promise.all(client.listeners('interactionCreate').map(listener => listener(interaction)))
+      await loaded.shutdownAndExit()
+
+      expect(events).toEqual(['prefs ready', 'themes ready', 'themes asked for #0000D1', 'call runs', 'themes shutdown', 'prefs shutdown'])
+    })
+  })
+
   describe('of a cooldownStore class', () => {
     /** A store that records its hooks and calls in `events`, whose onReady resolves `began`, then waits for `connect`. */
     function storeWith(loaded: Loaded, events: string[], connect: Promise<void> = Promise.resolve(), began?: PromiseWithResolvers<void>) {

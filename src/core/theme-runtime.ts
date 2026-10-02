@@ -71,7 +71,7 @@ export function configureThemes(
   resolverOptions?: ThemeResolverOptions,
 ): void {
   const varies = classes.some(cls => chainOf(cls).some(link => THEMED_CLASSES.has(link)))
-  const resolvers = resolverCaches(resolverOptions)
+  const resolvers = resolverCaches(resolverOptions, cls => container.get(cls))
   apps.set(container, { layer, varies, version: -1, ambientVersion: -1, app: defaultTheme(), scoped: undefined, resolvers, handlers: new WeakMap() })
   // The instance the app's code injects, whether bound here or already as a dependency of one of its classes
   if (!container.isBound(ThemeCache)) {

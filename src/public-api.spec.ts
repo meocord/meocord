@@ -247,6 +247,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'ThemeColors',
     'ThemeEmojis',
     'ThemeOverride',
+    'ThemeResolver',
     'ThemeResolvers',
     'Token',
     'UserThemeTarget',

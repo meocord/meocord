@@ -9,7 +9,7 @@ import {
   type ResponsePresenter,
 } from '@src/interface/index.js'
 import { type Provider } from '@src/interface/provider.interface.js'
-import { type RootTheme, type ThemeResolvers } from '@src/interface/theme.interface.js'
+import { type RootTheme, type ThemeResolver, type ThemeResolvers } from '@src/interface/theme.interface.js'
 import { type Translator } from '@src/common/translator.js'
 import { type CooldownStore } from '@src/common/cooldown-store.js'
 import { type CooldownStoreFailure } from '@src/core/cooldown-runner.js'
@@ -167,9 +167,10 @@ export interface MeoCordOptions<
    * server's, in a server or a DM. Each returns part of a theme or `undefined`, at once or as a promise, and is looked
    * up while `@Defer` acknowledges, before the guards. A result that is not a valid theme is left out, with a warning
    * once per server or user; a resolver that fails or passes its timeout leaves its theme out of the call, logged once
-   * until it answers again.
+   * until it answers again. A class implementing {@link ThemeResolver} does the same with the app's services, resolved
+   * from its container.
    */
-  themeFor?: ThemeResolvers
+  themeFor?: ThemeResolvers | (new (...args: any[]) => ThemeResolver)
 
   /**
    * How long `themeFor`'s results are kept (`ttlSeconds`, 300 unless set) and how many (`maxGuilds`, 10,000, and

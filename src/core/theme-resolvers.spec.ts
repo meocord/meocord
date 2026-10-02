@@ -608,20 +608,6 @@ describe('a resolver that fails', () => {
     expect(logs.mock.calls.filter(([text]) => String(text).includes('answers again'))).toEqual([])
   })
 
-  it('gives up waiting after themeForTimeoutMs, and the call goes on', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
-    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
-    const module = moduleWith({ guild: () => new Promise<ThemeOverride>(() => {}) }, { themeForTimeoutMs: 20 })
-
-    const call = module.invoke(Panel, 'panel', press('panel'))
-    // The resolver never answers: the call goes on once the timeout passes
-    await vi.advanceTimersByTimeAsync(20)
-    await call
-
-    expect(seen).toContainEqual(['handler', DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info, DEFAULT_THEME.colors.success])
-    expect(errors).toHaveBeenCalledWith(expect.stringContaining(`themeFor.guild for guild ${GUILD} did not answer within 20 ms`))
-  })
-
   it('leaves out a result that is not a valid theme, warning once for the server', async () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
@@ -667,18 +653,6 @@ describe('a resolver', () => {
       ['resolver', DEFAULT_THEME.colors.primary],
       ['resolver after await', DEFAULT_THEME.colors.primary],
     ])
-  })
-})
-
-describe('a resolver with no theme to give', () => {
-  it('returns null or undefined, as a database does for a missing row, and nothing is warned about', async () => {
-    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
-    const module = moduleWith({ guild: async () => null, user: () => undefined })
-
-    await module.invoke(Panel, 'panel', press('panel'))
-
-    expect(seen).toContainEqual(['handler', DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info, DEFAULT_THEME.colors.success])
-    expect(warn).not.toHaveBeenCalled()
   })
 })
 

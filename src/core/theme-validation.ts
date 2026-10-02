@@ -121,6 +121,27 @@ export function themeProblems(theme: unknown, where?: string): string[] {
 }
 
 /**
+ * Why `themeFor` cannot be called, or `undefined` when it can: `{ guild?, user? }` of functions, or a class with a
+ * `guild()` or `user()` method. `where` begins each reason, and `takes` ends the one for a value of neither shape.
+ */
+export function themeForProblem(themeFor: unknown, where: string, takes: string): string | undefined {
+  if (typeof themeFor === 'function') {
+    const prototype = (themeFor as { prototype?: Record<string, unknown> }).prototype
+    if (!prototype) return `${where} takes { guild?, user? }, each a function returning part of a theme, ${takes}`
+    if (typeof prototype.guild !== 'function' && typeof prototype.user !== 'function') {
+      return `${where}: ${themeFor.name} has neither a guild() nor a user() method, so it gives no theme.`
+    }
+    return undefined
+  }
+  if (themeFor === null || typeof themeFor !== 'object') return `${where} takes { guild?, user? }, each a function returning part of a theme, ${takes}`
+  for (const [key, resolver] of Object.entries(themeFor)) {
+    if (key !== 'guild' && key !== 'user') return `${where} has no resolver '${key}': give guild or user.`
+    if (resolver !== undefined && typeof resolver !== 'function') return `${where}: ${key} must be a function returning part of a theme.`
+  }
+  return undefined
+}
+
+/**
  * Throws when a theme has a problem, listing every one, so that a bad token stops the bot where it was set rather than
  * reaching Discord, which would refuse the message.
  *
