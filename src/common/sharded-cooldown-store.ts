@@ -16,7 +16,7 @@ import { isShardProcess, managerGone } from '@src/util/sharding-mode.util.js'
 
 /**
  * How long a shard holds a call the manager has not answered before failing it, so an unanswered call is
- * never held forever. MeoCord gives up on it sooner, after `cooldownStoreTimeoutMs`.
+ * never held forever. MeoCord itself fails the call after `cooldownStoreTimeoutMs`, a second by default.
  */
 export const SHARDED_COOLDOWN_ABANDON_MS = 30_000
 
@@ -184,9 +184,10 @@ export function shardedCooldownStoreOn(channel: CooldownChannel | undefined): Sh
 }
 
 /**
- * Answers a shard's `cooldown` message from the manager's store, and ignores any other message.
+ * Answers a shard's `cooldown` message from the manager's store, applies its `cooldown-release`, and ignores any
+ * other message.
  *
- * @returns Whether the message was a cooldown call.
+ * @returns Whether the message was one of the two.
  */
 export function answerCooldown(store: CooldownStore, message: unknown, reply: (message: ShardMessage) => unknown): boolean {
   if (!isShardMessage(message)) return false

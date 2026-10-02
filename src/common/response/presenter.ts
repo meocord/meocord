@@ -105,7 +105,7 @@ export function attachmentsOf(view: ResponseView): AttachmentBuilder[] {
 
 /**
  * Why Discord would refuse a view's files, if it would: more attachments than a message takes, counting the
- * `kept` ones a message it is added to keeps, or a file over `sizeLimit` bytes.
+ * `kept` ones a message it is added to keeps, a file without a name, or a file over `sizeLimit` bytes.
  */
 export function filesProblem(view: ResponseView, { kept = 0, sizeLimit = DEFAULT_ATTACHMENT_SIZE_LIMIT } = {}): string | undefined {
   const files = view.files ?? []

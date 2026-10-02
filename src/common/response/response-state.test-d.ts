@@ -17,7 +17,7 @@ describe('respond()', () => {
     void respond(interaction).send({ components: [], flags: MessageFlags.IsComponentsV2 })
   })
 
-  it('refuses a flag Discord ignores or rejects on a new message', () => {
+  it('refuses a flag Discord sets itself, and the withResponse option respond() manages', () => {
     // @ts-expect-error Crossposted is set by Discord, never sent
     void respond(interaction).send({ content: 'x', flags: MessageFlags.Crossposted })
     // @ts-expect-error withResponse is managed by respond()

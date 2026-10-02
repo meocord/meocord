@@ -67,7 +67,7 @@ function findText(translator: Translator<any> | undefined, locale: TextLocale, k
 
 const lists = new Map<string, Intl.ListFormat>()
 
-/** A list in a locale's words: "a, b or c", or, for a unit, "a, b, c". */
+/** A list in a locale's words: "a, b, or c" in en-US, or, for a unit, "a, b, c". */
 function listIn(locale: string, style: 'or' | 'unit', items: readonly string[]): string {
   let format = lists.get(`${locale} ${style}`)
   if (!format) lists.set(`${locale} ${style}`, (format = new Intl.ListFormat(locale, { type: style === 'or' ? 'disjunction' : 'unit' })))
@@ -75,8 +75,8 @@ function listIn(locale: string, style: 'or' | 'unit', items: readonly string[]):
 }
 
 /**
- * A text in `locale`, as {@link findText} finds it. A list in MeoCord's English is joined with commas, as it reads;
- * in an app's catalog, in the words of the locale that has it.
+ * A text in `locale`, as {@link findText} finds it. A list in MeoCord's English is joined with its `joiner`, a comma
+ * unless given; in an app's catalog, in the words of the locale that has it.
  */
 export function renderText(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): string {
   const found = findText(translator, locale, text.key)
@@ -109,7 +109,7 @@ export function translatorOfClient(client: object | null | undefined): Translato
   return client ? translators.get(client) : undefined
 }
 
-/** What an interaction is answered in: its user's locale, since MeoCord's answers to it are private. */
+/** What an interaction is answered in: its user's locale, as MeoCord answers the user who made the call. */
 export const interactionLocale = (interaction: { locale?: string }): TextLocale => interaction.locale as TextLocale
 
 /** What a reply to a message is in: its server's preferred locale, which the channel reads, or the default in a DM. */

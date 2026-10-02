@@ -2,7 +2,8 @@ import { type CatalogShape } from '@src/common/translator.js'
 
 /**
  * MeoCord's own texts for users, in English: the one place they are written. An app translates any of them by
- * adding a `meocord` group to its catalogs; what a locale leaves out is read from here.
+ * adding a `meocord` group to its catalogs. This English stands in as an English catalog: a locale's chain reads it
+ * after the app's catalogs, or, for an English request, before a default in another language.
  */
 export const MEOCORD_MESSAGES = {
   meocord: {

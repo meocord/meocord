@@ -87,6 +87,7 @@ export interface ThemeButtons {
  * @example
  * ```ts
  * // src/types/theme.d.ts
+ * import { type ColorResolvable } from 'discord.js'
  * import 'meocord/interface'
  *
  * declare module 'meocord/interface' {

@@ -100,7 +100,8 @@ export interface MeoCordApplication {
    * `MeoCordFactory.create` to make a new app instead. A retry after a provider's factory failed stays supported.
    *
    * A shard whose start fails exits 1 once the rejection is handled, and its manager restarts it. When MeoCord refuses
-   * the app, which it would in every shard, the manager logs why, stops every shard and exits 1 instead.
+   * the app, or Discord refuses its login for good, as for an invalid token or disallowed intents, which would happen in
+   * every shard, the manager logs why, stops every shard and exits 1 instead.
    *
    * @returns A promise that resolves once the bot is logged in, or every shard has been spawned.
    * @throws For a bot in one process, the error of a provider's factory that failed, or the login
@@ -192,9 +193,9 @@ export interface OnReady {
  * Implement it to stop what {@link OnReady} started: timers, open connections, writes still buffered.
  *
  * @remarks
- * Called on SIGINT or SIGTERM, before the client is destroyed, and only if `onReady` hooks ran. Hooks
- * run one at a time in reverse dependency order, so a service stops before the services it injects.
- * The whole sequence is limited by `shutdownTimeout` in `meocord.config.ts`; the process then exits
+ * Called when the bot stops, on SIGINT or SIGTERM or through `app.stop()`, before the client is destroyed, and only
+ * if `onReady` hooks ran. Hooks run one at a time in reverse dependency order, so a service stops before the services
+ * it injects. The whole sequence is limited by `shutdownTimeout` in `meocord.config.ts`; shutdown then goes on
  * whether or not it finished. A hook that throws is logged and the next one still runs.
  *
  * It runs only for a class whose `onReady` has finished, or that has none: a signal that arrives
@@ -643,7 +644,11 @@ export interface MessageCommandOptions {
    * @defaultValue `false`
    */
   mention?: boolean | 'only'
-  /** Matches the prefix and a pattern's literal words in the case written; param values always are. @defaultValue `false` */
+  /**
+   * Matches the prefix, a pattern's literal words, its choice words and its flag names in the case written. A text
+   * param keeps the case the user typed either way.
+   * @defaultValue `false`
+   */
   caseSensitive?: boolean
   /**
    * Param types of the app's own, used in patterns as `{name:type}` by their key here. Declare each in
@@ -651,14 +656,15 @@ export interface MessageCommandOptions {
    */
   types?: Record<string, MessageParamType>
   /**
-   * How long a reply showing a command's usage stays before it is deleted, in seconds. `0` keeps it.
+   * How long a reply showing a command's usage, or a guard's or validation's reason, stays before it is deleted, in
+   * seconds. `0` keeps it.
    * @defaultValue `10`
    */
   deleteUsageRepliesAfter?: number
   /**
    * Begins every text reply MeoCord sends to a message with the theme's `emojis.warning`: a command's usage, a
    * guard's or validation's reason, a `UserError`'s message, an `@On` listener's of a message event included, and the
-   * direct messages `dmOnError` and `dmOnCooldown` send.
+   * direct messages `dmOnError` and `dmOnCooldown` send. The built-in help's reply begins with `emojis.info` instead.
    * The emoji is the call's resolved theme's, so it follows `@UseTheme` and `themeFor`.
    * @defaultValue `false`
    */
@@ -684,8 +690,9 @@ export interface MessageCommandOptions {
    */
   dmOnCooldown?: boolean
   /**
-   * Answers `!help` with the message commands the caller can use, and `!help <command>` with one of them, from the
-   * `description` each handler gives. `true` uses the word `help`; `{ command, aliases }` names other words. It
+   * Answers `!help` with the message commands that work here, leaving out hidden ones and those with guards, since
+   * help runs no guards, and `!help <command>` with the one it names, listed or not, from the `description` each
+   * handler gives. `true` uses the word `help`; `{ command, aliases }` names other words. It
    * answers only after a prefix or a mention, and an app's own handler for the word runs instead. The reply's text
    * comes from the presenter's `messageHelp` when it has one.
    * @defaultValue `false`
@@ -713,7 +720,7 @@ export interface MessageHelpOptions {
 /**
  * What the built-in help command found, for a presenter's `messageHelp` to write.
  *
- * `list` is every command the caller can use here; `command` is the one a `!help <command>` names; `parent` is the
+ * `list` is every command that works here, but for hidden ones and those with guards; `command` is the one a `!help <command>` names; `parent` is the
  * subcommands of the words it names; `unknown` is a name no command has; `empty` is nothing to list.
  *
  * @example
@@ -818,7 +825,9 @@ export type MeoCordMessages = (typeof MEOCORD_MESSAGES)['meocord']
  *   label: 'hex colour',
  *   parse: word => (/^#[0-9a-f]{6}$/i.test(word) ? parseInt(word.slice(1), 16) : undefined),
  * }
- * // @MeoCord({ messages: { types: { color } } }), and in a .d.ts of the app:
+ * // @MeoCord({ messages: { types: { color } } }), and in a .d.ts of the app, which imports it to extend it:
+ * import 'meocord/interface'
+ *
  * declare module 'meocord/interface' {
  *   interface MessageParamTypes { color: number }
  * }
@@ -902,7 +911,7 @@ export interface MessageParamTypes {
  * @see {@link ParamRefsOf}
  */
 export interface EntityRef<T> {
-  /** The ID the message gave, by mention or as a bare ID. */
+  /** The entity's ID: the one the message gave, by mention or as a bare ID, or a role's found by its name. */
   readonly id: string
   /** The entity when discord.js already has it, with no request; `undefined` otherwise. */
   readonly cached: T | undefined
@@ -1088,7 +1097,7 @@ export interface MessageHandlerOptions {
   /**
    * Where the command works; `'any'` by default. A message sent elsewhere gets a usage reply saying
    * where it works, and the handler does not run. A command with a `member`, `role` or `channel` param
-   * works in servers only, whatever this says.
+   * works in servers only; `'dm'` with one is refused as the bot starts.
    */
   scope?: MessageScope
   /**
@@ -1103,8 +1112,8 @@ export interface MessageHandlerOptions {
  * The configuration `meocord.config.ts` exports: the bot's token, how it is built, and how it registers and shards.
  *
  * It holds what the CLI and the process need before the app class is read. What the app itself does, its
- * controllers, intents and message options, belongs in `@MeoCord` instead. A new app's config file imports
- * `dotenv/config` first, so `process.env` holds `.env`'s values.
+ * controllers, intents and message options, belongs in `@MeoCord` instead. A new app's config file loads its `.env`
+ * files with dotenv first, so `process.env` holds their values.
  *
  * @example
  * ```ts

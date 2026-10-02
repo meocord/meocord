@@ -97,7 +97,7 @@ describe('@Command(route) and the handler params', () => {
     expectTypeOf(Tickets).toBeConstructibleWith()
   })
 
-  it('refuses a param the pattern no longer has', () => {
+  it('refuses a param the pattern does not capture', () => {
     const narrowed = route('ticket/{id}')
     class Tickets {
       // @ts-expect-error {action} is not in 'ticket/{id}'

@@ -27,7 +27,7 @@ function read(name: LegacyColor): ColorResolvable {
   return useTheme().colors[ROLES[name]] as ColorResolvable
 }
 
-/** Sets a role beneath every theme an app sets, as the static once did; a value that is no colour is reported instead. */
+/** Sets a role beneath every theme an app sets; a value that is no colour is reported instead. */
 function assign(name: LegacyColor, value: ColorResolvable): void {
   const role = ROLES[name]
   warnDeprecated(logger, `Assigning Theme.${name}`, `colors.${role} in @MeoCord({ theme })`)
@@ -44,7 +44,7 @@ function assign(name: LegacyColor, value: ColorResolvable): void {
  * Five of the theme's colours as static properties: primary, success, info, danger and warning.
  *
  * Each one reads the matching role of the theme where it is read, `useTheme().colors`, so code written against it
- * follows `@MeoCord({ theme })` and `@UseTheme` with no change. Assigning one still recolours MeoCord's views, as a
+ * follows `@MeoCord({ theme })` and `@UseTheme` with no change. Assigning one recolours MeoCord's views, as a
  * role beneath every theme an app sets. Reading or assigning each one logs a warning once.
  *
  * @deprecated Since 4.1, and removed in the next major version (5.0). Use `useTheme().colors` instead. Themes

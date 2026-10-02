@@ -28,6 +28,7 @@ export interface MetadataDecorator<T> {
  * is unique, so two decorators never collide.
  *
  * @param description - A name for the key, shown when the key is logged.
+ * @returns A decorator that attaches its value, and the key stages read it by.
  *
  * @example
  * ```ts

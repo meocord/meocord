@@ -68,7 +68,8 @@ export interface Route<T extends string = string> {
    * A customId this route matches, with each param's value in its segment. `/` and `%` in a value are
    * encoded, and the handler receives the value as it was given.
    *
-   * @throws TypeError for a missing, empty or unknown value, and RangeError for an id over 100 characters.
+   * @throws TypeError for a missing, empty or unknown value or one not of its param's type, and RangeError for an id
+   *   over 100 characters.
    */
   build(...values: [RouteParams<T>] extends [never] ? [] : [values: RouteValues<T>]): string
   /** The pattern, so a route reads as its pattern in a template string. */

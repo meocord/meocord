@@ -16,8 +16,8 @@ export type PluralCategory = 'zero' | 'one' | 'two' | 'few' | 'many' | 'other'
  * `other` is required, since every language has it, and `{count}` interpolates like any param.
  *
  * @remarks
- * An object whose keys are all plural category names is always read as a plural, never as a group of messages named
- * `one`, `other` and so on.
+ * An object with an `other` form whose keys are all plural category names is always read as a plural, never as a group
+ * of messages named `one`, `other` and so on.
  *
  * @group Types
  */
@@ -149,8 +149,10 @@ type ParamsArgs<M> = [keyof MessageParams<M>] extends [never] ? [params?: Record
 export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>) => string
 
 /**
- * What a locale other than the default provides: any part of the default catalog, in its own wording, using only
- * the `{params}` the default's messages take.
+ * What a locale other than the default provides: any part of the default catalog, in its own wording.
+ *
+ * Its messages may use only the `{params}` the default's take: `createTranslator` checks that for a catalog that keeps
+ * its text, and `expectCompleteCatalog` for any.
  *
  * A message it leaves out falls back to a related locale, then to the default.
  *
@@ -161,8 +163,8 @@ export type LocaleCatalog<C> = {
 }
 
 /**
- * What is wrong with a catalog's `meocord` group, one message per mistake: a key MeoCord has no text for, or a
- * `{param}` MeoCord's English text lacks, shown beside that English so the params it takes can be read.
+ * What is wrong with a catalog's `meocord` group, one message per mistake: a key MeoCord has no text for, a group where
+ * MeoCord has a text, or a `{param}` MeoCord's English text lacks, shown beside that English.
  */
 type MeoCordIssues<T, M, Path extends string = 'meocord.'> = {
   [K in keyof T & string]: K extends keyof M
@@ -177,7 +179,7 @@ type MeoCordIssues<T, M, Path extends string = 'meocord.'> = {
 /** The issues of a catalog's `meocord` group, each a message naming the text and what is wrong. */
 export type CatalogIssues<C> = C extends { readonly meocord: infer G } ? MeoCordIssues<G, MeoCordMessages> : never
 
-/** Refuses a `meocord` group with a mistake, naming each one, where a mismatched text would otherwise read as `never`. */
+/** Refuses a catalog with a mistake, naming each one, where a mismatched text would otherwise read as `never`. */
 type MeoCordReport<Issues> = [Issues] extends [never] ? unknown : Readonly<Record<Issues & string, never>>
 
 /** The params a default message takes: its placeholders, and `count` for a plural. */
@@ -256,7 +258,8 @@ export type CatalogDefinition<T> = T & MeoCordReport<CatalogIssues<T>>
 /**
  * Declares a message catalog, keeping each message's text as its type so the params it takes can be checked.
  *
- * The default locale's catalog needs it, or `as const`; other locales do not.
+ * A default catalog declared apart from `createTranslator` needs it, or `as const`. Other locales compile without it, but
+ * only one that keeps its text has its `{params}` checked when the code compiles.
  *
  * @param catalog - Messages, plurals and nested groups of them.
  * @returns The catalog, unchanged.
@@ -392,7 +395,7 @@ export abstract class Translator<C = CatalogShape> {
   abstract locale(locale: Locale | `${Locale}`): Translate<C>
 }
 
-/** Where a translator made by `createTranslator` keeps its catalogs, for `expectCompleteCatalog` to read. */
+/** Where a translator made by `createTranslator` keeps its catalogs, for MeoCord's texts, `@MeoCord` and `expectCompleteCatalog`. */
 export const CATALOGS = Symbol('catalogs')
 
 /** How MeoCord's own texts read a translator made by `createTranslator`: the catalogs that serve a locale, in order. */
@@ -490,7 +493,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     if (requested && this.catalogs[requested as Locale]) add(requested as Locale)
     if (requested) {
       const language = languageOf(requested)
-      // locales starts with the default, so en-GB prefers the en-US default to another English catalog.
+      // Then the other catalogs of the requested language, as en-GB reads en-US
       for (const locale of this.locales) if (languageOf(locale) === language) add(locale)
     }
     add(this.defaultLocale)
@@ -564,8 +567,8 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
 /**
  * Creates the application's translator from one catalog per locale.
  *
- * Create it at module scope: command builders run when their class is decorated, before any container exists, and use
- * it for names and descriptions. Pass the same instance to `@MeoCord({ i18n })` to inject it as `Translator`.
+ * Create it at module scope: command builders are built when the controllers using them are decorated, before any
+ * container exists, and use it for names and descriptions. Pass the same instance to `@MeoCord({ i18n })` to inject it as `Translator`.
  *
  * Each locale is checked against the default catalog when the code compiles: every key must be one the default has,
  * and a message may use only the `{params}` the default's message takes, and `{count}` in a plural's forms, in any
@@ -583,8 +586,10 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
  * A brace a message shows as text is written twice: `'Buttons use ticket/{{id}}'` shows `ticket/{id}` and takes no
  * param.
  *
+ * @param options - The default locale and a catalog per locale.
  * @param options.default - The locale whose catalog is the reference and the last fallback.
  * @param options.locales - A catalog per discord.js `Locale`, including the default's.
+ * @returns The translator, typed by the default catalog.
  * @throws When the default locale has no catalog, or a key is not a Discord locale.
  *
  * @example

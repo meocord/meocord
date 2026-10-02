@@ -5,8 +5,9 @@ import { type CooldownLimit } from '@src/common/cooldown-store.js'
 /**
  * Thrown by a guard to deny a call and tell the user why.
  *
- * Use it where returning `false`, which denies silently, would leave the user guessing. The built-in fallback
- * shows the message only to the user who made the call, and a filter can catch it to answer otherwise.
+ * Use it where returning `false`, which denies silently, would leave the user guessing. The built-in fallback shows
+ * the message privately to the user who made an interaction, and as a reply to a message command; a listener's or a
+ * reaction's denial is only logged. A filter can catch it to answer otherwise.
  *
  * @example
  * ```ts
@@ -117,6 +118,7 @@ export class UserError extends Error {
  * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
  */
 export class CommandNotFoundError extends Error {
+  /** @param message - What the error says, `No handler matched the interaction.` unless given. */
   constructor(message = 'No handler matched the interaction.') {
     super(message)
     this.name = 'CommandNotFoundError'
@@ -143,8 +145,8 @@ const describePath = (path: readonly PropertyKey[]): string =>
 /**
  * Thrown when a handler's input fails its `@Validate` schema, so the handler does not run.
  *
- * The built-in fallback answers the user privately with each issue. Catch it in a filter to phrase the issues
- * your own way, or in the user's language.
+ * The built-in fallback answers with each issue, privately for an interaction and as a reply to a message command.
+ * Catch it in a filter to phrase the issues your own way, or in the user's language.
  *
  * @example
  * ```ts
@@ -169,7 +171,12 @@ export class ValidationError extends Error {
     this.name = 'ValidationError'
   }
 
-  /** The issues a Standard Schema reported, with each path reduced to its keys. */
+  /**
+   * The issues a Standard Schema reported, with each path reduced to its keys.
+   *
+   * @param issues - The issues, as the schema's `validate` reported them.
+   * @returns The error, its issues in the schema's order.
+   */
   static fromSchemaIssues(issues: readonly StandardSchemaV1Issue[]): ValidationError {
     return new ValidationError(
       issues.map(({ message, path = [] }) => ({
@@ -234,6 +241,8 @@ export class MessageUsageError extends Error {
    * @param usage - The command as the user should type it, such as `!ban <target> [reason…]`, or one line per
    *   subcommand for a message that names only their parent.
    * @param issues - Each thing wrong, in the order of the command's params.
+   * @param options - `serverOnly` or `dmOnly` for a command sent where it does not work, and `quiet` for a message
+   *   that used no prefix or mention.
    */
   constructor(
     readonly usage: string,
@@ -268,6 +277,7 @@ export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
  * which the reader's client words in their language and counts down; {@link translateError} gives it.
  *
  * @param retryAfterMs - How long until the next call is allowed.
+ * @returns The message, in English.
  *
  * @example
  * ```ts
@@ -307,7 +317,8 @@ export function cooldownText(retryAt: Date): MeoCordText {
  * Thrown when a `@Cooldown` blocks a call, so the handler does not run.
  *
  * Catch it in a filter to answer the caller your own way. Without one, the built-in fallback answers only the caller,
- * with `meocord.cooldown.until`: the time the wait ends, which `retryAt` holds, as a Discord timestamp.
+ * with `meocord.cooldown.until`: the time the wait ends, which `retryAt` holds, as a Discord timestamp. A message
+ * command is not answered, unless `messages.dmOnCooldown` tells its author in a direct message, once per wait.
  *
  * @example
  * ```ts
@@ -351,6 +362,8 @@ export class CooldownError extends Error {
  * An app translates it as `meocord.cooldown.storeDown` in its catalogs, and {@link translateError} gives it in a
  * user's language.
  *
+ * @returns The answer, in English.
+ *
  * @example
  * ```ts
  * @Catch(CooldownStoreError)
@@ -372,12 +385,13 @@ export function cooldownStoreMessage(): string {
  * Thrown when the cooldown store fails and `@MeoCord({ cooldownStoreFailure })` is `'deny'`, its default.
  *
  * Catch it in a filter to word the refusal your own way, or in the user's language. Without one, the built-in fallback
- * answers only the caller, with {@link cooldownStoreMessage}.
+ * answers only the caller, with {@link cooldownStoreMessage}. A message command is not answered, unless
+ * `messages.dmOnError` tells its author in a direct message, once per outage.
  *
  * @remarks
  * The store fails when it rejects or does not answer within `cooldownStoreTimeoutMs`. The call is refused, since a
  * cooldown that cannot be checked is not known to allow it. MeoCord logs the failure once per outage, with its cause,
- * and again when the store answers.
+ * and again when the store answers after 30 seconds without a failure.
  *
  * @example
  * ```ts

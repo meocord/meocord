@@ -42,10 +42,10 @@ describe('hideInLogs', () => {
     expect(printed()).toEqual([expect.stringMatching(/the token is x$/)])
   })
 
-  it('hides the value with a Bot or Bearer prefix, and the value alone as discord.js keeps it', () => {
-    hideInLogs(`  Bot ${VALUE}  `)
+  it.each(['Bot', 'Bearer'])('hides the value with a %s prefix, and the value alone as discord.js keeps it', prefix => {
+    hideInLogs(`  ${prefix} ${VALUE}  `)
 
-    new Logger().log(`Bot ${VALUE}`, VALUE, { stored: VALUE })
+    new Logger().log(`${prefix} ${VALUE}`, VALUE, { stored: VALUE })
 
     const [line] = printed()
     expect(line).not.toContain(VALUE)
