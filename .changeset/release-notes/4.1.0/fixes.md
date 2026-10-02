@@ -20,14 +20,14 @@
   - A controller or service that injects with `@inject(Token)` on a parameter typed as an interface is created, where 4.0 bound `Object` in place of the token and failed with "missing metadata on type Object".
   - Classes that inject each other in a cycle are refused as the app is created, naming the cycle, rather than with inversify's "Circular dependency found: (No dependency trace)".
   - A constructor parameter with no runtime type, as when two classes import each other or it's typed with an interface or `import type`, is refused as the app is created, naming the class and the parameter, rather than with inversify's error about `emitDecoratorMetadata`.
-  - A guard listed in `@MeoCord({ services })` or injected elsewhere reads each call's own `params`.
+  - A guard listed in `@MeoCord({ services })` or `providers`, or injected into a service, reads each call's own `params`; one that takes a param through a setter, or seals its instance, still shares them, and the bot warns once.
 - **Handler types**
   - A handler may return a value, as `return interaction.reply(...)` does, and may take fewer parameters than dispatch passes. Both failed to compile with "Unable to resolve signature of method decorator".
   - `applyDecorators` passes on the method or class a decorator returns in place of the one it was given, as a wrapping decorator does, where 4.0 dropped it and kept the original.
 - **Builds**
   - A production build keeps every class's own name. When two modules declared a class of one name, one was renamed, such as `Shop` to `shop_controller_Shop`, in errors and logs and wherever the code read its `name`.
   - Every imported file lands in `dist/assets` under its own name, as images, fonts and media already did, except an imported WebAssembly module, which takes a content hash.
-  - On Windows, `new URL('./file', import.meta.url)` for a file the build bundles gives a `file:` URL, where 4.0 gave the bundle's folder as a disk path, which `fileURLToPath` refused with `ERR_INVALID_URL_SCHEME`. Rebuild to pick this up.
+  - On Windows, `new URL('./file', import.meta.url)` for a file the build bundles gives a `file:` URL. 4.0 built it on the dist folder's disk path, which a URL reads as the scheme `c:`, so `fileURLToPath` refused it with `ERR_INVALID_URL_SCHEME`. Rebuild to pick this up.
   - A `tsconfig.json` that uses `extends`, `files`, `typeRoots`, comments, or `paths` under a `baseUrl` builds as TypeScript reads it, and `meocord build` no longer rewrites the file. Builds that run at the same time no longer read each other's copy of it.
   - A self-contained build runs under Bun, packs each package with the dependency versions it was installed with, and what a package npm nested under another needs, and in a pnpm project packs the packages an external depends on and a native package's per-platform binary. 4.0 gave every package the first version it copied, and could fail with "Cannot find module". Rebuild to pick this up.
 - **The CLI**
