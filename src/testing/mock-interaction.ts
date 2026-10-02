@@ -70,6 +70,7 @@ import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
 import { discordDefault, REAL_GETTER } from './discord-defaults.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
+import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
 
 // ---------------------------------------------------------------------------
 // DeepMocked<T>
@@ -316,8 +317,9 @@ function fetchedId(args: unknown[]): string | undefined {
 /**
  * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
  * `createDM` to the user's DM channel, `send` and its kin to a message, a manager's `fetch`, `create` and `edit` to its
- * item (an empty collection for a list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `pin`, `timeout` and
- * setters to the structure, and the rest to `undefined`. Any other method returns `undefined`.
+ * item (an empty collection for a list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `pin`, `unpin`,
+ * `timeout`, `disableCommunicationUntil` and setters to the structure, and the rest to `undefined`. Any other method
+ * returns `undefined`.
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
   if (!returnsPromise(key, method)) return createMockFn()
@@ -440,12 +442,6 @@ function findPrototypeMethod(instance: object, name: string): ((...args: unknown
 /** The most choices Discord accepts in one autocomplete response. */
 const MAX_AUTOCOMPLETE_CHOICES = 25
 
-/** The last id a mock was given; ids count up from a real snowflake, so each mock's is its own. */
-let lastSnowflake = 1_400_000_000_000_000_000n
-
-/** A snowflake-shaped id no other mock in this run has. */
-const nextSnowflake = (): string => String(++lastSnowflake)
-
 const isSnowflake = (id: unknown): id is string => typeof id === 'string' && /^\d{1,20}$/.test(id)
 
 /**
@@ -517,12 +513,6 @@ const optionOwners = new WeakMap<object, { guildId?: unknown; guild?: unknown }>
 
 /** A mock user that is a person, with an id of its own unless given one. */
 const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object.create(User.prototype), { id, bot: false }))
-
-/**
- * The id of the bot every mock client is logged in as, so a test can mention it. Fixed, and below the
- * ids other mocks take, so it is the same on every run and in any test order, and no mock shares it.
- */
-const MOCK_BOT_ID = '1300000000000000000'
 
 // ---------------------------------------------------------------------------
 // createMockInteraction
@@ -777,6 +767,9 @@ export function createMockInteraction<T extends object>(
     defineCreatedTime(instance, generatedId)
     const userGiven = !unset('user')
     if (!userGiven) instance.user = mockUser()
+    // Assigned once by discord.js's Base constructor, as on a message, and the gateway caches the user on it
+    if (unset('client')) Object.defineProperty(instance, 'client', { value: createMockClient(), writable: true })
+    cacheOf((instance.client as Client | undefined)?.users)?.set((instance.user as User).id, instance.user)
     // A channel given says where the interaction was made, for what the test leaves unset, as discord.js reads it
     const given = own('channel')
     if (typeof given === 'object' && given !== null) {
@@ -987,8 +980,7 @@ export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
  * Creates a mock {@link Client}, with `users`, `channels`, `guilds` and `application.commands` ready to stub.
  *
  * Use it when code under test reaches the client, such as to DM a user or fetch a channel, or to address messages to
- * the bot. A mock message built without one gets a client of its own; give an interaction its `client` when the code
- * under test reaches it.
+ * the bot. A mock message or interaction built without one gets a client of its own.
  *
  * @remarks
  * Its managers' methods resolve as discord.js's do: `users.send()` to a mock message, `users.fetch(id)` and
@@ -1849,7 +1841,7 @@ function buildOptionData(
  *   {@link ChatInputOptions}.
  *
  * @remarks
- * Every method is a mock function, and methods not listed, such as `getAttachment`, are stubbed automatically. An
+ * Every method is a mock function, and methods not listed, such as `getMessage`, are stubbed automatically. An
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
  * and in a server its `member` too. A user option's
  * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
@@ -1898,7 +1890,7 @@ export function createChatInputOptions<Cached extends CacheType = any>(
 
   const isObjectOption = (v: unknown): v is { id: string } => typeof v === 'object' && v !== null && 'id' in v
 
-  // Use a real prototype instance so unlisted methods (e.g. getAttachment)
+  // Use a real prototype instance so unlisted methods (e.g. getMessage)
   // are found on the prototype chain and auto-stubbed as a mock fn
   const base = Object.create(CommandInteractionOptionResolver.prototype)
 
@@ -1954,6 +1946,9 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     return value instanceof User ? memberOf(name, value) : value
   })
   base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | null>(getObjectOption)
+  base.getAttachment = createMockFn<(name: string, required?: boolean) => Attachment | null>((name: string, required?: boolean) =>
+    resolveOrThrow(name, values[name] instanceof Attachment ? values[name] : null, required),
+  )
 
   base.getFocused = createMockFn((getFull?: boolean) => {
     if (focused === null) throw new Error('No focused option found.')

@@ -193,6 +193,28 @@ describe('resolveRoute for messages', () => {
     expect(resolveRoute(Prefixed, { content: '!status', botId: '111', dm: true })?.method).toBe('status')
   })
 
+  it('resolves nothing in a DM for a handler dispatch answers with its usage there, as for a server', () => {
+    @Controller()
+    class Moderation {
+      @MessageHandler('warn', { scope: 'guild' })
+      warn() {}
+
+      @MessageHandler('kick {target:member}')
+      kick() {}
+
+      @MessageHandler('ping')
+      ping() {}
+    }
+    @MeoCord({ controllers: [Moderation], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class ServerApp {}
+
+    expect(resolveRoute(ServerApp, { content: '!warn', dm: true })).toBeUndefined()
+    expect(resolveRoute(ServerApp, { content: '!kick 123', dm: true })).toBeUndefined()
+    expect(resolveRoute(ServerApp, { content: '!ping', dm: true })?.method).toBe('ping')
+    // Where the message was sent is not known, so every scope fits
+    expect(resolveRoute(ServerApp, { content: '!warn' })?.method).toBe('warn')
+  })
+
   it('takes the prefix a message has when the app reads prefixes from a function', () => {
     @MeoCord({ controllers: [DiceController], clientOptions: { intents: [] }, messages: { prefix: () => '?' } })
     class PerGuildApp {}

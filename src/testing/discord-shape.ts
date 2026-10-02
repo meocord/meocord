@@ -1,16 +1,15 @@
 import { ComponentType } from 'discord.js'
+import { nextSnowflake } from './snowflake.js'
 
 type Json = Record<string, unknown>
 
 /** Where a mock resolves unfurled media to, as Discord's media proxy would. */
 const PROXY = 'https://images-ext-1.discordapp.net/external/mock'
 
-let mediaIds = 1_300_000_000_000_000_000n
-
 /** Unfurled media as Discord stores it: the url given, resolved to a proxied image of a fixed size. */
 function resolvedMedia(media: Json): Json {
   return {
-    id: String(mediaIds++),
+    id: nextSnowflake(),
     proxy_url: `${PROXY}/${encodeURIComponent(String(media.url))}`,
     width: 256,
     height: 256,
@@ -33,7 +32,7 @@ const uploaded = (media: Json): boolean =>
  */
 function loadingMedia(media: Json): Json {
   const { attachment_id: _attachment, ...rest } = media
-  return { ...rest, id: String(mediaIds++), flags: 0, loading_state: 1, content_type: null, width: null, height: null, placeholder: null, placeholder_version: null }
+  return { ...rest, id: nextSnowflake(), flags: 0, loading_state: 1, content_type: null, width: null, height: null, placeholder: null, placeholder_version: null }
 }
 
 /** Every component under `node`, in the order Discord numbers them: each one, then its children, then its accessory. */

@@ -47,6 +47,16 @@ describe('mock ids', () => {
     expect(message.guildId).toBe(message.guild?.id)
   })
 
+  it("never gives media the mock bot's id", async () => {
+    const interaction = createMockInteraction(ChatInputCommandInteraction)
+    await interaction.deferReply()
+    const sent = await interaction.editReply({ embeds: [{ thumbnail: { url: 'https://example.com/a.png' } }] })
+
+    const thumbnail = sent.embeds[0].toJSON().thumbnail as { id?: string }
+    expect(thumbnail.id).toMatch(SNOWFLAKE)
+    expect(thumbnail.id).not.toBe(createMockClient().user!.id)
+  })
+
   it('keeps ids a test gives', () => {
     const interaction = createMockInteraction(ChatInputCommandInteraction, { id: '1', channelId: '2', user: { id: '3' } as never })
     expect([interaction.id, interaction.channelId, interaction.user.id]).toEqual(['1', '2', '3'])
@@ -119,6 +129,17 @@ describe("a mock's data, where the test gives none", () => {
     ['premiumTier', GuildPremiumTier.None],
   ])("gives a guild's %s as Discord does", (key, expected) => {
     expect(read(createMockGuild(), key)).toEqual(expected)
+  })
+
+  it('gives an interaction a client of its own, with its user and channel cached, as a message has', () => {
+    const interaction = createMockInteraction(ButtonInteraction, { guildId: '200' })
+    const { client } = interaction
+
+    expect(client.user!.id).toBe(createMockClient().user!.id)
+    expect(client.users.cache.get(interaction.user.id)).toBe(interaction.user)
+    const { channel } = interaction
+    expect(client.channels.cache.get(interaction.channelId)).toBe(channel)
+    expect(createMockInteraction(ButtonInteraction).client).not.toBe(client)
   })
 
   it("gives a guild an owner's id, and the time its id was made", () => {

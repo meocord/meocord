@@ -51,6 +51,10 @@ const GUILD_TYPES = new Set(['member', 'role', 'channel'])
 /** Whether a param type is found only in a server. */
 export const isGuildType = (type: string): boolean => GUILD_TYPES.has(type)
 
+/** Whether a route's pattern takes a param found only in a server, so a DM gets its usage instead. */
+export const needsGuild = (route: MessageRoute): boolean =>
+  route.tokens.some(token => 'param' in token && token.type !== undefined && GUILD_TYPES.has(token.type))
+
 
 /** Whether a pattern's `{name:type}` names a type: built in, words to choose from, or one the app adds. */
 export function isKnownParamType(type: string, types: Record<string, MessageParamType> | undefined): boolean {
@@ -198,8 +202,7 @@ export async function parseMessageParams(
   const flagIssues = route.flags.length > 0 ? readFlags(route, message, start, params, items) : []
 
   const guild = message.guild
-  const needsGuild = route.tokens.some(token => 'param' in token && token.type !== undefined && GUILD_TYPES.has(token.type))
-  if (!guild && (needsGuild || items.some(item => GUILD_TYPES.has(item.type)))) {
+  if (!guild && (needsGuild(route) || items.some(item => GUILD_TYPES.has(item.type)))) {
     throw new MessageUsageError(usage, [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet })
   }
 

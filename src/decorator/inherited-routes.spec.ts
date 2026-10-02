@@ -10,7 +10,7 @@ const warnings = () =>
   vi
     .mocked(Logger.prototype.warn)
     .mock.calls.map(([line]) => String(line))
-    .filter(line => line.includes('re-declared') || line.includes('@Autocomplete'))
+    .filter(line => line.includes('re-declared') || / never runs?:/.test(line))
 
 /** Starts a testing module with the controllers, as the bot starts, which runs the startup checks. */
 const start = (...controllers: (new (...args: any[]) => unknown)[]) => MeoCordTestingModule.create({ controllers }).compile()
