@@ -1,6 +1,6 @@
 ### Deprecations
 
-- **Names removed in 5.0.** Each still works and its JSDoc names the replacement; `@typescript-eslint/no-deprecated` finds them outside specs.
+- **Names removed in 5.0.** Each still works and its JSDoc names the replacement. A new app's ESLint config sets `@typescript-eslint/no-deprecated` to warn outside specs, which finds them; add it to a 4.0 app's config.
   - `Theme`: use `useTheme().colors` and `@MeoCord({ theme })`; reading or setting a colour warns once ([guide](https://meocord.dev/docs/4.1/migrating#theme-is-deprecated-and-its-colours-changed)).
   - `SetMetadata` and string metadata keys: use `createMetadata` and `ExecutionContext.get(decorator)`; each warns once ([guide](https://meocord.dev/docs/4.1/migrating#setmetadata-and-string-metadata-keys-are-deprecated)).
   - `ReactionHandlerOptions`: renamed `ReactionEvent` ([guide](https://meocord.dev/docs/4.1/migrating#reactionhandleroptions-is-now-reactionevent)).
@@ -11,7 +11,7 @@
 - **Handlers that never run warn at startup,** and 5.0 refuses to start:
   - a command or autocomplete handler Discord never sends, such as an unregistered subcommand path, a renamed builder or an option without autocomplete ([guide](https://meocord.dev/docs/4.1/migrating#a-command-handler-discord-never-sends-logs-a-warning));
   - a second `@Autocomplete` for one option ([guide](https://meocord.dev/docs/4.1/migrating#a-second-autocomplete-for-one-option-logs-a-warning));
-  - a handler on a class that isn't a controller ([guide](https://meocord.dev/docs/4.1/migrating#a-handler-on-a-class-that-isnt-a-controller-logs-a-warning)).
+  - a command, message, reaction or autocomplete handler on a class that isn't a controller ([guide](https://meocord.dev/docs/4.1/migrating#a-handler-on-a-class-that-isnt-a-controller-logs-a-warning)).
 - **Changes in 5.0, warned now:**
   - a re-declared handler on another route still answers its inherited one; in 5.0 its own routes replace it ([guide](https://meocord.dev/docs/4.1/migrating#a-re-declared-handler-that-keeps-its-inherited-route-logs-a-warning));
-  - between equally specific overlapping patterns, the first listed runs; in 5.0, the more spelled-out one does ([guide](https://meocord.dev/docs/4.1/migrating#overlapping-component-patterns-meocord-5-prefers-the-one-that-spells-out-more)).
+  - between equally specific overlapping component patterns, the first listed runs; in 5.0, the more spelled-out one does ([guide](https://meocord.dev/docs/4.1/migrating#overlapping-component-patterns-meocord-5-prefers-the-one-that-spells-out-more)).
