@@ -2,7 +2,8 @@ import path from 'path'
 import { existsSync } from 'fs'
 import { createRequire } from 'module'
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { bundleEntry, isBuiltApplication } from '@src/util/bundle-entry.util.js'
+// Relative: the pre-entry that imports this file is bundled from its source, where no alias resolves
+import { bundleEntry, isBuiltApplication } from './bundle-entry.util.js'
 
 let cachedConfig: MeoCordConfig | undefined
 let configLoaded = false
