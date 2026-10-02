@@ -10,4 +10,6 @@ When the config really is missing, the message names the file it looked for and 
 
 The check that refuses a build made for another platform also reads its record beside the bundle. It now applies when a process manager's wrapper starts the bot.
 
+A development build (`meocord build --dev`) does the same, also when a process manager such as pm2 starts it through its own wrapper: its config, its asset imports and the script its shards start from are all found beside its bundle.
+
 Rebuild to pick these up.
