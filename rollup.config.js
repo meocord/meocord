@@ -90,6 +90,10 @@ const cjsBuild = {
   output: {
     dir: 'dist/cjs',
     format: 'cjs',
+    // A default import reads `.default` from a module that has one, as Node's require() of an ES module returns its
+    // namespace, and takes module.exports itself from a CommonJS module that hasn't. Rollup's own default hands on
+    // require()'s value as the default import, which is the namespace, not its default, for an ESM-only package
+    interop: 'compat',
     entryFileNames: '[name].cjs',
     chunkFileNames: '_shared/[name]-[hash].cjs',
     preserveModules: false,
