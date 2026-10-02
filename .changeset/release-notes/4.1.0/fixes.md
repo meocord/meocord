@@ -49,4 +49,5 @@
 - **Testing**
   - Mocks have an `'en-US'` locale, `createdTimestamp` and `createdAt`, a working `inGuild()` and resolving promise methods.
   - A mock interaction without a `client` gets one from `createMockClient`, and `getAttachment()` returns the `Attachment` given, or `null`.
+  - `createChatInputOptions`' entity getters read only their own kinds: `getRole()` on a user option is `null`, and with `required` throws discord.js's type error.
   - `createMockChannel` takes `ThreadChannel`, stubs `threads.create` on text, announcement, forum and media channels, and gives a subclass its base's managers.
