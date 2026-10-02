@@ -1,5 +1,15 @@
 # meocord
 
+## 4.1.0-beta.12
+
+### Minor Changes
+
+- [#411](https://github.com/meocord/meocord/pull/411) [`abaf630`](https://github.com/meocord/meocord/commit/abaf630dbb833940238590d71e7efc33809a3fa7) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@MeoCord({ themeFor })` takes a class implementing the new `ThemeResolver` interface, so a theme can be looked up with the app's services, such as a user's saved choice in a database a provider connects. Its `guild()` and `user()` methods are optional and typed as the functions are. The class is resolved from the app's container like the cooldown store: it isn't listed in `providers`, its constructor injects the app's services and providers, and it runs `OnReady` and `OnShutdown` in dependency order. Its results are cached, timed out and logged as the functions' are, and `ThemeCache` clears them. In tests, `fromApp` binds it, `overrideProvider` replaces it or what it injects, and `overrideThemeFor` takes a class too. See [Theming](https://meocord.dev/docs/4.1/theming).
+
+### Patch Changes
+
+- [#412](https://github.com/meocord/meocord/pull/412) [`c934277`](https://github.com/meocord/meocord/commit/c9342771cf87c894e2f0452e1450b1b6d28a74b5) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A class whose constructor injects but which has no decorator is refused as the app is created, naming the class and the decorator to add, rather than with inversify's `Found unexpected missing metadata on type …` error, at startup or, for a guard, at its first call. The advice is the class's own: `@Controller()` for a listed controller; `@Guard()`, `@Interceptor()`, `@Catch()` or `@Pipe()` for a guard, interceptor, filter or pipe, global or on a handler; `@Service()`, or a provider in `@MeoCord({ providers })` for a class from a package, for any other. Injecting one of MeoCord's classes an app makes itself, such as `Logger` or an error, is refused saying how to make it instead. A subclass whose constructor takes its decorated base's types, a parameter with a default value and a rest parameter are created as before.
+
 ## 4.1.0-beta.11
 
 ### Minor Changes
