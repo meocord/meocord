@@ -33,7 +33,7 @@
 - **Patterns**: `@MessageHandler('roll {sides:int} {note...?}')` matches after a prefix or mention, with typed params such as `int`, `member` or the app's own, flags and lists, checked at compile time ([docs](https://meocord.dev/docs/4.1/message-params)).
 - **Starts**: `messages: { prefix, mention, caseSensitive }` sets how commands start; `mention: 'only'` needs no MessageContent intent.
 - **Answers**: a misfit gets its usage; `aliases`, `description` and `scope` describe a command, `help` adds `!help`, and `dmOnError` and `dmOnCooldown` DM the author ([docs](https://meocord.dev/docs/4.1/message-commands)).
-- **Fetched after guards**: named members, users, roles and channels are fetched only once guards pass, uncached members together.
+- **Fetched after guards**: named members, users and channels are fetched only once guards pass, uncached members together; a role is read from the cache.
 
 ### Components and routing
 
@@ -56,7 +56,7 @@
 ### Testing
 
 - **`invoke` and `dispatch`** run a handler, or route an interaction, message or reaction, through the pipeline; `getResponse` shows what was sent ([docs](https://meocord.dev/docs/4.1/invoke-and-dispatch)).
-- **`MeoCordTestingModule.fromApp(App)`** wires the whole app as the bot does, with `override*()`; `init()`, `close()` and `emit()` run hooks and events ([docs](https://meocord.dev/docs/4.1/testing)).
+- **`MeoCordTestingModule.fromApp(App)`** wires the whole app as the bot does, with `override*()`; `init({ ready: true })`, `close()` and `emit()` run hooks and events ([docs](https://meocord.dev/docs/4.1/testing)).
 - **Mocks behave like discord.js**, with members, roles, permissions, channels and locales; `createMockMember`, `createMockMessage` and the rest take properties, a message its `author`, and `createMockInteraction` Discord's `authorizingIntegrationOwners` map ([docs](https://meocord.dev/docs/4.1/mocks)).
 - **Checks**: `inspectHandler`, `resolveRoute`, `expectCompleteCatalog`, `testCooldownStore` and `resetAllMocks()`.
 
