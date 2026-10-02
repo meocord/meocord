@@ -7,7 +7,7 @@ import { type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 export type Handler = (interaction: any, params: any, ...rest: any[]) => unknown
@@ -81,6 +81,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends Validat
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsInput<ParamsOf<M>, ValidatedInput<S, Pipes>>,
   ): void {
+    refuseOnClass('@Validate', target, propertyKey)
     // Checked where it applies, so the refusal names the handler
     if (typeof schema?.['~standard']?.validate !== 'function') {
       throw refuse(
@@ -151,6 +152,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsPiped<ParamsOf<M>, K, LastPipeOutput<Pipes>>,
   ): void {
+    refuseOnClass('@UsePipe', target, propertyKey)
     assertStageEntries('@UsePipe', 'pipe', `${target.constructor.name}.${propertyKey}`, pipes)
     // Decorators apply bottom-up, so a higher @UsePipe's pipes go first, in the order they read.
     const existing = (Reflect.getOwnMetadata(META.methodPipes, target, propertyKey) as { key: string; entry: PipeEntry }[]) ?? []

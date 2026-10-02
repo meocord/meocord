@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { deferMisuseError, type DeferOptions, nonInteractionHandler } from '@src/core/defer.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -41,6 +41,7 @@ import { META } from '@src/util/metadata-keys.js'
  */
 export function Defer(options: DeferOptions = {}): MethodDecorator {
   return (target: object, propertyKey: string | symbol) => {
+    refuseOnClass('@Defer', target, propertyKey)
     const methodName = String(propertyKey)
     const kind = nonInteractionHandler(target, methodName)
     if (kind) throw refuse(deferMisuseError(target.constructor.name, methodName, kind))

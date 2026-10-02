@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { type ClientEvents } from 'discord.js'
 import { ownHandlerList } from '@src/decorator/controller.decorator.js'
 import { META } from '@src/util/metadata-keys.js'
+import { refuseOnClass } from '@src/util/refusal.util.js'
 
 /** One `@On` or `@Once` declaration: the event, the method handling it, and whether it runs only once. */
 export interface EventHandlerMetadata {
@@ -17,6 +18,7 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<F>,
   ) {
+    refuseOnClass(once ? '@Once' : '@On', target, propertyKey)
     const handlers = ownHandlerList<EventHandlerMetadata>(META.eventHandlers, target)
     handlers.push({ event, method: propertyKey, once })
     Reflect.defineMetadata(META.eventHandlers, handlers, target)
