@@ -813,6 +813,36 @@ describe('createChatInputOptions', () => {
     })
   })
 
+  describe('an entity of another kind', () => {
+    const entities = () => {
+      const guild = createMockGuild()
+      return { user: createMockUser(), role: guild.roles.cache.get(guild.id)!, channel: createMockChannel(TextChannel) }
+    }
+
+    // discord.js reads an option by its type: another kind is no value, and a required one throws its type error
+    it.each([
+      ['getUser', 'role', 'Option "x" is of type: 8; expected 6, 9.'],
+      ['getRole', 'user', 'Option "x" is of type: 6; expected 8, 9.'],
+      ['getChannel', 'user', 'Option "x" is of type: 6; expected 7.'],
+      ['getMentionable', 'channel', 'Option "x" is of type: 7; expected 9.'],
+    ] as const)('%s reads a %s option as null, and throws when required', (getter, kind, message) => {
+      const options = createChatInputOptions({ x: entities()[kind] })
+      expect(options[getter]('x')).toBeNull()
+      expect(() => options[getter]('x', true)).toThrow(message)
+    })
+
+    it('getMember reads a role option as null', () => {
+      expect(createChatInputOptions({ x: entities().role }).getMember('x')).toBeNull()
+    })
+
+    it('getMentionable reads a user, a member and a role', () => {
+      const { user, role } = entities()
+      const member = createMockMember({ user })
+      const options = createChatInputOptions({ user, member, role })
+      expect([options.getMentionable('user'), options.getMentionable('member'), options.getMentionable('role')]).toEqual([user, member, role])
+    })
+  })
+
   describe('a user option', () => {
     it("resolves getMember to the user's member in the interaction's server, the one its cache holds", () => {
       const target = createMockUser()
@@ -848,6 +878,21 @@ describe('createChatInputOptions', () => {
       expect(option.user).toBe(user)
       expect(option.member).toBe(options.getMember('target'))
       expect(option.member).toBeInstanceOf(GuildMember)
+    })
+
+    it.each([
+      ['assigned', (interaction: { options: unknown }, options: unknown) => void (interaction.options = options)],
+      ['given through Object.assign', (interaction: { options: unknown }, options: unknown) => void Object.assign(interaction, { options })],
+    ])('belongs to the interaction it is %s to after creation', (_how, give) => {
+      const target = createMockUser()
+      const guild = createMockGuild()
+      const inServer = createMockInteraction(ChatInputCommandInteraction, { guildId: guild.id, guild })
+      const inDm = createMockInteraction(ChatInputCommandInteraction)
+      give(inServer, createChatInputOptions({ target }))
+      give(inDm, createChatInputOptions({ target }))
+
+      expect(inServer.options.getMember('target')).toBe(guild.members.cache.get(target.id))
+      expect(inDm.options.getMember('target')).toBeNull()
     })
 
     it('carries no member in its data in a direct message, even one read before', () => {
