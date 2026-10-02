@@ -22,6 +22,5 @@ The editor documentation of `meocord/common` and `meocord/interface` matches wha
   - `replyEmoji` notes that help begins with the info emoji.
   - `help` and `MessageHelp` say that `!help` leaves out hidden and guarded commands.
   - `scope: 'dm'` with a server-only param is refused.
-- **`MeoCordApplication.start()`** says a login Discord refuses for good also stops every shard.
 - **`OnShutdown`** runs on `app.stop()` too.
 - **Examples.** The examples for a param type's and a theme's `declare module` import what they use.
