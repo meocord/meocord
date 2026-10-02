@@ -39,7 +39,9 @@ import {
   UserContextMenuCommandInteraction,
   MessageContextMenuCommandInteraction,
   PrimaryEntryPointCommandInteraction,
+  ChannelType,
   Collection,
+  DiscordjsErrorCodes,
   GuildMember,
   Locale,
   Role,
@@ -910,6 +912,38 @@ describe('createChatInputOptions', () => {
       const options = createChatInputOptions({ target: member })
       expect(options.getUser('target')).toBe(member.user)
       expect(options.getMember('target')).toBe(member)
+    })
+  })
+
+  describe("discord.js's errors", () => {
+    const options = () => createChatInputOptions({ name: 'hutao', channel: createMockChannel(TextChannel) })
+    // Each as discord.js throws it: a TypeError with its code, and its own message
+    it.each([
+      ['a missing required option', () => options().getString('missing', true), DiscordjsErrorCodes.CommandInteractionOptionNotFound, 'Required option "missing" not found.'],
+      ['a missing required option, read whole', () => options().get('missing', true), DiscordjsErrorCodes.CommandInteractionOptionNotFound, 'Required option "missing" not found.'],
+      ['an option of another type', () => options().getInteger('name'), DiscordjsErrorCodes.CommandInteractionOptionType, 'Option "name" is of type: 3; expected 4.'],
+      ['a message read from a slash command', () => options().getMessage('name'), DiscordjsErrorCodes.CommandInteractionOptionType, 'Option "name" is of type: 3; expected _MESSAGE.'],
+      ['no subcommand, required by default', () => options().getSubcommand(), DiscordjsErrorCodes.CommandInteractionOptionNoSubcommand, 'No subcommand specified for interaction.'],
+      ['no subcommand group, required', () => options().getSubcommandGroup(true), DiscordjsErrorCodes.CommandInteractionOptionNoSubcommandGroup, 'No subcommand group specified for interaction.'],
+      [
+        'a channel of a type not allowed',
+        () => options().getChannel('channel', false, [ChannelType.GuildVoice]),
+        'CommandInteractionOptionInvalidChannelType' as DiscordjsErrorCodes,
+        'The type of channel of the option "channel" is: 0; expected 2.',
+      ],
+      ['no focused option', () => options().getFocused(), DiscordjsErrorCodes.AutocompleteInteractionOptionNoFocusedOption, 'No focused option for autocomplete interaction.'],
+    ] as const)('throws for %s', (_case, read, code, message) => {
+      expect(read).toThrow(message)
+      expect(read).toThrow(expect.objectContaining({ code, name: `DiscordjsTypeError [${code}]` }))
+      expect(read).toThrow(TypeError)
+    })
+
+    it('reads an option whole, a missing message option, a channel of an allowed type and no subcommand when not required, as discord.js does', () => {
+      expect(options().getMessage('missing')).toBeNull()
+      expect(options().get('name')).toMatchObject({ name: 'name', type: ApplicationCommandOptionType.String, value: 'hutao' })
+      expect(options().get('missing')).toBeNull()
+      expect(options().getChannel('channel', false, [ChannelType.GuildText])).toBeInstanceOf(TextChannel)
+      expect(options().getSubcommand(false)).toBeNull()
     })
   })
 
