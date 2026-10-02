@@ -798,9 +798,9 @@ describe('createChatInputOptions', () => {
     })
 
     // A whole number may be an Integer or a Number option; a fraction is only ever a Number
-    it('getInteger returns null for a fraction, which only a Number option carries', () => {
+    it('getInteger throws for a fraction, which only a Number option carries', () => {
       const options = createChatInputOptions({ amount: 1.5, count: 2 })
-      expect(options.getInteger('amount')).toBeNull()
+      expect(() => options.getInteger('amount')).toThrow('Option "amount" is of type: 10; expected 4.')
       expect(options.getNumber('amount')).toBe(1.5)
       expect([options.getInteger('count'), options.getNumber('count')]).toEqual([2, 2])
       expect(options.data.map(option => option.type)).toEqual([ApplicationCommandOptionType.Number, ApplicationCommandOptionType.Integer])
@@ -921,7 +921,7 @@ describe('createChatInputOptions', () => {
 
     it('throws for absent option when required=true', () => {
       const options = createChatInputOptions({})
-      expect(() => options.getString('missing', true)).toThrow()
+      expect(() => options.getString('missing', true)).toThrow('Required option "missing" not found.')
     })
 
     it('returns null for absent option when required=false', () => {
@@ -948,7 +948,7 @@ describe('createChatInputOptions', () => {
     const options = createChatInputOptions({ file })
     expect(options.getAttachment('file')).toBe(file)
     expect(options.getAttachment('other')).toBeNull()
-    expect(() => options.getAttachment('other', true)).toThrow('Option "other" is required but was not provided.')
+    expect(() => options.getAttachment('other', true)).toThrow('Required option "other" not found.')
   })
 
   describe('unlisted methods fall through to auto-stub', () => {

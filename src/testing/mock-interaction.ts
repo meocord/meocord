@@ -1787,14 +1787,14 @@ const ENTITY_CLASSES = [User, GuildMember, Role, BaseChannel, Attachment] as con
 type EntityClass = (typeof ENTITY_CLASSES)[number]
 
 /**
- * Every option type a value may be sent as: a number as an Integer or a Number, as `getInteger()` reads a fraction as
- * `null`, and a user or a role as a mentionable too. A plain `{ id }` may be any entity.
+ * Every option type a value may be sent as: a whole number as an Integer or a Number, and a user or a role as a
+ * mentionable too. A plain `{ id }` may be any entity.
  */
 function possibleTypesOf(value: unknown): readonly ApplicationCommandOptionType[] {
   const T = ApplicationCommandOptionType
   if (typeof value === 'string') return [T.String]
   if (typeof value === 'boolean') return [T.Boolean]
-  if (typeof value === 'number') return [T.Integer, T.Number]
+  if (typeof value === 'number') return Number.isInteger(value) ? [T.Integer, T.Number] : [T.Number]
   if (value instanceof User || value instanceof GuildMember) return [T.User, T.Mentionable]
   if (value instanceof Role) return [T.Role, T.Mentionable]
   if (value instanceof BaseChannel) return [T.Channel]
@@ -1905,7 +1905,7 @@ export function createChatInputOptions<Cached extends CacheType = any>(
 
   function resolveOrThrow<U>(name: string, value: U | null, required?: boolean): U | null {
     if (value === null) {
-      if (required === true) throw new Error(`Option "${name}" is required but was not provided.`)
+      if (required === true) throw new Error(`Required option "${name}" not found.`)
       return null
     }
     return value
@@ -1952,9 +1952,8 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getNumber = createMockFn<(name: string, required?: boolean) => number | null>((name: string, required?: boolean) =>
     readOption(name, [NUMBER], () => true, required),
   )
-  // A fraction is only ever a Number option's value
   base.getInteger = createMockFn<(name: string, required?: boolean) => number | null>((name: string, required?: boolean) =>
-    readOption(name, [INTEGER], Number.isInteger, required),
+    readOption(name, [INTEGER], () => true, required),
   )
   base.getBoolean = createMockFn<(name: string, required?: boolean) => boolean | null>((name: string, required?: boolean) =>
     readOption(name, [BOOLEAN], () => true, required),
