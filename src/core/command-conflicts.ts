@@ -153,7 +153,7 @@ const quoted = (names: string[]) =>
 /**
  * Warns, in one message, of every name-routed handler Discord never sends an interaction to: a subcommand path its
  * builder does not register or an option it does not register with autocomplete on, a customId pattern as a command
- * name, a builder registering another name, a command no builder registers, or an `@Autocomplete` an earlier one answers.
+ * name, a builder registering another name, a command no builder registers, or an `@Autocomplete` answered before.
  * @param options - `missingBuilders: false`, which testing passes, leaves out commands no builder registers.
  */
 export function warnUnregisteredCommands(controllerClasses: readonly ControllerClass[], { missingBuilders = true } = {}): void {
