@@ -62,8 +62,8 @@ export function registrationKey(body: CollectedCommand['body'], fallbackName: st
 /**
  * Every command the controllers declare, read from their prototypes: nothing is constructed.
  *
- * @returns The commands, or `undefined` when a builder cannot be serialised. Registration then sends
- *   nothing, since a bulk update without that command would delete it from Discord.
+ * @returns The commands, or `undefined` when a builder cannot be serialised or a localization would be rejected.
+ *   Registration then sends nothing, since a bulk update without that command would delete it from Discord.
  */
 export function collectCommands(
   controllerClasses: (new (...args: any[]) => any)[],
@@ -158,8 +158,8 @@ function defaultGuildsEmpty(options: TargetOptions): boolean {
 }
 
 /**
- * Where each command is sent: one bulk update per scope. A scope's update replaces everything the
- * application has there, so the default scope is always included, even when it ends up empty.
+ * Where each command is sent: one bulk update per scope. A scope's update replaces everything the application has
+ * there, so the default scope is included even when it ends up empty, unless `commands.guilds` lists no guild id.
  */
 export function planTargets(commands: CollectedCommand[], options: TargetOptions, logger: RegistrationLogger): RegistrationTarget[] {
   const everythingTo = everythingTarget(options)
@@ -277,16 +277,11 @@ export interface RegisterCommandsOptions extends TargetOptions {
 }
 
 /**
- * Registers the application's commands with Discord: one bulk update per scope.
- *
- * Production always sends: a bulk update is idempotent, so comparing with what Discord holds first
- * would only add a request. In development (`development: true`) a scope whose payload matches the
- * last one sent from this project is skipped, unless `force` is set. Afterwards, the scopes the
- * configuration names but did not send to are checked for leftovers, which `clearOther` removes, except
- * in a development run sending to `developmentGuild`, which only warns.
- * Failures are logged, never thrown.
- *
- * @returns Whether every scope was registered or skipped as unchanged.
+ * Registers the commands, one bulk update per scope; development skips a scope unchanged since its last send, unless
+ * `force`. Once one is sent, and not to `onlyGuild`, the other scopes the configuration names are checked for
+ * leftovers, which `clearOther` removes; a development-guild run or a `commands.guilds` with no id only warns. Never
+ * throws.
+ * @returns Whether every scope was sent or unchanged, and `commands.guilds`, if set, lists a guild id.
  */
 export async function registerCommands(options: RegisterCommandsOptions): Promise<boolean> {
   const { rest, applicationId, controllerClasses, logger, config, development, onlyGuild, force = false } = options

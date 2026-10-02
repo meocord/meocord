@@ -146,8 +146,9 @@ export class MeoCordFactory {
    *   load, naming the file and the reason, with what to do about it, when a provider cannot
    *   be bound, such as one for a token MeoCord binds itself, when two handlers take one command, or two builder
    *   classes build one, naming both, and for any other mistake it refuses as the app loads, such as two component
-   *   patterns that match the same customIds. In a built application it is logged first, as one line, so
-   *   `isExplainedError()` tells a caller not to log it again.
+   *   patterns that match the same customIds. In a built application it is logged first, with where in the source it
+   *   comes from, so `isExplainedError()` tells a caller not to log it again; in a shard of process sharding, the
+   *   manager logs it.
    */
   static create(target: ServiceIdentifier): MeoCordApplication {
     try {
@@ -272,8 +273,8 @@ export class MeoCordFactory {
     // Observers are services too: bound here so their lifecycle hooks run in dependency order
     const observers = appObservers(target as object)
     for (const observer of observers) bindDependencies(container, observer, providers)
-    // Providers first, then the services, then the controllers, each after what it depends on. The app's own classes,
-    // which a class injecting CooldownStore does not make of the store
+    // Providers first, then the services, the controllers and the observers, each after what it depends on. The app's
+    // own classes, which a class injecting CooldownStore does not make of the store
     const order = resolutionOrder(
       container,
       providers,

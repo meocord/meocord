@@ -5,7 +5,7 @@ describe('themeProblems', () => {
   it('accepts every form a colour, an emoji and a button style may take', () => {
     expect(
       themeProblems({
-        colors: { primary: '#7680F4', neutral: '7680f4', success: 0x26a042, warning: [176, 132, 0], danger: 'Red', info: 'Default' },
+        colors: { primary: '#7680F4', neutral: '7680f4', success: 0x26a042, warning: [176, 132, 0], danger: 'Red', info: 'Default', spare: 'Random' },
         emojis: {
           loading: '⏳',
           success: '✅',
@@ -97,7 +97,7 @@ describe('themeProblems', () => {
   })
 
   // TypeScript refuses these at the root theme; a JavaScript app is told at startup instead
-  it('refuses a role MeoCord reserves, in any group', () => {
+  it('refuses a role MeoCord reserves, in each of its groups', () => {
     expect(themeProblems({ colors: { accent: '#7680F4' }, emojis: { error: '❌' }, buttons: { link: ButtonStyle.Primary } })).toEqual([
       'theme.colors.accent: MeoCord reserves the role name accent for a role it may add; rename yours',
       'theme.emojis.error: MeoCord reserves the role name error for a role it may add; rename yours',

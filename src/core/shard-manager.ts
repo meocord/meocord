@@ -49,8 +49,9 @@ interface ShardState {
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
 /**
- * Runs a bot in process sharding: registers its commands once, spawns one process per shard from the
- * built bundle, restarts a shard that exits, and stops them all on SIGINT or SIGTERM.
+ * Runs a bot in process sharding: registers its commands once, spawns one process per shard from the built bundle,
+ * restarts a shard that exits, and stops them all on SIGINT or SIGTERM, a stop from `meocord start --dev`, or a shard's
+ * `stop()`.
  */
 export class ShardManager implements MeoCordApplication {
   private readonly logger = new Logger('ShardManager')
@@ -137,8 +138,8 @@ export class ShardManager implements MeoCordApplication {
   }
 
   /**
-   * Registers the commands over REST, once for every shard. A failure is logged and the shards start
-   * anyway, as a single process does, unless Discord refused the token, which no shard can log in with.
+   * Registers the commands over REST, once for every shard. A failure is logged, a token Discord refused included; it
+   * starts no shard, and `start()` is what goes on without the commands or stops for a refused token.
    */
   async registerCommands(): Promise<void> {
     await this.register()
@@ -232,7 +233,7 @@ export class ShardManager implements MeoCordApplication {
     void this.exitForLogin()
   }
 
-  /** Exits 1 for a bot that could not log in, telling `meocord start --dev` first so it ends its watch session. */
+  /** Exits 1 for a bot that could not log in, telling `meocord start --dev` first, which then waits for a change. */
   private exitForLogin(): void | Promise<void> {
     if (!underDevRunner()) return this.exit(1)
     // Set first, so the process exits 1 even if it ends while the message is still on its way
@@ -250,8 +251,8 @@ export class ShardManager implements MeoCordApplication {
 
   /**
    * Stops every shard as {@link stop} does, then exits: 0 when every shard stopped, 1 when one had to be killed.
-   * SIGINT and SIGTERM call it. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first is the same request; one after it
-   * kills them all at once.
+   * SIGINT, SIGTERM and a stop from `meocord start --dev` call it. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first
+   * is the same request; one after it kills them all at once.
    */
   async stopAndExit(): Promise<void> {
     const request = this.stopRequest()

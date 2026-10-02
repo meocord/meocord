@@ -224,14 +224,14 @@ describe('ShardContext', () => {
 
     it('calls every shard and gives one result per shard, a failing one included', async () => {
       const client = shardedClient(0, 3, async id => {
-        if (id === 1) throw new Error('StatsService is not a controller or service of this app.')
+        if (id === 1) throw new Error('StatsService is not a controller, service or provided class of this app.')
         return id * 10
       })
       const shards = new ShardContext(client, async () => 0)
 
       expect(await shards.call(StatsService, 'guildCount')).toEqual([
         { shardIds: [0], ok: true, value: 0 },
-        { shardIds: [1], ok: false, error: 'StatsService is not a controller or service of this app.' },
+        { shardIds: [1], ok: false, error: 'StatsService is not a controller, service or provided class of this app.' },
         { shardIds: [2], ok: true, value: 20 },
       ])
       expect(client.shard!.broadcastEval).toHaveBeenCalledWith(expect.any(Function), {

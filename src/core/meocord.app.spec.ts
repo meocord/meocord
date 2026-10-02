@@ -270,7 +270,7 @@ describe('MeoCordApp', () => {
     })
   })
 
-  describe('handleMessage()', () => {
+  describe('messageCreate', () => {
     it('ignores messages from bots', async () => {
       const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token')
       await app.start()
@@ -297,7 +297,7 @@ describe('MeoCordApp', () => {
     })
   })
 
-  describe('handleReaction()', () => {
+  describe('messageReactionAdd', () => {
     const BOT_ID = 'bot-1'
     const users = {
       own: { id: BOT_ID, bot: true },
@@ -582,8 +582,8 @@ describe('MeoCordApp', () => {
   })
 
   // Discord sends the four entity select menus as distinct component types carrying
-  // different resolved data. Routing them all as "a select menu" -- or not at all --
-  // answered a working component with "Command not found!".
+  // different resolved data. Routing them all as "a select menu", or not at all, would
+  // answer a working component with "Command not found!".
   describe('component dispatch', () => {
     const componentCases: [CommandType, { prototype: any; name: string }][] = [
       [CommandType.SELECT_MENU, StringSelectMenuInteraction],
@@ -1018,7 +1018,7 @@ describe('MeoCordApp', () => {
       return put
     }
 
-    it('sends the commands globally over the client\'s REST once ready', async () => {
+    it('sends the commands globally over the client\'s REST', async () => {
       const put = withRest()
       const app = new MeoCordApp([PingController] as any, createMockContainer() as any, mockClient as any, 't')
 
@@ -1049,7 +1049,7 @@ describe('MeoCordApp', () => {
       expect(error).toHaveBeenCalledWith(expect.stringContaining('Error registering commands globally'), expect.any(Error))
     })
 
-    it('keeps the ready listener\'s other work going when registration fails', async () => {
+    it('keeps a failed registration from reaching the ready listener as an unhandled error', async () => {
       withRest(vi.fn().mockRejectedValue(new Error('Invalid Form Body')))
       const app = new MeoCordApp([PingController] as any, createMockContainer() as any, mockClient as any, 't')
       await app.start()
@@ -1288,7 +1288,7 @@ describe('MeoCordApp', () => {
   })
 
   describe('shutdownAndExit()', () => {
-    it('destroys the client and clears the activity interval', async () => {
+    it('destroys the client, removes its listeners and exits 0', async () => {
       const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token', [{ name: 'Playing' }])
       await app.start()
 

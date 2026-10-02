@@ -20,8 +20,8 @@ function failingClient() {
 
 afterEach(() => vi.restoreAllMocks())
 
-// What undoFailedLogin undoes. If a discord.js release stops destroying the client on a failed login, or resets these
-// itself, this fails, and the workaround can go.
+// What undoFailedLogin undoes. If a discord.js release stops destroying the client on a failed login, or a later login
+// resets the manager's flag itself, this fails, and the workaround can go.
 describe("discord.js's failed login", () => {
   it('destroys the client: its WebSocket manager is marked destroyed and its sweepers stop', async () => {
     const client = failingClient()
@@ -36,7 +36,7 @@ describe("discord.js's failed login", () => {
     await client.destroy()
   })
 
-  it('leaves the manager destroyed through a later connect, which then skips closing the gateway', async () => {
+  it('leaves the manager marked destroyed through a later login', async () => {
     const client = failingClient()
     await client.login('token').catch(() => undefined)
 

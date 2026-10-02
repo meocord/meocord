@@ -3,8 +3,9 @@ import { type ReservedThemeRole } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
 
 /**
- * The role names MeoCord keeps for roles it may add, in any group: the runtime copy of `ReservedThemeRole`, which
- * refuses them in TypeScript at the root theme, so that a JavaScript app is told too. A type test keeps the two equal.
+ * The role names MeoCord keeps for roles it may add to `colors`, `emojis` and `buttons`: the runtime copy of
+ * `ReservedThemeRole`, which refuses them in TypeScript at the root theme, so that a JavaScript app is told too. A type
+ * test keeps the two equal.
  */
 export const RESERVED_THEME_ROLES = [
   'accent',
@@ -86,12 +87,10 @@ const GROUPS: Record<'colors' | 'emojis' | 'buttons', { check: (value: unknown) 
 }
 
 /**
- * What is wrong with a theme, or part of one, one line per problem naming its key path: a colour discord.js cannot
- * resolve, an emoji Discord would refuse, a button style other than Discord's four coloured ones, or a role name MeoCord
- * reserves. MeoCord's groups are checked, whatever roles an app added to them; a group of the app's own is its to check.
- *
- * @param theme - A theme as an app wrote it, or any part of one.
- * @param where - Where it was set, such as `@UseTheme on ShopController`, to begin each line with.
+ * What is wrong with a theme or part of one, a line per problem naming its key path: in MeoCord's groups, whatever
+ * roles an app added, a colour discord.js cannot resolve, an emoji Discord would refuse, a button style other than
+ * Discord's four coloured ones, or a reserved role name. A group of the app's own is its to check.
+ * @param where - Where it was set, such as `themeFor.guild for guild 123`, to begin each line with.
  */
 export function themeProblems(theme: unknown, where?: string): string[] {
   const at = where ? `${where}: ` : ''

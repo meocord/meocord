@@ -278,7 +278,7 @@ describe('the cache of themeFor\'s results', () => {
 })
 
 describe('a resolver that fails', () => {
-  it('leaves its theme out, logs once until it answers again, and is not asked again for a while', async () => {
+  it('leaves its theme out, logs the failure and its recovery, and is not asked again for a while', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
     const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
     const logs = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {})
@@ -296,7 +296,7 @@ describe('a resolver that fails', () => {
     failing = false
     await module.invoke(Panel, 'panel', press('panel'))
 
-    // The first server twice, then again after the backoff; the second once
+    // The first server once, then again after the backoff; the second once
     expect(guild).toHaveBeenCalledTimes(3)
     expect(seen.filter(entry => (entry as string[])[0] === 'handler')).toEqual([
       ['handler', DEFAULT_THEME.colors.primary, '#000022', DEFAULT_THEME.colors.success],

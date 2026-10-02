@@ -370,7 +370,7 @@ describe('lifecycle hooks', () => {
   })
 
   describe('shutdown', () => {
-    it('runs onShutdown in reverse dependency order, then destroys the client, then exits 0', async () => {
+    it('runs onShutdown in reverse of the startup order, then destroys the client, then exits 0', async () => {
       const loaded = await load()
       const order: string[] = []
 

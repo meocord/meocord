@@ -7,8 +7,8 @@ import { Logger } from '@src/common/index.js'
 export const SHARD_CALL_KEY = Symbol.for('meocord.shardCall')
 
 /**
- * Runs a service method in the current process: the class itself when the call starts here, or its
- * name when it comes from another shard, where only JSON arrives.
+ * Runs a service method in the current process: given the class itself in a bot of one process, or its name with
+ * process sharding, where every shard, the caller's own included, is reached as JSON.
  */
 export type ShardCallHandler = (
   service: string | (abstract new (...args: any[]) => unknown),
@@ -28,10 +28,9 @@ const unpackArgs = (packed: PackedArgs): unknown[] => Array.from({ length: packe
 type ClassToken = abstract new (...args: any[]) => unknown
 
 /**
- * Runs a {@link ShardContext.call} in this process, on a controller, a service or a class a provider stands in for: the
- * class itself for a call made here, its name for one from another shard. `classes` is read on each call, so it can be
- * filled after this is made. Only process sharding sends a name, and the app refuses to start with two of these
- * classes under one name there, so a name finds one class.
+ * Runs a {@link ShardContext.call} in this process, on a controller, a service or a class a provider stands in for,
+ * given the class itself or, with process sharding, its name. `classes` is read on each call, so it can be filled after
+ * this is made. The app refuses to start with two of these classes under one name there, so a name finds one class.
  */
 export function shardCallHandler(container: Container, classes: () => readonly ClassToken[], owner: string): ShardCallHandler {
   return async (service, method, args) => {
@@ -140,8 +139,8 @@ type MethodArgs<T, M extends keyof T> = T[M] extends (...args: infer A) => unkno
 type MethodResult<T, M extends keyof T> = T[M] extends (...args: any[]) => infer R ? Awaited<R> : never
 
 /**
- * Runs a call in the shard `broadcastEval` sends it to. It is turned into a string there, so it touches
- * only its parameters; coverage instrumentation would add references it cannot resolve.
+ * Runs a call in the shard `broadcastEval` sends it to. It is sent as its source and rebuilt there, so it touches only
+ * its parameters; coverage instrumentation would add references it cannot resolve.
  */
 /* istanbul ignore next */
 const runInShard = (client: Client, ctx: { service: string; method: string; args: PackedArgs }) =>
@@ -197,7 +196,7 @@ export class ShardContext {
 
   /**
    * @param client - The bot's client, or `undefined` in a testing module, which runs as one process.
-   * @param runHere - Runs a named service method in this process.
+   * @param runHere - Runs a service method in this process, given its class, or its name with process sharding.
    */
   constructor(
     private readonly client: Client | undefined,

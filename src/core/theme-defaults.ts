@@ -18,9 +18,9 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
 }
 
 /**
- * MeoCord's own theme: a value for every role it defines, beneath every theme an app sets. The colours keep the hues of
- * 4.0's `Theme`, with the lightness moved until each gives at least 3:1 (WCAG 2.1 SC 1.4.11) against every surface an
- * embed or a container sits on in Discord's light, dark, darker and midnight themes; theme-defaults.spec checks it.
+ * MeoCord's own theme: a value for every role it defines, beneath every theme an app sets. Each colour gives at least
+ * 3:1 (WCAG 2.1 SC 1.4.11) against every surface an embed or a container sits on in Discord's light, dark, darker and
+ * midnight themes; theme-defaults.spec checks it.
  * Frozen, since one theme is shared by every call.
  */
 export const DEFAULT_THEME: DeepReadonly<DefaultTheme> = deepFreeze<DefaultTheme>({

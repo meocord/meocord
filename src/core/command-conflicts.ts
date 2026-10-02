@@ -45,13 +45,10 @@ function overlap(a: CommandMeta, b: CommandMeta): boolean {
 }
 
 /**
- * Refuses the commands of which only one could ever run or be registered: two handlers of one slash command
- * name or subcommand path, or of one context menu name and kind, and two builder classes that build one
- * application command. One builder on a command and its own subcommand paths builds one command, and a user and a
- * message context menu may share a name. The app's start, `meocord register`, the shard manager and the testing
- * module call it before anything registers or runs.
- *
- * @throws Error naming both handlers, and both builders when two build one command, with what to do instead.
+ * Refuses commands of which only one could run or be registered: two handlers of one slash command name or subcommand
+ * path or of one context menu name and kind, or two builders of one command; a command's subcommands, and a user and a
+ * message context menu of one name, are no clash. The app, `meocord register`, the shard manager and testing call it.
+ * @throws Error naming both handlers, or both builders, with what to do instead.
  */
 export function assertDistinctCommands(controllerClasses: readonly ControllerClass[]): void {
   const handlers = new Map<string, Declared[]>()
@@ -154,15 +151,10 @@ const quoted = (names: string[]) =>
   names.length < 2 ? names.map(name => `"${name}"`).join('') : `${names.slice(0, -1).map(name => `"${name}"`).join(', ')} and "${names.at(-1)}"`
 
 /**
- * Warns, in one message, about every name-routed handler Discord never sends an interaction to: a subcommand path
- * the builder of its command does not register, a customId pattern given as a command name, a builder that
- * registers another name than its `@Command`'s, and a command no builder registers at all. An `@Autocomplete`
- * handler is checked the same way, for an option the builder does not register with autocomplete on, and for one
- * that completes what an earlier handler Discord asks already does: dispatch runs the first, in the order the
- * controllers are listed.
- *
- * @param options - `missingBuilders: false` leaves out the commands no builder registers, as the testing
- *   module does, where a handler with no builder is how a fixture is written.
+ * Warns, in one message, of every name-routed handler Discord never sends an interaction to: a subcommand path or an
+ * autocomplete option its builder does not register, a customId pattern as a command name, a builder registering
+ * another name, a command no builder registers, or an `@Autocomplete` an earlier-listed handler already answers.
+ * @param options - `missingBuilders: false`, which testing passes, leaves out commands no builder registers.
  */
 export function warnUnregisteredCommands(controllerClasses: readonly ControllerClass[], { missingBuilders = true } = {}): void {
   const declared: (Declared & { name: string })[] = []
@@ -341,12 +333,9 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
 }
 
 /**
- * Warns about customId patterns of one component type that can match the same customId, naming for each pair the
- * handler that runs and why. Warns rather than refuses: an app whose patterns overlap works, and refusing to start
- * would turn a latent mis-route into an outage.
- *
- * @throws Error for two handlers whose patterns match the same customIds, as the app refuses them, so the shard
- *   manager and the testing module refuse them too.
+ * Warns of customId patterns of one component type that can match one customId, naming the handler that runs and why;
+ * an app whose patterns overlap works, so refusing to start would turn a latent mis-route into an outage.
+ * @throws Error for two handlers whose patterns match the same customIds, which the app refuses as well.
  */
 export function warnOverlappingPatterns(controllerClasses: readonly ControllerClass[]): void {
   const routes = buildComponentRoutes(controllerClasses)

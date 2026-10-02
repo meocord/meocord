@@ -45,7 +45,9 @@ interface AppThemes {
   /** The version of the app read outside a call that `scoped` was decided with. */
   ambientVersion: number
   app: ResolvedTheme
-  /** The theme a call of a handler without a `@UseTheme` runs with, or `undefined` when it needs no scope. */
+  /**
+   * The theme a call of a handler without a `@UseTheme` is scoped to, or `undefined` when only `themeFor` may scope it.
+   */
   scoped: ResolvedTheme | undefined
   /** The caches of the app's `themeFor`, when it sets a resolver. */
   resolvers: ThemeResolverCaches | undefined
@@ -115,7 +117,10 @@ export function appTheme(container: Container): ResolvedTheme {
   return current(container)?.app ?? defaultTheme()
 }
 
-/** A handler's theme: the app's, then each class's `@UseTheme` from the base class down, then the method's. */
+/**
+ * A handler's theme: the app's, then each class's `@UseTheme` from the furthest base class its stages reach, then the
+ * method's.
+ */
 function handlerTheme(themes: AppThemes, prototype: object, methodName: string): ResolvedTheme {
   let byMethod = themes.handlers.get(prototype)
   if (!byMethod) themes.handlers.set(prototype, (byMethod = new Map()))
@@ -133,11 +138,9 @@ function handlerTheme(themes: AppThemes, prototype: object, methodName: string):
 }
 
 /**
- * The theme scope a call runs in, or `undefined` when it needs none: its handlers share one theme, the one read
- * outside any call, and no resolver applies to it. So an app with neither a `@UseTheme` nor `themeFor` pays one
- * check per call. The scope holds the handler's theme, with the call's server's and user's themes over it; when
- * those are still being looked up, `ready` settles once they are in the scope. Without a handler, as for an error
- * no route took, the app's theme.
+ * The theme scope a call runs in, or `undefined` when it needs none: its handlers share the theme read outside any
+ * call, and no resolver applies. The scope holds the handler's theme, or the app's without a handler, with the call's
+ * server's and user's themes over it; when those are still being looked up, `ready` settles once they are in the scope.
  */
 export function beginCallTheme(
   container: Container,
@@ -187,7 +190,7 @@ export function claimAmbientAppTheme(container: Container): void {
   claimAmbientTheme(container, () => appTheme(container))
 }
 
-/** Gives up the app's theme as the one read outside a call: its start failed, or it has shut down. */
+/** Gives up the app's theme as the one read outside a call: its start failed, or its shutdown has begun. */
 export function releaseAmbientAppTheme(container: Container): void {
   releaseAmbientTheme(container)
 }

@@ -117,7 +117,7 @@ describe('start()', () => {
     expect(ran).toEqual(['ping', 'onReady'])
   })
 
-  it("resolves the app's presenter once across a retry, as the built-in help reads it", async () => {
+  it("has the app's presenter after a retry, as the built-in help reads it", async () => {
     loginSucceedsOn(2)
     app = MeoCordFactory.create(App)
 

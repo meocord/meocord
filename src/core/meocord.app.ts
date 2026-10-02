@@ -60,7 +60,6 @@ export const SLOW_READY_HOOK_MS = 10_000
 
 type LifecycleClass = new (...args: any[]) => any
 
-/** A resolved controller, service or provided value, with its name for logs. */
 /** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
 const runningApps = new Set<() => Promise<boolean>>()
 const stopRequest = stopRequests()
@@ -68,10 +67,9 @@ let signalHandlersInstalled = false
 let shuttingDown: Promise<void> | undefined
 
 /**
- * Shuts every started app down and exits: `onShutdown` hooks under the configured `shutdownTimeout`,
- * then `destroy()`, then exit 0, or 1 if a client failed to close. SIGINT and SIGTERM call it, and so
- * does a shard its manager tells to stop. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first is the
- * same request; one after it forces exit 1.
+ * Shuts every started app down and exits, with a code already set or 0, and 1 if a client failed to close. Signals call
+ * it, and in a shard its manager's request or its going. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first is the
+ * same request; one after it forces exit 1, except in a shard, whose manager forces it.
  */
 export async function shutdownAndExit(): Promise<void> {
   const request = stopRequest()
@@ -209,7 +207,7 @@ export class MeoCordApp implements MeoCordApplication {
         this.logger.error(`Unhandled error while handling "${event}":`, error)
       }
     })()
-    // A call, which the cooldown store outlasts at shutdown; the ready listener only runs the hooks
+    // A call, which the cooldown store outlasts at shutdown; the ready listener's work is not one
     if (event !== 'clientReady') {
       this.calls.add(handled)
       void handled.then(() => this.calls.delete(handled))
@@ -224,11 +222,8 @@ export class MeoCordApp implements MeoCordApplication {
   private storeReady?: PromiseWithResolvers<void>
 
   /**
-   * Shows the next of the app's activities, in the order listed, starting again after the last.
-   *
-   * Guarded separately from {@link runListener}: this runs on a timer rather than an
-   * event, and a throw from a timer callback is an uncaught exception no listener
-   * wrapper can reach.
+   * Shows the next of the app's activities, in the order listed, starting again after the last. Guarded apart from
+   * {@link runListener}: it runs on a timer, where a throw would be an uncaught exception.
    */
   private updateActivity(): void {
     try {
@@ -246,33 +241,8 @@ export class MeoCordApp implements MeoCordApplication {
   private static toldDevRunnerLoginFailed = false
 
   /**
-   * Resolves the app's providers, makes its listed services, registers the Discord event handlers
-   * and logs the bot in.
-   *
-   * If a provider's factory or the login fails, the process exit code is set to `1` before the
-   * promise rejects, so the process exits non-zero even when the caller catches the error to log it.
-   * A later `start()` that logs in clears that code again. A shard whose start fails exits 1 once the rejection is
-   * handled, so its manager restarts it.
-   *
-   * The providers, services and event handlers are set up once: a `start()` after a failed one logs in
-   * again with them, a call while one is under way waits for it, and a call once the bot is online
-   * does nothing.
-   *
-   * Retrying `start()` after a failed login is deprecated; in the next major version (5.0) it rejects. Use
-   * `MeoCordFactory.create` to make a new app instead. A retry after a provider's factory failed stays supported:
-   * no login ran, so there is nothing to undo.
-   *
-   * @returns A promise that resolves once the bot is logged in.
-   * @throws The error of a factory that failed, already logged and naming its token, or the login
-   *   error, such as an invalid token or Discord being unreachable. A start that `stop()` ends rejects with "The bot
-   *   was stopped before it came online.", and a start of an app already stopped with "This app was stopped".
-   *   Use `MeoCordFactory.create` to make a new one.
-   *
-   * @example
-   * ```ts
-   * const app = MeoCordFactory.create(App)
-   * await app.start()
-   * ```
+   * Logs the bot in, as {@link MeoCordApplication.start} describes. The providers, services and event handlers are set
+   * up once, or again after a provider's factory failed; a retry after a failed login reuses them.
    */
   async start(): Promise<void> {
     if (isRegisterOnly()) return this.registerOnly()
@@ -280,7 +250,7 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.online) return
     this.starting ??= this.startOnce()
       .catch(error => {
-        // Its manager restarts a shard once it exits; a start a stop ended is the stop's to finish
+        // A shard ends, for its manager to restart, or to stop all if told it is fatal; a stopped start is the stop's
         if (isShardProcess() && !this.closing) endFailedShard(error)
         throw error
       })
@@ -289,18 +259,9 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Stops the bot without ending the process: runs the `onShutdown` hooks under the configured `shutdownTimeout`, then
-   * closes the client. A stop while the bot logs in ends the login, and that `start()` rejects. A call after the first
-   * waits for it, and a stopped app does not start again. In a shard of process sharding, it asks the manager to stop
-   * every shard, as the manager's own `stop()` does, so the bot stops whichever process calls it.
-   *
-   * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close the client is
-   *   logged, and sets `process.exitCode` to 1 unless another code is already set, as a signal's shutdown exits.
-   *
-   * @example
-   * ```ts
-   * await app.stop()
-   * ```
+   * Stops the bot, as {@link MeoCordApplication.stop} describes. In a shard it asks the manager to stop every shard,
+   * which then asks this one too, so the process ends. A client that fails to close sets `process.exitCode` to 1,
+   * unless a code is already set.
    */
   async stop(): Promise<void> {
     if (isShardProcess()) await tellManager({ meocord: 'stop' })
@@ -463,9 +424,9 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Registers the application's commands with Discord, where `meocord.config.ts`'s `commands` says.
-   *
-   * Runs once the bot is ready. It never throws: a failure is logged and the bot stays online.
+   * Registers the application's commands with Discord, where `meocord.config.ts`'s `commands` says. Runs once the bot
+   * is ready, except in a shard, whose manager registers. It never throws: a failure is logged and the bot stays
+   * online.
    */
   async registerCommands(): Promise<void> {
     const applicationId = this.bot.application?.id
@@ -526,9 +487,9 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Adds a client listener for every `@On` and `@Once` handler on the app's controllers and services.
-   * The instance is resolved when the first event arrives, and each call is isolated: an error is
-   * logged against the event and the handler, and the next listener still runs.
+   * Adds a client listener for every `@On` and `@Once` handler on the app's controllers and services, each event run on
+   * the class's one instance from the container. Each call is isolated: an error is logged against the event and the
+   * handler, and the next listener still runs.
    */
   private attachEventHandlers(): void {
     for (const lifecycleClass of this.lifecycleClasses) {
@@ -616,9 +577,9 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Resolves every bound controller and service and runs their `onReady` hooks one at a time, in
-   * dependency order. A hook that throws is logged and the next one still runs, with a warning for
-   * each hook whose dependencies' hooks failed. Once shutdown begins, no further hook starts.
+   * Resolves every lifecycle unit, provided values and the cooldown store included, and runs their `onReady` hooks one
+   * at a time, in dependency order. A failure is logged and the next one still runs, with a warning for each hook
+   * whose dependencies failed. Once shutdown begins, no further hook starts.
    */
   private async runReadyHooks(client: Client<true>): Promise<void> {
     const entries: LifecycleEntry[] = []
@@ -662,9 +623,9 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Runs the shutdown hooks, if the ready hooks ran, then destroys the client.
+   * Runs the shutdown hooks, if the ready hooks ran, then destroys the client; a stop during login ends the login.
    *
-   * @returns Whether the client was destroyed cleanly.
+   * @returns Whether the client closed cleanly, which an ended login counts as.
    */
   private async closeClient(): Promise<boolean> {
     this.closing = true
