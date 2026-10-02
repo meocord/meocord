@@ -6,6 +6,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { META } from '@src/util/metadata-keys.js'
+import { refuseOnMethod } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as an interceptor, which wraps a handler to act before and after it.
@@ -44,7 +45,8 @@ import { META } from '@src/util/metadata-keys.js'
 export function Interceptor(
   options: InterceptorOptions = {},
 ) {
-  return function (target: new (...args: any[]) => InterceptorInterface) {
+  return function (target: new (...args: any[]) => InterceptorInterface, propertyKey?: string | symbol) {
+    refuseOnMethod('@Interceptor', target, propertyKey)
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Interceptor')
   }

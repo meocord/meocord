@@ -8,6 +8,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { describeValue, isConstructor } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
+import { refuseOnMethod } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as an exception filter for the given error types.
@@ -39,7 +40,8 @@ import { META } from '@src/util/metadata-keys.js'
  * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
  */
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
-  return function (target: new (...args: any[]) => ExceptionFilter<any>) {
+  return function (target: new (...args: any[]) => ExceptionFilter<any>, propertyKey?: string | symbol) {
+    refuseOnMethod('@Catch', target, propertyKey)
     makeInjectable(target)
     errorTypes.forEach((type, index) => {
       if (isConstructor(type)) return
