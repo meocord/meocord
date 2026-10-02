@@ -13,8 +13,9 @@ export type PatternToken = { literal: string } | { param: string; rest: boolean;
 type ParamToken = Extract<PatternToken, { param: string }>
 
 /**
- * A flag of a message pattern, `{--name}`, given anywhere in a message as `--name`: without a type it is
- * `true` or `false`; with one, `{--name:type}`, it takes a value, `--name=value`, and is required unless `?`.
+ * A flag of a message pattern, `{--name}`, given as `--name` anywhere after the command's first word, or anywhere for a
+ * pattern that begins with a param: without a type it is `true` or `false`; with one, `{--name:type}`, it takes a
+ * value, `--name=value`, and is required unless `?`.
  */
 export interface FlagToken {
   flag: string
@@ -42,7 +43,7 @@ export interface MessageRoute {
   mentionOnly: boolean
   caseSensitive: boolean
   scope: MessageScope
-  /** Its flags, which a message may give anywhere, apart from its words. */
+  /** Its flags, which a message may give anywhere after the command's first word, apart from its words. */
   flags: FlagToken[]
   /** The handler's own pattern, when this route is one of its aliases. */
   aliasOf?: string
@@ -71,9 +72,10 @@ const PARAM = /^\{(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\.\.\.)?(\?)?\}$/
 const FLAG = /^\{--(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\?)?\}$/
 
 /**
- * Reads a pattern into its words and flags. Throws for a param that is not a whole word, a name given
- * twice, a rest param that is not last, a word after an optional param that is not optional too, an untyped
- * optional before another, which would take every word, and an untyped flag marked optional.
+ * Reads a pattern into its words and flags. Throws for a pattern of flags alone, a param that is not a whole word, a
+ * name given twice, a rest param that is not last, a word after an optional param that is not optional too, an untyped
+ * optional before another, which would take every word, and a flag whose name does not start with a letter or that is
+ * untyped and marked optional.
  */
 export function parseMessagePattern(pattern: string): MessagePattern {
   // Flags sit anywhere in a message, so they are read apart from the words, which keep their order
@@ -205,7 +207,7 @@ function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandO
 
 /**
  * Every patterned message handler of the given controllers, most specific first, read from metadata
- * alone. Throws for a pattern that cannot be read and for two that match the same messages.
+ * alone. Throws for a pattern or handler option that cannot be read and for two that match the same messages.
  */
 export function buildMessageRoutes(controllerClasses: readonly ControllerClass[], options: MessageCommandOptions = {}): MessageRoute[] {
   const routes: MessageRoute[] = []
@@ -404,7 +406,7 @@ export function staticMessageStarts(
   }
 }
 
-/** The text after the longest start the message begins with, or `undefined` when it begins with none. */
+/** The text after the longest start the message begins with that leaves some text, or `undefined` when none does. */
 export function afterStart(text: string, prefixes: readonly string[], mention: string | undefined, caseSensitive: boolean): string | undefined {
   const starts = [
     ...prefixes.map(prefix => ({ start: prefix, exact: caseSensitive })),
@@ -454,7 +456,10 @@ interface RouteGroup {
 /** Routes compiled once for dispatch: grouped by how a message starts for them, each group a trie of words. */
 interface MessageIndex {
   groups: RouteGroup[]
-  /** Whether some route can match a message with no prefix, so no message can be turned away by its first character. */
+  /**
+   * Whether no message can be turned away by its first character: some route takes one with no prefix, or has its own
+   * prefix beginning outside ASCII.
+   */
   acceptsAnyStart: boolean
   /** Whether some route uses the app's prefixes, which each message brings. */
   usesAppStarts: boolean
@@ -506,7 +511,10 @@ const NONE: never[] = []
 
 const wordKey = (word: string, caseSensitive: boolean) => (caseSensitive ? word : word.toLowerCase())
 
-/** Compiles ranked routes into tries, one per group; a route keeps its rank, its position in `routes`. */
+/**
+ * Compiles ranked routes into tries by group, one for routes without flags and one for those with; a route keeps its
+ * rank.
+ */
 function compileIndex(routes: readonly MessageRoute[]): MessageIndex {
   const groups = new Map<string, RouteGroup>()
   routes.forEach((route, rank) => {
@@ -656,10 +664,10 @@ function mayStart(index: MessageIndex, starts: MessageStarts, first: string): bo
 const indexes = new WeakMap<readonly MessageRoute[], MessageIndex>()
 
 /**
- * The route dispatch runs for a message's content: the first, in rank order, that the content matches
- * after the route's start, with the captured params. The routes are compiled into tries once, so a message
- * costs one pass over its words whatever the number of routes, and one whose first character no start
- * begins with costs a lookup.
+ * The route dispatch runs for a message's content: the first, in rank order, that the content matches after the
+ * route's start and whose scope fits, else the first that matches at all, with the captured params. The routes are
+ * compiled into tries once, so a message costs one pass over its words whatever the number of routes, and one whose
+ * first character no start begins with costs a lookup.
  */
 export function matchMessageRoute(
   routes: readonly MessageRoute[],
@@ -729,9 +737,9 @@ export function matchMessageRoute(
 }
 
 /**
- * The command a message names when no pattern matches it: the best-ranked route whose command words the
- * message begins with, after a prefix or mention it used. A message with no prefix or mention names none, so
- * ordinary chat is never taken for a command. Only the routes that share the message's first word are read.
+ * The command a message names when no pattern matches it: the best-ranked route whose command words the message begins
+ * with, after a prefix or mention it used, one whose scope fits first. A message with no prefix or mention names none,
+ * so ordinary chat is never taken for a command. Only the routes that share the message's first word are read.
  */
 export function matchMessageCommand(
   routes: readonly MessageRoute[],
@@ -778,11 +786,10 @@ export function matchMessageCommand(
 }
 
 /**
- * The subcommands a message names the parent of, when no pattern matches it and it names no command: the routes
- * whose command words begin with the most of the message's words, short of all of them, as `!config` or
- * `!config nope` does for `config set …` and `config get …`. Only routes `listable` accepts, that the message
- * started as they start and whose scope fits, count, so a parent whose subcommands are all left out names none.
- * A message with no prefix or mention names none, as chat is never taken for a command.
+ * The subcommands a message names the parent of, when no pattern matches it and it names no command: the routes whose
+ * command words begin with the most of the message's words, short of all of them, as `!config` does for `config set …`
+ * and `config get …`. Only routes `listable` accepts, that the message started as they start and whose scope fits,
+ * count; a message with no prefix or mention names none, as chat is never taken for a command.
  */
 export function matchMessageSubcommands(
   routes: readonly MessageRoute[],
@@ -826,12 +833,10 @@ export function matchMessageSubcommands(
 }
 
 /**
- * What a test calling a handler with a message alone passes as its params, as dispatch would build
- * them: `undefined` for a listener, which takes none; `{}` for a message without content; otherwise
- * what the handler's pattern captures, with the route and the start the message used. A message that
- * names the command after a prefix or mention without fitting its pattern gives the route, the start and
- * `given`, the words after the command words. Either only when dispatch would give the message to this
- * handler among `controllers`; any other gives why it does not reach the handler.
+ * What a test calling a handler with a message alone passes as its params, as dispatch builds them: `undefined` for a
+ * listener, `{}` for a message without content, else what the pattern captures with the route and start; for one naming
+ * the command without fitting it, the route, start and `given`, the words after the command words. Either only when
+ * dispatch would give the message to this handler among `controllers`; otherwise why it does not reach the handler.
  */
 export async function messageParamsFor(
   controllerClass: ControllerClass,

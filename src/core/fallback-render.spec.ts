@@ -92,7 +92,7 @@ describe('in a running bot, an answer MeoCord fails to build', () => {
     expect(told[0]).toMatchObject({ outcome: 'error', handled: false, error: expect.objectContaining({ name: 'TypeError' }) })
   })
 
-  it('leaves a reply Discord refuses at debug level, as today', async () => {
+  it('leaves a reply Discord refuses at debug level', async () => {
     const client = await start()
     const message = createMockMessage({ content: '!roll lots' })
     Object.assign(message.author, { bot: false, id: 'user-1' })

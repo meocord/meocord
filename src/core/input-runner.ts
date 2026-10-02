@@ -59,10 +59,11 @@ export function preparePipe(container: Container, entry: PipeEntry): void {
 
 /**
  * The handler's arguments with its input validated and piped: the second argument is replaced by the
- * schema's output, then each pipe's result for its key. Unchanged when the handler has neither, and
- * the call's context is built only if a pipe needs it.
+ * schema's output, then each pipe's result for its key; unchanged when the handler has neither. The call is counted
+ * against its cooldowns last, and the context is built only if a pipe or a cooldown needs it.
  *
- * @throws ValidationError when the schema reports issues; anything a pipe throws.
+ * @throws ValidationError when the schema reports issues; CooldownError or CooldownStoreError when a cooldown refuses
+ *   the call; anything a pipe throws.
  */
 export async function prepareHandlerArgs(
   container: Container,

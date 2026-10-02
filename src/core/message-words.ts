@@ -38,10 +38,10 @@ export function splitWords(text: string): { value: string; start: number }[] {
 }
 
 /**
- * Where the quote opening at `i` closes, at a closing quote that ends a word, searching no further than
- * `before`: `-1` when none opens there, and `-2` when it never closes. Both quotes close on the same
- * characters, so once one finds no close, no later one can; a read passes that place as `before`, which keeps
- * a text of unclosed quotes to one pass.
+ * Where the quote opening at `i` closes, at a closing quote that ends a word: `-1` when none opens there, and `-2` when
+ * it never closes. Both quotes close on the same characters, so once one finds no close, no later one can; a read
+ * passes that place as `before`, and a quote opening there or later is `-2` without a search, which keeps a text of
+ * unclosed quotes to one pass.
  */
 function quoteEnd(text: string, i: number, before: number): number {
   const closers = QUOTES.get(text[i])

@@ -68,10 +68,10 @@ async function fetchOne(kind: EntityKind, id: string, client: Client, guild: Gui
 const MEMBERS_PER_REQUEST = 100
 
 /**
- * The entities these refs name, each read from the cache or fetched once, however many refs, messages and
- * guards ask at once. Members not cached go out over the gateway, 100 IDs to a request; users wait their
- * turn in the one queue Discord's REST client keeps for every user lookup; channels go together, each in a
- * queue of its own. A ref whose entity does not exist resolves to `undefined`.
+ * The entities these refs name, each read from the cache or fetched once, however many refs, messages and guards ask at
+ * once. A server's members not cached, two or more, go out over the gateway, 100 IDs to a request, and a lone one on
+ * its own; users wait their turn in the one queue Discord's REST client keeps for every user lookup; channels go
+ * together, each in a queue of its own. A ref whose entity does not exist resolves to `undefined`.
  */
 export async function resolveRefs(refs: readonly MessageEntityRef[]): Promise<Map<MessageEntityRef, unknown>> {
   const found = new Map<MessageEntityRef, unknown>()
@@ -94,7 +94,7 @@ export async function resolveRefs(refs: readonly MessageEntityRef[]): Promise<Ma
     if (ref.kind === 'member' && guild && !ref.fetching && !requests?.has(key)) uncachedMembers.set(guild, [...(uncachedMembers.get(guild) ?? []), ref])
   }
 
-  // The uncached members of each server, 100 to a gateway request, each ID joining the one flight
+  // The uncached members of a server with two or more, 100 to a gateway request, each ID joining the one flight
   for (const [guild, members] of uncachedMembers) {
     if (members.length < 2) continue
     for (let at = 0; at < members.length; at += MEMBERS_PER_REQUEST) {

@@ -153,7 +153,7 @@ describe('typed message params', () => {
     expect(error.issues).toEqual([{ param: 'm', message: `m: <@${ID(8)}> is not a member of this server` }])
   })
 
-  it('finds roles by mention, ID or name, and channels by mention or ID', async () => {
+  it('finds roles by mention, ID or name, and a channel by mention', async () => {
     const role = { id: ID(10), name: 'Moderator' } as unknown as Role
     const channel = { id: ID(20) } as unknown as TextChannel
     const { message } = guildMessage({ roles: [role], channels: [channel] })
@@ -177,7 +177,7 @@ describe('typed message params', () => {
     expect(users.fetch).toHaveBeenCalledWith(ID(31))
   })
 
-  it('says a command with a member, role or channel param works in a server only, sent in a DM', async () => {
+  it('says a command with a member param works in a server only, sent in a DM', async () => {
     const message = createMockMessage({ content: '!kick x', guild: null })
     const error = await usageError(resolveMessageParams(routeOf('kick {m:member}'), { m: ID(1) }, message, '!', undefined))
 

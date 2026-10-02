@@ -37,7 +37,7 @@ class DailyController {
   }
 }
 
-/** A store whose every call fails, until `recover()`; then it counts in memory. */
+/** A store whose every call fails while `failing` is set; otherwise it counts in memory. */
 class FlakyStore extends CooldownStore {
   failing = true
   readonly memory = new MemoryCooldownStore()

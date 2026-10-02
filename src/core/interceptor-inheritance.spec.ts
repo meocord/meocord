@@ -4,7 +4,7 @@ import { CommandType } from '@src/enum/index.js'
 import { type CallHandler, type InterceptorInterface } from '@src/interface/index.js'
 import { createMockInteraction, MeoCordTestingModule } from '@src/testing/index.js'
 
-describe('class interceptors on an inherited handler', () => {
+describe('class interceptors a controller inherits', () => {
   it('come from every class in the chain, unless the declaring class opts out', async () => {
     const log: string[] = []
 

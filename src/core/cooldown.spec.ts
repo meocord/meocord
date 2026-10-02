@@ -341,7 +341,7 @@ describe('@Cooldown', () => {
 })
 
 describe('a cooldown key', () => {
-  // A store such as Redis outlives a deploy, so a release that adds a cooldown keeps the counts of the ones it had
+  // A store such as Redis outlives a deploy, so a release that adds a cooldown over another window keeps the counts
   it('keeps its count when a later release adds a cooldown before it', async () => {
     const store = new MemoryCooldownStore()
     const release1 = (() => {
@@ -451,7 +451,7 @@ describe('a cooldown key', () => {
     })
 
     // Their order tells two with the same uses apart, so swapping them swaps their counts
-    it('swaps the counts of two with the same uses when a later release reorders them', async () => {
+    it('starts the counts again when a later release reorders two with the same uses', async () => {
       const store = new MemoryCooldownStore()
       const releaseWith = (first: typeof byChannel, second: typeof byChannel) => {
         @Controller()
@@ -492,7 +492,7 @@ describe('a cooldown key', () => {
     expect(store.size).toBe(1)
   })
 
-  // Each records only the calls whose own value it gives; one key would count a call in channel Z under A's `X`
+  // Each records only the calls whose own value it gives; one key would count a channel and a server of one ID together
   it('keeps apart two cooldowns with the same window but different by functions, whose values can be equal', async () => {
     @Controller()
     class Rooms {

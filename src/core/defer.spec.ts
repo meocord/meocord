@@ -570,7 +570,7 @@ describe('@Defer', () => {
       expect(calls(interaction)).toEqual(['update'])
     })
 
-    it('acknowledges a slow handler after 1.5 s, capped at 2.5 s after the interaction was created', async () => {
+    it('acknowledges a slow handler no later than 2.5 s after the interaction was created', async () => {
       vi.useFakeTimers({ now: Date.now() })
       const emit = await startApp()
       let finish!: () => void

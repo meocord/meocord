@@ -179,8 +179,8 @@ export function cooldownPolicyOf(container: Container): CooldownPolicy {
 const logger = new Logger('Cooldown')
 
 /**
- * How long a store goes without a failure before its outage ends. A store that fails some calls and answers others,
- * as a cluster with one node down does, stays in one outage rather than starting a new one with each failure.
+ * How long after its last failure a store must answer for its outage to end. A store that fails some calls and answers
+ * others, as a cluster with one node down does, stays in one outage rather than starting a new one with each failure.
  */
 const OUTAGE_QUIET_MS = 30_000
 
@@ -257,10 +257,9 @@ export function claimStoreDownNotice(container: Container, who: string): boolean
 
 /**
  * Asks the store once, for every entry, to count the call or with `peek` only to check it, and fails with
- * {@link CooldownStoreError} when it throws, rejects or does not answer within `timeoutMs`, counted from the
- * call, so a store still getting ready takes from it. An answer that comes later is dropped, and a call it counted
- * is released through the verdict's `release`, so a call treated as not counted costs no use. With `keepLate`, as
- * for a call run uncounted, that late count is the call's own and stays.
+ * {@link CooldownStoreError} when it throws, rejects or misses `timeoutMs`, counted from the call, so a store still
+ * getting ready takes from it. A call a later answer counted is released, so it costs no use, unless `keepLate`, as for
+ * a call run uncounted, whose late count is its own.
  */
 async function askWithin(
   container: Container,
@@ -430,10 +429,9 @@ function isCounted(contextOf: () => HandlerExecutionContext): boolean {
 }
 
 /**
- * Checks the call against the handler's cooldowns without counting it, in one store call, `peekMany`: before
- * the work a call needs ahead of its handler, such as fetching what it names from Discord, so a call a
- * cooldown refuses costs none of it. Cooldowns with `by` are left to {@link consumeCooldowns}. It refuses
- * as consumeCooldowns does, with the same errors, and a failing store is handled by the same policy.
+ * Checks the call against the handler's cooldowns without `by`, counting nothing, in one `peekMany`, before the work
+ * ahead of its handler such as fetching from Discord, so a call a cooldown refuses costs none of it. It refuses as
+ * {@link consumeCooldowns} does, with the same errors, and a failing store meets the same policy.
  *
  * @throws CooldownError with the time until every cooldown checked allows another call.
  * @throws CooldownStoreError when the store fails and the policy is `'deny'`.
@@ -452,13 +450,10 @@ export async function peekCooldowns(
 }
 
 /**
- * Counts the call against all of the handler's cooldowns in one store call, `consumeMany`. With a store
- * that overrides it, as the built-in ones do, a call one cooldown refuses counts against none. Every key is
- * worked out first, so a `bypass` or `by` that throws leaves every count untouched. A store that fails is
- * handled by the app's policy: the call is refused with CooldownStoreError, or runs uncounted. When the
- * call's {@link peekCooldowns} found the store failing, the cooldowns it checked run uncounted without
- * asking again; those with `by`, which it never checked, are still counted, so a call waits a second
- * timeout only when the store is still down and the handler has one.
+ * Counts the call against all of the handler's cooldowns in one `consumeMany`, every key worked out first, so a
+ * `bypass` or `by` that throws counts nothing; with a store that overrides it, as the built-in ones do, a call one
+ * refuses counts against none. A failing store meets the app's policy; after a {@link peekCooldowns} that found it
+ * failing, only cooldowns with `by` are asked, so a second timeout comes only from a store still down.
  *
  * @param params - The handler's second argument, as the handler receives it, for `by`.
  * @throws CooldownError with the time until every cooldown allows another call.

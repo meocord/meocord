@@ -176,11 +176,10 @@ class Continuation extends Promise<unknown> {
 }
 
 /**
- * Runs `handler` inside `interceptors`, the first outermost. Each receives the call's context with its
- * own params, and continues with `next.handle()`. A level ends once its interceptor has settled and every
- * run it left on a chain that ends unhandled has, so the call ends when such a handler does; that run's
- * rejection fails the call. `returnedEarly` is told of each interceptor that settles while a run it started is still
- * going, or without starting one, innermost first, so the last it is told of is the outermost.
+ * Runs `handler` inside `interceptors`, the first outermost, each with the call's context and its own params. A level
+ * ends once its interceptor has settled and every run it left on a chain that ends unhandled has; that run's rejection
+ * fails the call. `returnedEarly` is told of each interceptor as it settles while a run it started is still going, or
+ * without starting one.
  */
 export async function runInterceptors(
   interceptors: readonly InterceptorEntry[],

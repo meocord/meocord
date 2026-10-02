@@ -260,7 +260,7 @@ describe('guards on a direct call', () => {
     log.length = 0
   })
 
-  it('run as in 4.0, with the call context available to guards that inject it', async () => {
+  it('run the handler\'s class and method guards, with the call context available to guards that inject it', async () => {
     const module = MeoCordTestingModule.create({ controllers: [GuardedController] }).compile()
     const controller = module.get(GuardedController)
 

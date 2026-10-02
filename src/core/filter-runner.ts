@@ -36,8 +36,8 @@ export const CLASS_FILTERS = Symbol('class_filters')
 export const METHOD_FILTERS = Symbol('method_filters')
 
 /**
- * A handler's filters by level, the level closest to the handler first: the method's, then the
- * classes' from the one declaring the handler down to the controller, then the global ones.
+ * A handler's filters by level, the level closest to the handler first: the method's, then its classes', from the
+ * controller up to the top base, then the global ones.
  */
 export function handlerFilterLevels(
   prototype: object,

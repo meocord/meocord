@@ -313,14 +313,14 @@ describe('observers, dispatch kind by dispatch kind', () => {
 })
 
 describe('observers themselves', () => {
-  it('are singletons from the container, with their dependencies injected', async () => {
+  it('are resolved from the container, with their dependencies injected', async () => {
     await module.invoke(ShopController, 'buy', slash())
     await module.invoke(ShopController, 'secret', slash())
 
     expect(module.get(Metrics).outcomes).toEqual(['ran', 'denied'])
   })
 
-  it('run in the order listed, each isolated: one that throws is logged and the rest still run', async () => {
+  it('run in the order listed, each isolated: one that throws leaves the rest to run', async () => {
     const isolated = MeoCordTestingModule.create({
       controllers: [ShopController],
       observers: [AuditObserver, BrokenObserver, MetricsObserver],
@@ -485,7 +485,7 @@ describe('onStart', () => {
     expect(order).toEqual(['start traced', 'guard', 'handler', 'settled traced ran paired:true'])
   })
 
-  it('is isolated: one that throws is logged, and the call and the other observers go on', async () => {
+  it('is isolated: one that throws leaves the call and the other observers to go on', async () => {
     const traced = MeoCordTestingModule.create({ controllers: [TracedController], observers: [BrokenStart, SpanObserver] }).compile()
 
     await expect(traced.invoke(TracedController, 'traced', slash())).resolves.toEqual({ ran: true })

@@ -183,7 +183,7 @@ describe('the order of class stages across levels', () => {
     expect(ran).toEqual(['RootGuard', 'MiddleGuard', 'LeafGuard', 'MethodGuard', 'RootTag', 'MiddleTag', 'LeafTag', 'own'])
   })
 
-  it('gives a handler declared on a base the same chain, as it had', async () => {
+  it('gives a handler declared on a base the same class chain', async () => {
     await module.invoke(Leaf, 'inherited', click('root/1'))
     expect(ran).toEqual(['RootGuard', 'MiddleGuard', 'LeafGuard', 'RootTag', 'MiddleTag', 'LeafTag', 'inherited'])
   })

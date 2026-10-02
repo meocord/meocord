@@ -123,7 +123,7 @@ describe('an unrouted component a collector answers', () => {
     expect([click.update.mock.calls.length, click.reply.mock.calls.length, click.followUp.mock.calls.length]).toEqual([1, 0, 0])
   })
 
-  it('is answered at once when nothing else listens, as before', async () => {
+  it('is answered at once when nothing else listens', async () => {
     const click = createMockInteraction(ButtonInteraction, { customId: 'dead', client })
 
     await compile().dispatch(click)

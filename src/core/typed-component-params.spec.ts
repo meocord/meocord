@@ -62,7 +62,7 @@ describe('typed customId params', () => {
       values: { count: 7 },
     })
     expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/seven' })).toBeUndefined()
-    // A route without a typed param reads as it always has, with no values
+    // A route without a typed param has no values
     expect(resolveRoute(App, { type: CommandType.BUTTON, customId: 'counter/reset' })).not.toHaveProperty('values')
 
     await module.invoke(Panel, 'count', press(counter.build({ count: 3 })))
@@ -156,7 +156,7 @@ describe('typed customId params beside other routes of one shape', () => {
 })
 
 describe('typed customId params of one shape', () => {
-  it('keeps words beside bool and warns, with a shared value going to the words; the same words in another order stop the bot', async () => {
+  it('keeps words beside bool and reports the pair, with a shared value going to the words; the same words in another order are refused', async () => {
     const ran: unknown[] = []
     @Controller()
     class Toggle {

@@ -77,7 +77,7 @@ describe('the fallback', () => {
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Cooldown (channel)'))
   })
 
-  // The runner logs a failing store once per outage; each call it refused is not logged again
+  // The runner logs a failing store once per outage; each call it refused is logged at debug level only
   it('logs a message a failing cooldown store refused at debug level only', async () => {
     const logger = await fail(createMockMessage(), new CooldownStoreError(new Error('down'), false))
 
@@ -92,7 +92,7 @@ describe('the fallback', () => {
   })
 
   describe('on an unanswered interaction', () => {
-    it('replies privately with the 4.0 text and error styling', async () => {
+    it('replies privately with the generic error text and error styling', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
 
       const logger = await fail(interaction)
@@ -343,7 +343,6 @@ describe('the fallback', () => {
   })
 })
 
-// Pinned against the fallback itself, so a branch added to one and not the other fails here
 /** A reaction as the fallback reads one: its class and its emoji. */
 const mockReaction = () => Object.defineProperty(Object.create(MessageReaction.prototype), 'emoji', { value: { name: '👍' } }) as MessageReaction
 
@@ -404,6 +403,7 @@ describe('the fallback on a message a guard or validation refuses', () => {
   })
 })
 
+// Pinned against the fallback itself, so a branch added to one and not the other fails here
 describe('isUserOutcome', () => {
   const errors: [string, () => unknown][] = [
     ['MessageUsageError', () => new MessageUsageError('!roll <sides>', [])],

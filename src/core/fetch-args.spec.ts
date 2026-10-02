@@ -137,7 +137,7 @@ describe('fetchArgs', () => {
     ])
   })
 
-  it('hands what it throws to the handler\'s filters, outside the interceptors, and counts no cooldown', async () => {
+  it('fails the call with what it throws, and counts no cooldown', async () => {
     const module = compile()
 
     const failed = await run(module, 'pay', async () => {

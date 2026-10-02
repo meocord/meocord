@@ -32,8 +32,9 @@ type MessageReplyOptions = Pick<MessageCommandOptions, 'deleteUsageRepliesAfter'
  */
 export type Fallback = (error: unknown, context: ExecutionContext) => Promise<unknown>
 
-/** How the fallback treats an answer it fails to build: logged in a bot, and also rethrown when `strict`, as in a test. */
+/** How the fallback answers, beyond its defaults. */
 export interface FallbackOptions {
+  /** Rethrows an answer it fails to build, as in a test, besides logging it as a bot does. */
   strict?: boolean
   /** Whether a caller a cooldown refused is yet to be told during this wait; see `claimCooldownNotice`. */
   cooldownNotice?: (refusal: CooldownError) => Promise<boolean>
@@ -162,11 +163,10 @@ async function sendReply<T>(reply: PresentedReply, send: (body: ReplyBody) => Pr
 const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ? `${useTheme().emojis.warning} ${text}` : text)
 
 /**
- * `text`, answering `error` for `message`: plain text, after the call's `emojis.warning` when `withEmoji`, unless the
- * app's presenter has `messageError`, which draws it instead: an embed, coloured as an interaction's view is, with that
- * emoji when the view has none of its own, and the view's files when Discord takes them. Should drawing or rendering
- * that view fail, `messageError` throwing or rejecting or its view being one an embed cannot hold, the plain text
- * stands in for it, so the author is still told, and the failure comes with it, for the caller to report once sent.
+ * `text`, answering `error` for `message`: plain, after the call's `emojis.warning` when `withEmoji`, unless the
+ * presenter's `messageError` draws it as an embed, coloured as an interaction's view is, with that emoji when it has
+ * none and its files when Discord takes them. Should that view fail to draw or render, the plain text stands in, and
+ * the failure comes back with it, for the caller to report once sent.
  */
 async function presentedReply(message: Message, error: unknown, text: string, withEmoji: boolean | undefined, logger: Logger): Promise<PresentedReply> {
   const presenter = presenterFor(message.client)
@@ -269,7 +269,8 @@ async function tellPrivately(
 
 /**
  * Logs an error an interaction's call raised that is the user's own outcome, below error level, and says whether it
- * was one: a command no handler takes, a denial, a cooldown, a refusal or invalid input. `isUserOutcome` agrees.
+ * was one: a command no handler takes, a denial, a cooldown or its failing store, a refusal or invalid input.
+ * `isUserOutcome` agrees.
  */
 function logUserOutcome(logger: Logger, error: unknown, call: string): boolean {
   if (error instanceof CommandNotFoundError) logger.warn(error.message)
@@ -324,13 +325,10 @@ async function sendUsage(message: Message, body: PresentedReply, seconds: number
 }
 
 /**
- * The built-in fallback: logs an error no filter handled, then answers the interaction through
- * `respond(interaction).error()` if it can still take an answer. A message that names a command but does
- * not fit it is answered with the command's usage, and one a guard denies or validation refuses with the
- * reason, each deleted after `deleteUsageRepliesAfter` seconds; a listener's or a reaction's denial only at debug
- * level, since its guard filters calls; one a `UserError` refused with that error's message; other errors of
- * messages, reactions and events are only logged. An autocomplete's menu is closed, its user's outcomes logged at debug
- * level as a command's are.
+ * The built-in fallback: logs an error no filter handled and answers the call. An interaction that can still take an
+ * answer gets its error view, and an autocomplete an empty menu. A message command gets its usage, a guard's or
+ * validation's reason, or a `UserError`'s message as a reply, and with `dmOnError` or `dmOnCooldown` a direct message
+ * for other errors and cooldown refusals. Anything else, as a reaction's or an event's error, is only logged.
  */
 export function createFallback(
   logger: Logger,
@@ -367,8 +365,8 @@ export function createFallback(
           await tellPrivately(context, error, logger, replies.replyEmoji, answering)
         }
       }
-      // Logged once per outage where the store failed, rather than for every call it refused; a command's author is
-      // told privately when the app asks, once per outage
+      // The store's failure is logged once per outage where it failed, each call it refused only at debug level; a
+      // command's author is told privately when the app asks, once per outage
       else if (error instanceof CooldownStoreError) {
         logger.debug(`Cooldown store down; skipped ${describeCall(context)}`)
         const author = context.getMessage()?.author.id
