@@ -1,8 +1,8 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { type ChatInputCommandInteraction } from 'discord.js'
-import { Command, Controller, Cooldown, On, Validate } from '@src/decorator/index.js'
+import { type ChatInputCommandInteraction, type Message } from 'discord.js'
+import { Command, Controller, Cooldown, Defer, MessageHandler, On, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type StandardSchemaV1 } from '@src/interface/index.js'
 import { appStages } from '@src/core/handler-pipeline.js'
@@ -68,6 +68,17 @@ describe('an application MeoCord refuses as it loads', () => {
     return Limited
   }
 
+  // @Defer below the handler's decorator runs first, so the pipeline refuses it once the handler is known
+  const deferredMessage = () => {
+    @Controller()
+    class Deferred {
+      @MessageHandler('hi')
+      @Defer()
+      async hi(_message: Message) {}
+    }
+    return Deferred
+  }
+
   const overlapping = () => {
     @Controller()
     class Profile {
@@ -99,6 +110,7 @@ describe('an application MeoCord refuses as it loads', () => {
     },
     { site: '@Validate on an event handler', load: () => compile(validatedEvent())(), subject: 'Validated.joined' },
     { site: '@Cooldown on an event handler', load: () => compile(limitedEvent())(), subject: 'Limited.joined' },
+    { site: '@Defer written below @MessageHandler', load: () => compile(deferredMessage())(), subject: 'Deferred.hi' },
     { site: 'two component patterns that match the same customIds', load: () => buildComponentRoutes(overlapping()), subject: 'Profile.show' },
     { site: 'an app class without @MeoCord', load: () => appStages(class PlainApp {}), subject: 'PlainApp' },
     { site: 'a build for another platform', load: () => assertBuiltForThisPlatform(dist), subject: path.basename(dist) },
