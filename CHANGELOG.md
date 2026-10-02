@@ -1,5 +1,43 @@
 # meocord
 
+## 4.1.0-beta.11
+
+### Minor Changes
+
+- [#401](https://github.com/meocord/meocord/pull/401) [`ae9d548`](https://github.com/meocord/meocord/commit/ae9d548775b552e1af20b12199b56dd87c67c90f) Thanks [@l7aromeo](https://github.com/l7aromeo)! - MeoCord asks for `discord.js` 14.27.0 or later and `dotenv` 18.0.5 or later as peers. A bot on an older `discord.js` 14 or `dotenv` 18 upgrades them with MeoCord: `npm install discord.js@^14.27.0 dotenv@^18.0.5`, or the same with your package manager.
+
+  MeoCord's own dependencies move to their latest stable releases, and `meocord create` makes the new app's first commit by running `git` directly, so installing MeoCord no longer pulls in `simple-git`. A new app starts on the latest stable releases of its tools, with TypeScript held at 6.0.3.
+
+### Patch Changes
+
+- [#403](https://github.com/meocord/meocord/pull/403) [`ec97a2f`](https://github.com/meocord/meocord/commit/ec97a2f4a9172c9ed6b9ddb99f7378353f1a0e7b) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A self-contained build that copies one package into `dist/node_modules` says "holds 1 package", not "1 packages".
+
+- [#407](https://github.com/meocord/meocord/pull/407) [`4d91448`](https://github.com/meocord/meocord/commit/4d91448a936da9c11feb5aa2bca3ddb013b95275) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `require('meocord/common')`, and every other entry point a CommonJS project loads with `require()`, logs again: `Logger`'s `log()`, `info()`, `verbose()` and `debug()` threw `TypeError` there, as the CommonJS build read `chalk`, a package that ships only as an ES module, without its default export. A bot built with `meocord build` was not affected, since its bundle loads the ES module build.
+
+- [#410](https://github.com/meocord/meocord/pull/410) [`ca34a30`](https://github.com/meocord/meocord/commit/ca34a30335d72d0b6fef87628fb667adf8bddd2c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A decorator applied where it can't work is now named where it applies, directly or inside an `applyDecorators` composite:
+
+  - **A decorator that goes only on a method, on a class,** stops the bot as the class loads, with one line naming the class: `Shop: @Defer goes on a method, not on a class.` This covers `@Command`, `@Autocomplete`, `@MessageHandler`, `@ReactionHandler`, `@On`, `@Once`, `@Validate`, `@UsePipe` and `@Defer`, and `@Inject`, which goes on a constructor parameter or a property. `@Defer`, `@Validate`, `@UsePipe`, `@On` and `@Once` did nothing there, and the handler decorators failed with a `TypeError`.
+  - **`@Interceptor`, `@Catch`, `@Pipe` and `@Observer` on a method** stop the bot the same way: `Shop.buy: @Interceptor goes on a class, not on a method.`
+  - **`@Controller`, `@Service`, `@Guard`, `@CommandBuilder` and `@MeoCord` on a method** still apply nothing, as in 4.0, and now log a warning once: `@Guard on the method Shop.buy is deprecated; in the next major version (5.0) it is refused. Use @Guard on a class instead.` Move the decorator to the class.
+
+  Decorators that go on a class or a method, such as `@UseGuard`, `@Cooldown`, `@UseTheme` and those `createMetadata` makes, apply as before. See [Custom decorators](https://meocord.dev/docs/4.1/custom-decorators).
+
+- [#409](https://github.com/meocord/meocord/pull/409) [`ca62ec5`](https://github.com/meocord/meocord/commit/ca62ec523545205fedadd4516ed96ae52655e1e7) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `createChatInputOptions` reads options as discord.js does, and throws discord.js's own errors: each a `DiscordjsTypeError` with discord.js's code and message.
+
+  - A getter of another type throws discord.js's type error, such as `Option "x" is of type: 4; expected 3.`, with or without `required`: `getString()` on a number, `getInteger()` on a fraction, `getChannel()` on a user. A user or member read as a role, or a role read as a user or member, is `null`, or that error when `required`, as the option may be a mentionable one.
+  - A missing required option throws `Required option "x" not found.`, `getSubcommand()` throws `No subcommand specified for interaction.` unless given `false`, as in discord.js, `getSubcommandGroup(true)` and `getFocused()` throw discord.js's messages, and `getChannel()` checks the channel types it's given.
+  - `get()` returns the option as discord.js does, and `getMessage()` reads no option of a slash command.
+  - Options assigned to a mock interaction after it is created, as with `interaction.options = createChatInputOptions({ target })`, belong to it, so `getMember()` is the server's cached member, or `null` in a DM.
+
+- [#406](https://github.com/meocord/meocord/pull/406) [`6958c64`](https://github.com/meocord/meocord/commit/6958c6422454bf6b11fe1ebdfc3a9ab20a873f43) Thanks [@l7aromeo](https://github.com/l7aromeo)! - MeoCord keeps its own metadata under keys beginning `meocord:`, so `SetMetadata` takes any key a 4.0 bot used, such as `'guards'` or `'commandType'`, and stores it as 4.0 did. It refuses only a key beginning `meocord:` and the two keys dependency injection reads, `design:paramtypes` and inversify's injectable flag. A 4.1 beta refused `'guards'`, `'commandType'` and `'inversify:container'`, so a 4.0 bot that set one of them failed to load.
+
+  Code that read MeoCord's guard list or a builder's command type under `'guards'` or `'commandType'` no longer finds them there. To read the guards a handler runs, use `inspectHandler` from `meocord/testing`.
+
+  Every key MeoCord keeps its metadata under is now such a string, so a test or a tool that loads both meocord's CommonJS and ES module entries sees a controller one of them decorated from the other, where it found none.
+
+- [#402](https://github.com/meocord/meocord/pull/402) [`2be278a`](https://github.com/meocord/meocord/commit/2be278a504158721fc6ab2f6bb6d2e6773e94ce4) Thanks [@l7aromeo](https://github.com/l7aromeo)! - - **A bot that imports two or more WebAssembly modules builds again.** Each imported module is written to `dist/assets` under a content hash, as `<hash>.module.wasm`. A wasm file read through `new URL('./file.wasm', import.meta.url)` keeps its own name.
+  - **`new URL('./file', import.meta.url)` for a bundled file gives a `file:` URL on Windows.** It was built on the bundle's directory as a disk path, which a URL reads as scheme `c:`, so `fileURLToPath` threw `ERR_INVALID_URL_SCHEME`. The URL is now relative to the bundle on every platform.
+
 ## 4.1.0-beta.10
 
 ### Minor Changes
