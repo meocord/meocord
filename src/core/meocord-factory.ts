@@ -15,7 +15,7 @@ import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
 import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages } from '@src/core/handler-pipeline.js'
-import { assertStartupClasses, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { meocordClasses } from '@src/core/meocord-classes.js'
 import { appObservers, bindObservers } from '@src/core/observer-runner.js'
@@ -242,7 +242,8 @@ export class MeoCordFactory {
     })
     assertStartupClasses(runs, { translator: options.i18n !== undefined || providers.has(Translator) })
     const container = new Container()
-    markStartupChecked(container, [...runs.classes, ...meocordClasses()])
+    const translator = options.i18n !== undefined || providers.has(Translator)
+    markStartupChecked(container, [...runs.classes, ...meocordClasses()], lateGuardCheck(providers, translator))
     bindGlobalStages(container, stages)
 
     // Bind the Discord client as a constant value
@@ -338,8 +339,8 @@ export class MeoCordFactory {
     }
     Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
 
-    // Stamp each class with the container so @UseGuard can resolve guards on a direct call
-    for (const cls of appClasses) {
+    // Stamp every class the app runs with the container, so @UseGuard resolves guards on a direct call to any of them
+    for (const cls of runs.classes) {
       Reflect.defineMetadata(META.container, container, cls)
     }
 

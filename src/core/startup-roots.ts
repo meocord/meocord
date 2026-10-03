@@ -70,6 +70,11 @@ export function startupClasses(roots: StartupRoots): StartupClasses {
   }
 }
 
+/** How a container checks a guard first met at a call: the guard and what it injects, as the startup checks would. */
+export function lateGuardCheck(providers: ProviderMap, translator: boolean): (guard: unknown) => void {
+  return guard => assertStartupClasses({ classes: reachableClasses([guard], providers), decorators: new Map([[guard, '@Guard()']]) }, { translator })
+}
+
 /** Runs the startup checks over every class an app runs, so a class that cannot be made is refused by name now. */
 export function assertStartupClasses({ classes, decorators }: StartupClasses, { translator }: { translator: boolean }): void {
   assertTypedParameters(classes, decorators)
