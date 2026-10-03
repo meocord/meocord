@@ -29,7 +29,7 @@ If you know NestJS, the shape will feel familiar.
 
 ## Getting started
 
-MeoCord runs on Node.js 22.13 or newer, or Bun. `discord.js` 14.27 or newer and `dotenv` 18.0.5 or newer are its peer dependencies, and `meocord create` installs both.
+MeoCord runs on Node.js 22.13 or newer, or Bun. `discord.js` 14.27 or a later 14.x and `dotenv` 18.0.5 or a later 18.x are its peer dependencies, and `meocord create` installs both.
 
 ```shell
 npx meocord create my-bot
