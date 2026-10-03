@@ -19,7 +19,13 @@ import {
   BaseChannel,
   BaseInteraction,
   BaseManager,
+  BaseGuild,
   ChannelManager,
+  DataManager,
+  CDN,
+  GuildChannel,
+  PermissionOverwriteManager,
+  PermissionOverwrites,
   ChannelSelectMenuInteraction,
   Client,
   ClientUser,
@@ -57,6 +63,7 @@ import {
   ThreadMemberManager,
   User,
   UserManager,
+  UserContextMenuCommandInteraction,
   UserSelectMenuInteraction,
   type CacheType,
   type CommandInteractionOption,
@@ -79,7 +86,6 @@ import {
   type OmitPartialGroupDMChannel,
   type PartialGroupDMChannel,
   type PrimaryEntryPointCommandInteraction,
-  type UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { createDiscordError } from './response.js'
 import { stampCall } from '@src/common/response/call-order.js'
@@ -214,8 +220,15 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
         proto = Object.getPrototypeOf(proto)
       }
 
+      // A client the mock's structures share: its guild's, or one of its own
+      if (key === 'client' && target instanceof Base) return clientOf(target) as StubValue
+
       const stub: StubValue =
-        typeof protoValue === 'function' ? methodStub(target, key, protoValue as (...args: unknown[]) => unknown, () => proxy) : stubDeep({})
+        typeof protoValue === 'function'
+          ? isRealMethod(target, key)
+            ? createMockFn((...args: unknown[]) => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args))
+            : methodStub(target, key, protoValue as (...args: unknown[]) => unknown, () => proxy)
+          : stubDeep({})
       stubs.set(key, stub)
       return stub
     },
@@ -231,6 +244,36 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
     },
   })
   return proxy
+}
+
+// discord.js methods that read only what the mock holds, so they run for real: looking items up in a manager's cache,
+// ranking roles, a member's or role's permissions in a channel, and whom a message mentions
+const REAL_METHODS = new Map<object, ReadonlySet<string>>([
+  [DataManager.prototype, new Set(['resolve', 'resolveId'])],
+  [RoleManager.prototype, new Set(['comparePositions'])],
+  [Role.prototype, new Set(['comparePositionTo', 'permissionsIn'])],
+  [GuildChannel.prototype, new Set(['permissionsFor', 'overwritesFor', 'memberPermissions', 'rolePermissions'])],
+  [GuildMember.prototype, new Set(['permissionsIn', 'isCommunicationDisabled'])],
+  [User.prototype, new Set(['avatarURL', 'displayAvatarURL', 'bannerURL'])],
+  [BaseGuild.prototype, new Set(['iconURL', 'bannerURL', 'splashURL'])],
+  [MessageMentions.prototype, new Set(['has'])],
+])
+
+function isRealMethod(target: object, key: string): boolean {
+  for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
+    if (REAL_METHODS.get(proto)?.has(key)) return true
+  }
+  return false
+}
+
+// The client of a structure made without one: the one its guild has, else one of its own, made once
+const ownClients = new WeakMap<object, unknown>()
+function clientOf(target: object): unknown {
+  const guild = Object.getOwnPropertyDescriptor(target, 'guild')?.value as unknown
+  if (guild instanceof Guild) return guild.client
+  let client = ownClients.get(target)
+  if (client === undefined) ownClients.set(target, (client = createMockClient()))
+  return client
 }
 
 // ---------------------------------------------------------------------------
@@ -861,6 +904,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     if (!userGiven) instance.user = mockUser()
     // Assigned once by discord.js's Base constructor, as on a message, and the gateway caches the user on it
     if (unset('client')) Object.defineProperty(instance, 'client', { value: createMockClient(), writable: true, configurable: true })
+    // The client caches the guild the interaction came from
+    const guildGiven = own('guild')
+    if (guildGiven instanceof Guild) cached(cacheOf((instance.client as Client).guilds), guildGiven.id, () => guildGiven)
     cacheOf((instance.client as Client | undefined)?.users)?.set((instance.user as User).id, instance.user)
     // A channel given says where the interaction was made, for what the test leaves unset, as discord.js reads it
     const given = own('channel')
@@ -908,6 +954,26 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         enumerable: true,
         configurable: true,
       })
+    }
+    // A user context menu's target: the user with its targetId, the client's cached one or one made and cached there,
+    // and in a server that user's member; each read live, so a targetId set later picks its user, and assignable
+    if (UserContextMenuCommandInteraction.prototype.isPrototypeOf(instance)) {
+      if (unset('targetId')) instance.targetId = (own('targetUser') as User | undefined)?.id ?? nextSnowflake()
+      const targetUser = (): User => {
+        const id = own('targetId') as string
+        return cached(cacheOf((instance.client as Client).users), id, () => mockUser(id)) as User
+      }
+      const live = (key: string, read: () => unknown) =>
+        Object.defineProperty(instance, key, {
+          get: read,
+          set: (value: unknown) => Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true }),
+          enumerable: true,
+          configurable: true,
+        })
+      if (unset('targetUser')) live('targetUser', targetUser)
+      if (unset('targetMember')) {
+        live('targetMember', () => (own('guildId') ? memberFor(own('guild'), targetUser(), true, own('guildId') as string) : null))
+      }
     }
   }
 
@@ -1109,11 +1175,19 @@ export function createMockClient(): DeepMocked<Client<true>> {
   // Real caches, empty until something is put in them, as a client that has just logged in
   instance.users = managerWith(UserManager.prototype, undefined)
   instance.channels = managerWith(ChannelManager.prototype, undefined)
-  instance.guilds = stubDeep(Object.create(GuildManager.prototype))
+  instance.guilds = managerWith(GuildManager.prototype, undefined)
   instance.user = stubDeep(Object.assign(Object.create(ClientUser.prototype), { id: MOCK_BOT_ID, bot: true }))
   instance.application = stubDeep(appInstance)
 
-  return stubDeep(instance) as DeepMocked<Client<true>>
+  // Discord's CDN routes, which avatar and icon URLs are built from; nothing is requested
+  instance.rest = stubDeep(Object.assign(Object.create(null) as object, { cdn: new CDN() }))
+  // A client a test is given is a logged-in one
+  instance.isReady = createMockFn(() => true)
+
+  const client = stubDeep(instance) as DeepMocked<Client<true>>
+  for (const key of ['users', 'channels', 'guilds']) (instance[key] as Record<string, unknown>).client = client
+  Object.defineProperty(instance.user, 'client', { value: client, writable: true, configurable: true })
+  return client
 }
 
 /**
@@ -1137,11 +1211,42 @@ export interface MockGuildOverrides {
   channels?: readonly GuildBasedChannel[]
 }
 
-/** A manager whose `cache` is a real collection of `items`, by id, empty without them, and whose methods are stubs. */
+// What each manager holds, which discord.js's resolve() checks an item against
+const HOLDS: readonly (readonly [object, object])[] = [
+  [GuildMemberManager.prototype, GuildMember],
+  [RoleManager.prototype, Role],
+  [GuildChannelManager.prototype, GuildChannel],
+  [UserManager.prototype, User],
+  [ChannelManager.prototype, BaseChannel],
+  [GuildManager.prototype, Guild],
+  [GuildBanManager.prototype, GuildBan],
+  [ThreadMemberManager.prototype, ThreadMember],
+  [GuildMessageManager.prototype, Message],
+  [DMMessageManager.prototype, Message],
+  [GuildTextThreadManager.prototype, ThreadChannel],
+  [GuildForumThreadManager.prototype, ThreadChannel],
+  [PermissionOverwriteManager.prototype, PermissionOverwrites],
+]
+
+/**
+ * A manager whose `cache` is a real collection of `items`, by id, empty without them, and whose methods are stubs but
+ * for `resolve` and `resolveId`, which read the cache. Its `client` is the one its guild or channel has.
+ */
 function managerWith(prototype: object, items: readonly { id: string; user?: { id: string } }[] | undefined): object {
-  const manager = Object.create(prototype) as object
+  const manager = Object.create(prototype) as Record<string, unknown>
   const cache = new Collection((items ?? []).map(item => [String(item.id ?? item.user?.id), item]))
   Object.defineProperty(manager, 'cache', { value: cache, writable: true })
+  const holds = HOLDS.find(([Manager]) => Manager === prototype || Object.prototype.isPrototypeOf.call(Manager, prototype))?.[1]
+  if (holds) Object.defineProperty(manager, 'holds', { value: holds })
+  let own: unknown
+  Object.defineProperty(manager, 'client', {
+    get: () => {
+      const owner = manager.guild ?? manager.channel ?? manager.thread
+      return owner instanceof Base ? owner.client : (own ??= createMockClient())
+    },
+    set: (value: unknown) => (own = value),
+    configurable: true,
+  })
   return stubDeep(manager)
 }
 
@@ -1193,7 +1298,7 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   instance.bans = managerWith(GuildBanManager.prototype, undefined)
 
   const guild = stubDeep(instance) as DeepMocked<Guild>
-  homeManagers(instance, guild)
+  settleGuild(instance, guild)
   // A member made without a server of its own is in this one
   for (const member of overrides.members ?? []) {
     if (!unhomedMembers.delete(member)) continue
@@ -1264,12 +1369,14 @@ export function createMockChannel<T extends BaseChannel>(
     instance.messages = managerWith(GuildMessageManager.prototype, undefined)
     instance.members = managerWith(ThreadMemberManager.prototype, undefined)
   }
+  // A server's channel has its overwrites, none until a test puts some in the cache, which its permissions read
+  if (is(GuildChannel) && !is(ThreadChannel)) instance.permissionOverwrites = managerWith(PermissionOverwriteManager.prototype, undefined)
   Object.assign(instance, props)
 
   const stubs = new Map<string, StubValue>()
   const channel = stubDeep(instance, stubs)
   // Each manager knows its channel, as discord.js's do, and a thread's members their thread
-  for (const key of ['messages', 'threads']) if (instance[key]) (instance[key] as Record<string, unknown>).channel = channel
+  for (const key of ['messages', 'threads', 'permissionOverwrites']) if (instance[key]) (instance[key] as Record<string, unknown>).channel = channel
   if (is(ThreadChannel) && instance.members) (instance.members as Record<string, unknown>).thread = channel
   // Type guards run discord.js's own logic, which reads the channel's type and the managers it has
   for (const name of CHANNEL_TYPE_GUARDS) {
@@ -1506,13 +1613,37 @@ function createMockGuildForMessage(id = nextSnowflake()): object {
   guild.roles = guildRoleManager(guild.id as string, undefined)
   guild.bans = managerWith(GuildBanManager.prototype, undefined)
   const proxy = stubDeep(guild)
-  homeManagers(guild, proxy)
+  settleGuild(guild, proxy)
   return proxy
 }
 
 /** Gives a guild's managers the guild, as discord.js's do, so what they fetch or make is in it. */
 function homeManagers(instance: Record<string, unknown>, guild: object): void {
   for (const key of ['members', 'channels', 'roles', 'bans']) (instance[key] as Record<string, unknown>).guild = guild
+}
+
+/**
+ * Makes `guild` whole, as discord.js's guilds are: its managers and the roles and channels in its caches belong to it,
+ * it has a client of its own until one is given, and `members.me` is the bot's member, the cached one or one with
+ * @everyone, made and cached once on first read.
+ */
+function settleGuild(instance: Record<string, unknown>, guild: object): void {
+  homeManagers(instance, guild)
+  let client: unknown
+  Object.defineProperty(instance, 'client', { get: () => (client ??= createMockClient()), set: value => (client = value), configurable: true })
+  const members = instance.members as object
+  Object.defineProperty(members, 'me', {
+    get: () => {
+      const { user } = (guild as Guild).client
+      return cached(cacheOf(members), user.id, () => memberIn(guild, user.id, user))
+    },
+    configurable: true,
+  })
+  for (const key of ['roles', 'channels']) {
+    for (const item of cacheOf(instance[key])?.values() ?? []) {
+      if (!Object.prototype.hasOwnProperty.call(item, 'guild')) (item as Record<string, unknown>).guild = guild
+    }
+  }
 }
 
 /**
@@ -1614,7 +1745,9 @@ function mentionsOf(content: string | undefined, client: unknown, guild: unknown
   }
   // Own values, so the prototype's getters, which read the raw mention data, are not reached
   const instance = Object.create(MessageMentions.prototype) as object
-  for (const [key, value] of Object.entries({ ...mentioned, everyone: false })) Object.defineProperty(instance, key, { value, writable: true })
+  for (const [key, value] of Object.entries({ ...mentioned, everyone: false, client, guild: guild ?? null })) {
+    Object.defineProperty(instance, key, { value, writable: true })
+  }
   return stubDeep(instance)
 }
 
@@ -1767,9 +1900,14 @@ export function createMockMessage(
   Object.defineProperty(instance, 'guild', { value: guild, writable: true })
   // The author as a member of the message's server; a direct message has none. A given author's member is the one
   // the server caches, as the gateway resolves it, so every message from that author has the same member
-  const author = overrides.author
-  const member = guild ? memberFor(guild, instance.author as { id: string }, author !== undefined) : null
-  Object.defineProperty(instance, 'member', { value: member, writable: true })
+  // The author's member, cached as the gateway caches it with the message; `member` reads the cache, as discord.js does
+  if (guild) memberFor(guild, instance.author as { id: string }, true)
+  Object.defineProperty(instance, 'member', {
+    get: () => (guild ? (guild as Guild).members.resolve(instance.author as User) : null),
+    set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
+    enumerable: true,
+    configurable: true,
+  })
   // In a server's text channel, the ids matching the objects; with no guild, a DM
   instance.channelId = channel.id
   instance.guildId = guild?.id ?? null
@@ -1778,12 +1916,15 @@ export function createMockMessage(
     writable: true,
   })
 
-  // Assigned once by discord.js's Base constructor, so an own value, as it is on a real message
+  // Assigned once by discord.js's Base constructor, so an own value, as it is on a real message; a guild the message
+  // made for itself has the same client, which caches the guild
   const client = overrides.client ?? createMockClient()
+  if (guild && overrides.guild === undefined) (guild as Record<string, unknown>).client = client
   Object.defineProperty(instance, 'client', { value: client, writable: true, configurable: true })
+  if (guild instanceof Guild) cached(cacheOf(client.guilds), guild.id, () => guild)
   cacheChannel(channel, guild, client)
   const userCache = cacheOf(client.users)
-  for (const user of [...(overrides.users ?? []), ...(author ? [author] : [])]) userCache?.set(user.id, user)
+  for (const user of [...(overrides.users ?? []), instance.author as User]) userCache?.set(user.id, user)
 
   // MessageMentions — constructor-assigned; what the content mentions, cached as the gateway delivers it
   instance.mentions = mentionsOf(overrides.content, client, guild)
