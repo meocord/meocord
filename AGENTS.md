@@ -140,6 +140,8 @@ what an application experiences, generate an app from the built package and run 
 - Write release notes for the person upgrading: what changed and what they do about it, linking the
   upgrade guide at `https://meocord.dev/docs/<line>/migrating#<anchor>` for breaking changes, and other
   documentation at `https://meocord.dev/docs/<line>/<page>`, never a README anchor.
+- A stable version that follows its own prereleases needs curated notes in `.changeset/release-notes/<version>/`
+  before it is versioned (CONTRIBUTING.md, How a release happens); `release:version` refuses without them.
 - Merging to `main` publishes nothing. The workflow opens a `chore: release` pull request; **merging
   that pull request publishes to npm**.
 
