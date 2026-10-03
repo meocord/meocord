@@ -15,6 +15,14 @@ export function warnDeprecatedBehaviour(logger: Logger, old: string, outcome: 'i
   warnOnce(logger, `${old} is deprecated; in the next major version (5.0) it ${outcome}. Use ${replacement} instead.`)
 }
 
+/**
+ * Warns once per run that a mock reads `value` as a placeholder where discord.js computes it, saying what 5.0 gives
+ * and how to set it.
+ */
+export function warnPlaceholder(logger: Logger, value: string, outcome: string, how: string): void {
+  warnOnce(logger, `${value} reads a placeholder here; in the next major version (5.0) ${outcome}. ${how}`)
+}
+
 function warnOnce(logger: Logger, text: string): void {
   if (warned.has(text)) return
   warned.add(text)

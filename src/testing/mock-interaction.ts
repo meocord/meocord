@@ -51,6 +51,7 @@ import {
   Message,
   MessageFlagsBitField,
   MessageMentions,
+  MessageReaction,
   Role,
   RoleManager,
   RoleSelectMenuInteraction,
@@ -91,6 +92,8 @@ import { createDiscordError } from './response.js'
 import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
 import { discordDefault, REAL_GETTER } from './discord-defaults.js'
+import { Logger } from '@src/common/logger.js'
+import { warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
 
@@ -215,6 +218,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
         const desc = Object.getOwnPropertyDescriptor(proto, key)
         if (desc !== undefined) {
           protoValue = desc.value
+          if (desc.get && PLACEHOLDER_BOOLEANS.get(proto)?.has(key)) warnBooleanPlaceholder(target, key)
           break
         }
         proto = Object.getPrototypeOf(proto)
@@ -264,6 +268,33 @@ function isRealMethod(target: object, key: string): boolean {
     if (REAL_METHODS.get(proto)?.has(key)) return true
   }
   return false
+}
+
+// discord.js's computed booleans a mock reads as a placeholder, which is truthy: 5.0 computes them, and until then a
+// test that reads one is told so once
+const PLACEHOLDER_BOOLEANS = new Map<object, ReadonlySet<string>>([
+  [Message.prototype, new Set(['editable', 'deletable', 'pinnable', 'crosspostable', 'bulkDeletable', 'hasThread', 'partial'])],
+  [GuildMember.prototype, new Set(['manageable', 'kickable', 'bannable', 'moderatable'])],
+  [Role.prototype, new Set(['editable'])],
+  [GuildChannel.prototype, new Set(['viewable', 'manageable', 'deletable'])],
+  [ThreadChannel.prototype, new Set(['joinable', 'joined', 'sendable', 'unarchivable', 'editable', 'manageable', 'viewable'])],
+  [BaseGuildVoiceChannel.prototype, new Set(['joinable'])],
+  [User.prototype, new Set(['partial'])],
+  [BaseChannel.prototype, new Set(['partial'])],
+  [MessageReaction.prototype, new Set(['partial'])],
+])
+
+const mockLogger = new Logger('Mocks')
+
+function warnBooleanPlaceholder(target: object, key: string): void {
+  const name = (Object.getPrototypeOf(target) as { constructor: { name: string } }).constructor.name
+  const variable = name.charAt(0).toLowerCase() + name.slice(1)
+  warnPlaceholder(
+    mockLogger,
+    `${name}.${key}`,
+    'the mock computes it as discord.js does',
+    `Set it on the mock, such as ${variable}.${key} = false, to test either way.`,
+  )
 }
 
 // The client of a structure made without one: the one its guild has, else one of its own, made once
@@ -1911,9 +1942,23 @@ export function createMockMessage(
   // In a server's text channel, the ids matching the objects; with no guild, a DM
   instance.channelId = channel.id
   instance.guildId = guild?.id ?? null
+  // The thread its channel caches under its id, as discord.js reads it; until 5.0, a placeholder thread otherwise
+  let placeholderThread: object | undefined
   Object.defineProperty(instance, 'thread', {
-    value: stubDeep(Object.create(ThreadChannel.prototype)),
-    writable: true,
+    get: () => {
+      const found = cacheOf((instance.channel as { threads?: unknown }).threads)?.get(instance.id as string)
+      if (found) return found
+      warnPlaceholder(
+        mockLogger,
+        'Message.thread',
+        'it is null unless the channel caches a thread under the message id, as discord.js reads it',
+        'Cache one with message.channel.threads.cache.set(message.id, thread).',
+      )
+      return (placeholderThread ??= stubDeep(Object.create(ThreadChannel.prototype)))
+    },
+    set: (value: unknown) => Object.defineProperty(instance, 'thread', { value, writable: true, enumerable: true, configurable: true }),
+    enumerable: true,
+    configurable: true,
   })
 
   // Assigned once by discord.js's Base constructor, so an own value, as it is on a real message; a guild the message
