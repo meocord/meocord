@@ -5,7 +5,7 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: (
 const { Container } = await import('inversify')
 const { ButtonInteraction, Client } = await import('discord.js')
 const { MeoCordFactory } = await import('@src/core/meocord-factory.js')
-const { Catch, Command, Controller, Guard, Interceptor, MeoCord, On, Pipe, Service, UseGuard, UseInterceptor, UsePipe } = await import('@src/decorator/index.js')
+const { Catch, Command, Controller, Guard, Interceptor, MeoCord, Observer, On, Pipe, Service, UseGuard, UseInterceptor, UsePipe } = await import('@src/decorator/index.js')
 const { Translator } = await import('@src/common/translator.js')
 const { CommandType } = await import('@src/enum/index.js')
 const { createMockInteraction, MeoCordTestingModule } = await import('@src/testing/index.js')
@@ -182,10 +182,123 @@ describe('every class an app runs, checked as it is created', () => {
   // Every class MeoCord binds was checked as the app was created: one bound without that is a root a check missed
   it('refuses to bind a class the startup checks never saw', () => {
     const container = new Container()
-    markStartupChecked(container, [Clock])
+    markStartupChecked(container, [Clock], () => {})
     class Missed {}
 
     expect(() => bindShared(container, Clock)).not.toThrow()
     expect(() => bindShared(container, Missed)).toThrow('Missed: MeoCord binds it without checking it as the app is created')
+  })
+})
+
+describe('a guarded method called directly', () => {
+  const runs: string[] = []
+  beforeEach(() => {
+    runs.length = 0
+  })
+
+  @Guard()
+  class Staff {
+    constructor(readonly clock: Clock) {}
+    canActivate() {
+      runs.push('guard')
+      return true
+    }
+  }
+  const press = () => createMockInteraction(ButtonInteraction, { customId: 'panel' })
+
+  // A subclass the app makes itself, from a handler, of a class MeoCord made: its guards are met only at the call
+  it('runs a guard first met on an instance the app made itself, checking it then', async () => {
+    @Controller()
+    class Panel {
+      @Command('panel', CommandType.BUTTON)
+      async panel(interaction: unknown) {
+        await new Extra().extra(interaction)
+      }
+    }
+    class Extra extends Panel {
+      @UseGuard(Staff)
+      async extra(_interaction: unknown) {
+        runs.push('extra')
+      }
+    }
+    const Undecorated = injecting('guard', Clock, false)
+    class Unchecked extends Panel {
+      @UseGuard(Undecorated as never)
+      async unchecked(_interaction: unknown) {}
+    }
+    const module = MeoCordTestingModule.fromApp(appWith({ controllers: [Panel] })).compile()
+
+    await module.invoke(Panel, 'panel', press())
+    expect(runs).toEqual(['guard', 'extra'])
+    await expect(new Unchecked().unchecked(press())).rejects.toThrow(`${Undecorated.name}: its constructor takes parameters, but ${Undecorated.name} has no decorator`)
+  })
+
+  it.each([
+    [
+      "a provider's class",
+      () => {
+        class Billing {
+          @UseGuard(Staff)
+          async charge(_interaction: unknown) {
+            runs.push('charge')
+          }
+        }
+        Service()(Billing)
+        return { options: { providers: [{ provide: 'billing', useClass: Billing }] }, run: (module: any) => module.get('billing').charge(press()) }
+      },
+    ],
+    [
+      'a service only a guard injects',
+      () => {
+        @Service()
+        class Ledger {
+          @UseGuard(Staff)
+          async charge(_interaction: unknown) {
+            runs.push('charge')
+          }
+        }
+        // The guard calls the service's guarded method itself, on the instance its own resolution made
+        @Guard()
+        class Audits {
+          constructor(readonly ledger: Ledger) {}
+          async canActivate(interaction: unknown) {
+            await this.ledger.charge(interaction)
+            return true
+          }
+        }
+        const Panel = controllerUsing(UseGuard(Audits) as MethodDecorator)
+        return { options: { controllers: [Panel] }, run: (module: any) => module.invoke(Panel, 'panel', press()) }
+      },
+    ],
+    [
+      'an observer',
+      () => {
+        @Observer()
+        class Watch {
+          onSettled() {}
+          @UseGuard(Staff)
+          async charge(_interaction: unknown) {
+            runs.push('charge')
+          }
+        }
+        return { options: { observers: [Watch] }, run: (module: any) => module.get(Watch).charge(press()) }
+      },
+    ],
+  ])('runs its guards on %s, which MeoCord made', async (_kind, build) => {
+    const { options, run } = build()
+    const module = MeoCordTestingModule.fromApp(appWith(options)).compile()
+    await run(module)
+    expect(runs).toEqual(['guard', 'charge'])
+  })
+
+  it('says what to do on an instance of a class MeoCord never made, rather than failing inside', async () => {
+    class Loose {
+      @UseGuard(Staff)
+      async go(_interaction: unknown) {}
+    }
+    MeoCordTestingModule.fromApp(appWith({ controllers: [controllerUsing()] })).compile()
+    await expect(new Loose().go(press())).rejects.toThrow(new Error(
+      'Loose.go: @UseGuard runs its guards through the app that made Loose, and this instance was made outside one. Inject Loose, or call it on an instance the app made.',
+    ))
   })
 })

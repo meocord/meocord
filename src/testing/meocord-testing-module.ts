@@ -65,7 +65,7 @@ import { appObservers, assertObservers, bindObservers } from '@src/core/observer
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
-import { assertStartupClasses, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
@@ -996,8 +996,9 @@ export class TestingModuleBuilder {
       observers: [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
       stubs: [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()],
     })
-    assertStartupClasses(startup, { translator: i18n !== undefined || providers.has(Translator) })
-    markStartupChecked(container, [...startup.classes, ...meocordClasses()])
+    const hasTranslator = i18n !== undefined || providers.has(Translator)
+    assertStartupClasses(startup, { translator: hasTranslator })
+    markStartupChecked(container, [...startup.classes, ...meocordClasses()], lateGuardCheck(providers, hasTranslator))
     // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
     const needClient = startup.classes.filter(cls => injectedTokens(cls).includes(Client))
     if (needClient.length > 0 && !providers.has(Client)) {
@@ -1084,7 +1085,8 @@ export class TestingModuleBuilder {
       }),
     )
     assertProvided(container, providers, startup.classes, "the testing module's providers")
-    for (const cls of appClasses) Reflect.defineMetadata(META.container, container, cls)
+    // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
+    for (const cls of startup.classes) Reflect.defineMetadata(META.container, container, cls)
     prepareHandlerStages(container, appClasses)
     const messages = messagesOf(this.options.app)
     // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages

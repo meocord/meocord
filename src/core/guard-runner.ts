@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { assertStartupChecked } from '@src/core/startup-checked.js'
+import { checkOnFirstUse } from '@src/core/startup-checked.js'
 import { Container, LazyServiceIdentifier } from 'inversify'
 import { type GuardInterface } from '@src/interface/index.js'
 import { MetadataKey } from '@src/enum/index.js'
@@ -129,7 +129,7 @@ function needsContext(container: Container, cls: object, seen = new Set<object>(
 
 /** Resolves a guard for one call, in a child container holding the context when it needs one. */
 function resolveGuard(container: Container, guard: GuardClass, context: HandlerExecutionContext | UnroutedExecutionContext): GuardInterface {
-  if (!container.isBound(guard)) assertStartupChecked(container, guard)
+  if (!container.isBound(guard)) checkOnFirstUse(container, guard)
   if (!needsContext(container, guard)) {
     return container.get(guard, { autobind: true })
   }
@@ -463,7 +463,14 @@ export async function runDirectCall(
 ): Promise<unknown> {
   const prototype = Object.getPrototypeOf(instance) as object
   const controller = instance.constructor as new (...args: any[]) => unknown
-  const container = Reflect.getMetadata(META.container, controller) as Container
+  // The app that made the class, or a class it extends: a subclass the app's code makes runs as its base does
+  const container = Reflect.getMetadata(META.container, controller) as Container | undefined
+  if (!container) {
+    throw new Error(
+      `${controller.name}.${methodName}: @UseGuard runs its guards through the app that made ${controller.name}, and this ` +
+        `instance was made outside one. Inject ${controller.name}, or call it on an instance the app made.`,
+    )
+  }
   if (!(await runGuards(handlerGuards(prototype, methodName), { container, controller, methodName, args }))) return undefined
 
   const inner = wrapperCount(prototype, methodName) - 1
