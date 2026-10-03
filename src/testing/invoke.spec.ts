@@ -305,6 +305,34 @@ describe('TestingModule.invoke', () => {
       expect(log.at(-1)).toBe('settings')
     })
 
+    it('rejects a command dispatch gives another handler, naming the one that runs', async () => {
+      @Controller()
+      class Settings {
+        @Command('settings', CommandType.SLASH)
+        async bare(_interaction: ChatInputCommandInteraction) {
+          log.push('bare')
+        }
+
+        @Command('settings language', CommandType.SLASH)
+        async language(_interaction: ChatInputCommandInteraction) {
+          log.push('language')
+        }
+      }
+      const module = MeoCordTestingModule.create({ controllers: [Settings] }).compile()
+      const sub = () =>
+        createMockInteraction(ChatInputCommandInteraction, {
+          commandName: 'settings',
+          options: createChatInputOptions({ subcommand: 'language' }) as never,
+        })
+
+      await expect(module.invoke(Settings, 'bare', sub())).rejects.toThrow(
+        "command 'settings language' does not reach Settings.bare: dispatch runs Settings.language.",
+      )
+      await module.invoke(Settings, 'language', sub())
+      await module.invoke(Settings, 'bare', createMockInteraction(ChatInputCommandInteraction, { commandName: 'settings' }))
+      expect(log).toEqual(['language', 'bare'])
+    })
+
     it('leaves a method without a route unchecked', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'anything' })
 

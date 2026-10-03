@@ -15,9 +15,9 @@ import {
   isCustomIdRouted,
   matchesCommandType,
   matchesHandler,
-  resolveCommandPaths,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
+import { commandRouteKeys, matchCommandRoute } from '@src/core/command-routes.js'
 
 /** The second argument an interaction handler receives, and the names given twice while building it. */
 export interface HandlerInput {
@@ -113,26 +113,33 @@ export function componentRouteFor(
 }
 
 /**
- * Why a command could not reach a handler by its name, for a test calling the handler directly.
- * `undefined` when it could, when the handler has no command route, or when the interaction is not a command.
+ * Why a command could not reach a handler by its name, for a test calling the handler directly: the handler is checked
+ * against the one dispatch routes the command to, among `controllers`. `undefined` when it is that one, when the
+ * handler has no command route, or when the interaction is not a command.
  */
-export function commandMismatch(controller: { name: string; prototype: object }, methodName: string, interaction: Interaction): string | undefined {
+export function commandMismatch<C extends { name: string; prototype: object }>(
+  controllers: readonly C[],
+  controller: C,
+  methodName: string,
+  interaction: Interaction,
+): string | undefined {
   if (!interaction.isCommand()) return undefined
   const handler = `${controller.name}.${methodName}`
   const named = Object.entries(getCommandMap(controller.prototype) ?? {}).flatMap(([route, metas]) =>
     metas.filter(meta => meta.methodName === methodName && !isCustomIdRouted(meta.type)).map(meta => ({ route, meta })),
   )
   if (typeof interaction.commandName !== 'string' || named.length === 0) return undefined
-  // A chat command reaches the handler of its full path, or of its bare name, as dispatch tries them
-  const keys = interaction.isChatInputCommand() ? resolveCommandPaths(interaction) : [interaction.commandName]
-  const byName = named.filter(({ route }) => keys.includes(route))
+  const keys = commandRouteKeys(interaction)
+  const winner = matchCommandRoute(controllers, interaction)
+  if (winner?.controllerClass === controller && winner.meta.methodName === methodName) return undefined
   // A user and a message context menu may share a name; dispatch sends each only to its own kind's handler
-  if (byName.some(({ meta }) => !interaction.isContextMenuCommand() || matchesHandler(meta, interaction))) return undefined
-  if (byName.length > 0) {
+  const byName = named.filter(({ route }) => keys.includes(route))
+  if (interaction.isContextMenuCommand() && byName.length > 0 && !byName.some(({ meta }) => matchesHandler(meta, interaction))) {
     const [sent, handled] = interaction.isUserContextMenuCommand() ? ['user', 'message'] : ['message', 'user']
     const name = interaction.commandName
     return `A ${sent} context menu command '${name}' does not match ${handler}, which handles the ${handled} context menu command '${name}'.`
   }
+  if (winner) return `command '${keys[0]}' does not reach ${handler}: dispatch runs ${winner.controllerClass.name}.${winner.meta.methodName}.`
   return `command '${keys[0]}' does not match ${handler}'s route ${named.map(({ route }) => `'${route}'`).join(' or ')}.`
 }
 

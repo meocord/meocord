@@ -12,7 +12,6 @@ import { type Container } from 'inversify'
 import { type Logger } from '@src/common/logger.js'
 import {
   getAutocompleteHandlers,
-  getCommandMap,
   getMessageHandlers,
   getReactionHandlers,
   matchesEmoji,
@@ -23,7 +22,6 @@ import {
   focusedOptionName,
   hasCustomId,
   matchesCommandType,
-  matchesHandler,
   resolveCommandPaths,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
@@ -52,6 +50,7 @@ import { Translator } from '@src/common/translator.js'
 import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback, noteInvocation } from '@src/core/fallback.js'
 import { handlerInput } from '@src/core/handler-input.js'
+import { matchCommandRoute } from '@src/core/command-routes.js'
 import { runGuards } from '@src/core/guard-runner.js'
 import { HandlerRegistry, shareMessageRoutes } from '@src/core/handler-registry.js'
 import {
@@ -291,18 +290,11 @@ export class Dispatcher {
       }
     }
 
-    // Paths are walked outside the controller loop so the full subcommand path always
-    // beats the bare command name, whatever order the controllers were registered in.
-    for (const path of this.resolveNameRoutes(interaction)) {
-      for (const controllerClass of this.controllerClasses) {
-        const controllerInstance = this.getInstance(controllerClass)
-        const commandMap = getCommandMap(controllerInstance)
-        const commandMetadata = commandMap?.[path]?.find(meta => matchesHandler(meta, interaction))
-        if (!commandMetadata) continue
-
-        await this.executeCommand(controllerInstance, commandMetadata, interaction, call)
-        return
-      }
+    // The same match a test's invoke checks a handler against, so the two cannot disagree
+    const command = matchCommandRoute(this.controllerClasses, interaction)
+    if (command) {
+      await this.executeCommand(this.getInstance(command.controllerClass), command.meta, interaction, call)
+      return
     }
 
     // A component or modal no route takes may be a collector's: with another listener on the client, it has the
@@ -324,21 +316,6 @@ export class Dispatcher {
       `No handler matched ${describeInteraction(interaction)}. Check that a @Command pattern is ` +
         `declared for it and that its controller is registered.`,
     )
-  }
-
-  /**
-   * The names a command interaction can be handled under, most specific first.
-   *
-   * Empty for anything that is not a command, which is how a component
-   * whose customId matched no pattern falls through to the unmatched warning instead
-   * of being looked up under a name it does not have.
-   */
-  private resolveNameRoutes(interaction: Interaction<CacheType>): string[] {
-    if (interaction.isChatInputCommand()) return resolveCommandPaths(interaction)
-    if (interaction.isContextMenuCommand() || interaction.isPrimaryEntryPointCommand()) {
-      return [interaction.commandName]
-    }
-    return []
   }
 
   /**
