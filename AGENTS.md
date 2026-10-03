@@ -46,6 +46,7 @@ testing toolkit.
 | `bun run test:coverage`                     | Run with coverage; thresholds are enforced in CI                                                     |
 | `bun run build`                             | Clean `dist/` and build ESM, CJS and `.d.ts`/`.d.cts` declarations                                   |
 | `bun run build && bun run verify:generated` | Generate a real app from `dist`, install it, and run its typecheck, tests, coverage, builds and lint |
+| `bun run build && bun run verify:runners`   | Install the packed build under jest, vitest, node:test and bun test, and run each runner's test      |
 | `bun run notices:check`                     | Fail if THIRD_PARTY_NOTICES.md is out of date (`bun run notices` rewrites)                           |
 | `bun run changeset`                         | Write a release note for a change that reaches the published package                                 |
 
@@ -161,8 +162,8 @@ Releases happen only on the maintainer's explicit go-ahead, performed by the sup
 - Conventional commit subjects (`fix(scope): …`, `feat(testing): …`, `!` for breaking), with a body
   explaining what was wrong, what changed and how it was verified.
 - Open a PR against `main` using the PR template; link the issue it closes (`Closes #n`).
-- Branch protection: linear history, required checks `Lint`, `Test`, `Build`, `Coverage`, `Windows`, `Redis`.
-  PRs land through the merge queue, which rebases them onto `main`, re-runs the checks and merges.
+- Branch protection: linear history, required checks `Lint`, `Test`, `Build`, `Coverage`, `Windows`, `Redis`,
+  `Test runners`. PRs land through the merge queue, which rebases them onto `main`, re-runs the checks and merges.
 - No AI residue — see below.
 - Commits, PRs and code say nothing about how the work was organised — see section 9.
 - Never force-push `main`, and never rewrite a branch someone else is working on.
