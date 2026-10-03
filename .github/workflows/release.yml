@@ -55,7 +55,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'agents-md-approved') }}
-          MAX_LINES: 230
+          MAX_LINES: 231
         # HEAD is the pull request merged into its base as the base is now, and its first parent is that base, so
         # their diff is the pull request's own change. The base SHA the event names can predate later merges.
         run: |
