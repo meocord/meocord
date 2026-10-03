@@ -1012,7 +1012,7 @@ export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
  * import { expect } from 'vitest'
  *
  * const client = createMockClient()
- * const botId = client.user!.id
+ * const botId = client.user.id
  * const message = createMockMessage({ content: `<@${botId}> help`, client })
  * expect(message.mentions.users.has(botId)).toBe(true)
  * ```
@@ -1021,7 +1021,7 @@ export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
  * @category Mocks
  * @see {@link createMockMessage}
  */
-export function createMockClient(): DeepMocked<Client> {
+export function createMockClient(): DeepMocked<Client<true>> {
   const instance = Object.create(Client.prototype) as Record<string, unknown>
 
   // Manager properties are constructor-assigned — pre-initialize as prototype-based
@@ -1036,7 +1036,7 @@ export function createMockClient(): DeepMocked<Client> {
   instance.user = stubDeep(Object.assign(Object.create(ClientUser.prototype), { id: MOCK_BOT_ID, bot: true }))
   instance.application = stubDeep(appInstance)
 
-  return stubDeep(instance) as DeepMocked<Client>
+  return stubDeep(instance) as DeepMocked<Client<true>>
 }
 
 /**

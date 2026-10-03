@@ -54,7 +54,7 @@ describe('mock ids', () => {
 
     const thumbnail = sent.embeds[0].toJSON().thumbnail as { id?: string }
     expect(thumbnail.id).toMatch(SNOWFLAKE)
-    expect(thumbnail.id).not.toBe(createMockClient().user!.id)
+    expect(thumbnail.id).not.toBe(createMockClient().user.id)
   })
 
   it('keeps ids a test gives', () => {
@@ -135,7 +135,7 @@ describe("a mock's data, where the test gives none", () => {
     const interaction = createMockInteraction(ButtonInteraction, { guildId: '200' })
     const { client } = interaction
 
-    expect(client.user!.id).toBe(createMockClient().user!.id)
+    expect(client.user!.id).toBe(createMockClient().user.id)
     expect(client.users.cache.get(interaction.user.id)).toBe(interaction.user)
     const { channel } = interaction
     expect(client.channels.cache.get(interaction.channelId)).toBe(channel)
@@ -178,7 +178,7 @@ describe("a mock's data, where the test gives none", () => {
     const user = Object.assign(createMockUser(), { username: 'ada', globalName: 'Ada' })
     expect([user.tag, user.displayName]).toEqual(['ada', 'Ada'])
     expect(user.createdTimestamp).toBe(SnowflakeUtil.timestampFrom(user.id))
-    expect(createMockClient().user?.username).toBe('bot')
+    expect(createMockClient().user.username).toBe('bot')
   })
 
   it.each([

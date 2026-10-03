@@ -15,7 +15,7 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
  */
 const A = '100000000000000001'
 const B = '100000000000000002'
-const BOT = createMockClient().user!.id
+const BOT = createMockClient().user.id
 const ran: string[] = []
 
 // An entity shows as its ID; one a handler receives still as a ref, with `resolve`, shows marked

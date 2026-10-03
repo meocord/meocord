@@ -343,7 +343,7 @@ export class TestingModule {
     })
     await this.resolving
     if (options.ready) {
-      const { client = createMockClient() as unknown as Client<true>, primary = true } = options.ready === true ? {} : options.ready
+      const { client = createMockClient(), primary = true } = options.ready === true ? {} : options.ready
       this.readying ??= this.runReady(client, primary)
       await this.readying
     }

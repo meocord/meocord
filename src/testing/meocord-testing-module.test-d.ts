@@ -3,6 +3,7 @@ import { type ButtonInteraction, type Client, type Message, type MessageReaction
 import { type DispatchedCall, type InvocationResult, MeoCordTestingModule, type TestingModule, type TestingModuleBuilder } from './meocord-testing-module.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
 import { createExecutionContext } from './execution-context.js'
+import { createMockClient } from './mock-interaction.js'
 import { getResponse } from './response.js'
 
 /**
@@ -103,6 +104,7 @@ describe('TestingModule lifecycle', () => {
     expectTypeOf(module.init()).resolves.toEqualTypeOf<typeof module>()
     expectTypeOf(module.init({ ready: true })).resolves.toEqualTypeOf<typeof module>()
     void module.init({ ready: { client: {} as Client<true>, primary: false } })
+    void module.init({ ready: { client: createMockClient() } })
     expectTypeOf(module.close()).toEqualTypeOf<Promise<void>>()
   })
 

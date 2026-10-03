@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
+  type Client,
   ComponentType,
   EmbedBuilder,
   MessageFlags,
@@ -20,6 +21,7 @@ import {
   createChatInputOptions,
   createMock,
   createMockChannel,
+  createMockClient,
   createMockInteraction,
   createMockMessage,
   createMockUser,
@@ -162,6 +164,19 @@ describe('createMock', () => {
   it('rejects a prop the type does not declare', () => {
     // @ts-expect-error `notifi` is not a method on NotificationService.
     createMock<NotificationService>({ notifi: async () => '' })
+  })
+})
+
+describe('createMockClient', () => {
+  // The mock is logged in, as the client an interaction or message arrives on
+  it('is accepted wherever a mock takes the client it arrived on', () => {
+    const client = createMockClient()
+    expectTypeOf(client).toExtend<Client<true>>()
+    expectTypeOf(client.user.id).toEqualTypeOf<string>()
+    createMockInteraction(ButtonInteraction, { client })
+    createMockMessage({ client })
+    createMockChannel(TextChannel, { client })
+    createMockUser({ client })
   })
 })
 

@@ -108,7 +108,7 @@ describe('TestingModule lifecycle', () => {
   })
 
   it('hands onReady the client and primary it is given', async () => {
-    const client = createMockClient() as unknown as Client<true>
+    const client = createMockClient()
     let received: [Client<true>, ReadyInfo] | undefined
     const scheduler = vi.spyOn(Scheduler.prototype, 'onReady').mockImplementation((...args) => {
       received = args
