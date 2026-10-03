@@ -1,5 +1,209 @@
 # meocord
 
+## 4.1.0
+
+### Highlights
+
+- **Adds to 4.0.** Upgrading from 4.0, below, lists what may change for a 4.0 bot ([docs](https://meocord.dev/docs/4.1/whats-new)).
+- **One way to answer.** `respond()`, `@Defer()` and presenters, in a theme's colours and emojis ([docs](https://meocord.dev/docs/4.1/responses)).
+- **A pipeline around every handler.** Global guards, interceptors, filters, pipes, `@Cooldown` and observers, in one order ([docs](https://meocord.dev/docs/4.1/how-a-call-runs)).
+- **Message command patterns.** Typed params, flags, aliases, usage replies and a built-in `!help` ([docs](https://meocord.dev/docs/4.1/message-commands)).
+- **Sharding, providers and lifecycle.** Sharding in one process or a process per shard, with `ShardContext.call`, async providers, `onReady`/`onShutdown` and `app.stop()` ([docs](https://meocord.dev/docs/4.1/sharding)).
+- **Localisation and testing.** Typed catalogs, and `MeoCordTestingModule` with Discord-shaped mocks ([docs](https://meocord.dev/docs/4.1/testing)).
+
+### Upgrading from 4.0
+
+- **Requirements.** Node.js 22.13+, discord.js 14.27.0+ and dotenv 18.0.5+: `npm install discord.js@^14.27.0 dotenv@^18.0.5`. Most 4.0 bots and tests run without edits ([guide](https://meocord.dev/docs/4.1/migrating#upgrading-from-40-to-41)).
+- **Class guards cover inherited and autocomplete handlers.** Check guards that read command-only data or reply on denial; an autocomplete denial closes the menu ([guide](https://meocord.dev/docs/4.1/migrating#class-guards-now-cover-inherited-handlers)).
+- **Base class stages cover subclasses.** A base controller's guards, interceptors, filters and cooldowns run first on its subclasses' handlers; `@Controller({ inheritStages: false })` opts out ([guide](https://meocord.dev/docs/4.1/migrating#a-base-controllers-class-stages-cover-its-subclasses)).
+- **`applyDecorators(A, B)` applies in stack order.** Guards run in the order listed; reverse them to keep 4.0's order ([guide](https://meocord.dev/docs/4.1/migrating#applydecorators-applies-its-decorators-in-the-order-they-stack)).
+- **Message keywords ignore case, and one handler runs.** They match word by word; set `caseSensitive: true` to match case. Two handlers on one keyword stop the bot, and an app `prefix` applies to keywords; use `{ prefix: false }` for bare messages ([guide](https://meocord.dev/docs/4.1/migrating#message-keywords-match-in-any-case-and-only-one-runs)).
+- **Bot reactions are ignored**, the bot's own included. Add `{ bots: true }` to a `@ReactionHandler` that needs them, and recheck counts that subtracted the bot's own reactions ([guide](https://meocord.dev/docs/4.1/migrating#reactions-from-bots-reach-no-handler)).
+- **Duplicate routes stop the bot.** Two component handlers matching the same customIds, two handlers of one command, or two builders of one command (4.0 warned) are refused, naming both. Registering a base controller with its subclass is refused the same way ([guide](https://meocord.dev/docs/4.1/migrating#two-handlers-of-one-command-stop-the-bot)).
+- **A re-declared inherited route takes the subclass's options.** Its own builder or `@MessageHandler`/`@ReactionHandler` options apply; to keep the base's, don't re-declare it ([guide](https://meocord.dev/docs/4.1/migrating#a-re-declared-handler-that-keeps-its-inherited-route-logs-a-warning)).
+- **Errors after a reply or deferral are answered.** A deferred reply becomes the error, and a replied command gets a private follow-up; an exception filter replaces it ([guide](https://meocord.dev/docs/4.1/migrating#errors-after-a-reply-or-deferral-are-answered)).
+- **`Theme` follows the app's theme, with new defaults,** as do MeoCord's own answers: `Theme.errorColor` is `#E3606D`, not `#DC3545`, and the success, info and warning colours change too. Set `@MeoCord({ theme: { colors } })` to keep 4.0's ([guide](https://meocord.dev/docs/4.1/migrating#theme-is-deprecated-and-its-colours-changed)).
+- **MeoCord's metadata keys start with `meocord:`.** `SetMetadata` refuses only those and the DI keys (inversify's injectable flag, `design:paramtypes`); read MeoCord's metadata with `inspectHandler` ([guide](https://meocord.dev/docs/4.1/migrating#setmetadata-refuses-meocords-own-keys)).
+- **Activities rotate in order, only when set.** Without `activities`, MeoCord leaves the presence alone; with them, it starts at ready.
+- **Reactions use the cached message.** `reaction.message` is fetched only when held by id alone; call `reaction.message.fetch()` for fresh data.
+- **customId params arrive decoded.** `%2F` and `%25` reach the handler as `/` and `%`; drop your own decoding.
+- **Logs and exit codes.** `[DEBUG]` prints only in development unless `logLevel` or `MEOCORD_LOG_LEVEL=debug` asks; `info()`/`verbose()` print `[INFO]`/`[VERBOSE]`, objects as `console.log` does, and a signal after a failed login exits 1. Skip it in a 4.0 `main.ts` catch with `if (!isExplainedError(error))` from `meocord/common`, or a refused token or intent logs twice ([docs](https://meocord.dev/docs/4.1/configuration#logging)).
+
+### Upgrading builds and the CLI
+
+- **A mistyped config option stops `build`, `start` and `register`,** listing every problem; unknown options only warn ([guide](https://meocord.dev/docs/4.1/migrating#a-config-option-of-the-wrong-type-stops-the-cli)).
+- **Config and assets load beside `dist/main.js`.** `.env` still loads from the working directory, so set it there when starting elsewhere. Rebuild ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
+- **`NODE_ENV` follows the mode.** `build --prod` compiles `meocord.config.ts` as production, and `start --dev` runs the bot as development whatever the shell sets. On Bun, start production with `NODE_ENV=production`, or `.env.development` loads first, with a warning ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
+- **No `eval` devtool.** Development builds use `cheap-module-source-map`, and `eval-*` becomes its non-eval form with a warning. Set `sourceMappedStacks: false` for trackers that apply uploaded source maps ([docs](https://meocord.dev/docs/4.1/configuration#stack-traces)).
+- **`meocord/eslint` flags unawaited promises.** `await`, `return` or `void` them, or turn the rule off ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
+- **The generated rate-limit guard never limited.** Move its map to module level, or use `@Cooldown` ([guide](https://meocord.dev/docs/4.1/migrating#the-generated-rate-limit-guard-limits)).
+- **What a 4.0 app can copy.** New apps read every `.env` file and type asset imports; add the `swc` `include` for coverage of untested files. An app created for pnpm adds `reflect-metadata`, `@types/node` and a `pnpm-workspace.yaml`, and one installed with npm 11.16+ adds `allowScripts` to `package.json` ([guide](https://meocord.dev/docs/4.1/migrating#installing-with-pnpm-or-npm-1116-and-later)).
+
+### Upgrading your tests
+
+- **Mocks have distinct snowflake ids.** Pass `{ user: first.user }` to share a user. A mock without `guildId` is a DM, a given channel sets `channelId`, `guildId` and `guild`, and a member given to `createChatInputOptions` fills a `User` param with the `User`, where 4.0 passed the `GuildMember` ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
+- **Handler arguments are type-checked.** Select menu choices and plain-string customId params that never matched now fail to compile ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
+- **Changed messages.** Load-time refusals start with `Class.method:`, and a `@Command` given the wrong interaction names the handler, not "Invalid interaction type passed to @Command". A modal mock's `isFromMessage()` needs a `message`, and autocomplete `respond()` rejects over 25 choices.
+- **Option mocks resolve as Discord's.** `getMember()` returns the member, `null` in a DM. A getter of another type, `getInteger()` on a fraction (use `getNumber()`), `getChannel()` on a channel type the option doesn't allow, or `getSubcommand()` with no subcommand throws discord.js's error, where 4.0's mock returned `null` (`getSubcommand(false)` reads none as `null`); only a user or member read as a role, or the reverse, stays `null`.
+- **Load `.env` in tests yourself,** in the vitest setup or with `dotenv`, if a suite relied on an earlier build for it.
+
+### Responses and presenters
+
+- **`respond(interaction)` answers any interaction**: acknowledge, send, edit, follow up or report an error as its state allows, in user-installed apps too ([docs](https://meocord.dev/docs/4.1/responses)).
+- **`@Defer()` acknowledges before guards run**, then locks the clicked message's controls under a loading view until the handler answers; `mode: 'auto'` defers only when needed ([docs](https://meocord.dev/docs/4.1/defer)).
+- **Presenters draw MeoCord's own answers**: `@MeoCord({ presenter })` styles loading, error and help views, for messages too, async or not, with files; a failed drawing still answers ([docs](https://meocord.dev/docs/4.1/presenters)).
+- **Unanswered handlers are named** in a development warning, which `@MeoCord({ warnUnanswered })` toggles.
+
+### Handlers and the call pipeline
+
+- **One fixed pipeline** runs every handler: guards, then interceptors around validation, pipes, cooldowns and the handler, inside exception filters ([docs](https://meocord.dev/docs/4.1/how-a-call-runs)).
+- **Guards** can be global, in `@MeoCord({ guards })`; they read typed facts through `ExecutionContext` and `createMetadata`, and throw `GuardDeniedError` to say why ([docs](https://meocord.dev/docs/4.1/guards)).
+- **Interceptors** wrap a handler, for timing, logging, caching or mapping errors ([docs](https://meocord.dev/docs/4.1/interceptors)).
+- **Exception filters and `UserError`** decide what the user sees when a call throws; a `UserError` answers privately, or in a reply that doesn't ping ([docs](https://meocord.dev/docs/4.1/exception-filters)).
+- **`@Validate` and pipes** check input with any Standard Schema library and reshape it ([docs](https://meocord.dev/docs/4.1/validation)).
+- **Typed options**: each `{ provide, params }` is checked against the params its stage declares, and `MeoCordOptions` names what `@MeoCord` takes.
+- **Observers** hear each call start and settle, with its outcome and duration ([docs](https://meocord.dev/docs/4.1/observers)).
+- **`@On` and `@Once`** handle any discord.js event, on a controller or a service, through the same pipeline ([docs](https://meocord.dev/docs/4.1/gateway-events)).
+- **`HandlerRegistry`** lists every handler with its metadata ([docs](https://meocord.dev/docs/4.1/handler-discovery)).
+- **Startup checks** name dead handlers, shadowing handlers or builders, and missing intents or partials before login; a refused app gets one line naming `Class.method` and exits 1.
+
+### Theming
+
+- **Themes** name colours, emojis and button styles by role, set with `@MeoCord({ theme })`, `@UseTheme` or per server and user with `themeFor` and `ThemeCache`; `useTheme()` reads them, and apps add roles ([docs](https://meocord.dev/docs/4.1/theming)).
+- **`ThemeResolver` classes** look themes up with the app's services: `themeFor` takes one, resolved from the container, cached as the functions are ([docs](https://meocord.dev/docs/4.1/theming#per-server-and-per-user)).
+- **`respond()` fills in colour**: an answer without one takes `primary`, error views take `warning` or `danger`, and `{ fill: false }` sends as written.
+
+### Cooldowns
+
+- **`@Cooldown`** limits a handler per user, channel, server, everyone or a `by` value; cooldowns stack, count only calls that pass guards and validation, and show the wait as a Discord timestamp ([docs](https://meocord.dev/docs/4.1/cooldowns)).
+- **Cooldown stores**: memory by default, `ShardedCooldownStore` across shards, `RedisCooldownStore` on Redis or Valkey, or your own, checked with `testCooldownStore`; `cooldownStoreFailure` decides calls while one is down ([docs](https://meocord.dev/docs/4.1/recipes/cooldown-stores)).
+
+### Message commands
+
+- **Patterns**: `@MessageHandler('roll {sides:int} {note...?}')` matches after a prefix or mention, with typed params such as `int`, `member` or the app's own, flags and lists, checked at compile time ([docs](https://meocord.dev/docs/4.1/message-params)).
+- **Starts**: `messages: { prefix, mention, caseSensitive }` sets how commands start; `mention: 'only'` needs no MessageContent intent.
+- **Answers**: a misfit gets its usage; `aliases`, `description` and `scope` describe a command, `help` adds `!help`, and `dmOnError` and `dmOnCooldown` DM the author ([docs](https://meocord.dev/docs/4.1/message-commands)).
+- **Fetched after guards**: named members, users and channels are fetched only once guards pass, uncached members together; a role is read from the cache.
+
+### Components and routing
+
+- **Typed customId params** such as `{count:int}` arrive as values, and `route()` builds matching ids, checked at compile time ([docs](https://meocord.dev/docs/4.1/components)).
+- **Select choices and modal fields arrive in params**, with resolved users, members, roles and channels, and file uploads as `Attachment`s.
+- **Context menu handlers are typed** from the builder's `setType()` ([docs](https://meocord.dev/docs/4.1/context-menus)).
+- **Reactions match a custom emoji by id** as well as by name ([docs](https://meocord.dev/docs/4.1/reactions)).
+
+### Sharding
+
+- **`sharding`** runs shards in one process or, with `mode: 'process'`, one each; the manager registers once, restarts exited shards, stops when all would fail, and shuts shards down through their hooks ([docs](https://meocord.dev/docs/4.1/sharding)).
+- **`ShardContext.call`** runs a service method in every shard, each result typed as the JSON it arrives as, in tests too.
+
+### Providers and lifecycle
+
+- **Providers** supply values, classes and async factories under any token, `createToken` included, injected with `@Inject`; `factoryProvider` types a factory ([docs](https://meocord.dev/docs/4.1/services)).
+- **`OnReady` and `OnShutdown`** run in dependency order on controllers, services, providers and the cooldown store, within `shutdownTimeout` ([docs](https://meocord.dev/docs/4.1/lifecycle-hooks)).
+- **`app.stop()`** shuts the bot down from code, as a signal does.
+
+### Testing
+
+- **`invoke` and `dispatch`** run a handler, or route an interaction, message or reaction, through the pipeline; `getResponse` shows what was sent ([docs](https://meocord.dev/docs/4.1/invoke-and-dispatch)).
+- **`MeoCordTestingModule.fromApp(App)`** wires the whole app as the bot does, with `override*()`; `init({ ready: true })`, `close()` and `emit()` run hooks and events ([docs](https://meocord.dev/docs/4.1/testing)).
+- **Mocks behave like discord.js**, with members, roles, permissions, channels and locales; `createMockMember`, `createMockMessage` and the rest take properties, a message its `author`, and `createMockInteraction` Discord's `authorizingIntegrationOwners` map ([docs](https://meocord.dev/docs/4.1/mocks)).
+- **Checks**: `inspectHandler`, `resolveRoute`, `expectCompleteCatalog`, `testCooldownStore` and `resetAllMocks()`.
+
+### Localisation
+
+- **`createTranslator`** checks keys, `{params}` and plurals against the default catalog at compile time; `t.localizations()` fills builders, `t.for()` translates replies, and `@MeoCord({ i18n })` injects it ([docs](https://meocord.dev/docs/4.1/localisation)).
+- **MeoCord's own texts** translate through a `meocord` group in the app's catalog.
+
+### The CLI and builds
+
+- **Command registration** goes global, per server or to a dev server, at startup or with `meocord register` over REST; unchanged dev commands skip resending unless `--force-register` ([docs](https://meocord.dev/docs/4.1/slash-commands#registering-commands)).
+- **`meocord create`** commits the lockfile, adds `npm start`, writes samples whose specs test what they answer, and makes its first commit by running git directly, so MeoCord no longer installs `simple-git`.
+- **`meocord generate`** adds observers, filters, interceptors and pipes, a customId per component, and specs that test the answer.
+- **`meocord start --dev`** restarts on source, config, `tsconfig.json` and dev `.env` changes, one bot at a time, keeping the last good build while code doesn't compile ([docs](https://meocord.dev/docs/4.1/cli)).
+- **`.env` files**: a new app reads `.env.<mode>.local`, `.env.local`, `.env.<mode>` and `.env` on every runtime.
+- **Self-contained builds** pack native addons from any package manager and run on Bun too; `optionalExternals` covers optional packages ([docs](https://meocord.dev/docs/4.1/self-contained-builds)).
+- **Source-mapped stacks and `logLevel`**: traces name your source lines in production too, and `logLevel` or `MEOCORD_LOG_LEVEL` sets what prints ([docs](https://meocord.dev/docs/4.1/configuration)).
+- **`dist/cli.json`** describes every CLI command and option as data.
+
+### Deprecations
+
+- **Names removed in 5.0.** Each still works and its JSDoc names the replacement. A new app's ESLint config sets `@typescript-eslint/no-deprecated` to warn outside specs, which finds them; add it to a 4.0 app's config.
+  - `Theme`: use `useTheme().colors` and `@MeoCord({ theme })`; reading or setting a colour warns once ([guide](https://meocord.dev/docs/4.1/migrating#theme-is-deprecated-and-its-colours-changed)).
+  - `SetMetadata` and string metadata keys: use `createMetadata` and `ExecutionContext.get(decorator)`; each warns once ([guide](https://meocord.dev/docs/4.1/migrating#setmetadata-and-string-metadata-keys-are-deprecated)).
+  - `ReactionHandlerOptions`: renamed `ReactionEvent` ([guide](https://meocord.dev/docs/4.1/migrating#reactionhandleroptions-is-now-reactionevent)).
+  - `MetadataKey`, `CommandMetadata`, `AutocompleteMetadata`: internal; drop the import ([guide](https://meocord.dev/docs/4.1/migrating#metadatakey-commandmetadata-and-autocompletemetadata-are-deprecated)).
+- **`@Autocomplete<void>` loses its type parameter in 5.0.** Lint misses it: search for `@Autocomplete<` and write `@Autocomplete(…)`.
+- **Retrying `start()` after a failed login warns,** logging in again with its handlers, and rejects in 5.0. Make a new app with `MeoCordFactory.create` per attempt; retrying after a provider failure stays supported ([guide](https://meocord.dev/docs/4.1/migrating#retrying-start-after-a-failed-login-is-deprecated)).
+- **`@Controller`, `@Service`, `@Guard`, `@CommandBuilder` or `@MeoCord` on a method** applies nothing, as in 4.0, and warns; 5.0 refuses it. Move it to the class ([guide](https://meocord.dev/docs/4.1/migrating#a-class-decorator-on-a-method-logs-a-warning)).
+- **`@MessageHandler('')` warns,** and 5.0 refuses it. Write `@MessageHandler()` ([guide](https://meocord.dev/docs/4.1/migrating#messagehandler-logs-a-warning)).
+- **Handlers that never run warn at startup,** and 5.0 refuses to start:
+  - a command or autocomplete handler Discord never sends, such as an unregistered subcommand path, a renamed builder or an option without autocomplete ([guide](https://meocord.dev/docs/4.1/migrating#a-command-handler-discord-never-sends-logs-a-warning));
+  - a second `@Autocomplete` for one option ([guide](https://meocord.dev/docs/4.1/migrating#a-second-autocomplete-for-one-option-logs-a-warning));
+  - a command, message, reaction or autocomplete handler on a class that isn't a controller ([guide](https://meocord.dev/docs/4.1/migrating#a-handler-on-a-class-that-isnt-a-controller-logs-a-warning)).
+- **Changes in 5.0, warned now:**
+  - a re-declared handler on another route still answers its inherited one; in 5.0 its own routes replace it ([guide](https://meocord.dev/docs/4.1/migrating#a-re-declared-handler-that-keeps-its-inherited-route-logs-a-warning));
+  - between equally specific overlapping component patterns, the first listed runs; in 5.0, the more spelled-out one does ([guide](https://meocord.dev/docs/4.1/migrating#overlapping-component-patterns-meocord-5-prefers-the-one-that-spells-out-more)).
+
+### Fixes to 4.0 behaviour
+
+- **Running the bot**
+  - Retrying `app.start()` after a failed login no longer attaches every handler twice.
+  - `node dist/main.js` has the config's `.env` values before the app's modules run. Rebuild.
+  - A refused privileged intent, or a refused or empty token, is explained in one line with where to fix it.
+  - A builder that can't be built is named with its command in the registration error.
+  - A builder on a subcommand path is named with the fix, not "Invalid string format"; one naming its own command still works, with a warning.
+  - One SIGINT and SIGTERM listener per process: many apps no longer trigger `MaxListenersExceededWarning`.
+  - A signal during login stops the bot at once, with "Bot has shut down".
+  - A missing or broken built config is reported once, with the file, reason and fix.
+  - Reactions in uncached DMs reach their handlers again on discord.js 14.26.2 and later.
+- **Routing and dispatch**
+  - A click a discord.js collector answers no longer gets "Command not found!".
+  - A user and a message context menu of one name each reach their own handler.
+  - Overlapping component patterns are warned about at startup, not the first click.
+  - A subclass controller no longer adds its handlers to its base class.
+- **Dependency injection**
+  - A subclass with its own constructor gets its own dependencies.
+  - `@inject(Token)` on an interface-typed parameter works, not "missing metadata on type Object".
+  - An injection cycle is refused naming it, not "Circular dependency found: (No dependency trace)".
+  - A constructor parameter with no runtime type is refused naming the class and parameter, not inversify's `emitDecoratorMetadata` error.
+  - A class with no decorator whose constructor injects, guards, interceptors, filters and pipes included, is refused as the app starts naming the class and the decorator to add, not inversify's missing-metadata error, which a guard gave only at its first call.
+  - A guard in `services` or `providers`, or injected into a service, reads each call's own `params`; one with a setter param or a sealed instance shares them, with a warning.
+  - A guarded method called directly on any class the app runs, a provider's class included, or on a subclass of one, runs its guards, not "Cannot read properties of undefined (reading 'get')"; on an instance no app made, it says to inject the class.
+- **Handler types**
+  - A handler may return a value or take fewer parameters, not "Unable to resolve signature of method decorator".
+  - `applyDecorators` passes on what a wrapping decorator returns.
+- **Builds**
+  - Production builds keep class names, where a clash renamed `Shop` to `shop_controller_Shop`.
+  - Imported files land in `dist/assets` under their own names; a WebAssembly module takes a content hash.
+  - On Windows, `new URL('./file', import.meta.url)` gives a `file:` URL, not a `c:` path `fileURLToPath` refused with `ERR_INVALID_URL_SCHEME`. Rebuild.
+  - A `tsconfig.json` with `extends`, `files`, `typeRoots`, comments or `baseUrl` paths builds as TypeScript reads it, is never rewritten, and concurrent builds no longer clash.
+  - Self-contained builds run under Bun and pack each package's installed dependency versions, npm-nested and pnpm-store dependencies, and per-platform binaries, fixing "Cannot find module". Rebuild.
+- **The CLI**
+  - `meocord start` forwards SIGINT and SIGTERM, so Docker, pm2 and systemd stop the bot cleanly.
+  - `start --dev` runs one bot at a time, restarts it through its own shutdown on Windows, starts it again on the next rebuild after it exits on its own, which one Ctrl+C then stops, and keeps it running when a save doesn't compile or an `rsbuild` hook throws.
+  - `start --dev --build` builds once, and `start --dev` exits 1 when watching can't start.
+  - `create` keeps the app when git can't commit, joins an enclosing Git repository, quotes any app name, and refuses a name with no letters or digits, not `Directory "" already exists`.
+  - A created app passes `lint` and `test` on pnpm and installs on pnpm 11+ and npm 11.16+ without warnings; `create` warns on Node.js 22.0 to 22.12.
+  - `generate` works on Windows, writes lint-clean files formatted in one ESLint run, and refuses a name outside `src/`, with `\` separating folders on Windows.
+  - `build` and `start --prod` don't clear the screen, `start --dev` keeps scrollback, and no command writes screen-clearing codes into piped output.
+  - `--help` no longer prints "No available choices.".
+  - The CLI runs at the filesystem root, not "Cannot locate the "MeoCord" package directory".
+  - `require('meocord/package.json')` resolves, and `meocord/eslint` ignores `coverage/`.
+- **Logging**
+  - `Logger` prints any value, a `Symbol` included, and colours a line only when its own stream is a terminal.
+  - Log lines escape what a user sent, and shorten long message text, with its length.
+  - A project that loads meocord with `require()`, as CommonJS code or Jest in CommonJS mode does, logs again: every `Logger` method threw `chalk.bold is not a function`. Built bots were not affected.
+  - The CLI and tests no longer read the app's name or `.env` from a stale `dist`.
+- **Testing**
+  - Mocks have an `'en-US'` locale, `createdTimestamp` and `createdAt`, a working `inGuild()` and resolving promise methods.
+  - A mock interaction without a `client` gets one from `createMockClient`, and `getAttachment()` returns the `Attachment` given, or `null`.
+  - `createMockChannel` takes `ThreadChannel`, stubs `threads.create` on text, announcement, forum and media channels, and gives a subclass its base's managers.
+
+### Security
+
+- **`Logger` no longer writes the bot token to logs** ([GHSA-62w2-fp4p-4jq8](https://github.com/meocord/meocord/security/advisories/GHSA-62w2-fp4p-4jq8)). In 4.0.0, a discord.js object a bot logged through `Logger`, such as an interaction, a message or the client, printed with every property, the token included. 4.0.1 fixed it, and 4.1.0 has the fix: `Logger` prints objects as `console.log` does and replaces the token with `[redacted]`. Coming from 4.0.1, nothing changes. Coming from 4.0.0, if a bot logged such objects and others can read its logs, reset the token in the Discord Developer Portal.
+
 ## 4.1.0-beta.12
 
 ### Minor Changes

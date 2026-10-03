@@ -1,3 +1,0 @@
-### Security
-
-- **`Logger` no longer writes the bot token to logs** ([GHSA-62w2-fp4p-4jq8](https://github.com/meocord/meocord/security/advisories/GHSA-62w2-fp4p-4jq8)). In 4.0.0, a discord.js object a bot logged through `Logger`, such as an interaction, a message or the client, printed with every property, the token included. 4.0.1 fixed it, and 4.1.0 has the fix: `Logger` prints objects as `console.log` does and replaces the token with `[redacted]`. Coming from 4.0.1, nothing changes. Coming from 4.0.0, if a bot logged such objects and others can read its logs, reset the token in the Discord Developer Portal.
