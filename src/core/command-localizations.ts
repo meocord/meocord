@@ -3,6 +3,10 @@ import { ApplicationCommandType, Locale } from 'discord.js'
 /** Discord's rule for a chat input command or option name, localised or not. */
 const CHAT_INPUT_NAME = /^[-_'\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u
 
+/** Discord's longest name for every command and option, context menus included, and for a choice. */
+const COMMAND_NAME_LENGTH = 32
+const CHOICE_NAME_LENGTH = 100
+
 const DISCORD_LOCALES: ReadonlySet<string> = new Set(Object.values(Locale))
 
 interface LocalizedNode {
@@ -38,11 +42,11 @@ export function localizationProblems(commandName: string, body: LocalizedNode): 
       return []
     })
 
-  const check = (path: string, node: LocalizedNode, rules: { chatInputName: boolean; descriptions: boolean }) => {
+  const check = (path: string, node: LocalizedNode, rules: { nameLength: number; chatInputName: boolean; descriptions: boolean }) => {
     for (const [locale, value, field] of known(node.name_localizations, `${path}name_localizations`)) {
       if (value === null) continue
-      if (typeof value !== 'string' || value.length < 1 || value.length > (rules.chatInputName ? 32 : 100)) {
-        problems.push(`"${commandName}" ${field}: ${describeLength(value)} (1 to ${rules.chatInputName ? 32 : 100})`)
+      if (typeof value !== 'string' || value.length < 1 || value.length > rules.nameLength) {
+        problems.push(`"${commandName}" ${field}: ${describeLength(value)} (1 to ${rules.nameLength})`)
       } else if (rules.chatInputName && (!CHAT_INPUT_NAME.test(value) || value !== value.toLocaleLowerCase(locale))) {
         problems.push(`"${commandName}" ${field}: "${value}" must be lowercase letters, numbers, - _ or ' with no spaces`)
       }
@@ -59,16 +63,16 @@ export function localizationProblems(commandName: string, body: LocalizedNode): 
 
   // Context menu names allow spaces and capitals, and none of them has a description.
   const contextMenu = body.type === ApplicationCommandType.User || body.type === ApplicationCommandType.Message
-  check('', body, { chatInputName: chatInput, descriptions: !contextMenu })
+  check('', body, { nameLength: COMMAND_NAME_LENGTH, chatInputName: chatInput, descriptions: !contextMenu })
 
   const walk = (path: string, options: unknown) => {
     if (!Array.isArray(options)) return
     for (const option of options as LocalizedNode[]) {
       const at = `${path}${String(option.name)}.`
-      check(`options.${at}`, option, { chatInputName: true, descriptions: true })
+      check(`options.${at}`, option, { nameLength: COMMAND_NAME_LENGTH, chatInputName: true, descriptions: true })
       if (Array.isArray(option.choices)) {
         for (const choice of option.choices as LocalizedNode[]) {
-          check(`options.${at}choices.${String(choice.name)}.`, choice, { chatInputName: false, descriptions: false })
+          check(`options.${at}choices.${String(choice.name)}.`, choice, { nameLength: CHOICE_NAME_LENGTH, chatInputName: false, descriptions: false })
         }
       }
       walk(at, option.options)
