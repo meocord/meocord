@@ -305,14 +305,16 @@ const returnsPromise = (key: string, method: (...args: unknown[]) => unknown) =>
   PROMISE_METHODS.has(key) ||
   (/^set[A-Z]/.test(key) && !SYNC_SETTERS.has(key))
 
-// The id of the one item a fetch asks for: an id, a discord.js object, or options naming one, such as `{ user: id }`;
-// undefined for a fetch of a list
-function fetchedId(args: unknown[]): string | undefined {
+// The ids a fetch asks for: an id, a discord.js object, or options naming one or several, such as `{ user: id }` or
+// `{ user: [ids] }`; undefined for a fetch of a list
+function fetchedIds(args: unknown[]): string | string[] | undefined {
   const idOf = (value: unknown) => (typeof value === 'string' ? value : value instanceof Base ? (value as { id?: string }).id : undefined)
   const [first] = args
   if (typeof first !== 'object' || first === null || first instanceof Base) return idOf(first)
   for (const key of ['user', 'member', 'message', 'guild', 'thread', 'id']) {
-    const id = idOf((first as Record<string, unknown>)[key])
+    const value = (first as Record<string, unknown>)[key]
+    if (Array.isArray(value)) return value.map(idOf).filter(id => id !== undefined)
+    const id = idOf(value)
     if (id !== undefined) return id
   }
   return undefined
@@ -321,9 +323,9 @@ function fetchedId(args: unknown[]): string | undefined {
 /**
  * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
  * `createDM` to the user's DM channel, `send` and its kin to a message, a manager's `fetch`, `create` and `edit` to its
- * item (an empty collection for a list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `pin`, `unpin`,
- * `timeout`, `disableCommunicationUntil` and setters to the structure, and the rest to `undefined`. Any other method
- * returns `undefined`.
+ * item (a collection of each for a fetch of several, an empty one for a list fetch), a structure's own `edit`, `fetch`,
+ * `delete`, `ban`, `pin`, `unpin`, `timeout`, `disableCommunicationUntil` and setters to the structure, and the rest to
+ * `undefined`. Any other method returns `undefined`.
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
   if (!returnsPromise(key, method)) return createMockFn()
@@ -338,12 +340,14 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
   if (target instanceof BaseManager) {
     const item = MANAGER_ITEMS.find(([Manager]) => Manager.prototype.isPrototypeOf(target))?.[1]
-    // A fetch of one item finds it in the cache first, as discord.js does, and caches one it makes
+    // A fetch of one item finds it in the cache first, as discord.js does, and caches one it makes; a fetch of
+    // several does so for each
     if (item && key === 'fetch') {
       return createMockFn(async (...args: unknown[]) => {
-        const id = fetchedId(args)
-        if (id === undefined) return new Collection()
-        return cached(cacheOf(receiver()), id, () => item(id, receiver()))
+        const ids = fetchedIds(args)
+        const one = (id: string) => cached(cacheOf(receiver()), id, () => item(id, receiver()))
+        if (Array.isArray(ids)) return new Collection(ids.map(id => [id, one(id)]))
+        return ids === undefined ? new Collection() : one(ids)
       })
     }
     if (item && (key === 'create' || key === 'edit')) return createMockFn(async () => item(undefined, receiver()))
@@ -1079,8 +1083,9 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  *
  * @remarks
  * A manager's `fetch(id)` resolves to its cached item with that id, as discord.js looks there first, or to a new one it
- * caches under that id: a member or channel in this guild, a role with that id, or a ban; `create()` and `edit()`
- * resolve to a mock of its item, and a list fetch to an empty collection. Members, roles and channels given are put in
+ * caches under that id: a member or channel in this guild, a role with that id, or a ban. `members.fetch({ user: ids })`
+ * resolves to a collection of each of those members, found or made the same way; `create()` and `edit()` resolve to a
+ * mock of its item, and a list fetch to an empty collection. Members, roles and channels given are put in
  * their managers' caches, where dispatch looks first when it resolves a message's typed params; a member
  * {@link createMockMember} made without a server is in this one. Its `roles.everyone` is the role given with the
  * guild's id, or else an @everyone role of its own at position 0 with no permissions, in `roles.cache` as Discord has

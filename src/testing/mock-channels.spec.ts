@@ -2,6 +2,7 @@ import 'reflect-metadata'
 import { vi } from 'vitest'
 import {
   ChatInputCommandInteraction,
+  Collection,
   DMChannel,
   ForumChannel,
   GuildMember,
@@ -223,7 +224,7 @@ describe("a user's DM channel", () => {
   })
 })
 
-describe("a mock manager's fetch of one item", () => {
+describe("a mock manager's fetch by id", () => {
   it('resolves to the cached item with that id, as discord.js looks in its cache first', async () => {
     const member = createMockMember()
     const guild = createMockGuild({ members: [member] })
@@ -249,5 +250,20 @@ describe("a mock manager's fetch of one item", () => {
     expect([user.id, role!.id, channel!.id]).toEqual([id, id, id])
     await expect(guild.members.fetch(id)).resolves.toBe(member)
     expect(client.users.cache.get(id)).toBe(user)
+  })
+
+  it('resolves a fetch of several members to each of them, by id, as fetching each on its own would', async () => {
+    const cached = createMockMember()
+    const guild = createMockGuild({ members: [cached] })
+    const user = createMockUser({ id: '223456789012345678' })
+    const id = '123456789012345678'
+
+    const members = await guild.members.fetch({ user: [cached.id, id, user] })
+
+    expect(members).toBeInstanceOf(Collection)
+    expect([...members.keys()]).toEqual([cached.id, id, user.id])
+    expect(members.get(cached.id)).toBe(cached)
+    expect(members.get(id)).toBe(guild.members.cache.get(id))
+    await expect(guild.members.fetch(user.id)).resolves.toBe(members.get(user.id))
   })
 })
