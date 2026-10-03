@@ -62,11 +62,11 @@ describe('createMockMessage caches', () => {
     const first = await import('./mock-interaction.js')
     first.createMockUser()
     first.createMockMessage()
-    const afterOthers = first.createMockClient().user!.id
+    const afterOthers = first.createMockClient().user.id
     vi.resetModules()
     const second = await import('./mock-interaction.js')
 
-    expect(second.createMockClient().user!.id).toBe(afterOthers)
+    expect(second.createMockClient().user.id).toBe(afterOthers)
   })
 
   it('is sent to the same bot as every mock client, or to the client it is given', () => {
@@ -153,7 +153,7 @@ describe('typed user params through dispatch and invoke', () => {
 
   it('matches a mention of the bot where a prefix goes, under invoke', async () => {
     const module = MeoCordTestingModule.create({ app: App, controllers: [WhoController] }).compile()
-    const bot = createMockClient().user!.id
+    const bot = createMockClient().user.id
 
     const { ran } = await module.invoke(WhoController, 'who', createMockMessage({ content: `<@${bot}> who <@${USER}>` }))
 
