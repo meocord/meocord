@@ -344,6 +344,40 @@ jobs:
       - name: Run CLI scenarios
         run: bun run cli:scenarios
 
+  # The packed package installed into one project per test runner its users test with: jest, vitest, node:test and bun
+  # test. Each typechecks against the built declarations and runs a test of meocord/testing in that runner's own idiom.
+  runners:
+    name: Test runners
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build package
+        run: bun run build
+
+      # The runners' packages, which the consumers install from the registry; meocord itself comes from the tarball
+      - name: Cache the runners' packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: runners-${{ runner.os }}-${{ hashFiles('scripts/runner-consumers/*/package.json') }}
+
+      - name: Test each runner against the packed package
+        run: bun run verify:runners
+
   # Publishes, with --dry-run, the tarball `build` packed, from a job with no checkout: npm reads the package's
   # name, version and files from the tarball, as `publish` does with the one `pack` makes at a release. The files must
   # be the ones packing in place gave, so what a release publishes is what a pull request shows.
@@ -403,8 +437,9 @@ jobs:
       !cancelled() &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.lint.result == 'success' && needs.test-result.result == 'success' &&
-      needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success'
-    needs: [lint, test-result, coverage, build, windows]
+      needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success' &&
+      needs.runners.result == 'success'
+    needs: [lint, test-result, coverage, build, windows, runners]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -515,8 +550,8 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.lint.result == 'success' && needs.test-result.result == 'success' &&
       needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success' &&
-      needs.release-checks.result == 'success'
-    needs: [lint, test-result, coverage, build, windows, release-checks]
+      needs.runners.result == 'success' && needs.release-checks.result == 'success'
+    needs: [lint, test-result, coverage, build, windows, runners, release-checks]
     runs-on: ubuntu-latest
     # For RELEASE_TOKEN, a secret of this environment. Without `id-token` the job cannot request npm's credentials.
     environment: Production

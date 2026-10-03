@@ -1,0 +1,15 @@
+{
+  "name": "meocord-jest-consumer",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "@types/node": "^26.6.3",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.5",
+    "reflect-metadata": "^0.2.2",
+    "@jest/globals": "^30.5.2",
+    "@swc/core": "^1.16.13",
+    "@swc/jest": "^0.2.39",
+    "jest": "^30.5.2"
+  }
+}

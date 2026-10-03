@@ -134,7 +134,7 @@ const nodeCompatibleConfig = {
 export default [
   // The smoke app is typechecked by scripts/e2e.ts, inside the application it is installed into, and the
   // JSDoc example fixtures by scripts/check-jsdoc-examples.ts, against the build
-  { ignores: ['dist/*', 'rollup.config.js', 'test/e2e/app/**', 'scripts/jsdoc-examples/**'] },
+  { ignores: ['dist/*', 'rollup.config.js', 'test/e2e/app/**', 'scripts/jsdoc-examples/**', 'scripts/runner-consumers/**'] },
   ...recommendedTypeScriptConfigs,
   eslintConfigPrettier,
   typescriptConfig,
