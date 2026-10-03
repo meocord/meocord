@@ -400,12 +400,14 @@ jobs:
           name: package
           path: package
 
-      # A prerelease needs a tag; this one is never seen, as nothing is published
+      # --force skips only npm's release checks, among them the refusal of a version already published: main carries
+      # the released version between releases, and those checks belong to the release, not to what the tarball holds.
+      # The tag is never seen, as nothing is published.
       - name: Publish it with --dry-run
         working-directory: package
         run: |
           tarball=$(ls meocord-*.tgz)
-          npm publish "./$tarball" --dry-run --json --provenance=false --tag dry-run > publish.json
+          npm publish "./$tarball" --dry-run --force --json --provenance=false --tag dry-run > publish.json
 
       - name: Compare it with the package packed in place
         working-directory: package
