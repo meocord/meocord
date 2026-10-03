@@ -28,19 +28,20 @@ bun install
 bun run test
 ```
 
-| Command                    | What it does                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------- |
-| `bun run test`             | Runs the suite, including the `*.test-d.ts` type-level assertions                                 |
-| `bun run test:watch`       | Same, in watch mode                                                                               |
-| `bun run test:coverage`    | Runs the suite with istanbul coverage and enforces the thresholds                                 |
-| `bun run test:mutation`    | Mutation-tests the core modules with Stryker, by hand and not in CI; name modules to run a few    |
-| `bun run lint`             | Formats, fixes lint, then typechecks the source, test, and eslint projects                        |
-| `bun run build`            | Clears `dist/`, builds ESM, CJS, and type declarations through rollup, and writes `dist/cli.json` |
-| `bun run verify:generated` | Generates an app from the packed build and runs its own checks — see below                        |
-| `bun run cli:scenarios`    | Runs the packed CLI through what must work and what must fail clearly — see below                 |
-| `bun run test:e2e`         | Runs a smoke app against real Discord with a test application — see below                         |
-| `bun run changeset`        | Records a release note for your change — see below                                                |
-| `bun run notices`          | Regenerates THIRD_PARTY_NOTICES.md after a dependency is added or removed                         |
+| Command                    | What it does                                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `bun run test`             | Runs the suite, including the `*.test-d.ts` type-level assertions                                       |
+| `bun run test:watch`       | Same, in watch mode                                                                                     |
+| `bun run test:coverage`    | Runs the suite with istanbul coverage and enforces the thresholds                                       |
+| `bun run test:mutation`    | Mutation-tests the core modules with Stryker, by hand and not in CI; name modules to run a few          |
+| `bun run lint`             | Formats, fixes lint, then typechecks the source, test, and eslint projects                              |
+| `bun run build`            | Clears `dist/`, builds ESM, CJS, and type declarations through rollup, and writes `dist/cli.json`       |
+| `bun run verify:generated` | Generates an app from the packed build and runs its own checks — see below                              |
+| `bun run verify:runners`   | Installs the packed build into a jest, vitest, node:test and bun test project, and runs each one's test |
+| `bun run cli:scenarios`    | Runs the packed CLI through what must work and what must fail clearly — see below                       |
+| `bun run test:e2e`         | Runs a smoke app against real Discord with a test application — see below                               |
+| `bun run changeset`        | Records a release note for your change — see below                                                      |
+| `bun run notices`          | Regenerates THIRD_PARTY_NOTICES.md after a dependency is added or removed                               |
 
 ## Making a change
 
@@ -50,7 +51,8 @@ bun run test
 4. If the change reaches the published package, run `bun run changeset` and commit the file it writes.
 5. Run `bun run lint` and `bun run test` before pushing.
 6. If you touched anything under `src/bin/`, also run `bun run build && bun run verify:generated`. If you
-   changed a public symbol's JSDoc, run `bun run build && bun run check:jsdoc-examples`.
+   changed a public symbol's JSDoc, run `bun run build && bun run check:jsdoc-examples`. If you touched `src/testing/`, run
+   `bun run build && bun run verify:runners`.
 7. If you added or removed a dependency, run `bun run notices` and commit the result. CI fails when it is out of date.
 8. Push and open a pull request against `main`.
 
