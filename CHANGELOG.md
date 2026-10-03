@@ -1,5 +1,34 @@
 # meocord
 
+## 4.1.1
+
+### Patch Changes
+
+- [#424](https://github.com/meocord/meocord/pull/424) [`43b9454`](https://github.com/meocord/meocord/commit/43b945447262405f61cced6660cd1d2be881d4b8) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock guild's `members.fetch({ user: ids })` now resolves to a collection of each of those members, found in the cache or made the way `members.fetch(id)` makes one. It resolved to an empty collection, so in a test a message command naming two or more members by ID that the guild hasn't cached refused them all as not members of the server, while one such member resolved. Mentioned members were not affected: they come from the message's mentions.
+
+- [#422](https://github.com/meocord/meocord/pull/422) [`22daff2`](https://github.com/meocord/meocord/commit/22daff26ac4a694a8d70eace38a4c038d3cef0ef) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `createMockClient()` is typed as a logged-in client, `DeepMocked<Client<true>>`, as the mock already behaves. Pass it straight to `createMockInteraction`, `createMockChannel`, `createMockUser` or `module.init({ ready: { client } })`: each of these failed to compile without a cast, since an interaction's client is `Client<true>`. `client.user` is no longer nullable, so `client.user!.id` can be `client.user.id`. Remove any `as unknown as Client<true>` cast on the mock.
+
+- [#430](https://github.com/meocord/meocord/pull/430) [`1d0c0cf`](https://github.com/meocord/meocord/commit/1d0c0cf7d9755e5d24a0f218809a2f95fe403ccc) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Mocks from `meocord/testing` now compute what discord.js computes from them, where they returned `undefined` or a placeholder object:
+
+  - **Lookups:** a manager's `resolve()` and `resolveId()` read its cache, so `guild.members.resolve(id)` finds a member given to `createMockGuild`. `guild.members.me` is the bot's member, the cached one or one with @everyone. A guild's roles and channels, and the guilds of a client's messages and interactions, belong where discord.js puts them, and everything in a guild shares its client.
+  - **Ranking and permissions:** `role.comparePositionTo()`, `channel.permissionsFor()`, `member.permissionsIn()` and an interaction's `appPermissions` compute from the roles, the channel's `permissionOverwrites` and the bot's member. Being real, they keep working after `resetAllMocks()`.
+  - **Messages:** `message.member` reads the guild's member cache, so a test that removes the author's member there gets `null`, as discord.js gives for an author it hasn't cached. A default message now caches its author and the author's member, as Discord's message event does. `message.mentions.has(user)` answers from what the content mentions.
+  - **Defaults:** a role is not hoisted, managed or mentionable, with no icon, tags or colours. A member's `joinedTimestamp` is when the mock was made, so `partial` is `false`. A message has no `reference`, `poll` or stickers. `avatarURL()` and `iconURL()` are `null` without an avatar or icon, `displayAvatarURL()` is Discord's default avatar, and a mock client `isReady()`.
+  - **User context menus:** `targetUser` is the user with `targetId`, the client's cached one or one made, and `targetMember` that user's member in a server. A `targetId` given later picks its user, and both stay assignable.
+
+- [#431](https://github.com/meocord/meocord/pull/431) [`b24a0bc`](https://github.com/meocord/meocord/commit/b24a0bca78b72c602718a5a8f496251484f37bfe) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock still reads some values discord.js computes as a truthy placeholder: a message's `editable`, `deletable`, `pinnable`, `crosspostable`, `bulkDeletable`, `hasThread` and `partial`, a member's `manageable`, `kickable`, `bannable` and `moderatable`, a role's `editable`, a channel's `viewable`, `manageable` and `deletable` and its thread and voice counterparts, and `partial` on users, channels and reactions. A test that reads one now gets a warning, once per run, that 5.0 computes it as discord.js does, and how to set it on the mock, such as `message.editable = false`, to test either way. A value the test sets is read without a warning.
+
+  `message.thread` is the thread the message's channel caches under the message's id, as discord.js reads it. Without one it is still a placeholder thread, with a warning that 5.0 gives `null` there.
+
+- [#429](https://github.com/meocord/meocord/pull/429) [`961455d`](https://github.com/meocord/meocord/commit/961455d86534be61c2b22739240fa48d53564dd7) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Mocks from `meocord/testing` now pass to one another, and to the testing module, without a cast:
+
+  - **A mock reached through a property that may be `null`** keeps its mock API, such as `message.member?.fetch.mockResolvedValue(member)` or `message.guild?.members.fetch`.
+  - **An overloaded method's mock** takes what any of its overloads takes or resolves to, such as `guild.members.fetch.mockResolvedValue(member)` and `channel.messages.fetch.mockResolvedValue(message)`, where only the list form compiled before.
+  - **`createMockInteraction` given `guild: null`, `member: null` or a DM channel** builds an interaction outside a server, typed so its `guild` and `member` may be `null`.
+  - **`createMockMessage`** is typed as discord.js emits a message, so `module.emit('messageCreate', createMockMessage())` compiles.
+  - **`createMockChannel(ThreadChannel)`** is typed as a public or private thread, as discord.js types every thread, so it fits an interaction's `channel`, a guild's channels and the `threadCreate` event.
+  - **`getResponse(interaction).calls[n].payload`** is typed by the call's `method`: after `call.method === 'reply'`, it is the reply's options. `ResponseCall` itself is unchanged, so code that builds or extends one compiles as before.
+
 ## 4.1.0
 
 ### Highlights
