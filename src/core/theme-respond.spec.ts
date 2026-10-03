@@ -110,7 +110,7 @@ describe('respond() in the theme of the call', () => {
     }
     await MeoCordTestingModule.create({ controllers: [Same] }).compile().invoke(Same, 'same', interaction)
 
-    const body = interaction.update.mock.calls[0][0] as { embeds: unknown[]; components: unknown[] }
+    const body = interaction.update.mock.calls[0][0]
     expect(body.embeds[0]).toBe(coloured)
     expect(body.components[0]).toBe(row)
     expect(built.map(toJSON => toJSON.mock.calls.length)).toEqual([0, 0])
@@ -186,7 +186,7 @@ describe('an error respond() answers', () => {
     await module.dispatch(crashed).catch(() => undefined)
 
     const colourOf = (interaction: ReturnType<typeof press>) =>
-      (interaction.reply.mock.calls[0]?.[0] as { embeds?: { color?: number }[] })?.embeds?.[0]?.color
+      ((interaction.reply.mock.calls[0]?.[0]))?.embeds?.[0]?.color
     expect([colourOf(cooled), colourOf(crashed)]).toEqual([colour('#0000B1'), colour('#0000B2')])
   })
 })

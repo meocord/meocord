@@ -116,7 +116,7 @@ const member = (id: string) => ({ id, user: { id } }) as unknown as GuildMember
 const messageFor = (content: string, where: 'guild' | 'dm') =>
   createMockMessage({ content, guild: where === 'dm' ? null : createMockGuild({ members: [member(A), member(B)] }) })
 const replies = (message: ReturnType<typeof createMockMessage>) =>
-  message.reply.mock.calls.map(([reply]) => String((reply as { content?: string }).content ?? reply))
+  message.reply.mock.calls.map(([reply]) => String((reply).content ?? reply))
 
 describe('module.dispatch and the bot', () => {
   let bot: Client

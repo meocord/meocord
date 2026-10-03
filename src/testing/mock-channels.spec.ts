@@ -80,7 +80,7 @@ describe("a mock interaction's channel", () => {
 
   it('is the channel the test gives', () => {
     const channel = createMockChannel(ThreadChannel)
-    expect(createMockInteraction(ChatInputCommandInteraction, { channel: channel as never }).channel).toBe(channel)
+    expect(createMockInteraction(ChatInputCommandInteraction, { channel: channel }).channel).toBe(channel)
   })
 
   it.each([
@@ -103,7 +103,7 @@ describe("a mock interaction's channel", () => {
     ['of a DM, with a guildId given', () => createMockChannel(DMChannel), '100000000000000002', 'a DM', 'server 100000000000000002'],
     ['of a server, in a DM', () => createMockChannel(TextChannel), null, "a server's channel", 'a DM'],
   ] as const)('refuses a channel %s, naming both', (_name, make, guildId, channelPlace, mockPlace) => {
-    expect(() => createMockInteraction(ChatInputCommandInteraction, { channel: make() as never, guildId: guildId as string })).toThrow(
+    expect(() => createMockInteraction(ChatInputCommandInteraction, { channel: make() as never, guildId: guildId })).toThrow(
       new RegExp(`${channelPlace}.*${mockPlace}`),
     )
   })
@@ -213,7 +213,7 @@ describe("a user's DM channel", () => {
     await user.send('through the user')
     await createMockMember({ user }).send('through a member')
     await (interaction.channel as unknown as DMChannel).send('through the interaction')
-    await (message.channel as unknown as DMChannel).send('through the message')
+    await (message.channel).send('through the message')
 
     expect(vi.mocked(dm.send).mock.calls.map(([content]) => content)).toEqual([
       'through the user',

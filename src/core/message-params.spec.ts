@@ -120,25 +120,25 @@ describe('typed message params', () => {
   it('asks for uncached members at most 100 at a time, as a gateway request takes no more', async () => {
     const { message, guild } = guildMessage()
     const ids = Array.from({ length: 150 }, (_, i) => ID(200 + i))
-    guild.members.fetch.mockImplementation((async ({ user }: { user: string[] }) => new Collection(user.map(id => [id, member(id)]))) as never)
+    guild.members.fetch.mockImplementation(((async ({ user }: { user: string[] }) => new Collection(user.map(id => [id, member(id)])))))
 
     const params = await resolveMessageParams(routeOf('kick {targets:member...}'), { targets: ids.join(' ') }, message, '!', undefined)
 
     expect((params.targets as GuildMember[]).map(target => target.id)).toEqual(ids)
-    expect(guild.members.fetch.mock.calls.map(([options]) => (options as { user: string[] }).user.length)).toEqual([100, 50])
+    expect(guild.members.fetch.mock.calls.map(([options]) => (options).user.length)).toEqual([100, 50])
   })
 
   it('fetches one uncached member on its own, and fetches each when the batch is refused', async () => {
     const one = guildMessage()
-    one.guild.members.fetch.mockResolvedValue(member(ID(5)) as never)
+    one.guild.members.fetch.mockResolvedValue(member(ID(5)))
     await resolveMessageParams(routeOf('who {m:member}'), { m: ID(5) }, one.message, '!', undefined)
     expect(one.guild.members.fetch).toHaveBeenCalledWith(ID(5))
 
     const two = guildMessage()
-    two.guild.members.fetch.mockImplementation((async (options: unknown) => {
+    two.guild.members.fetch.mockImplementation(((async (options: unknown) => {
       if (typeof options === 'object') throw new Error('Members intent missing')
       return member(options as string)
-    }) as never)
+    })))
     const params = await resolveMessageParams(routeOf('pair {a:member} {b:member}'), { a: ID(6), b: ID(7) }, two.message, '!', undefined)
     expect(params).toEqual({ a: member(ID(6)), b: member(ID(7)) })
     expect(two.guild.members.fetch).toHaveBeenCalledTimes(3)

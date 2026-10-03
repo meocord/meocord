@@ -261,7 +261,7 @@ describe("a message command's errors, in the presenter's messageError view", () 
 
     await module.dispatch(message)
 
-    const payload = message.reply.mock.calls[0]?.[0] as Payload & { allowedMentions?: unknown }
+    const payload = (message.reply.mock.calls[0]?.[0])
     // replyEmoji gives the view the theme's warning emoji, which this presenter's view leaves out
     expect(payload.embeds?.[0]).toMatchObject({ description: expect.stringMatching(/^⚠️ .*is not a valid whole number/s), image: { url: 'attachment://card.png' } })
     expect(names(payload)).toEqual(['card.png'])
@@ -274,7 +274,7 @@ describe("a message command's errors, in the presenter's messageError view", () 
 
     await module.dispatch(message)
 
-    const payload = message.reply.mock.calls[0]?.[0] as Payload
+    const payload = (message.reply.mock.calls[0]?.[0])
     expect(payload.embeds?.[0]).toMatchObject({ description: '⚠️ Not today.' })
     expect(names(payload)).toEqual(['card.png'])
   })
@@ -284,7 +284,7 @@ describe("a message command's errors, in the presenter's messageError view", () 
 
     await module.dispatch(message).catch(() => undefined)
 
-    const payload = message.author.send.mock.calls[0]?.[0] as Payload & { allowedMentions?: unknown }
+    const payload = (message.author.send.mock.calls[0]?.[0])
     expect(payload.embeds?.[0]?.description).toContain('!broken')
     expect(names(payload)).toEqual(['card.png'])
     expect(payload.allowedMentions).toEqual({ parse: [] })
@@ -297,7 +297,7 @@ describe("a message command's errors, in the presenter's messageError view", () 
 
     await module.dispatch(again).catch(() => undefined)
 
-    const payload = again.author.send.mock.calls[0]?.[0] as Payload
+    const payload = (again.author.send.mock.calls[0]?.[0])
     expect(payload.embeds?.[0]?.description).toContain('!daily')
     expect(names(payload)).toEqual(['card.png'])
   })
@@ -341,7 +341,7 @@ describe('a send Discord refuses as too large', () => {
 
     await module.dispatch(message)
 
-    const [first, again] = [message.reply.mock.calls[0]?.[0] as Payload, message.reply.mock.calls[1]?.[0] as Payload]
+    const [first, again] = [(message.reply.mock.calls[0]?.[0]), (message.reply.mock.calls[1]?.[0])]
     expect(names(first)).toEqual(['card.png'])
     expect(names(again)).toEqual([])
     expect(again.embeds?.[0]).toMatchObject({ description: '⚠️ Not today.' })

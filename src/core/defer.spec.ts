@@ -422,7 +422,7 @@ describe('@Defer', () => {
       const clickOn = (id: string) => {
         const interaction = click(`clicked/${id}`, read())
         interaction.editReply.mockImplementation(async payload => {
-          current = ((payload as Payload).components ?? current) as Json[]
+          current = ((payload).components ?? current) as Json[]
           return read() as never
         })
         interaction.fetchReply.mockImplementation(async () => read() as never)

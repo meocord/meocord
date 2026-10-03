@@ -103,22 +103,22 @@ describe('fetching entity params after the guards', () => {
 
   it('asks for uncached members 100 to a gateway request, and for channels all at once', async () => {
     const { message, guild } = fresh()
-    guild.members.fetch.mockImplementation((async ({ user }: { user: string[] }) => new Collection(user.map(id => [id, member(id)]))) as never)
+    guild.members.fetch.mockImplementation(((async ({ user }: { user: string[] }) => new Collection(user.map(id => [id, member(id)])))))
     const members = await parseMessageParams(routeOf('kick {targets:member...}'), { targets: ids(150).join(' ') }, message, '!', undefined)
 
     const params = await fetchMessageParams(members)
 
     expect((params.targets as GuildMember[]).map(target => target.id)).toEqual(ids(150))
-    expect(guild.members.fetch.mock.calls.map(([options]) => (options as { user: string[] }).user.length)).toEqual([100, 50])
+    expect(guild.members.fetch.mock.calls.map(([options]) => (options).user.length)).toEqual([100, 50])
 
     let inFlight = 0
     let most = 0
-    guild.channels.fetch.mockImplementation((async (id: string) => {
+    guild.channels.fetch.mockImplementation(((async (id: string) => {
       most = Math.max(most, ++inFlight)
       await new Promise(resolve => setTimeout(resolve, 1))
       inFlight--
       return { id } as TextChannel
-    }) as never)
+    })))
     const channels = await parseMessageParams(routeOf('lock {targets:channel...}'), { targets: ids(20, 300).join(' ') }, message, '!', undefined)
     await fetchMessageParams(channels)
     expect(most).toBe(20)
@@ -147,7 +147,7 @@ describe('fetching entity params after the guards', () => {
     const { message, guild, users } = fresh()
     guild.members.fetch.mockRejectedValue(new Error('Unknown Member'))
     users.fetch.mockRejectedValue(new Error('Unknown User'))
-    guild.channels.fetch.mockResolvedValue(null as never)
+    guild.channels.fetch.mockResolvedValue(null)
     const parsed = await parseMessageParams(
       routeOf('check {m:member} {u:user} {c:channel}'),
       { m: ID(20), u: ID(21), c: `<#${ID(22)}>` },

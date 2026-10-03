@@ -104,7 +104,7 @@ describe('context types', () => {
     class App {}
 
     const module = MeoCordTestingModule.create({ app: App, controllers: [Events] }).compile()
-    await module.emit('messageCreate', createMockMessage() as never)
+    await module.emit('messageCreate', createMockMessage())
 
     expect(log).toEqual(['event ran'])
   })

@@ -629,7 +629,7 @@ describe('typed message params and usage replies', () => {
     const client = await startApp({ controllers: [Whois], messages: { prefix: '!' } })
     const message = createMockMessage({ content: `!whois ${user.id}`, guild: createMockGuild() })
     Object.assign(message.author, { bot: false, id: 'user-1' })
-    vi.mocked(message.client.users.fetch).mockResolvedValue(user as never)
+    vi.mocked(message.client.users.fetch).mockResolvedValue(user)
 
     await Promise.all(client.rawListeners('messageCreate').map(listener => (listener as (m: unknown) => unknown)(message)))
 
