@@ -1,4 +1,18 @@
-import { DiscordAPIError, type Interaction } from 'discord.js'
+import {
+  type APIModalInteractionResponseCallbackData,
+  DiscordAPIError,
+  type Interaction,
+  type InteractionDeferReplyOptions,
+  type InteractionDeferUpdateOptions,
+  type InteractionEditReplyOptions,
+  type InteractionReplyOptions,
+  type InteractionUpdateOptions,
+  type JSONEncodable,
+  type MessageEditOptions,
+  type MessagePayload,
+  type MessageResolvable,
+  type ModalComponentData,
+} from 'discord.js'
 import { existingResponse, type ResponseCall, type ResponsePhase } from '@src/common/response/response-state.js'
 import { callOrder } from '@src/common/response/call-order.js'
 import { RESPONSE_LOG } from './mock-interaction.js'
@@ -18,9 +32,22 @@ export interface ResponseReport {
 
   /**
    * Every answer call the interaction got, through `respond()` or discord.js directly, in order: the payload it sent,
-   * without `withResponse`, and the `error` of one Discord refused.
+   * without `withResponse`, and the `error` of one Discord refused. Checking a call's `method` types its `payload` as
+   * that method takes it: the options of a reply, an edit or a deferral, the modal shown, or the message deleted.
    */
-  calls: readonly ResponseCall[]
+  calls: readonly (
+    | (ResponseCall & { method: 'reply' | 'followUp'; payload?: string | MessagePayload | InteractionReplyOptions })
+    | (ResponseCall & { method: 'update'; payload?: string | MessagePayload | InteractionUpdateOptions })
+    | (ResponseCall & { method: 'editReply'; payload?: string | MessagePayload | InteractionEditReplyOptions })
+    | (ResponseCall & { method: 'message.edit'; payload?: string | MessagePayload | MessageEditOptions })
+    | (ResponseCall & {
+        method: 'showModal'
+        payload?: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData | APIModalInteractionResponseCallbackData
+      })
+    | (ResponseCall & { method: 'deferReply'; payload?: InteractionDeferReplyOptions })
+    | (ResponseCall & { method: 'deferUpdate'; payload?: InteractionDeferUpdateOptions })
+    | (ResponseCall & { method: 'deleteReply'; payload?: MessageResolvable | '@original' })
+  )[]
 }
 
 const VISIBLE = new Set<ResponseCall['method']>(['reply', 'update', 'editReply', 'followUp', 'message.edit'])
@@ -66,10 +93,15 @@ export function getResponse(interaction: Interaction): ResponseReport {
   const viaChannel = state?.history.filter(call => call.method === 'message.edit') ?? []
   const calls = log ? [...log, ...viaChannel].sort((a, b) => callOrder(a) - callOrder(b)) : [...(state?.history ?? [])]
   const sent = calls.some(call => VISIBLE.has(call.method) && !('error' in call))
-  if (state) return { state: state.state, sent, calls }
+  // Each call recorded what its method received, as that method takes it
+  if (state) return { state: state.state, sent, calls: calls as ResponseReport['calls'] }
   const answered = interaction.isRepliable() ? interaction.replied : false
   const deferred = interaction.isRepliable() ? interaction.deferred : false
-  return { state: answered ? 'replied' : deferred ? 'deferred' : 'unanswered', sent: log ? sent : answered, calls }
+  return {
+    state: answered ? 'replied' : deferred ? 'deferred' : 'unanswered',
+    sent: log ? sent : answered,
+    calls: calls as ResponseReport['calls'],
+  }
 }
 
 /**

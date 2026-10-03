@@ -40,6 +40,7 @@ import {
   ThreadChannel,
 } from 'discord.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
+import { type ResponseCall } from '@src/common/response/response-state.js'
 import { getResponse } from './response.js'
 import { createModalFields } from './modal-fields.js'
 import {
@@ -194,6 +195,17 @@ describe('a mock thread', () => {
 })
 
 describe('a recorded response', () => {
+  it('is still a ResponseCall to build from any payload, or to extend', () => {
+    const unknownValue: unknown = { content: 'hi' }
+    const call: ResponseCall = { method: 'reply', payload: unknownValue }
+    interface Logged extends ResponseCall {
+      at: number
+    }
+    expectTypeOf<Logged>().toExtend<ResponseCall>()
+    expectTypeOf(getResponse(createMockInteraction(ButtonInteraction)).calls[0]).toExtend<ResponseCall>()
+    void call
+  })
+
   it('types its payload by the method that sent it', () => {
     const call = getResponse(createMockInteraction(ButtonInteraction)).calls[0]
 
