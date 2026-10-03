@@ -444,6 +444,17 @@ bunx changeset pre exit
 
 and the next release pull request versions `4.0.0` from everything collected during the beta.
 
+That stable version's changelog entry comes from curated notes, not from every beta's changesets
+again. Write them before exiting, in `.changeset/release-notes/<version>/`, as any of six files joined
+in this order: `highlights.md`, `upgrading.md`, `features.md`, `deprecations.md`, `fixes.md` and
+`security.md`. Each holds only `### ` groups and their `- ` entries, continued by lines indented two
+spaces, which is the shape the docs site reads a changelog in; `scripts/lib/release-notes.spec.ts`
+checks the notes in the repository. When the release pull request is versioned,
+`scripts/release-notes.ts` puts the notes in place of the entry changesets wrote and deletes the
+folder. A stable version that follows its own prereleases without notes is refused, so the version
+step fails rather than repeat every beta's changes. A prerelease, and a patch release after a stable
+one, need no notes.
+
 ## Reporting bugs
 
 Open an [issue](https://github.com/meocord/meocord/issues/new/choose). The bug form asks for the
