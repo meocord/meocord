@@ -528,7 +528,7 @@ export class TestingModule {
     const interaction = first instanceof BaseInteraction ? (first as Interaction) : undefined
     // The handler dispatch gives the customId to, among every handler of the module
     const component = interaction && hasCustomId(interaction) ? componentRouteFor(this.componentRoutes(), controller, methodName, interaction) : undefined
-    const mismatch = component && 'mismatch' in component ? component.mismatch : interaction && commandMismatch(controller, methodName, interaction)
+    const mismatch = component && 'mismatch' in component ? component.mismatch : interaction && commandMismatch(this.controllers, controller, methodName, interaction)
     if (mismatch) throw new Error(mismatch)
     let hooks: Pick<RunOptions, 'parseArgs' | 'fetchArgs'> = {}
     let callArgs =
