@@ -29,7 +29,7 @@ import {
   User,
   VoiceChannel,
 } from 'discord.js'
-import { createMockUser, memberRoles } from './mock-interaction.js'
+import { createMockGuild, createMockUser, memberRoles } from './mock-interaction.js'
 
 /** A permission set with none, frozen as discord.js freezes the ones it gives. */
 const noPermissions = () => new PermissionsBitField().freeze()
@@ -113,6 +113,8 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     name: () => 'role',
     // Above @everyone, which a server's role manager makes at position 0
     position: () => 1,
+    // Every role has a server; one made without is in one of its own, unless a guild given it takes it in
+    guild: () => createMockGuild(),
     rawPosition: role => role.position,
     permissions: noPermissions,
     hoist: () => false,
