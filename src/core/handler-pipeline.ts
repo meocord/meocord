@@ -199,16 +199,23 @@ export function classDecorators(controllers: readonly object[], globals: GlobalS
   for (const entry of globals.guards) add(guard(entry), '@Guard()')
   for (const entry of globals.interceptors) add(interceptorClass(entry), '@Interceptor()')
   for (const entry of globals.filters) add(filterClass(entry), '@Catch()')
-  for (const controller of controllers) {
-    const prototype = (controller as { prototype: object }).prototype
-    for (const method of handlerMethods(prototype)) {
-      for (const entry of handlerGuards(prototype, method)) add(guard(entry), '@Guard()')
-      for (const entry of handlerInterceptors(prototype, method)) add(interceptorClass(entry), '@Interceptor()')
-      for (const entry of handlerFilterLevels(prototype, method, []).flat()) add(filterClass(entry), '@Catch()')
-      for (const { entry } of handlerInputStages(prototype, method).pipes) add(pipeClass(entry), '@Pipe()')
-    }
-  }
+  for (const controller of controllers) for (const [cls, decorator] of handlerStageClasses(controller)) add(cls, decorator)
   return decorators
+}
+
+/**
+ * The guards, interceptors, filters and pipes the handlers of `cls` declare, each with its decorator: a controller's,
+ * or a service's `@On` and `@Once` handlers, which run their stages too.
+ */
+export function handlerStageClasses(cls: object): [unknown, string][] {
+  const prototype = (cls as { prototype: object }).prototype
+  const guard = (entry: GuardEntry) => (isGuardWithParams(entry) ? entry.provide : entry)
+  return [...handlerMethods(prototype)].flatMap(method => [
+    ...handlerGuards(prototype, method).map(entry => [guard(entry), '@Guard()'] as [unknown, string]),
+    ...handlerInterceptors(prototype, method).map(entry => [interceptorClass(entry), '@Interceptor()'] as [unknown, string]),
+    ...handlerFilterLevels(prototype, method, []).flat().map(entry => [filterClass(entry), '@Catch()'] as [unknown, string]),
+    ...handlerInputStages(prototype, method).pipes.map(({ entry }) => [pipeClass(entry), '@Pipe()'] as [unknown, string]),
+  ])
 }
 
 /**

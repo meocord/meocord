@@ -28,7 +28,6 @@ import {
   appStages,
   bindAppPresenter,
   bindGlobalStages,
-  classDecorators,
   type GlobalStages,
   prepareHandlerStages,
   type RunOptions,
@@ -65,7 +64,9 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
-import { adviseInPlaceOfInjecting } from '@src/core/meocord-classes.js'
+import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
+import { assertStartupClasses, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
@@ -76,8 +77,6 @@ import { Logger } from '@src/common/logger.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
 import {
   assertProvided,
-  assertTypedParameters,
-  reachableClasses,
   bindProvider,
   bindsOwnToken,
   isClassProvider,
@@ -984,21 +983,23 @@ export class TestingModuleBuilder {
     const store = providers.has(CooldownStore) ? undefined : appOptions?.cooldownStore
     // The themeFor class this module runs, the app's or overrideThemeFor's, bound on its own as the app binds it
     const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
-    const roots = [
-      ...(this.options.controllers ?? []),
-      ...services,
-      ...(themeResolver ? [themeResolver] : []),
-      ...(store ? [store] : []),
-      ...(this.options.app ? appObservers(this.options.app) : []),
-      ...(this.options.observers ?? []),
-    ]
-    const reachable = reachableClasses(roots, providers)
-    // Its stage classes too, as the app checks them, except those an override stands in for
-    const decorators = classDecorators(this.options.controllers ?? [], stages)
-    for (const stub of [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()]) decorators.delete(stub)
-    assertTypedParameters(reachableClasses([...roots, ...decorators.keys()], providers), decorators)
+    // Every class the module runs, as the app finds them, except stage classes an override stands in for
+    const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
+    const startup = startupClasses({
+      controllers: this.options.controllers ?? [],
+      services,
+      providers,
+      stages,
+      presenter: this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter,
+      cooldownStore: store,
+      themeFor: stages?.themeFor?.resolvers,
+      observers: [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
+      stubs: [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()],
+    })
+    assertStartupClasses(startup, { translator: i18n !== undefined || providers.has(Translator) })
+    markStartupChecked(container, [...startup.classes, ...meocordClasses()])
     // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
-    const needClient = reachable.filter(cls => injectedTokens(cls).includes(Client))
+    const needClient = startup.classes.filter(cls => injectedTokens(cls).includes(Client))
     if (needClient.length > 0 && !providers.has(Client)) {
       container.bind(Client).toDynamicValue(() => {
         throw new Error(
@@ -1026,7 +1027,6 @@ export class TestingModuleBuilder {
     if (appOptions && !container.isBound(COOLDOWN_POLICY)) container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(appOptions))
 
     // The app's translator, unless a provider stands in for it
-    const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
     if (i18n && !providers.has(Translator)) {
       container.bind(Translator).toConstantValue(i18n)
       bindsOwnToken(container, Translator)
@@ -1037,6 +1037,7 @@ export class TestingModuleBuilder {
       // A provided class is bound by its own provider, wherever in the list that provider comes
       if (container.isBound(cls) || providers.has(cls)) return
       if (injectedTokens(cls).includes(ExecutionContext)) throw singletonContextError(cls)
+      assertStartupChecked(container, cls)
 
       makeInjectable(cls)
       container.bind(cls).toSelf().inSingletonScope()
@@ -1082,7 +1083,7 @@ export class TestingModuleBuilder {
         return isAppClassToken(token) && (!provider || (isClassProvider(provider) && provider.useClass === token))
       }),
     )
-    assertProvided(container, providers, [...appClasses, ...(store ? [store] : [])], "the testing module's providers")
+    assertProvided(container, providers, startup.classes, "the testing module's providers")
     for (const cls of appClasses) Reflect.defineMetadata(META.container, container, cls)
     prepareHandlerStages(container, appClasses)
     const messages = messagesOf(this.options.app)

@@ -152,6 +152,7 @@ const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   'core/message-params.ts': { count: 6, why: 'a message whose params do not fit its command, answered with its usage' },
   'core/shard-context.ts': { count: 2, why: 'ShardContext.call, from a handler' },
   'core/shard-manager.ts': { count: 1, why: 'start() of an app that was stopped' },
+  'core/startup-checked.ts': { count: 1, why: "a class MeoCord binds that its startup checks never saw: MeoCord's bug, not the app's" },
   'core/message-routes.ts': {
     count: 18,
     why: "a pattern's own mistakes, which buildMessageRoutes refuses with the handler's name; and a test's resolveRoute",

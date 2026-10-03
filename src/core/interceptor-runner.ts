@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
+import { assertStartupChecked } from '@src/core/startup-checked.js'
 import { type InterceptorInterface } from '@src/interface/index.js'
 import { injectedTokens, perHandler, singletonContextError, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
 import { ExecutionContext, type HandlerExecutionContext } from '@src/common/execution-context.js'
@@ -59,6 +60,7 @@ export const handlerInterceptors = perHandler((prototype: object, methodName: st
 export function bindShared(container: Container, cls: new (...args: any[]) => unknown): void {
   if (container.isBound(cls)) return
   if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
+  assertStartupChecked(container, cls)
 
   makeInjectable(cls)
   container.bind(cls).toSelf().inSingletonScope()

@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { assertStartupChecked } from '@src/core/startup-checked.js'
 import { Container, LazyServiceIdentifier } from 'inversify'
 import { type GuardInterface } from '@src/interface/index.js'
 import { MetadataKey } from '@src/enum/index.js'
@@ -128,6 +129,7 @@ function needsContext(container: Container, cls: object, seen = new Set<object>(
 
 /** Resolves a guard for one call, in a child container holding the context when it needs one. */
 function resolveGuard(container: Container, guard: GuardClass, context: HandlerExecutionContext | UnroutedExecutionContext): GuardInterface {
+  if (!container.isBound(guard)) assertStartupChecked(container, guard)
   if (!needsContext(container, guard)) {
     return container.get(guard, { autobind: true })
   }
