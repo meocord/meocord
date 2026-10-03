@@ -11,6 +11,7 @@ const { CommandType } = await import('@src/enum/index.js')
 const { createMockInteraction, MeoCordTestingModule } = await import('@src/testing/index.js')
 const { bindShared } = await import('@src/core/interceptor-runner.js')
 const { markStartupChecked } = await import('@src/core/startup-checked.js')
+const { META } = await import('@src/util/metadata-keys.js')
 
 @Service()
 class Clock {
@@ -233,7 +234,8 @@ describe('a guarded method called directly', () => {
     await expect(new Unchecked().unchecked(press())).rejects.toThrow(`${Undecorated.name}: its constructor takes parameters, but ${Undecorated.name} has no decorator`)
   })
 
-  it.each([
+  // Each shape's guarded call, reached through the container the app stamped on its controller, as a handler would
+  const SHAPES: [string, () => { options: object; run: (get: (token: unknown) => any) => Promise<unknown> }][] = [
     [
       "a provider's class",
       () => {
@@ -244,7 +246,7 @@ describe('a guarded method called directly', () => {
           }
         }
         Service()(Billing)
-        return { options: { providers: [{ provide: 'billing', useClass: Billing }] }, run: (module: any) => module.get('billing').charge(press()) }
+        return { options: { providers: [{ provide: 'billing', useClass: Billing }] }, run: get => get('billing').charge(press()) }
       },
     ],
     [
@@ -266,8 +268,7 @@ describe('a guarded method called directly', () => {
             return true
           }
         }
-        const Panel = controllerUsing(UseGuard(Audits) as MethodDecorator)
-        return { options: { controllers: [Panel] }, run: (module: any) => module.invoke(Panel, 'panel', press()) }
+        return { options: { guards: [Audits] }, run: get => get(Audits).canActivate(press()) }
       },
     ],
     [
@@ -281,15 +282,22 @@ describe('a guarded method called directly', () => {
             runs.push('charge')
           }
         }
-        return { options: { observers: [Watch] }, run: (module: any) => module.get(Watch).charge(press()) }
+        return { options: { observers: [Watch] }, run: get => get(Watch).charge(press()) }
       },
     ],
-  ])('runs its guards on %s, which MeoCord made', async (_kind, build) => {
-    const { options, run } = build()
-    const module = MeoCordTestingModule.fromApp(appWith(options)).compile()
-    await run(module)
-    expect(runs).toEqual(['guard', 'charge'])
-  })
+  ]
+
+  it.each(CREATE.flatMap(([where, create]) => SHAPES.map(([shape, build]) => [where, shape, create, build] as const)))(
+    '%s runs the guards on %s, which MeoCord made',
+    async (_where, _shape, create, build) => {
+      const { options, run } = build()
+      const Panel = controllerUsing()
+      create(appWith({ controllers: [Panel], ...options }))
+      const container = Reflect.getMetadata(META.container, Panel) as InstanceType<typeof Container>
+      await run(token => container.get(token as never, { autobind: true }))
+      expect(runs).toEqual(['guard', 'charge'])
+    },
+  )
 
   it('says what to do on an instance of a class MeoCord never made, rather than failing inside', async () => {
     class Loose {
