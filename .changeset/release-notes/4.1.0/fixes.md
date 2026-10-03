@@ -22,6 +22,7 @@
   - A constructor parameter with no runtime type is refused naming the class and parameter, not inversify's `emitDecoratorMetadata` error.
   - A class with no decorator whose constructor injects, guards, interceptors, filters and pipes included, is refused as the app starts naming the class and the decorator to add, not inversify's missing-metadata error, which a guard gave only at its first call.
   - A guard in `services` or `providers`, or injected into a service, reads each call's own `params`; one with a setter param or a sealed instance shares them, with a warning.
+  - A guarded method called directly on any class the app runs, a provider's class included, or on a subclass of one, runs its guards, not "Cannot read properties of undefined (reading 'get')"; on an instance no app made, it says to inject the class.
 - **Handler types**
   - A handler may return a value or take fewer parameters, not "Unable to resolve signature of method decorator".
   - `applyDecorators` passes on what a wrapping decorator returns.
