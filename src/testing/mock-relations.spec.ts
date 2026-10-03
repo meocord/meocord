@@ -85,6 +85,13 @@ describe("a mock guild's roles", () => {
     expect(tieOlder.comparePositionTo(tieNewer)).toBeGreaterThan(0)
     expect(high.guild.roles.comparePositions(low, high)).toBeLessThan(0)
   })
+
+  it('compare when no guild was given them, as every role has one', () => {
+    const [low, high] = [role('300000000000000001', 1), role('300000000000000002', 5)]
+
+    expect(high.comparePositionTo(low)).toBeGreaterThan(0)
+    expect(low.comparePositionTo(high)).toBeLessThan(0)
+  })
 })
 
 describe("a mock channel's permissions", () => {
