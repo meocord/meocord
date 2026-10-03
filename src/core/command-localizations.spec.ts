@@ -71,6 +71,26 @@ describe('localizationProblems', () => {
     ).toEqual([])
   })
 
+  // Discord caps every command's name and its localisations at 32 characters, and a choice's at 100
+  it.each([ApplicationCommandType.User, ApplicationCommandType.Message, ApplicationCommandType.PrimaryEntryPoint])(
+    'holds a type %i command name to 32 characters',
+    type => {
+      const name = (length: number) => `Report ${'x'.repeat(length - 7)}`
+      expect(localizationProblems('Report', { name: 'Report', type, name_localizations: { ja: name(32) } })).toEqual([])
+      expect(localizationProblems('Report', { name: 'Report', type, name_localizations: { ja: name(33) } })).toEqual([
+        '"Report" name_localizations.ja: 33 characters (1 to 32)',
+      ])
+    },
+  )
+
+  it('holds a choice name to 100 characters', () => {
+    const choice = (ja: string) => slash({ options: [{ name: 'when', choices: [{ name: 'daily', value: 'd', name_localizations: { ja } }] }] })
+    expect(localizationProblems('ban', choice('x'.repeat(100)))).toEqual([])
+    expect(localizationProblems('ban', choice('x'.repeat(101)))).toEqual([
+      '"ban" options.when.choices.daily.name_localizations.ja: 101 characters (1 to 100)',
+    ])
+  })
+
   it('names a problem inside a subcommand group by its path, and checks choices as display text', () => {
     const problems = localizationProblems(
       'settings',
