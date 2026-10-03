@@ -29,6 +29,27 @@ updates:
       # and a floating patch there changes what every generated app compiles to.
       - dependency-name: '@swc/core'
 
+  # The test runners scripts/verify-runners.ts installs, one project each, every dependency moved across the projects in
+  # one pull request. The
+  # nightly workflow tests their newest releases first; these locks are what pull requests and releases test against.
+  - package-ecosystem: bun
+    directories:
+      - /scripts/runner-consumers/bun
+      - /scripts/runner-consumers/jest
+      - /scripts/runner-consumers/node-test
+      - /scripts/runner-consumers/vitest
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    labels: ['type: dependencies']
+    commit-message:
+      prefix: ci
+    groups:
+      runners:
+        patterns: ['*']
+        group-by: dependency-name
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
