@@ -12,7 +12,9 @@ import { decoratedName, refuse } from '@src/util/refusal.util.js'
  * @remarks
  * The decorators apply as they would stacked in the order written: `applyDecorators(A, B)` is `@A @B`, so `B` applies
  * first and `A` last, and guards run in the order listed. A method or class a decorator returns in place of the one it
- * was given, as a wrapping decorator does, is what the next decorator, and TypeScript, receive.
+ * was given, as a wrapping decorator does, is what the next decorator, and TypeScript, receive. Each decorator still
+ * checks where it applies: one that goes only on a method, such as `Defer` or `Validate`, refuses a class, so a
+ * composite holding one goes on handlers only.
  *
  * @param decorators - The decorators, in the order they would be written stacked.
  * @returns One decorator for a class or a method.

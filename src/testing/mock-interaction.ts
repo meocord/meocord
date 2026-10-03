@@ -1879,7 +1879,7 @@ function buildOptionData(
  *   {@link ChatInputOptions}.
  *
  * @remarks
- * Every method is a mock function, and throws discord.js's own errors, each a `DiscordjsTypeError` with its code. An
+ * Every method is a mock function, and its errors are discord.js's own, each a `DiscordjsTypeError` with its code. An
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
  * and in a server its `member` too. A user option's
  * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
