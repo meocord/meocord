@@ -3,6 +3,7 @@ import {
   AutocompleteInteraction,
   ButtonInteraction,
   ChatInputCommandInteraction,
+  type GuildMember,
   type Message,
   type MessageReaction,
 } from 'discord.js'
@@ -22,7 +23,14 @@ import { CommandNotFoundError, MessageUsageError, UserError } from '@src/common/
 import { type DispatchObserver, type ExceptionFilter, type ReactionEvent } from '@src/interface/index.js'
 import { type DispatchedCall, MeoCordTestingModule } from './meocord-testing-module.js'
 import { resolveRoute } from './routing.js'
-import { createChatInputOptions, createMock, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
+import {
+  createChatInputOptions,
+  createMock,
+  createMockGuild,
+  createMockInteraction,
+  createMockMessage,
+  createMockUser,
+} from './mock-interaction.js'
 
 const calls: string[] = []
 
@@ -216,6 +224,31 @@ describe('TestingModule.dispatch', () => {
     expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Usage:\n!settings get <key>\n!settings set <key> <value>' }))
     expect(resolveRoute(SettingsApp, { content: '!settings' })).toBeUndefined()
     await expect(module.invoke(Settings, 'get', createMockMessage({ content: '!settings' }))).rejects.toThrow("does not match Settings.get's pattern")
+  })
+
+  it('resolves members its guild has not cached alike, whether the message names one or several', async () => {
+    const named: string[][] = []
+    @Controller()
+    class Pairs {
+      @MessageHandler('one {a:member}')
+      one(_message: Message, { a }: { a: GuildMember }) {
+        named.push([a.id])
+      }
+
+      @MessageHandler('pair {a:member} {b:member}')
+      pair(_message: Message, { a, b }: { a: GuildMember; b: GuildMember }) {
+        named.push([a.id, b.id])
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Pairs] }).compile()
+    const [a, b] = ['111111111111111111', '222222222222222222']
+
+    // Two uncached members of one guild go out in one batch fetch, one on its own
+    await module.dispatch(createMockMessage({ content: `one ${a}`, guild: createMockGuild() }))
+    const pair = await module.dispatch(createMockMessage({ content: `pair ${a} ${b}`, guild: createMockGuild() }))
+
+    expect(pair.error).toBeUndefined()
+    expect(named).toEqual([[a], [a, b]])
   })
 
   it('skips a message from a bot, as the bot does', async () => {
