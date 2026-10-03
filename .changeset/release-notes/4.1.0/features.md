@@ -69,7 +69,7 @@
 ### The CLI and builds
 
 - **Command registration** goes global, per server or to a dev server, at startup or with `meocord register` over REST; unchanged dev commands skip resending unless `--force-register` ([docs](https://meocord.dev/docs/4.1/slash-commands#registering-commands)).
-- **`meocord create`** commits the lockfile, adds `npm start`, and writes samples whose specs test what they answer.
+- **`meocord create`** commits the lockfile, adds `npm start`, writes samples whose specs test what they answer, and makes its first commit by running git directly, so MeoCord no longer installs `simple-git`.
 - **`meocord generate`** adds observers, filters, interceptors and pipes, a customId per component, and specs that test the answer.
 - **`meocord start --dev`** restarts on source, config, `tsconfig.json` and dev `.env` changes, one bot at a time, keeping the last good build while code doesn't compile ([docs](https://meocord.dev/docs/4.1/cli)).
 - **`.env` files**: a new app reads `.env.<mode>.local`, `.env.local`, `.env.<mode>` and `.env` on every runtime.
