@@ -147,7 +147,7 @@ describe("a reply that quotes the user's words", () => {
   async function replyTo(content: string): Promise<string> {
     const message = createMockMessage({ content })
     await module.dispatch(message)
-    return (message.reply.mock.calls[0]?.[0] as { content: string }).content
+    return ((message.reply.mock.calls[0]?.[0])).content
   }
 
   it("shows a param's markdown as written", async () => {

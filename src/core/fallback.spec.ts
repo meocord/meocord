@@ -270,7 +270,7 @@ describe('the fallback', () => {
     it('follows up once after 40060, the interaction having been answered elsewhere', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
       interaction.reply.mockRejectedValueOnce(discordError(40060))
-      interaction.followUp.mockResolvedValue(undefined as never)
+      interaction.followUp.mockResolvedValue(undefined)
 
       await fail(interaction)
 

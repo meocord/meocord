@@ -727,10 +727,10 @@ describe('respond(), call by call', () => {
     it("returns the message Discord answers a reply and an update with, and records each call's payload", async () => {
       const reply = createMockMessage()
       const commandCall = command()
-      commandCall.reply.mockResolvedValue({ resource: { message: reply } } as never)
+      commandCall.reply.mockResolvedValue(({ resource: { message: reply } }))
       const update = createMockMessage()
       const buttonCall = button()
-      buttonCall.update.mockResolvedValue({ resource: { message: update } } as never)
+      buttonCall.update.mockResolvedValue(({ resource: { message: update } }))
 
       expect(await respond(commandCall).send('hi')).toBe(reply)
       expect(await respond(buttonCall).send('updated')).toBe(update)
@@ -1081,7 +1081,7 @@ describe("respond() under @Defer's timer and locks", () => {
       const clickOn = (customId: string) => {
         const interaction = createMockInteraction(ButtonInteraction, { customId, message })
         interaction.editReply.mockImplementation(async payload => {
-          current = ((payload as Payload).components ?? current) as unknown[]
+          current = ((payload).components ?? current) as unknown[]
           return Object.assign(messageWith({ components: current }), { id: message.id }) as never
         })
         interaction.fetchReply.mockImplementation(async () => Object.assign(messageWith({ components: current }), { id: message.id }) as never)
@@ -1267,7 +1267,7 @@ describe('respond(), the last details', () => {
     const interaction = button(messageWith({ components: [row] }))
     let current: unknown[] = []
     interaction.editReply.mockImplementation(async payload => {
-      const withIds = ((payload as Payload).components ?? []).map((component, index) => ({ ...component, id: index + 1 }))
+      const withIds = ((payload).components ?? []).map((component, index) => ({ ...component, id: index + 1 }))
       current = withIds
       return messageWith({ components: withIds }) as never
     })

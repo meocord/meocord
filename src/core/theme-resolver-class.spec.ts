@@ -344,7 +344,7 @@ describe('a ThemeResolver class', () => {
       ['presenter', '#0000E2'],
     ])
     // A button's send() updates the message it is on
-    expect((reply.update.mock.calls[0][0] as { embeds: { color?: number }[] }).embeds[0].color).toBe(resolveColor('#0000E2'))
+    expect((reply.update.mock.calls[0][0]).embeds[0].color).toBe(resolveColor('#0000E2'))
   })
 
   it("keeps a call's theme when the choice behind it changes during the call, and gives the next call the new one", async () => {

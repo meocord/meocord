@@ -37,7 +37,7 @@ describe('UserError', () => {
 
       const payload = interaction.reply.mock.calls[0][0]
       expect(description(payload)).toBe('You need 10 coins.')
-      expect((payload as { flags: unknown }).flags).toBe(Ephemeral)
+      expect((payload).flags).toBe(Ephemeral)
       expect(logger.error).not.toHaveBeenCalled()
       expect(logger.debug).toHaveBeenCalled()
     })

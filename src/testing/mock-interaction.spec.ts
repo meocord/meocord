@@ -126,7 +126,7 @@ describe('createMockInteraction', () => {
     it('auto-stubs nested method access', async () => {
       const interaction = createMockInteraction(ChatInputCommandInteraction)
       expect(vi.isMockFunction(interaction.reply)).toBe(true)
-      interaction.reply.mockResolvedValue(undefined as any)
+      interaction.reply.mockResolvedValue(undefined)
       await expect(interaction.reply({ content: 'hi' })).resolves.toBeUndefined()
     })
 
@@ -689,7 +689,7 @@ describe('createMockInteraction', () => {
 
     it('keeps the mock API on methods after narrowing to the real class', async () => {
       const interaction = createMockInteraction(ButtonInteraction, { customId: 'x' })
-      interaction.reply.mockResolvedValue(undefined as never)
+      interaction.reply.mockResolvedValue(undefined)
 
       await (interaction as ButtonInteraction).reply({ content: 'hi' })
 
@@ -1249,7 +1249,7 @@ describe('createMockMessage', () => {
 
   it('msg.channel is a TextChannel-like object with send', () => {
     const msg = createMockMessage()
-    expect(vi.isMockFunction((msg.channel as any).send)).toBe(true)
+    expect(vi.isMockFunction((msg.channel).send)).toBe(true)
   })
 
   it('msg.guild is a Guild-like object with members', () => {
@@ -1275,7 +1275,7 @@ describe('createMockMessage', () => {
 
   it('msg.author.send.mockResolvedValue works', async () => {
     const msg = createMockMessage()
-    ;(msg.author.send as any).mockResolvedValue(createMockMessage())
+    ;(msg.author.send).mockResolvedValue(createMockMessage())
     const result = await msg.author.send({ content: 'hi' })
     expect(result).toBeInstanceOf(Message)
   })
@@ -1297,15 +1297,15 @@ describe('createMockMessage', () => {
   it('msg.channel.send.mockResolvedValue works', async () => {
     const msg = createMockMessage()
     const reply = createMockMessage()
-    ;(msg.channel as any).send.mockResolvedValue(reply)
-    const result = await (msg.channel as any).send({ content: 'hi' })
+    ;(msg.channel).send.mockResolvedValue(reply)
+    const result = await (msg.channel).send({ content: 'hi' })
     expect(result).toBe(reply)
   })
 
   it('msg.channel.send.mockRejectedValue works', async () => {
     const msg = createMockMessage()
-    ;(msg.channel as any).send.mockRejectedValue(new Error('cannot send'))
-    await expect((msg.channel as any).send({ content: 'hi' })).rejects.toThrow('cannot send')
+    ;(msg.channel).send.mockRejectedValue(new Error('cannot send'))
+    await expect((msg.channel).send({ content: 'hi' })).rejects.toThrow('cannot send')
   })
 
   it('msg.guild.members.fetch.mockResolvedValue works', async () => {
@@ -1500,7 +1500,7 @@ describe('createMockClient', () => {
   it('client.guilds.fetch.mockResolvedValue works', async () => {
     const client = createMockClient()
     const guild = createMockGuild()
-    ;(client.guilds as any).fetch.mockResolvedValue(guild)
+    ;(client.guilds).fetch.mockResolvedValue(guild)
     const result = await (client.guilds as any).fetch('guild-123')
     expect(result).toBe(guild)
   })
@@ -1541,7 +1541,7 @@ describe('createMockGuild', () => {
   it('guild.members.fetch.mockResolvedValue works', async () => {
     const guild = createMockGuild()
     const member = createMockUser() // close enough structurally
-    ;(guild.members as any).fetch.mockResolvedValue(member)
+    ;(guild.members).fetch.mockResolvedValue(member)
     const result = await (guild.members as any).fetch('member-123')
     expect(result).toBe(member)
   })
@@ -1555,7 +1555,7 @@ describe('createMockGuild', () => {
   it('guild.channels.fetch.mockResolvedValue works', async () => {
     const guild = createMockGuild()
     const channel = createMockChannel(TextChannel)
-    ;(guild.channels as any).fetch.mockResolvedValue(channel)
+    ;(guild.channels).fetch.mockResolvedValue(channel)
     const result = await (guild.channels as any).fetch('ch-123')
     expect(result).toBe(channel)
   })
@@ -1625,7 +1625,7 @@ describe('createMockChannel', () => {
   it('channel.messages.fetch.mockResolvedValue works (TextChannel)', async () => {
     const channel = createMockChannel(TextChannel)
     const msg = createMockMessage()
-    ;(channel.messages as any).fetch.mockResolvedValue(msg)
+    ;(channel.messages).fetch.mockResolvedValue(msg)
     const result = await (channel.messages as any).fetch('msg-123')
     expect(result).toBe(msg)
   })
@@ -1638,7 +1638,7 @@ describe('createMockChannel', () => {
 
   it('channel.threads.fetch.mockResolvedValue works (TextChannel)', async () => {
     const channel = createMockChannel(TextChannel)
-    ;(channel.threads as any).fetch.mockResolvedValue('thread-result')
+    ;(channel.threads).fetch.mockResolvedValue('thread-result')
     const result = await (channel.threads as any).fetch('thread-123')
     expect(result).toBe('thread-result')
   })

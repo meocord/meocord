@@ -264,7 +264,7 @@ describe('respond() outside a call, as in a collector\'s callback', () => {
     const click = createMockInteraction(ButtonInteraction, { customId: 'picked', client: client as never })
     Object.assign(click, { guildId: guildId ?? null })
     await collect!(click)
-    return (click.update.mock.calls[0]?.[0] as { embeds: { color?: number }[] }).embeds[0].color
+    return ((click.update.mock.calls[0]?.[0])).embeds[0].color
   }
 
   beforeEach(() => {
