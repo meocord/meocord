@@ -769,7 +769,12 @@ describe('lifecycle hooks', () => {
       fake = await startFakeDiscord({ readyDelayMs: 500 })
     })
 
-    afterEach(() => fake.close())
+    // Each test's client closes once its login completes; until it does, a client cut off by the close would reconnect,
+    // and a later test's gateway on the same port, as Windows hands out, would take its session
+    afterEach(async () => {
+      await fake.waitFor('closed')
+      await fake.close()
+    })
 
     async function stoppedWhileLoggingIn() {
       const loaded = await load()
@@ -785,6 +790,7 @@ describe('lifecycle hooks', () => {
       @loaded.MeoCord({ controllers: [], services: [Scheduler], clientOptions: { intents: [], rest: { api: fake.api } } })
       class App {}
 
+      const login = vi.spyOn(loaded.discord.Client.prototype, 'login')
       const destroy = vi.spyOn(loaded.discord.Client.prototype, 'destroy')
       const outcome = loaded.MeoCordFactory.create(App)
         .start()
@@ -794,7 +800,7 @@ describe('lifecycle hooks', () => {
         )
       await fake.waitFor('identified')
       await loaded.shutdownAndExit()
-      return { outcome, destroy, readyHooks }
+      return { outcome, client: login.mock.contexts[0], destroy, readyHooks }
     }
 
     it('ends the start at once and exits 0, before the gateway is ready', async () => {
@@ -818,12 +824,13 @@ describe('lifecycle hooks', () => {
     })
 
     it('closes the client once its login completes, over its one gateway session, with no ready hook run', async () => {
-      const { destroy, readyHooks } = await stoppedWhileLoggingIn()
+      const { client, destroy, readyHooks } = await stoppedWhileLoggingIn()
       expect(destroy).not.toHaveBeenCalled()
 
       await fake.waitFor('closed')
 
-      expect(destroy).toHaveBeenCalledTimes(1)
+      // The spy is on the prototype every client shares, so the check names the one this app made
+      expect(destroy.mock.contexts).toEqual([client])
       expect(fake.events).toEqual(['connected', 'identified', 'ready', 'closed'])
       expect(readyHooks).toEqual([])
     })
