@@ -515,7 +515,7 @@ function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[
         payload && typeof payload === 'object' && 'withResponse' in payload
           ? Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'withResponse'))
           : payload
-      const call = { method, payload: sent } as ResponseCall
+      const call: ResponseCall = { method, payload: sent }
       stampCall(call)
       log.push(call)
       try {
@@ -634,6 +634,27 @@ export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
   props?: MockProps<T>,
 ): DeepMocked<T>
+/**
+ * Creates a mock interaction from outside a server: one given `guild: null`, `member: null` or a DM channel, as from a
+ * direct message or a server the bot isn't in.
+ *
+ * It is typed as discord.js types an interaction that may come from anywhere, so its `guild` and `member` may be
+ * `null`. Everything else is as {@link createMockInteraction} builds it from a server.
+ *
+ * @param Class - The discord.js interaction class to mock.
+ * @param props - The interaction's properties, with `guild: null`, `member: null` or a DM `channel`; see {@link MockProps}.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const command = createMockInteraction(ChatInputCommandInteraction, { channel: createMockChannel(DMChannel), guild: null })
+ * expect(command.inGuild()).toBe(false)
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
   props: MockProps<WithCache<T, CacheType>> & OutsideServer,
