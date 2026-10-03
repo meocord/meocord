@@ -1092,6 +1092,9 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  * it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given, so `t.forGuild(guild)`
  * translates as for a new English server.
  *
+ * The mock makes a member for any id it's asked for, so a test of an id that isn't a member rejects the fetch, as
+ * `guild.members.fetch.mockRejectedValue(createDiscordError(10007))`, or resolves a collection without that member.
+ *
  * @example
  * ```ts
  * const target = createMock<GuildMember>({ id: '111111111111111111' })
