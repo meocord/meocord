@@ -1,7 +1,10 @@
 import { ApplicationCommandType, Locale } from 'discord.js'
 
-/** Discord's rule for a chat input command or option name, localised or not. */
-const CHAT_INPUT_NAME = /^[-_'\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u
+/**
+ * Discord's rule for a chat input command or option name, localised or not, as its application command docs give it
+ * under "Application Command Naming". A letter that has a lowercase variant must also be lowercase.
+ */
+const CHAT_INPUT_NAME = /^[-_\u02BC\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u
 
 /** Discord's longest name for every command and option, context menus included, and for a choice. */
 const COMMAND_NAME_LENGTH = 32
@@ -48,7 +51,7 @@ export function localizationProblems(commandName: string, body: LocalizedNode): 
       if (typeof value !== 'string' || value.length < 1 || value.length > rules.nameLength) {
         problems.push(`"${commandName}" ${field}: ${describeLength(value)} (1 to ${rules.nameLength})`)
       } else if (rules.chatInputName && (!CHAT_INPUT_NAME.test(value) || value !== value.toLocaleLowerCase(locale))) {
-        problems.push(`"${commandName}" ${field}: "${value}" must be lowercase letters, numbers, - _ or ' with no spaces`)
+        problems.push(`"${commandName}" ${field}: "${value}" must be lowercase where a letter has case, and only letters, numbers, - _ or ʼ with no spaces`)
       }
     }
 

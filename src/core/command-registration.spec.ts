@@ -793,8 +793,8 @@ describe('registration, message by message', () => {
 
       expect(logger.error).toHaveBeenCalledWith(
         'No commands were registered: Discord would reject 2 localization(s):\n' +
-          '  "ban" name_localizations.ja: "A" must be lowercase letters, numbers, - _ or \' with no spaces\n' +
-          '  "ban" name_localizations.fr: "B" must be lowercase letters, numbers, - _ or \' with no spaces',
+          '  "ban" name_localizations.ja: "A" must be lowercase where a letter has case, and only letters, numbers, - _ or ʼ with no spaces\n' +
+          '  "ban" name_localizations.fr: "B" must be lowercase where a letter has case, and only letters, numbers, - _ or ʼ with no spaces',
       )
     })
 

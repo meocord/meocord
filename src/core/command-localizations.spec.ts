@@ -42,6 +42,19 @@ describe('localizationProblems', () => {
     expect(problems.join('\n')).toMatch(/ja.*\n.*fr.*\n.*de/)
   })
 
+  // Discord's regex takes the modifier letter apostrophe U+02BC, not the ASCII one
+  it('takes an apostrophe only as ʼ', () => {
+    expect(localizationProblems('ban', slash({ name_localizations: { fr: 'lʼinterdire' } }))).toEqual([])
+    expect(localizationProblems('ban', slash({ name_localizations: { fr: "l'interdire" } }))).toEqual([
+      `"ban" name_localizations.fr: "l'interdire" must be lowercase where a letter has case, and only letters, numbers, - _ or ʼ with no spaces`,
+    ])
+  })
+
+  it('takes uncased letters, and refuses a titlecase one', () => {
+    expect(localizationProblems('ban', slash({ name_localizations: { ja: 'バン', ko: '차단' } }))).toEqual([])
+    expect(localizationProblems('ban', slash({ name_localizations: { hr: 'ǈubav' } }))).toHaveLength(1)
+  })
+
   // Discord lowercases by the locale's own rules: Turkish has a dotted capital İ
   it('reads lowercase as the locale does', () => {
     expect(localizationProblems('ban', slash({ name_localizations: { tr: 'yasakla' } }))).toEqual([])
