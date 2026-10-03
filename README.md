@@ -24,12 +24,12 @@ If you know NestJS, the shape will feel familiar.
 - **A request pipeline** — [guards](https://meocord.dev/docs/4.1/guards) decide whether a handler runs, interceptors wrap it, validation and pipes check its input, [cooldowns](https://meocord.dev/docs/4.1/cooldowns) limit how often it runs, and exception filters decide what the user is told.
 - **Dependency injection** — services, providers and lifecycle hooks, wired into controllers with no manual instantiation.
 - **Answers that fit the interaction** — `respond(interaction)` replies, edits or follows up from whatever state the interaction is in, styled by a presenter and a [theme](https://meocord.dev/docs/4.1/theming).
-- **Testing without Discord** — `meocord/testing` runs a handler through its whole pipeline, with [mocks](https://meocord.dev/docs/4.1/testing) for every interaction type.
-- **A CLI** — `meocord create`, `build`, `start`, `register` and `generate`, with Rsbuild builds for development and production, sharding, and [deployment](https://meocord.dev/docs/4.1/deployment) without `node_modules`.
+- **Testing without Discord** — `meocord/testing` runs a handler through its whole pipeline, with [mocks](https://meocord.dev/docs/4.1/mocks) for every interaction type.
+- **A CLI** — `meocord create`, `build`, `start`, `register` and `generate`, with Rsbuild builds for development and production, sharding, and [self-contained builds](https://meocord.dev/docs/4.1/self-contained-builds) that deploy without `node_modules`.
 
 ## Getting started
 
-MeoCord runs on Node.js 22.13 or newer, or Bun. `discord.js` 14 and `dotenv` 18 are its peer dependencies, and `meocord create` installs both.
+MeoCord runs on Node.js 22.13 or newer, or Bun. `discord.js` 14.27 or newer and `dotenv` 18.0.5 or newer are its peer dependencies, and `meocord create` installs both.
 
 ```shell
 npx meocord create my-bot
