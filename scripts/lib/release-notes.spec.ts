@@ -111,9 +111,10 @@ describe('writeReleaseNotes', () => {
 // The notes waiting in this repository, checked now rather than when the release's version step runs
 describe("the repository's notes", () => {
   const notesRoot = path.join(repoRoot, NOTES_DIR)
+  // None wait once a version step has written and deleted them, as on the release pull request
   const versions = existsSync(notesRoot) ? readdirSync(notesRoot) : []
 
-  it.each(versions)('%s reads as the docs site shows it', version => {
-    expect(() => readNotes(path.join(notesRoot, version))).not.toThrow()
+  it('each read as the docs site shows them, when any are waiting', () => {
+    for (const version of versions) expect(() => readNotes(path.join(notesRoot, version)), version).not.toThrow()
   })
 })
