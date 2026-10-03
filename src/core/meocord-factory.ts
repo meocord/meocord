@@ -14,13 +14,15 @@ import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.j
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
-import { appStages, bindAppPresenter, bindGlobalStages, classDecorators, prepareHandlerStages } from '@src/core/handler-pipeline.js'
+import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages } from '@src/core/handler-pipeline.js'
+import { assertStartupClasses, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
+import { meocordClasses } from '@src/core/meocord-classes.js'
 import { appObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import {
   assertProvided,
-  assertTypedParameters,
   reachableClasses,
   bindProvider,
   bindsOwnToken,
@@ -66,6 +68,7 @@ function bindDependencies(container: Container, cls: any, providers: ProviderMap
   // A provided class is bound by its own provider, wherever in the list that provider comes
   if (container.isBound(cls) || providers.has(cls)) return
   if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
+  assertStartupChecked(container, cls)
 
   makeInjectable(cls)
 
@@ -224,12 +227,22 @@ export class MeoCordFactory {
       })
     }
 
-    // Before binding, where inversify would otherwise fail first with an error about compiler options
-    // Its stage classes too, which the container resolves only at their first call
+    // Every class the app runs, its stages and presenter included, checked before binding, where inversify would
+    // otherwise fail first with an error about compiler options, or a guard only at its first call
     const stages = appStages(target as object)
-    const decorators = classDecorators(options.controllers, stages)
-    assertTypedParameters(reachableClasses([...roots, ...decorators.keys()], providers), decorators)
+    const runs = startupClasses({
+      controllers: options.controllers,
+      services: options.services ?? [],
+      providers,
+      stages,
+      presenter: options.presenter,
+      cooldownStore: options.cooldownStore,
+      themeFor: options.themeFor,
+      observers: appObservers(target as object),
+    })
+    assertStartupClasses(runs, { translator: options.i18n !== undefined || providers.has(Translator) })
     const container = new Container()
+    markStartupChecked(container, [...runs.classes, ...meocordClasses()])
     bindGlobalStages(container, stages)
 
     // Bind the Discord client as a constant value
@@ -298,12 +311,7 @@ export class MeoCordFactory {
         return isAppClassToken(token) && (!provider || (isClassProvider(provider) && provider.useClass === token))
       }),
     )
-    assertProvided(
-      container,
-      providers,
-      [...appClasses, ...(options.cooldownStore ? [options.cooldownStore] : [])],
-      '@MeoCord({ providers })',
-    )
+    assertProvided(container, providers, runs.classes, '@MeoCord({ providers })')
     // The store first, after only what it injects: it is ready before anything a call reaches, and shuts down last
     const store = options.cooldownStore
     const lifecycle: LifecycleUnit[] = (store ? resolutionOrder(container, providers, [store, ...order]) : order).map(token => ({

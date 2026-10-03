@@ -1,0 +1,5 @@
+---
+'meocord': patch
+---
+
+Every class an app runs is now checked as it is created: its presenter, its guards, interceptors, filters and pipes, global, on a handler or on a service's `@On` handler, and a guard on any class's method, as well as its controllers, services, providers, cooldown store, `themeFor` class and observers. One that injects `Translator` without `@MeoCord({ i18n })`, or that has no decorator but injects, is refused by name before the bot logs in, where a guard failed only at its first call, a presenter with inversify's `Found unexpected missing metadata on type …` error, and a stage class's missing translator was never caught. In the testing module, a guard or other stage class that injects the Discord `Client` the module doesn't make is named, rather than failing with inversify's error.
