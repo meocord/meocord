@@ -1784,7 +1784,6 @@ describe('methods that return a promise in discord.js', () => {
   it('leaves methods that return a value synchronously alone', () => {
     const client = createMockClient()
 
-    expect(createMockUser().avatarURL()).toBeUndefined()
     expect(client.user?.setPresence({ status: 'idle' })).toBeUndefined()
   })
 

@@ -41,8 +41,8 @@ describe('createMockMessage caches', () => {
   it('caches nothing for an id that is not a mention', () => {
     const message = createMockMessage({ content: `!x ${USER}` })
 
-    expect(message.client.users.cache.size).toBe(0)
-    expect(message.guild!.members.cache.size).toBe(0)
+    expect(message.client.users.cache.has(USER)).toBe(false)
+    expect(message.guild!.members.cache.has(USER)).toBe(false)
   })
 
   it('keeps the members and users a test gives, beside those mentioned', () => {

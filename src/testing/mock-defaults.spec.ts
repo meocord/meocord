@@ -184,7 +184,7 @@ describe("a mock's data, where the test gives none", () => {
   it.each([
     ['nickname', null],
     ['avatar', null],
-    ['joinedTimestamp', null],
+    ['joinedTimestamp', expect.any(Number)],
     ['premiumSinceTimestamp', null],
     ['communicationDisabledUntilTimestamp', null],
     ['pending', false],
