@@ -346,6 +346,8 @@ jobs:
 
   # The packed package installed into one project per test runner its users test with: jest, vitest, node:test and bun
   # test. Each typechecks against the built declarations and runs a test of meocord/testing in that runner's own idiom.
+  # The runners install as the consumers' lockfiles pin them, so a jest or vitest release cannot block a release; the
+  # nightly workflow runs them resolved afresh, and Dependabot moves the locks.
   runners:
     name: Test runners
     runs-on: ubuntu-latest
@@ -373,7 +375,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
-          key: runners-${{ runner.os }}-${{ hashFiles('scripts/runner-consumers/*/package.json') }}
+          key: runners-${{ runner.os }}-${{ hashFiles('scripts/runner-consumers/*/bun.lock') }}
 
       - name: Test each runner against the packed package
         run: bun run verify:runners
