@@ -1,6 +1,21 @@
 // Framework-agnostic mock function, so `meocord/testing` depends on neither jest nor vitest.
 // Both detect it through `_isMockFunction` and read `fn.mock.calls` in their assertions.
 
+// Each call signature of `T`, up to four, as a union: `Parameters` and `ReturnType` read only an overloaded function's
+// last signature, such as the list form of a manager's `fetch`
+type Overloads<T> = T extends {
+  (...args: infer A1): infer R1
+  (...args: infer A2): infer R2
+  (...args: infer A3): infer R3
+  (...args: infer A4): infer R4
+}
+  ? ((...args: A1) => R1) | ((...args: A2) => R2) | ((...args: A3) => R3) | ((...args: A4) => R4)
+  : T
+type CallArgs<T> = Parameters<Overloads<T> & ((...args: any[]) => any)>
+type CallResult<T> = ReturnType<Overloads<T> & ((...args: any[]) => any)>
+// A function for any of `T`'s signatures; declared as a method so a narrower parameter, one overload's, is accepted
+type Implementation<T> = { fn(...args: CallArgs<T>): CallResult<T> }['fn']
+
 /**
  * One call's outcome, as a mock function records it: the value it returned, or the error it threw.
  *
@@ -26,13 +41,13 @@ export interface MockResult<T = unknown> {
  */
 export interface MockState<T extends (...args: any[]) => any = (...args: any[]) => any> {
   /** Arguments from each call, in order. */
-  readonly calls: Parameters<T>[]
+  readonly calls: CallArgs<T>[]
   /** Return / throw result from each call, in order. */
-  readonly results: MockResult<ReturnType<T>>[]
+  readonly results: MockResult<CallResult<T>>[]
   /** The `this` value recorded for each call. */
   readonly instances: any[]
   /** Arguments from the most recent call, or undefined if never called. */
-  readonly lastCall?: Parameters<T>
+  readonly lastCall?: CallArgs<T>
 }
 
 /**
@@ -52,21 +67,21 @@ export interface MockInstance<T extends (...args: any[]) => any = (...args: any[
   /** What the mock has recorded: its calls, their outcomes and their `this`. */
   readonly mock: MockState<T>
   /** Returns `value` from every call, until another implementation is set. */
-  mockReturnValue(value: ReturnType<T>): MockedFunction<T>
+  mockReturnValue(value: CallResult<T>): MockedFunction<T>
   /** Returns `value` from the next call only. */
-  mockReturnValueOnce(value: ReturnType<T>): MockedFunction<T>
+  mockReturnValueOnce(value: CallResult<T>): MockedFunction<T>
   /** Resolves every call to `value`. */
-  mockResolvedValue(value: Awaited<ReturnType<T>>): MockedFunction<T>
+  mockResolvedValue(value: Awaited<CallResult<T>>): MockedFunction<T>
   /** Resolves the next call only to `value`. */
-  mockResolvedValueOnce(value: Awaited<ReturnType<T>>): MockedFunction<T>
+  mockResolvedValueOnce(value: Awaited<CallResult<T>>): MockedFunction<T>
   /** Rejects every call with `value`. */
   mockRejectedValue(value: unknown): MockedFunction<T>
   /** Rejects the next call only with `value`. */
   mockRejectedValueOnce(value: unknown): MockedFunction<T>
   /** Runs `fn` for every call. */
-  mockImplementation(fn: T): MockedFunction<T>
+  mockImplementation(fn: Implementation<T>): MockedFunction<T>
   /** Runs `fn` for the next call only; `*Once` implementations run in the order they were set. */
-  mockImplementationOnce(fn: T): MockedFunction<T>
+  mockImplementationOnce(fn: Implementation<T>): MockedFunction<T>
   /** Forgets the recorded calls, keeping the implementation. */
   mockClear(): MockedFunction<T>
   /** Forgets the recorded calls, and puts back the implementation the mock was created with. */
@@ -83,7 +98,8 @@ export interface MockInstance<T extends (...args: any[]) => any = (...args: any[
  * A mock function with the signature of `T`, and the mock API of {@link MockInstance}.
  *
  * It takes the place of jest's `MockedFunction<T>` and Vitest's `MockedFunction<T>`. The mock factories type each
- * method of a mock with it, so `interaction.reply.mockResolvedValue(...)` type-checks.
+ * method of a mock with it, so `interaction.reply.mockResolvedValue(...)` type-checks. For an overloaded method, such as
+ * a manager's `fetch`, the mock API takes what any of its overloads takes or returns.
  *
  * @group Testing
  * @category Mocks

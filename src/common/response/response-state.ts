@@ -2,12 +2,18 @@ import {
   type APIEmbed,
   type BitFieldResolvable,
   type Interaction,
+  type InteractionDeferReplyOptions,
+  type InteractionDeferUpdateOptions,
   type InteractionEditReplyOptions,
   type InteractionReplyOptions,
+  type InteractionUpdateOptions,
   type Message,
+  type MessageEditOptions,
   MessageFlags,
   MessageFlagsBitField,
   type MessageFlagsResolvable,
+  type MessagePayload,
+  type MessageResolvable,
   type ModalComponentData,
   type JSONEncodable,
   type APIModalInteractionResponseCallbackData,
@@ -155,24 +161,25 @@ export interface ResponseSendOptions {
  * One answer call an interaction got, as `getResponse` from `meocord/testing` reports it: made through `respond()`, or
  * with discord.js directly on a mock interaction.
  *
+ * Its `method` is the Discord method it used; `message.edit` edits the message itself, once the interaction's token
+ * has expired. Its `payload` is what that method received, typed as the method takes it, so checking `method` narrows
+ * it: the options of a reply, an edit or a deferral, the modal shown, or the message deleted.
+ *
  * @group Responses
  */
-export interface ResponseCall {
-  /**
-   * The Discord method it used; `message.edit` edits the message itself, once the interaction's token has expired.
-   */
-  method:
-    | 'deferReply'
-    | 'deferUpdate'
-    | 'reply'
-    | 'update'
-    | 'editReply'
-    | 'followUp'
-    | 'deleteReply'
-    | 'showModal'
-    | 'message.edit'
-  /** What was sent, as that method received it; none for a deferral or a deletion. */
-  payload?: unknown
+export type ResponseCall = (
+  | { method: 'reply' | 'followUp'; payload?: string | MessagePayload | InteractionReplyOptions }
+  | { method: 'update'; payload?: string | MessagePayload | InteractionUpdateOptions }
+  | { method: 'editReply'; payload?: string | MessagePayload | InteractionEditReplyOptions }
+  | { method: 'message.edit'; payload?: string | MessagePayload | MessageEditOptions }
+  | {
+      method: 'showModal'
+      payload?: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData | APIModalInteractionResponseCallbackData
+    }
+  | { method: 'deferReply'; payload?: InteractionDeferReplyOptions }
+  | { method: 'deferUpdate'; payload?: InteractionDeferUpdateOptions }
+  | { method: 'deleteReply'; payload?: MessageResolvable | '@original' }
+) & {
   /** What the call rejected with, such as the `DiscordAPIError` for a refused call; absent when it succeeded. */
   error?: unknown
 }
@@ -502,7 +509,8 @@ export class InteractionResponse implements ResponseState {
 
   /** Makes a Discord call, recorded as it is made so the order stays as issued, and marked with its error if it rejects. */
   private async call<T>(method: ResponseCall['method'], payload: unknown, run: () => Promise<T>): Promise<T> {
-    const call: ResponseCall = { method, payload }
+    // What `method` received, which the call sites pass as that method takes it
+    const call = { method, payload } as ResponseCall
     stampCall(call)
     this.calls.push(call)
     try {

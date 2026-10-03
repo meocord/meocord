@@ -50,6 +50,7 @@ import {
   RoleSelectMenuInteraction,
   StringSelectMenuInteraction,
   type TextBasedChannel,
+  type AnyThreadChannel,
   TextChannel,
   ThreadChannel,
   ThreadMember,
@@ -67,6 +68,18 @@ import {
   MediaChannel,
   NewsChannel,
   SnowflakeUtil,
+  type AutocompleteInteraction,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  type CommandInteraction,
+  type ContextMenuCommandInteraction,
+  type MessageComponentInteraction,
+  type MessageContextMenuCommandInteraction,
+  type ModalSubmitInteraction,
+  type OmitPartialGroupDMChannel,
+  type PartialGroupDMChannel,
+  type PrimaryEntryPointCommandInteraction,
+  type UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { createDiscordError } from './response.js'
 import { stampCall } from '@src/common/response/call-order.js'
@@ -80,7 +93,8 @@ import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
 // ---------------------------------------------------------------------------
 
 /**
- * A mock of `T`: every method a mock function, and every nested object mocked in turn, five levels deep.
+ * A mock of `T`: every method a mock function, and every nested object mocked in turn, five levels deep, including a
+ * discord.js structure that may be absent, such as a message's `member`, when it is present.
  *
  * It is what the mock factories return. It is assignable wherever `T` is expected, and each method takes
  * `mockResolvedValue` and the rest of {@link MockInstance}.
@@ -96,11 +110,17 @@ import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
 export type DeepMocked<T, Depth extends number[] = []> = Depth['length'] extends 5
   ? T
   : {
-      -readonly [K in keyof T]: T[K] extends (...args: infer A) => infer R
-        ? MockedFunction<(...args: A) => R>
+      -readonly [K in keyof T]: T[K] extends (...args: any[]) => any
+        ? MockedFunction<T[K]>
         : T[K] extends object
           ? DeepMocked<T[K], [...Depth, 0]>
-          : T[K]
+          : // A structure of the mock itself that may be absent, such as a message's member, is mocked when present;
+            // deeper ones keep their discord.js type, which costs a consumer's typecheck far less
+            Depth extends []
+            ? NonNullable<T[K]> extends Base
+              ? DeepMocked<NonNullable<T[K]>, [...Depth, 0]> | Extract<T[K], null | undefined>
+              : T[K]
+            : T[K]
     } & T
 
 /**
@@ -495,7 +515,7 @@ function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[
         payload && typeof payload === 'object' && 'withResponse' in payload
           ? Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'withResponse'))
           : payload
-      const call: ResponseCall = { method, payload: sent }
+      const call = { method, payload: sent } as ResponseCall
       stampCall(call)
       log.push(call)
       try {
@@ -538,6 +558,30 @@ const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object
 // createMockInteraction
 // ---------------------------------------------------------------------------
 
+// An interaction class's instance with the cache type `C`: discord.js declares each generic over it, and
+// `Class.prototype` reads it as `any`, which passes for a cached server's and a raw one's alike
+type WithCache<T, C extends CacheType> =
+  T extends ChatInputCommandInteraction<any> ? ChatInputCommandInteraction<C>
+  : T extends AutocompleteInteraction<any> ? AutocompleteInteraction<C>
+  : T extends MessageContextMenuCommandInteraction<any> ? MessageContextMenuCommandInteraction<C>
+  : T extends UserContextMenuCommandInteraction<any> ? UserContextMenuCommandInteraction<C>
+  : T extends PrimaryEntryPointCommandInteraction<any> ? PrimaryEntryPointCommandInteraction<C>
+  : T extends ContextMenuCommandInteraction<any> ? ContextMenuCommandInteraction<C>
+  : T extends CommandInteraction<any> ? CommandInteraction<C>
+  : T extends ButtonInteraction<any> ? ButtonInteraction<C>
+  : T extends StringSelectMenuInteraction<any> ? StringSelectMenuInteraction<C>
+  : T extends UserSelectMenuInteraction<any> ? UserSelectMenuInteraction<C>
+  : T extends RoleSelectMenuInteraction<any> ? RoleSelectMenuInteraction<C>
+  : T extends MentionableSelectMenuInteraction<any> ? MentionableSelectMenuInteraction<C>
+  : T extends ChannelSelectMenuInteraction<any> ? ChannelSelectMenuInteraction<C>
+  : T extends MessageComponentInteraction<any> ? MessageComponentInteraction<C>
+  : T extends ModalSubmitInteraction<any> ? ModalSubmitInteraction<C>
+  : T extends BaseInteraction<any> ? BaseInteraction<C>
+  : T
+
+// What makes an interaction one outside a server: no guild, no member, or a DM channel
+type OutsideServer = { guild: null } | { member: null } | { channel: DMChannel | PartialGroupDMChannel }
+
 /**
  * Creates a mock instance of a discord.js class, such as an interaction, keeping its prototype so `instanceof` holds.
  *
@@ -563,6 +607,9 @@ const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object
  * {@link getResponse} reports every answer the interaction got. Every method is a mock function, and one that returns a
  * promise in discord.js resolves.
  *
+ * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
+ * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
+ *
  * @param Class - The discord.js class to mock.
  * @param props - Values for properties the class declares `readonly`; see {@link MockProps}.
  *
@@ -586,7 +633,12 @@ const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
   props?: MockProps<T>,
-): DeepMocked<T> {
+): DeepMocked<T>
+export function createMockInteraction<T extends object>(
+  Class: InteractionClass<T>,
+  props: MockProps<WithCache<T, CacheType>> & OutsideServer,
+): DeepMocked<WithCache<T, CacheType>>
+export function createMockInteraction<T extends object>(Class: InteractionClass<T>, props?: MockProps<T>): DeepMocked<T> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
 
@@ -1129,6 +1181,9 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   return guild
 }
 
+// The type discord.js gives a channel of this class: a thread is a public or a private one, never the base class
+type ChannelOf<T> = T extends ThreadChannel ? AnyThreadChannel : T
+
 /**
  * Creates a mock channel of the given class, such as `TextChannel`, `ThreadChannel` or `DMChannel`.
  *
@@ -1138,7 +1193,8 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
  * The managers the class has are ready to stub: `messages`, `threads` on text, announcement, forum and media channels,
  * and `members` on threads, each with a real, empty `cache` and the channel as its `channel`, or `thread`. A subclass gets the managers of the class it extends.
  * Type guards such as `isTextBased()`, `isDMBased()` and `isThread()` run discord.js's own logic, so each answers what
- * the channel is.
+ * the channel is. A thread is typed as discord.js types every thread it gives, a public or a private one, so it fits
+ * an interaction's `channel`, a guild's channels and the `threadCreate` event.
  *
  * @param Class - The discord.js channel class to mock.
  * @param props - Values for the channel's properties, such as its `id`, `name` or `topic`; see {@link MockProps}.
@@ -1156,7 +1212,10 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
  * @category Mocks
  * @see {@link createMockGuild}
  */
-export function createMockChannel<T extends BaseChannel>(Class: InteractionClass<T>, props: MockProps<T> = {}): DeepMocked<T> {
+export function createMockChannel<T extends BaseChannel>(
+  Class: InteractionClass<T>,
+  props: MockProps<T> = {},
+): DeepMocked<ChannelOf<T>> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
   instance.id = nextSnowflake()
   const is = (Base: { prototype: object }) => Base.prototype.isPrototypeOf(Class.prototype) || Class === Base
@@ -1196,7 +1255,7 @@ export function createMockChannel<T extends BaseChannel>(Class: InteractionClass
     const method = findPrototypeMethod(instance, name)
     if (method !== null) stubs.set(name, createMockFn(() => method.call(channel)))
   }
-  return channel as DeepMocked<T>
+  return channel as DeepMocked<ChannelOf<T>>
 }
 
 const CHANNEL_TYPE_GUARDS = ['isThread', 'isTextBased', 'isDMBased', 'isVoiceBased', 'isThreadOnly', 'isSendable'] as const
@@ -1630,7 +1689,8 @@ function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
  * and `reply()` resolve to a new mock message. Without overrides the message is empty, in a server, from a new
  * person who is its `member`; with `guild: null` it is a direct message. Give `author` to send several messages as
  * one user, such as to reach a per-user cooldown. An author given, and the users, roles and channels the content
- * mentions, are cached as the gateway delivers them.
+ * mentions, are cached as the gateway delivers them. It is typed as discord.js emits a message, never in a group DM,
+ * so it fits `messageCreate` and the other message events.
  *
  * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *
@@ -1653,7 +1713,9 @@ function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
  * @see {@link MockMessageOverrides}
  * @see {@link createMockGuild}
  */
-export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMocked<Message> & { deleted: boolean } {
+export function createMockMessage(
+  overrides: MockMessageOverrides = {},
+): DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { deleted: boolean } {
   const instance = Object.create(Message.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
 
@@ -1762,7 +1824,7 @@ export function createMockMessage(overrides: MockMessageOverrides = {}): DeepMoc
     }),
   )
 
-  return stubDeep(instance, stubs) as DeepMocked<Message> & { deleted: boolean }
+  return stubDeep(instance, stubs) as DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { deleted: boolean }
 }
 
 // ---------------------------------------------------------------------------

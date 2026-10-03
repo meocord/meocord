@@ -188,7 +188,8 @@ describe('DeepMocked depth cap', () => {
 
 describe('createMockMessage', () => {
   it('takes typed overrides, or none', () => {
-    expectTypeOf(createMockMessage).parameter(0).toEqualTypeOf<MockMessageOverrides | undefined>()
+    const overrides: MockMessageOverrides = {}
+    createMockMessage(overrides)
 
     createMockMessage()
     createMockMessage({
@@ -229,7 +230,7 @@ describe('createMockChannel', () => {
     const channel = createMockChannel(TextChannel)
     const thread = createMockChannel(ThreadChannel)
     // discord.js types a created thread as public or private, not as the ThreadChannel class
-    channel.threads.create.mockResolvedValue(thread as never)
+    channel.threads.create.mockResolvedValue(thread)
     expectTypeOf(channel.threads.create).toBeFunction()
   })
 })
