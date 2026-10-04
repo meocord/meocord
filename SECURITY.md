@@ -5,10 +5,13 @@
 Security fixes land on the latest minor of the current major line and are published to npm as a
 patch release. Older majors are not backported.
 
-| Version | Supported |
-| ------- | --------- |
-| 4.x     | Yes       |
-| < 4.0   | No        |
+| Version               | Supported                           |
+| --------------------- | ----------------------------------- |
+| Latest minor of 4.x   | Yes                                 |
+| Earlier minors of 4.x | No: upgrade to the latest 4.x minor |
+| < 4.0                 | No                                  |
+
+An earlier minor whose fix is not backported is deprecated on npm, with the advisory it is affected by.
 
 Prerelease channels (`alpha`, `beta`) are not covered — move to `latest` before reporting.
 
