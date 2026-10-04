@@ -15,17 +15,17 @@
 
 If you know NestJS, the shape will feel familiar.
 
-**Documentation:** [meocord.dev](https://meocord.dev/docs/4.1) · [Getting started](https://meocord.dev/docs/4.1/getting-started) · [API reference](https://meocord.dev/docs/4.1/api) · [Upgrading to 4.1](https://meocord.dev/docs/4.1/migrating) · [Changelog](https://meocord.dev/docs/4.1/changelog)
+**Documentation:** [meocord.dev](https://meocord.dev/docs/latest) · [Getting started](https://meocord.dev/docs/latest/getting-started) · [API reference](https://meocord.dev/docs/latest/api) · [Upgrading to 4.1](https://meocord.dev/docs/latest/migrating) · [Changelog](https://meocord.dev/docs/latest/changelog)
 
 ## Features
 
-- **Controllers for every interaction** — [slash commands](https://meocord.dev/docs/4.1/slash-commands) and their subcommands, autocomplete, [buttons, selects and modals](https://meocord.dev/docs/4.1/components) routed by customId, context menus, message commands and reactions, each a decorated method.
-- **Message commands** — [commands typed in chat](https://meocord.dev/docs/4.1/message-commands), from a pattern such as `ban {target:member} {reason...?}`: typed params, flags and lists, a usage reply when a message does not fit, and built-in help.
-- **A request pipeline** — [guards](https://meocord.dev/docs/4.1/guards) decide whether a handler runs, interceptors wrap it, validation and pipes check its input, [cooldowns](https://meocord.dev/docs/4.1/cooldowns) limit how often it runs, and exception filters decide what the user is told.
+- **Controllers for every interaction** — [slash commands](https://meocord.dev/docs/latest/slash-commands) and their subcommands, autocomplete, [buttons, selects and modals](https://meocord.dev/docs/latest/components) routed by customId, context menus, message commands and reactions, each a decorated method.
+- **Message commands** — [commands typed in chat](https://meocord.dev/docs/latest/message-commands), from a pattern such as `ban {target:member} {reason...?}`: typed params, flags and lists, a usage reply when a message does not fit, and built-in help.
+- **A request pipeline** — [guards](https://meocord.dev/docs/latest/guards) decide whether a handler runs, interceptors wrap it, validation and pipes check its input, [cooldowns](https://meocord.dev/docs/latest/cooldowns) limit how often it runs, and exception filters decide what the user is told.
 - **Dependency injection** — services, providers and lifecycle hooks, wired into controllers with no manual instantiation.
-- **Answers that fit the interaction** — `respond(interaction)` replies, edits or follows up from whatever state the interaction is in, styled by a presenter and a [theme](https://meocord.dev/docs/4.1/theming).
-- **Testing without Discord** — `meocord/testing` runs a handler through its whole pipeline, with [mocks](https://meocord.dev/docs/4.1/mocks) for every interaction type.
-- **A CLI** — `meocord create`, `build`, `start`, `register` and `generate`, with Rsbuild builds for development and production, sharding, and [self-contained builds](https://meocord.dev/docs/4.1/self-contained-builds) that deploy without `node_modules`.
+- **Answers that fit the interaction** — `respond(interaction)` replies, edits or follows up from whatever state the interaction is in, styled by a presenter and a [theme](https://meocord.dev/docs/latest/theming).
+- **Testing without Discord** — `meocord/testing` runs a handler through its whole pipeline, with [mocks](https://meocord.dev/docs/latest/mocks) for every interaction type.
+- **A CLI** — `meocord create`, `build`, `start`, `register` and `generate`, with Rsbuild builds for development and production, sharding, and [self-contained builds](https://meocord.dev/docs/latest/self-contained-builds) that deploy without `node_modules`.
 
 ## Getting started
 
@@ -38,7 +38,7 @@ cp .env.example .env       # then put your bot token in DISCORD_TOKEN
 npx meocord start --dev    # development, restarting on every change
 ```
 
-The new project comes with a sample of each controller type, a guard, a presenter, a service and a spec for each. [Getting started](https://meocord.dev/docs/4.1/getting-started) walks through it, and [Your first command](https://meocord.dev/docs/4.1/first-command) adds one.
+The new project comes with a sample of each controller type, a guard, a presenter, a service and a spec for each. [Getting started](https://meocord.dev/docs/latest/getting-started) walks through it, and [Your first command](https://meocord.dev/docs/latest/first-command) adds one.
 
 ## Example
 
@@ -77,18 +77,18 @@ export class GreetController {
 export default class App {}
 ```
 
-The command's options arrive as the handler's second argument. [Slash commands](https://meocord.dev/docs/4.1/slash-commands) covers options, subcommands and registration.
+The command's options arrive as the handler's second argument. [Slash commands](https://meocord.dev/docs/latest/slash-commands) covers options, subcommands and registration.
 
 ## Documentation
 
-Everything else is on [meocord.dev](https://meocord.dev/docs/4.1), for each version:
+Everything else is on [meocord.dev](https://meocord.dev/docs/latest), for each version:
 
-| To                                  | Read                                                            |
-| ----------------------------------- | --------------------------------------------------------------- |
-| Learn MeoCord from the start        | [Getting started](https://meocord.dev/docs/4.1/getting-started) |
-| Look up a decorator, type or helper | [API reference](https://meocord.dev/docs/4.1/api)               |
-| Upgrade from 4.0, or from 3.x       | [Upgrading](https://meocord.dev/docs/4.1/migrating)             |
-| See what changed in each release    | [Changelog](https://meocord.dev/docs/4.1/changelog)             |
+| To                                  | Read                                                               |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| Learn MeoCord from the start        | [Getting started](https://meocord.dev/docs/latest/getting-started) |
+| Look up a decorator, type or helper | [API reference](https://meocord.dev/docs/latest/api)               |
+| Upgrade from 4.0, or from 3.x       | [Upgrading](https://meocord.dev/docs/latest/migrating)             |
+| See what changed in each release    | [Changelog](https://meocord.dev/docs/latest/changelog)             |
 
 ## Support
 
@@ -108,28 +108,28 @@ These sections moved to meocord.dev. Their headings stay here so that links from
 
 ### Theming
 
-[Theming](https://meocord.dev/docs/4.1/theming) on meocord.dev.
+[Theming](https://meocord.dev/docs/latest/theming) on meocord.dev.
 
 ### Themes per server and per user
 
-[Themes per server and per user](https://meocord.dev/docs/4.1/theming#per-server-and-per-user) on meocord.dev.
+[Themes per server and per user](https://meocord.dev/docs/latest/theming#per-server-and-per-user) on meocord.dev.
 
 ### Adding tokens of your own
 
-[Adding tokens of your own](https://meocord.dev/docs/4.1/theming#adding-tokens-of-your-own) on meocord.dev.
+[Adding tokens of your own](https://meocord.dev/docs/latest/theming#adding-tokens-of-your-own) on meocord.dev.
 
 ### Where calls are counted
 
-[Where calls are counted](https://meocord.dev/docs/4.1/cooldowns#where-calls-are-counted) on meocord.dev.
+[Where calls are counted](https://meocord.dev/docs/latest/cooldowns#where-calls-are-counted) on meocord.dev.
 
 ### Store recipes
 
-[Cooldown stores](https://meocord.dev/docs/4.1/recipes/cooldown-stores) on meocord.dev.
+[Cooldown stores](https://meocord.dev/docs/latest/recipes/cooldown-stores) on meocord.dev.
 
 ### Stack traces
 
-[Stack traces](https://meocord.dev/docs/4.1/configuration#stack-traces) on meocord.dev.
+[Stack traces](https://meocord.dev/docs/latest/configuration#stack-traces) on meocord.dev.
 
 ### Running tests
 
-[Running tests](https://meocord.dev/docs/4.1/testing#running-tests) on meocord.dev.
+[Running tests](https://meocord.dev/docs/latest/testing#running-tests) on meocord.dev.
