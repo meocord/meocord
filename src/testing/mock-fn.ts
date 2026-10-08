@@ -150,8 +150,10 @@ const created = new Set<WeakRef<MockInstance>>()
 const collected = new FinalizationRegistry<WeakRef<MockInstance>>(ref => created.delete(ref))
 
 /**
- * A mock function a test runner makes, as {@link useMockFn} takes it: callable, recording its calls in `mock.calls`,
- * with `mockImplementation`, `mockClear` and `mockReset`. Vitest's `vi.fn`, jest's `jest.fn` and bun's `mock` make one.
+ * A mock function a test runner makes, as {@link useMockFn} takes it.
+ *
+ * It is callable, records its calls in `mock.calls`, and has `mockImplementation`, `mockClear` and `mockReset`.
+ * Vitest's `vi.fn`, jest's `jest.fn` and bun's `mock` make one.
  *
  * @group Testing
  * @category Mocks
@@ -170,8 +172,9 @@ export interface RunnerMock {
 }
 
 /**
- * A test runner's mock function factory, such as `vi.fn`: called with the implementation a mock starts with, it returns
- * the runner's mock. See {@link useMockFn}.
+ * A test runner's mock function factory, such as `vi.fn`.
+ *
+ * Called with the implementation a mock starts with, it returns the runner's mock. See {@link useMockFn}.
  *
  * @group Testing
  * @category Mocks
