@@ -619,8 +619,14 @@ function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: Resp
     mockResolvedValue: (value: unknown) => () => Promise.resolve(value),
     mockRejectedValue: (value: unknown) => () => Promise.reject(value),
   }
+  // In place of the mock's own, keeping whether each is among its keys
   const define = (name: string, value: unknown) =>
-    Object.defineProperty(mock, name, { value, writable: true, enumerable: false, configurable: true })
+    Object.defineProperty(mock, name, {
+      value,
+      writable: true,
+      enumerable: Object.getOwnPropertyDescriptor(mock, name)?.enumerable ?? false,
+      configurable: true,
+    })
   for (const [name, behaviourOf] of Object.entries(setters)) {
     define(name, (value?: unknown) => (always(record(behaviourOf(value))), mock))
     define(`${name}Once`, (value?: unknown) => (once(record(behaviourOf(value))), mock))
@@ -1062,8 +1068,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
  */
 function stubCallable(): Mock {
   const fn = createMockFn()
-  // Any property beyond the mock's own API is a nested mock, made on first read and kept on the function. Its
-  // prototype makes them rather than a Proxy around it, so it stays the plain mock function a runner's matchers read
+  // Any property beyond the mock's own API is a nested mock, made on first read and kept on the function, out of its
+  // keys. Its prototype makes them rather than a Proxy around it, so it stays the plain mock function matchers read
   const inherited = Object.getPrototypeOf(fn) as object
   Object.setPrototypeOf(
     fn,
@@ -1073,7 +1079,7 @@ function stubCallable(): Mock {
         // Never thenable — otherwise awaiting a mock hangs on itself
         if (prop === 'then') return undefined
         const nested = stubCallable()
-        Object.defineProperty(receiver, prop, { value: nested, writable: true, enumerable: true, configurable: true })
+        Object.defineProperty(receiver, prop, { value: nested, writable: true, enumerable: false, configurable: true })
         return nested
       },
     }),
