@@ -1,7 +1,7 @@
 /**
- * Checks the JSDoc of every public symbol with a `@group` and compiles its `@example`, and the README's blocks, against
- * the built package, after `bun run build`. `--coverage` lists the symbols still missing parts; `--fix` moves every
- * documentation link onto the package's own line, as a new minor version needs.
+ * Checks that every public symbol has a `@group`, checks its JSDoc and compiles its `@example`, and the README's
+ * blocks, against the built package, after `bun run build`. `--coverage` lists the symbols still missing parts; `--fix`
+ * moves every documentation link onto the package's own line, as a new minor version needs.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
@@ -396,7 +396,12 @@ function main(): void {
   }
 
   for (const item of symbols.values()) {
-    if (!item.group) continue
+    // The API reference files every public symbol under its @group, from the JSDoc of its own declaration; a re-export
+    // has its target's
+    if (!item.group) {
+      problems.push(`${item.entries.join(', ')}'s ${item.name} has no @group tag; give its declaration a JSDoc comment of its own with one.`)
+      continue
+    }
     if (!GROUPS.includes(item.group)) problems.push(`${item.name}: @group ${item.group} is not one of ${GROUPS.join(', ')}.`)
     // A symbol with a @group follows the whole standard: the reference renders it from these
     const sentences = sentenceCount(item.summary)
