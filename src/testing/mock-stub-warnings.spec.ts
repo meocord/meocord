@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { GuildMember, TextChannel, ThreadChannel, VoiceChannel } from 'discord.js'
+import { DMChannel, GuildMember, TextChannel, ThreadChannel, VoiceChannel } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { createMockChannel, createMockInteraction, createMockMessage } from './mock-interaction.js'
@@ -29,6 +29,12 @@ describe('a boolean discord.js computes, which a mock reads as a placeholder', (
     void createMockChannel(VoiceChannel).joinable
 
     expect(warned).toEqual([expect.stringMatching(/^VoiceChannel\.joinable reads a placeholder.*useStrictMocks\(\)/s)])
+  })
+
+  it("names the variable to set in camel case, a class's leading acronym included", () => {
+    void createMockChannel(DMChannel).partial
+
+    expect(warned).toEqual([expect.stringContaining('such as dmChannel.partial = false')])
   })
 
   it('says nothing for one the test set', () => {
