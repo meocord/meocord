@@ -1,11 +1,13 @@
 import 'reflect-metadata'
-import { ChatInputCommandInteraction, PermissionFlagsBits, PermissionsBitField, User } from 'discord.js'
+import { ChatInputCommandInteraction, PermissionFlagsBits, PermissionsBitField, TextChannel, User } from 'discord.js'
 import { Command, Controller, Guard, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createChatInputOptions, createMockGuild, createMockInteraction, createMockRawMember, createMockUser } from './mock-interaction.js'
+import { createChatInputOptions, createMockChannel, createMockGuild, createMockInteraction, createMockRawMember, createMockUser } from './mock-interaction.js'
 import { getResponse } from './response.js'
+import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 
 const SERVER = '100000000000000001'
 
@@ -61,6 +63,13 @@ describe('an interaction given a raw member', () => {
     expect(command.memberPermissions!.has(PermissionFlagsBits.BanMembers)).toBe(false)
   })
 
+  it('has no channel, only its channelId, as discord.js caches none from a server it is not in', () => {
+    const command = createMockInteraction(ChatInputCommandInteraction, { guildId: SERVER, member: createMockRawMember() })
+
+    expect(command.channel).toBeNull()
+    expect(command.channelId).toEqual(expect.any(String))
+  })
+
   it("gives a user option's member as the resolved member Discord sends, with no user of its own", () => {
     const target = createMockUser()
     const command = createMockInteraction(ChatInputCommandInteraction, {
@@ -77,13 +86,28 @@ describe('an interaction given a raw member', () => {
   })
 
   it.each([
-    ['with a guild', () => ({ guildId: SERVER, guild: createMockGuild({ id: SERVER }) }), /server the bot isn't in.*guild/],
     ['without a guildId', () => ({}), /server the bot isn't in.*guildId/],
     ['with another user', () => ({ guildId: SERVER, user: createMockUser({ id: '200000000000000002' }) }), /200000000000000001.*200000000000000002/],
+    ['with a channel', () => ({ guildId: SERVER, channel: createMockChannel(TextChannel) }), /server the bot isn't in.*channel/],
   ] as const)('is refused %s, naming what disagrees', (_name, more, message) => {
     const member = createMockRawMember({ user: { id: '200000000000000001' } })
 
     expect(() => createMockInteraction(ChatInputCommandInteraction, { member, ...more() } as never)).toThrow(message)
+  })
+
+  it('keeps a raw-shaped member given with a guild as before, a cached server, and warns once to leave the guild out', () => {
+    const warned: string[] = []
+    forgetDeprecationWarnings()
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
+    const guild = createMockGuild({ id: SERVER })
+    const member = createMockRawMember()
+
+    const command = createMockInteraction(ChatInputCommandInteraction, { guildId: SERVER, guild, member } as never)
+    createMockInteraction(ChatInputCommandInteraction, { guildId: SERVER, guild, member: createMockRawMember() } as never)
+
+    expect([command.guild, command.member, command.inCachedGuild(), command.inRawGuild(), command.memberPermissions]).toEqual([guild, member, true, false, null])
+    expect(warned).toEqual([expect.stringMatching(/raw member.*guild.*leave the guild out/)])
+    vi.restoreAllMocks()
   })
 
   it('runs through dispatch as in Discord: a guard that reads a cached member throws, and the answers are reported', async () => {
