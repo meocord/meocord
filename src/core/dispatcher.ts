@@ -132,6 +132,15 @@ export interface DispatcherOptions {
   routeTies?: RouteTies
 }
 
+/** A handler of a message, by name, and how to run it in a call. */
+interface MessageRun {
+  name: string
+  run: (call: Call) => Promise<boolean>
+}
+
+/** How long a message's handler may take, with others waiting after it, before it is named as slow. */
+const SLOW_HANDLER_MS = 5000
+
 /** One dispatched call: when it arrived, the fallback that answers it, and who is told what it did. */
 interface Call {
   startedAt?: number
@@ -478,16 +487,67 @@ export class Dispatcher {
     } catch (error) {
       await handleUnroutedError(this.container, [message], error, this.runOptions(call))
     }
+    // The matched handler, then every listener, each resolved from the container only as it starts
+    const runs: MessageRun[] = []
     if (target) {
       const { route, params, start, given } = target
       noteInvocation(message, `${start}${commandWordsOf(route.tokens).join(' ')}`)
       const hooks = messageCommandHooks(route, params, message, start, given, this.messageOptions.types)
-      await this.invokeHandler(this.getInstance(route.controllerClass), route.method, [message, params], call, hooks)
+      runs.push({
+        name: `${route.controllerClass.name}.${route.method}`,
+        run: at => this.invokeHandler(this.getInstance(route.controllerClass), route.method, [message, params], at, hooks),
+      })
     }
-
     for (const { controllerClass, method } of this.messageListeners) {
-      await this.invokeHandler(this.getInstance(controllerClass), method, [message], call)
+      runs.push({
+        name: `${controllerClass.name}.${method}`,
+        run: at => this.invokeHandler(this.getInstance(controllerClass), method, [message], at),
+      })
     }
+    if (this.messageOptions.handlers === 'concurrent') await this.runTogether(runs, call)
+    else await this.runInTurn(runs, call)
+  }
+
+  /** Runs a message's handlers one after another, warning once about one that held the rest back for long. */
+  private async runInTurn(runs: readonly MessageRun[], call: Call): Promise<void> {
+    const warn = this.messageOptions.slowHandlerWarning !== false
+    for (const [index, { name, run }] of runs.entries()) {
+      const started = performance.now()
+      await run(call)
+      const waiting = runs.length - 1 - index
+      if (warn && waiting > 0) this.warnSlowOnce(name, performance.now() - started, waiting)
+    }
+  }
+
+  /**
+   * Starts a message's handlers together and settles once all have. Each is reported as settled in the order the
+   * handlers are listed, whichever settles first, and a call that rejects, rejects this once every one has settled.
+   */
+  private async runTogether(runs: readonly MessageRun[], call: Call): Promise<void> {
+    const { record } = call
+    const reports = runs.map(() => [] as Parameters<DispatchRecorder['settled']>[])
+    const results = await Promise.allSettled(
+      runs.map(({ run }, index) =>
+        run(record ? { ...call, record: { settled: (...report) => reports[index].push(report), unhandled: error => record.unhandled(error) } } : call),
+      ),
+    )
+    for (const report of reports.flat()) record?.settled(...report)
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed) throw failed.reason
+  }
+
+  /** The message handlers already warned about as slow, so each is named once. */
+  private readonly warnedSlow = new Set<string>()
+
+  /** Warns, once per handler, that it took `SLOW_HANDLER_MS` or longer with `waiting` handlers held back behind it. */
+  private warnSlowOnce(name: string, took: number, waiting: number): void {
+    if (took < SLOW_HANDLER_MS || this.warnedSlow.has(name)) return
+    this.warnedSlow.add(name)
+    const held = waiting === 1 ? 'the listener after it' : `the ${waiting} listeners after it`
+    this.logger.warn(
+      `${name} took ${(took / 1000).toFixed(1)} s on a message, and held back ${held}. ` +
+        "@MeoCord({ messages: { handlers: 'concurrent' } }) runs them side by side; messages: { slowHandlerWarning: false } turns this off.",
+    )
   }
 
   /**

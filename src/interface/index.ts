@@ -707,6 +707,27 @@ export interface MessageCommandOptions {
    * @defaultValue `false`
    */
   help?: boolean | MessageHelpOptions
+  /**
+   * How a message's handlers run: the patterned handler it matched, then every `@MessageHandler()` listener.
+   * `'sequential'` runs each once the one before it has settled, so a slow command delays the listeners after it.
+   * `'concurrent'` starts them together and settles once all have: each keeps its own guards, interceptors, filters
+   * and observers, and no order holds between them, so a listener can run before the command has written what it
+   * reads. The built-in help and a command's usage are answered first either way.
+   * @defaultValue `'sequential'`; the next major version (5.0) may run them concurrently by default
+   *
+   * @example
+   * ```ts
+   * @MeoCord({ controllers: [Commands, Moderation], messages: { prefix: '!', handlers: 'concurrent' } })
+   * class App {}
+   * ```
+   */
+  handlers?: 'sequential' | 'concurrent'
+  /**
+   * Warns, once per handler, when a message's handler takes 5 seconds or more with listeners waiting after it, under
+   * `handlers: 'sequential'`, naming the handler and how many it held back.
+   * @defaultValue `true`
+   */
+  slowHandlerWarning?: boolean
 }
 
 /**
