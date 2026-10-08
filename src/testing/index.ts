@@ -23,8 +23,8 @@ export {
 } from './mock-interaction.js'
 export type { DeepMocked, ChatInputOptions, MockGuildOverrides, MockMemberOverrides, MockMessageOverrides, MockProps } from './mock-interaction.js'
 
-export { clearAllMocks, createMockFn, isMockFunction, resetAllMocks } from './mock-fn.js'
-export type { Mock, MockedFunction, MockInstance, MockResult, MockState } from './mock-fn.js'
+export { clearAllMocks, createMockFn, isMockFunction, resetAllMocks, useMockFn } from './mock-fn.js'
+export type { Mock, MockedFunction, MockFnFactory, MockInstance, MockResult, MockState, RunnerMock } from './mock-fn.js'
 
 export { resolveRoute, findRouteConflicts } from './routing.js'
 export type { ComponentCommandType, MessageToResolve, ResolvedRoute, RouteConflict } from './routing.js'

@@ -575,15 +575,17 @@ function defineCreatedTime(instance: object, generatedId: string | undefined): v
 /** Where a mock interaction keeps every answer it got, through respond() or discord.js directly, in order. */
 export const RESPONSE_LOG: unique symbol = Symbol('response log')
 
-const ANSWER_METHODS = ['reply', 'deferReply', 'editReply', 'followUp', 'deleteReply', 'update', 'deferUpdate', 'showModal'] as const
+type Behaviour = (...args: any[]) => any
 
 /**
- * `mock`, recording each call in `log` as it is made, with what it sent and, once it settles, what it rejected with.
- * `withResponse` is how a call asks discord.js for the message back, not part of what it sends, so it is left out.
+ * A mock of an answer method, `impl` its behaviour, that records each call in `log` as it is made, with what it sent
+ * and, once it settles, what it rejected with. The record wraps every behaviour the mock is given, its own and any a
+ * test sets, so the mock stays the plain mock function a runner's matchers read, bun's included. `withResponse` is how
+ * a call asks discord.js for the message back, not part of what it sends, so it is left out.
  */
-function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[]): Mock {
-  return new Proxy(mock, {
-    apply(target, self, args: unknown[]) {
+function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: ResponseCall[]): Mock {
+  const record = (behaviour: Behaviour): Behaviour =>
+    function (this: unknown, ...args: unknown[]) {
       const [payload] = args
       const sent =
         payload && typeof payload === 'object' && 'withResponse' in payload
@@ -593,7 +595,7 @@ function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[
       stampCall(call)
       log.push(call)
       try {
-        const result: unknown = Reflect.apply(target, self, args)
+        const result: unknown = Reflect.apply(behaviour, this, args)
         // Recorded and passed on, so a rejection nobody awaits is unhandled in the test, as it is on a bot
         if (result instanceof Promise) {
           return result.then(undefined, (error: unknown) => {
@@ -606,8 +608,31 @@ function recorded(method: ResponseCall['method'], mock: Mock, log: ResponseCall[
         call.error = error
         throw error
       }
-    },
-  })
+    }
+  const mock = createMockFn(record(impl)) as Mock & Record<string, unknown>
+  const always = mock.mockImplementation.bind(mock) as (fn: Behaviour) => unknown
+  const once = mock.mockImplementationOnce.bind(mock) as (fn: Behaviour) => unknown
+  // Each way a test sets a behaviour goes through the record, a runner's own extras included where it has them
+  const setters: Record<string, (value?: any) => Behaviour> = {
+    mockImplementation: (fn: Behaviour) => fn,
+    mockReturnValue: (value: unknown) => () => value,
+    mockResolvedValue: (value: unknown) => () => Promise.resolve(value),
+    mockRejectedValue: (value: unknown) => () => Promise.reject(value),
+  }
+  const define = (name: string, value: unknown) =>
+    Object.defineProperty(mock, name, { value, writable: true, enumerable: false, configurable: true })
+  for (const [name, behaviourOf] of Object.entries(setters)) {
+    define(name, (value?: unknown) => (always(record(behaviourOf(value))), mock))
+    define(`${name}Once`, (value?: unknown) => (once(record(behaviourOf(value))), mock))
+  }
+  if (typeof mock.mockReturnThis === 'function') {
+    define('mockReturnThis', () => (always(record(function (this: unknown) { return this })), mock))
+  }
+  const withImplementation = mock.withImplementation
+  if (typeof withImplementation === 'function') {
+    define('withImplementation', (fn: Behaviour, callback: () => unknown) => withImplementation.call(mock, record(fn), callback))
+  }
+  return mock
 }
 
 /** The interaction a mock options resolver was given to, for the server a user option's member is in. */
@@ -786,29 +811,34 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       return false
     }
 
-    stubs.set(
+    // Every answer the interaction gets, through respond() or discord.js directly, in order, for getResponse
+    const log: ResponseCall[] = []
+    Object.defineProperty(instance, RESPONSE_LOG, { value: log })
+    const answer = (method: ResponseCall['method'], impl: Behaviour) => stubs.set(method, recordedMock(method, impl, log))
+
+    answer(
       'reply',
-      createMockFn(async (...args: unknown[]) => {
+      async (...args: unknown[]) => {
         if (instance.deferred || instance.replied) throw alreadyReplied()
         instance.replied = true
         if (hasEphemeralFlag(args[0] as Record<string, unknown> | undefined)) instance.ephemeral = true
-      }),
+      },
     )
-    stubs.set(
+    answer(
       'deferReply',
-      createMockFn(async (...args: unknown[]) => {
+      async (...args: unknown[]) => {
         if (instance.deferred || instance.replied) throw alreadyReplied()
         instance.deferred = true
         if (hasEphemeralFlag(args[0] as Record<string, unknown> | undefined)) instance.ephemeral = true
-      }),
+      },
     )
-    stubs.set(
+    answer(
       'followUp',
-      createMockFn(async () => {
+      async () => {
         if (!instance.deferred && !instance.replied) throw notYetReplied('followUp')
         instance.replied = true
         return createMockMessage()
-      }),
+      },
     )
     // The interaction's own message as Discord holds it: the message a component is on, or the original response.
     // An edit replaces it in the shape Discord stores, with ids and resolved media, stamped with when it was edited,
@@ -818,16 +848,16 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     // A command answered with a modal has no original response, and Discord refuses one asked for
     let modalAnswered = false
     const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
-    stubs.set(
+    answer(
       'editReply',
-      createMockFn(async (options?: unknown) => {
+      async (options?: unknown) => {
         if (!instance.deferred && !instance.replied) throw notYetReplied('editReply')
         if (modalAnswered) throw unknownMessage()
         instance.replied = true
         held = edited(current(), options)
         // The response has the message as Discord answers the edit, before its uploaded files have loaded again
         return messageFrom({ ...held, components: held.returned ?? held.components })
-      }),
+      },
     )
     stubs.set(
       'fetchReply',
@@ -836,51 +866,44 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         return messageFrom(current())
       }),
     )
-    stubs.set(
+    answer(
       'deleteReply',
-      createMockFn(async () => {
+      async () => {
         if (!instance.deferred && !instance.replied) throw notYetReplied('deleteReply')
         if (modalAnswered) throw unknownMessage()
-      }),
+      },
     )
 
     // showModal — the first response of a command or a component, like reply()
     if (instance.type === InteractionType.ApplicationCommand || instance.type === InteractionType.MessageComponent) {
-      stubs.set(
+      answer(
         'showModal',
-        createMockFn(async () => {
+        async () => {
           if (instance.deferred || instance.replied) throw alreadyReplied()
           instance.replied = true
           modalAnswered = instance.type === InteractionType.ApplicationCommand
-        }),
+        },
       )
     }
 
     // deferUpdate / update — components, and modals submitted from a message's component
     if (instance.type === InteractionType.MessageComponent || instance.type === InteractionType.ModalSubmit) {
-      stubs.set(
+      answer(
         'update',
-        createMockFn(async () => {
+        async () => {
           if (instance.deferred || instance.replied) throw alreadyReplied()
           instance.replied = true
-        }),
+        },
       )
-      stubs.set(
+      answer(
         'deferUpdate',
-        createMockFn(async () => {
+        async () => {
           if (instance.deferred || instance.replied) throw alreadyReplied()
           instance.deferred = true
-        }),
+        },
       )
     }
 
-    // Every answer the interaction gets, through respond() or discord.js directly, in order, for getResponse
-    const log: ResponseCall[] = []
-    Object.defineProperty(instance, RESPONSE_LOG, { value: log })
-    for (const method of ANSWER_METHODS) {
-      const stub = stubs.get(method)
-      if (stub) stubs.set(method, recorded(method, stub as Mock, log))
-    }
   }
 
   // Autocomplete is not repliable, but it has a response of its own: Discord accepts
@@ -1039,30 +1062,23 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
  */
 function stubCallable(): Mock {
   const fn = createMockFn()
-  const nested = new Map<string, Mock>()
-
-  return new Proxy(fn, {
-    get(target, prop) {
-      if (typeof prop === 'symbol') return Reflect.get(target, prop, target)
-
-      const key = prop as string
-
-      // Never thenable — otherwise awaiting a mock hangs on itself
-      if (key === 'then') return undefined
-
-      // The mock's own API (`mock`, `mockReturnValue`, `_isMockFunction`, …) and
-      // the function intrinsics pass straight through.
-      if (key in target) return Reflect.get(target, prop, target)
-
-      if (!nested.has(key)) nested.set(key, stubCallable())
-      return nested.get(key) as Mock
-    },
-
-    set(target, prop, value) {
-      Object.defineProperty(target, prop, { value, writable: true, enumerable: true, configurable: true })
-      return true
-    },
-  }) as Mock
+  // Any property beyond the mock's own API is a nested mock, made on first read and kept on the function. Its
+  // prototype makes them rather than a Proxy around it, so it stays the plain mock function a runner's matchers read
+  const inherited = Object.getPrototypeOf(fn) as object
+  Object.setPrototypeOf(
+    fn,
+    new Proxy(inherited, {
+      get(proto, prop, receiver: object) {
+        if (typeof prop === 'symbol' || prop in proto) return Reflect.get(proto, prop, receiver)
+        // Never thenable — otherwise awaiting a mock hangs on itself
+        if (prop === 'then') return undefined
+        const nested = stubCallable()
+        Object.defineProperty(receiver, prop, { value: nested, writable: true, enumerable: true, configurable: true })
+        return nested
+      },
+    }),
+  )
+  return fn
 }
 
 /**

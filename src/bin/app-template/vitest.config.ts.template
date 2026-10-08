@@ -24,7 +24,7 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    // vi.fn() mocks only; vitest.setup.ts resets the mocks from meocord/testing
+    // Every mock's calls, meocord/testing's included; vitest.setup.ts also resets meocord's to how each was created
     clearMocks: true,
     include: ['src/**/*.spec.ts'],
     coverage: {
