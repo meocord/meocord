@@ -32,6 +32,7 @@ import {
   type ComponentRoute,
   matchComponentRoute,
   type RouteParamValue,
+  type RouteTies,
 } from '@src/core/component-routes.js'
 import {
   appPresenterOf,
@@ -127,6 +128,8 @@ export interface DispatcherOptions {
   warnUnanswered?: boolean
   /** Waits for the observers before a call settles, as the testing module does. */
   awaitObservers?: boolean
+  /** How equally specific customId patterns rank; the app's `routeTies`. */
+  routeTies?: RouteTies
 }
 
 /** One dispatched call: when it arrived, the fallback that answers it, and who is told what it did. */
@@ -229,7 +232,7 @@ export class Dispatcher {
 
   /** The component routes, built on first use; the app calls it as it is created. */
   getComponentRoutes(): ComponentRoute[] {
-    return (this.componentRoutes ??= buildComponentRoutes([...this.controllerClasses]))
+    return (this.componentRoutes ??= buildComponentRoutes([...this.controllerClasses], { routeTies: this.options.routeTies }))
   }
 
   /**

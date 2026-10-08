@@ -1,3 +1,4 @@
+import { type RouteTies } from '@src/core/component-routes.js'
 import {
   type ActivityOptions,
   Client,
@@ -147,6 +148,7 @@ export class MeoCordApp implements MeoCordApplication {
     lifecycleUnits?: LifecycleUnit[],
     private readonly messageOptions: MessageCommandOptions = {},
     warnUnanswered = false,
+    routeTies: RouteTies = 'listed',
   ) {
     // First, so nothing logged from here on, before login or after, prints it
     hideInLogs(discordToken)
@@ -162,6 +164,7 @@ export class MeoCordApp implements MeoCordApplication {
       fallback: this.fallback,
       botUserId: () => this.bot.user?.id,
       warnUnanswered,
+      routeTies,
     })
     this.dispatcher.getComponentRoutes()
     // Read through the config's own check: a bot started without the CLI loads its config unchecked

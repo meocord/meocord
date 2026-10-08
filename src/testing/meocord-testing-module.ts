@@ -35,7 +35,7 @@ import {
 } from '@src/core/handler-pipeline.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
-import { buildComponentRoutes, type ComponentRoute } from '@src/core/component-routes.js'
+import { buildComponentRoutes, type ComponentRoute, type RouteTies } from '@src/core/component-routes.js'
 import { hasCustomId } from '@src/util/interaction.util.js'
 import {
   type DispatchObserver,
@@ -300,6 +300,8 @@ export class TestingModule {
     private readonly services: readonly (new (...args: any[]) => unknown)[] = [],
     /** How long `close()` waits for the `onShutdown` hooks, as the bot's `shutdownTimeout` does. */
     private readonly shutdownTimeout: number = DEFAULT_SHUTDOWN_TIMEOUT_MS,
+    /** The `app`'s `routeTies`, which component routes rank by as the bot ranks them. */
+    private readonly routeTies?: RouteTies,
   ) {}
 
   private resolving?: Promise<void>
@@ -580,7 +582,7 @@ export class TestingModule {
 
   /** The module's component routes, ranked as dispatch ranks them; throws, as the bot would, for two of one shape. */
   private componentRoutes(): ComponentRoute[] {
-    return (this.builtComponentRoutes ??= buildComponentRoutes(this.controllers))
+    return (this.builtComponentRoutes ??= buildComponentRoutes(this.controllers, { routeTies: this.routeTies }))
   }
 
   private dispatcher?: Dispatcher
@@ -595,6 +597,7 @@ export class TestingModule {
       controllerClasses: this.controllers,
       messageOptions: this.messageOptions,
       logger,
+      routeTies: this.routeTies,
       // Strict: an answer MeoCord fails to build rejects the dispatch, where a bot logs it and carries on
       fallback: createFallback(logger, () => this.messageOptions, {
         strict: true,
@@ -741,6 +744,11 @@ function throwFailures(hook: 'onReady' | 'onShutdown', failures: readonly { name
       `${failures.length} ${hook} hooks threw: ${failures.map(({ name }) => name).join(', ')}.`,
     )
   }
+}
+
+/** The app's `routeTies`, when the testing module is given an app; the default ranking otherwise. */
+function routeTiesOf(app: object | undefined): RouteTies | undefined {
+  return app && (Reflect.getMetadata(META.appOptions, app) as { routeTies?: RouteTies } | undefined)?.routeTies
 }
 
 /** The app's `messages` options, when the testing module is given an app. */
@@ -1096,7 +1104,7 @@ export class TestingModuleBuilder {
     // A handler with no builder is how a fixture is written, so only what is always a mistake is named
     warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
     warnInheritedRoutes(this.options.controllers ?? [])
-    warnOverlappingPatterns(this.options.controllers ?? [])
+    warnOverlappingPatterns(this.options.controllers ?? [], routeTiesOf(this.options.app))
     warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
     if (this.options.app) bindAppPresenter(container, this.options.app)
     const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
@@ -1142,6 +1150,7 @@ export class TestingModuleBuilder {
       warnUnanswered,
       services,
       this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+      routeTiesOf(this.options.app),
     )
   }
 }

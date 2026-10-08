@@ -19,10 +19,37 @@ export interface ComponentRoute {
   types: Record<string, string>
 }
 
-/** Two patterns of one component type that can both match a customId. */
+/** Two patterns of one component type that can both match a customId, the one that runs, and what decides it. */
 export interface ComponentRouteConflict {
   type: CommandType
   patterns: [string, string]
+  runs: string
+  decidedBy: 'specificity' | 'literal' | 'order'
+}
+
+/** How equally specific patterns rank: in the order they are listed, or a literal segment first. */
+export type RouteTies = 'listed' | 'literalFirst'
+
+/** Each segment of a pattern as literal, `L`, or a param, `P`; compared as text, a literal ranks first. */
+const literalMask = (pattern: string): string =>
+  pattern
+    .split('/')
+    .map(segment => (segment.includes('{') ? 'P' : 'L'))
+    .join('')
+
+/**
+ * Orders two routes as `routeTies` ranks them: the more specific first, and with `'literalFirst'`, between equally
+ * specific patterns, the one literal at the first segment where they differ. Patterns of different lengths, which no
+ * customId matches both of, are ordered by length only so the order is total. What remains keeps its listing order.
+ */
+function rank(routeTies: RouteTies): (a: ComponentRoute, b: ComponentRoute) => number {
+  return (a, b) => {
+    const bySpecificity = (b.meta.specificity ?? 0) - (a.meta.specificity ?? 0)
+    if (bySpecificity !== 0 || routeTies === 'listed') return bySpecificity
+    const [left, right] = [literalMask(a.pattern), literalMask(b.pattern)]
+    if (left.length !== right.length) return left.length - right.length
+    return left < right ? -1 : left > right ? 1 : 0
+  }
 }
 
 /**
@@ -30,7 +57,7 @@ export interface ComponentRouteConflict {
  * Throws for two handlers whose patterns match the same customIds of one component type; one handler
  * declared under two spellings of a pattern keeps one route.
  */
-export function buildComponentRoutes(controllerClasses: readonly ControllerClass[]): ComponentRoute[] {
+export function buildComponentRoutes(controllerClasses: readonly ControllerClass[], { routeTies = 'listed' }: { routeTies?: RouteTies } = {}): ComponentRoute[] {
   const routes: ComponentRoute[] = []
   // By component type and pattern shape: the route that shape already has
   const seen = new Map<string, ComponentRoute>()
@@ -59,8 +86,8 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
       }
     }
   }
-  // A stable sort, so equally specific patterns keep the order their controllers and handlers are listed in
-  return routes.sort((a, b) => (b.meta.specificity ?? 0) - (a.meta.specificity ?? 0))
+  // A stable sort, so what the ranking leaves tied keeps the order controllers and handlers are listed in
+  return routes.sort(rank(routeTies))
 }
 
 /**
@@ -132,9 +159,25 @@ function readCustomIdSegments(
   return { values, text }
 }
 
-/** Pattern pairs that can match one customId, compared only within a component type, as dispatch does. */
-export function findComponentRouteConflicts(routes: readonly ComponentRoute[]): ComponentRouteConflict[] {
-  const byType = new Map<CommandType, string[]>()
-  for (const { meta, pattern } of routes) byType.set(meta.type, [...(byType.get(meta.type) ?? []), pattern])
-  return [...byType].flatMap(([type, patterns]) => findAmbiguousRoutes(patterns).map(pair => ({ type, patterns: pair })))
+/**
+ * Pattern pairs that can match one customId, compared only within a component type, as dispatch does, each with the
+ * pattern that runs, the one ranked first in `routes`, and what decides it under `routeTies`, which ranked them.
+ */
+export function findComponentRouteConflicts(routes: readonly ComponentRoute[], routeTies: RouteTies = 'listed'): ComponentRouteConflict[] {
+  const byType = new Map<CommandType, ComponentRoute[]>()
+  for (const route of routes) byType.set(route.meta.type, [...(byType.get(route.meta.type) ?? []), route])
+  return [...byType].flatMap(([type, typed]) =>
+    findAmbiguousRoutes(typed.map(route => route.pattern)).map(([left, right]) => {
+      const [first, second] = [typed.find(route => route.pattern === left)!, typed.find(route => route.pattern === right)!]
+      const runs = routes.indexOf(first) < routes.indexOf(second) ? first : second
+      const other = runs === first ? second : first
+      const decidedBy =
+        (runs.meta.specificity ?? 0) !== (other.meta.specificity ?? 0)
+          ? 'specificity'
+          : routeTies === 'literalFirst' && literalMask(runs.pattern) !== literalMask(other.pattern)
+            ? 'literal'
+            : 'order'
+      return { type, patterns: [left, right] as [string, string], runs: runs.pattern, decidedBy }
+    }),
+  )
 }

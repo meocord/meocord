@@ -76,7 +76,9 @@ describe('component routes', () => {
       two() {}
     }
     const routes = buildComponentRoutes([Overlap])
-    expect(findComponentRouteConflicts(routes)).toEqual([{ type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'] }])
+    expect(findComponentRouteConflicts(routes)).toEqual([
+      { type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'], runs: 'a/{x}/c', decidedBy: 'order' },
+    ])
   })
 
   // Until 5.0; the startup warning about the pair names the one that runs
@@ -96,5 +98,37 @@ describe('component routes', () => {
 
     expect(winner([XC, BY])).toBe('a/{x}/c')
     expect(winner([BY, XC])).toBe('a/b/{y}')
+  })
+
+  describe('ranking equally specific patterns', () => {
+    @Controller()
+    class Last {
+      @Command('{z}/b/c', CommandType.BUTTON)
+      zbc() {}
+    }
+    @Controller()
+    class Middle {
+      @Command('a/{x}/c', CommandType.BUTTON)
+      axc() {}
+    }
+    @Controller()
+    class First {
+      @Command('a/b/{y}', CommandType.BUTTON)
+      aby() {}
+    }
+    const order = (routes: { pattern: string }[]) => routes.map(route => route.pattern)
+
+    it('keeps listing order by default', () => {
+      expect(order(buildComponentRoutes([Last, Middle, First]))).toEqual(['{z}/b/c', 'a/{x}/c', 'a/b/{y}'])
+    })
+
+    // A literal at the first segment where two differ wins, so any listing gives one order: a transitive ranking
+    it.each([
+      [[Last, Middle, First]],
+      [[First, Last, Middle]],
+      [[Middle, First, Last]],
+    ] as const)('ranks literal-first, whatever the listing, with literalFirst', controllers => {
+      expect(order(buildComponentRoutes(controllers, { routeTies: 'literalFirst' }))).toEqual(['a/b/{y}', 'a/{x}/c', '{z}/b/c'])
+    })
   })
 })

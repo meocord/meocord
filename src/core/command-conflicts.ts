@@ -9,7 +9,7 @@ import {
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
-import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts, literalFirst } from '@src/core/component-routes.js'
+import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts, literalFirst, type RouteTies } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
@@ -375,9 +375,10 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
  * an app whose patterns overlap works, so refusing to start would turn a latent mis-route into an outage.
  * @throws Error for two handlers whose patterns match the same customIds, which the app refuses as well.
  */
-export function warnOverlappingPatterns(controllerClasses: readonly ControllerClass[]): void {
-  const routes = buildComponentRoutes(controllerClasses)
-  const conflicts = findComponentRouteConflicts(routes)
+export function warnOverlappingPatterns(controllerClasses: readonly ControllerClass[], routeTies: RouteTies = 'listed'): void {
+  const routes = buildComponentRoutes(controllerClasses, { routeTies })
+  // With 'literalFirst', a pair the ids themselves decide, by specificity or a literal segment, needs no word
+  const conflicts = findComponentRouteConflicts(routes, routeTies).filter(({ decidedBy }) => routeTies === 'listed' || decidedBy === 'order')
   if (conflicts.length === 0) return
 
   const routeOf = new Map(routes.map(route => [`${route.meta.type}\0${route.pattern}`, route]))
@@ -404,6 +405,7 @@ function ambiguityOutcome(runs: ComponentRoute, other: ComponentRoute): string {
   const reorder = together ? `Declare ${name(other)} first` : `List ${other.controllerClass.name} first`
   return (
     `${name(runs)} runs, as ${listed}. In the next major version (5.0), ${name(other)} runs instead, as ` +
-    `"${other.pattern}" spells out the first segment where the two differ. ${reorder}, or make the patterns distinct.`
+    `"${other.pattern}" spells out the first segment where the two differ. ${reorder}, make the patterns distinct, or ` +
+    "set @MeoCord({ routeTies: 'literalFirst' })."
   )
 }

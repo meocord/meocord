@@ -21,8 +21,8 @@ afterEach(() => {
   config.current = { discordToken: 'token' }
 })
 
-const create = (controllers: (new () => unknown)[]) => {
-  @MeoCord({ controllers, clientOptions: { intents: [] } })
+const create = (controllers: (new () => unknown)[], routeTies?: 'listed' | 'literalFirst') => {
+  @MeoCord({ controllers, clientOptions: { intents: [] }, routeTies })
   class App {}
   MeoCordFactory.create(App)
 }
@@ -69,8 +69,8 @@ describe('patterns that can match the same customId', () => {
       ['XC', 'BY'],
       [
         '  "a/{x}/c"  vs  "a/b/{y}": XC.xc runs, as its controller is listed first. In the next major version (5.0), ' +
-          'BY.by runs instead, as "a/b/{y}" spells out the first segment where the two differ. List BY first, or make ' +
-          'the patterns distinct.',
+          'BY.by runs instead, as "a/b/{y}" spells out the first segment where the two differ. List BY first, make the ' +
+          "patterns distinct, or set @MeoCord({ routeTies: 'literalFirst' }).",
         '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.',
       ],
     ],
@@ -84,8 +84,8 @@ describe('patterns that can match the same customId', () => {
       ['Both'],
       [
         '  "a/{x}/c"  vs  "a/b/{y}": Both.xc runs, as it is declared first. In the next major version (5.0), Both.by ' +
-          'runs instead, as "a/b/{y}" spells out the first segment where the two differ. Declare Both.by first, or make ' +
-          'the patterns distinct.',
+          'runs instead, as "a/b/{y}" spells out the first segment where the two differ. Declare Both.by first, make the ' +
+          "patterns distinct, or set @MeoCord({ routeTies: 'literalFirst' }).",
       ],
     ],
   ] as const)('names the handler that runs for each pair, and the one that runs in 5.0: %s', (_order, listed, lines) => {
@@ -105,8 +105,8 @@ describe('patterns that can match the same customId', () => {
       '1 pattern pair(s) can match the same customId, so which one runs is decided by ranking rather than by the ids ' +
         'themselves:\n' +
         '  "a/{x}/c"  vs  "a/b/{y}": Both.xc runs, as it is declared first. In the next major version (5.0), Both.by ' +
-        'runs instead, as "a/b/{y}" spells out the first segment where the two differ. Declare Both.by first, or make ' +
-        'the patterns distinct.',
+        'runs instead, as "a/b/{y}" spells out the first segment where the two differ. Declare Both.by first, make the ' +
+        "patterns distinct, or set @MeoCord({ routeTies: 'literalFirst' }).",
     ])
   })
 
@@ -180,5 +180,28 @@ describe('patterns that can match the same customId', () => {
     MeoCordTestingModule.create({ controllers: [Both] }).compile()
 
     expect(overlapWarnings()).toHaveLength(1)
+  })
+})
+
+describe("@MeoCord({ routeTies: 'literalFirst' })", () => {
+  it('names only the pairs listing order still decides, which literal-first leaves', () => {
+    @Controller()
+    class Ties {
+      @Command('a/{x}/c', CommandType.BUTTON)
+      xc() {}
+
+      @Command('a/b/{y}', CommandType.BUTTON)
+      by() {}
+
+      @Command('{p:int}/{q}', CommandType.BUTTON)
+      pq() {}
+
+      @Command('{r}/{s:int}', CommandType.BUTTON)
+      rs() {}
+    }
+
+    create([Ties], 'literalFirst')
+
+    expect(pairLines()).toEqual(['  "{p:int}/{q}"  vs  "{r}/{s:int}": Ties.pq runs, as it is declared first.'])
   })
 })

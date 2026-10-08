@@ -111,7 +111,35 @@ describe('findRouteConflicts', () => {
     @MeoCord({ controllers: [Overlapping], clientOptions: { intents: [] } })
     class OverlappingApp {}
 
-    expect(findRouteConflicts(OverlappingApp)).toEqual([{ type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'] }])
+    expect(findRouteConflicts(OverlappingApp)).toEqual([
+      { type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'], runs: 'a/{x}/c', decidedBy: 'order' },
+    ])
+  })
+
+  it("says which pattern runs, and why, under the app's routeTies", () => {
+    @Controller()
+    class Ties {
+      @Command('a/{x}/c', CommandType.BUTTON)
+      async xc() {}
+
+      @Command('a/b/{y}', CommandType.BUTTON)
+      async by() {}
+
+      @Command('a/{z}', CommandType.BUTTON)
+      async z() {}
+
+      @Command('a/b', CommandType.BUTTON)
+      async b() {}
+    }
+    @MeoCord({ controllers: [Ties], clientOptions: { intents: [] }, routeTies: 'literalFirst' })
+    class LiteralApp {}
+
+    expect(findRouteConflicts(LiteralApp)).toEqual([
+      { type: CommandType.BUTTON, patterns: ['a/b/{y}', 'a/{x}/c'], runs: 'a/b/{y}', decidedBy: 'literal' },
+      { type: CommandType.BUTTON, patterns: ['a/b', 'a/{z}'], runs: 'a/b', decidedBy: 'specificity' },
+    ])
+    expect(resolveRoute(LiteralApp, { type: CommandType.BUTTON, customId: 'a/b/c' })).toMatchObject({ method: 'by', alsoMatches: ['a/{x}/c'] })
+    expect(resolveRoute(LiteralApp, { type: CommandType.BUTTON, customId: 'a/q/c' })).not.toHaveProperty('alsoMatches')
   })
 
   it('throws, as the bot does at startup, for two handlers with the same pattern', () => {
