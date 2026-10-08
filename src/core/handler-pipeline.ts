@@ -112,11 +112,17 @@ export function appStages(app: object): GlobalStages {
 export function bindAppPresenter(container: Container, app: object, client?: object): ResponsePresenter | undefined {
   const options = Reflect.getMetadata(META.appOptions, app) as { presenter?: new (...args: any[]) => ResponsePresenter } | undefined
   if (!options?.presenter) return undefined
-  bindShared(container, options.presenter)
+  prepareAppPresenter(container, app)
   const presenter = container.get<ResponsePresenter>(options.presenter)
   container.bind<ResponsePresenter>(APP_PRESENTER).toConstantValue(presenter)
   if (client) setPresenter(client, presenter)
   return presenter
+}
+
+/** Binds the app's presenter class as a shared stage, checking it as one, without making it. */
+export function prepareAppPresenter(container: Container, app: object): void {
+  const options = Reflect.getMetadata(META.appOptions, app) as { presenter?: new (...args: any[]) => ResponsePresenter } | undefined
+  if (options?.presenter) bindShared(container, options.presenter)
 }
 
 /** Where a container keeps the application's presenter. */
@@ -221,12 +227,12 @@ export function handlerStageClasses(cls: object): [unknown, string][] {
 /**
  * Binds the interceptors, filters and pipes every handler of `controllers` uses, and the global ones, as singletons, so
  * one that cannot be shared, or a filter without `@Catch`, fails at startup; refuses there `@Defer`, `@Validate`,
- * `@UsePipe` and `@Cooldown` where they cannot apply, and two classes that keep state under one name.
+ * `@UsePipe` and `@Cooldown` where they cannot apply, and two classes that keep state under one name. Binds only; it
+ * makes nothing, so it runs with the other startup checks.
  */
 export function prepareHandlerStages(container: Container, controllers: readonly (new (...args: any[]) => unknown)[]): void {
   assertDistinctNamesWhereKeyed(controllers)
   const globals = globalStagesOf(container)
-  configureThemes(container, globals.theme, controllers, globals.themeFor)
   for (const entry of globals.interceptors) prepareInterceptor(container, entry)
   for (const entry of globals.filters) prepareFilter(container, entry)
 
@@ -241,6 +247,12 @@ export function prepareHandlerStages(container: Container, controllers: readonly
     }
     assertInputStagesOnInteractions(controller, prototype)
   }
+}
+
+/** Records the app's theme for the handlers of `controllers`, once the startup checks have passed: it makes the theme cache. */
+export function prepareThemes(container: Container, controllers: readonly (new (...args: any[]) => unknown)[]): void {
+  const globals = globalStagesOf(container)
+  configureThemes(container, globals.theme, controllers, globals.themeFor)
 }
 
 /** Whether a class has state keyed by its name: a cooldown on a handler, or a `@Once` handler. */
