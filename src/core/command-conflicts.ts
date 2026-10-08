@@ -333,36 +333,35 @@ function unasked(
 /**
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for
  * `@Command`, `@MessageHandler`, `@ReactionHandler` and `@Autocomplete` alike. The next major version (5.0) drops
- * the inherited routes. Every class a listed controller extends is checked once, a base that is not listed included.
+ * the inherited routes. Every class a listed controller extends is checked, a base that is not listed included, for
+ * the routes that controller still answers.
  */
 export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[]): void {
-  const checked = new Set<object>()
-  const problems: string[] = []
+  // A set, so a class two listed controllers extend is named once, for the routes either of them still answers
+  const problems = new Set<string>()
   for (const controllerClass of controllerClasses) {
+    // The routes the listed controller answers: an inherited one @Controller({ inheritedRoutes: 'replace' }) drops is not
+    const answered = new Set(getHandlerRoutes(controllerClass.prototype as object).map(route => `${route.method}\0${route.label}`))
     for (let prototype = controllerClass.prototype as object | null; prototype && prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype) as object | null) {
-      if (checked.has(prototype)) break
-      checked.add(prototype)
       const declared = getDeclaredRoutes(prototype)
       const base = Object.getPrototypeOf(prototype) as object | null
       if (declared.length === 0 || !base) continue
-      // Inherited routes the class still answers, which @Controller({ inheritedRoutes: 'replace' }) leaves none of
-      const answered = new Set(getHandlerRoutes(prototype).map(route => `${route.method}\0${route.label}`))
       const inherited = getHandlerRoutes(base).filter(route => answered.has(`${route.method}\0${route.label}`))
       for (const method of new Set(declared.map(route => route.method))) {
         const own = [...new Set(declared.filter(route => route.method === method).map(route => route.label))]
         const kept = [...new Set(inherited.filter(route => route.method === method).map(route => route.label))].filter(label => !own.includes(label))
         if (kept.length === 0) continue
         const name = (prototype as { constructor: { name: string } }).constructor.name
-        problems.push(`  ${name}.${method} answers ${listed(kept)}, which it inherits, as well as its own ${listed(own)}.`)
+        problems.add(`  ${name}.${method} answers ${listed(kept)}, which it inherits, as well as its own ${listed(own)}.`)
       }
     }
   }
-  if (problems.length === 0) return
+  if (problems.size === 0) return
 
-  const one = problems.length === 1
+  const one = problems.size === 1
   logger.warn(
-    `${problems.length} re-declared ${one ? 'handler still answers routes it inherits' : 'handlers still answer routes they inherit'}:\n` +
-      `${problems.join('\n')}\nIn the next major version (5.0), a handler's own routes replace the ones it inherits. ` +
+    `${problems.size} re-declared ${one ? 'handler still answers routes it inherits' : 'handlers still answer routes they inherit'}:\n` +
+      `${[...problems].join('\n')}\nIn the next major version (5.0), a handler's own routes replace the ones it inherits. ` +
       "To keep an inherited route, declare it on the subclass's method as well; to drop it now, give the subclass " +
       "@Controller({ inheritedRoutes: 'replace' }).",
   )
