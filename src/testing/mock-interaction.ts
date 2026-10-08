@@ -308,7 +308,8 @@ const mockLogger = new Logger('Mocks')
 
 function warnBooleanPlaceholder(target: object, key: string): void {
   const name = (Object.getPrototypeOf(target) as { constructor: { name: string } }).constructor.name
-  const variable = name.charAt(0).toLowerCase() + name.slice(1)
+  // The class name in camel case, a leading acronym included: dmChannel, guildMember
+  const variable = name.replace(/^[A-Z]+(?=[A-Z][a-z])|^[A-Z]/, start => start.toLowerCase())
   warnPlaceholder(
     mockLogger,
     `${name}.${key}`,
