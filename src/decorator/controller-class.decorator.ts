@@ -1,4 +1,5 @@
 import { type ControllerOptions } from '@src/interface/index.js'
+import { dropInheritedRoutes } from '@src/decorator/controller.decorator.js'
 import { guardOwnHandlersWithBaseGuards } from '@src/decorator/guard.decorator.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { META } from '@src/util/metadata-keys.js'
@@ -43,6 +44,7 @@ export function Controller(options: ControllerOptions = {}) {
     if (deprecatedOnMethod('@Controller', target, propertyKey)) return
     makeInjectable(target)
     if (options.inheritStages === false) Reflect.defineMetadata(META.inheritStages, false, target)
+    if (options.inheritedRoutes === 'replace') dropInheritedRoutes(target.prototype as object)
     guardOwnHandlersWithBaseGuards(target)
   }
 }

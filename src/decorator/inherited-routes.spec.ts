@@ -4,7 +4,7 @@ import { SlashCommandBuilder } from 'discord.js'
 import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, ReactionHandler } from '@src/decorator/index.js'
 import { getAutocompleteHandlers, getCommandMap, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { CommandType } from '@src/enum/index.js'
-import { MeoCordTestingModule } from '@src/testing/index.js'
+import { inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
 
 const warnings = () =>
   vi
@@ -111,7 +111,7 @@ describe('a handler a subclass re-declares on another route', () => {
         '  ShopLeaf.roll answers message "roll", which it inherits, as well as its own message "dice".\n' +
         '  ShopLeaf.vote answers reaction "👍", which it inherits, as well as its own reaction "⭐".\n' +
         '  ShopLeaf.complete answers autocomplete of "user" in "stats", which it inherits, as well as its own autocomplete of "member" in "stats".\n' +
-        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well.",
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well; to drop it now, give the subclass @Controller({ inheritedRoutes: 'replace' }).",
     ])
   })
 
@@ -135,7 +135,7 @@ describe('a handler a subclass re-declares on another route', () => {
     expect(warnings()).toEqual([
       '1 re-declared handler still answers routes it inherits:\n' +
         '  Leaf.page answers button "page/{n:int}", which it inherits, as well as its own button "shop/page/{n:int}".\n' +
-        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well.",
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well; to drop it now, give the subclass @Controller({ inheritedRoutes: 'replace' }).",
     ])
   })
 
@@ -169,7 +169,82 @@ describe('a handler a subclass re-declares on another route', () => {
     expect(warnings()).toEqual([
       '1 re-declared handler still answers routes it inherits:\n' +
         '  Sub.ping answers slash "ping", which it inherits, as well as its own message "ping".\n' +
-        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well.",
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well; to drop it now, give the subclass @Controller({ inheritedRoutes: 'replace' }).",
     ])
+  })
+})
+
+describe("@Controller({ inheritedRoutes: 'replace' })", () => {
+  it('answers only the routes a re-decorated handler declares, for every kind of handler, with nothing to warn of', () => {
+    @Controller({ inheritedRoutes: 'replace' })
+    class ShopLeaf extends Base {
+      @Command('shop/page/{n:int}', CommandType.BUTTON)
+      page() {}
+
+      @MessageHandler('dice')
+      roll() {}
+
+      @ReactionHandler('⭐')
+      vote() {}
+
+      @Autocomplete('stats', 'member')
+      complete() {}
+    }
+
+    start(ShopLeaf)
+
+    expect(Object.keys(getCommandMap(ShopLeaf.prototype))).toEqual(['ping', 'shop/page/{n:int}'])
+    expect(getMessageHandlers(ShopLeaf.prototype).map(handler => handler.pattern)).toEqual(['dice'])
+    expect(getReactionHandlers(ShopLeaf.prototype).map(handler => handler.emoji)).toEqual(['⭐'])
+    expect(getAutocompleteHandlers(ShopLeaf.prototype).map(handler => handler.optionName)).toEqual(['member'])
+    expect(warnings()).toEqual([])
+    // The base keeps every route it declares
+    expect(Object.keys(getCommandMap(Base.prototype))).toEqual(['page/{n:int}', 'ping'])
+  })
+
+  it('drops an inherited route of another kind too, and keeps one the subclass re-declares with its own options', () => {
+    @Controller({ inheritedRoutes: 'replace' })
+    class Sub extends Base {
+      @MessageHandler('ping')
+      ping() {}
+
+      @Command('page/{n:int}', CommandType.BUTTON)
+      @Command('shop/page/{n:int}', CommandType.BUTTON)
+      page() {}
+    }
+
+    expect(Object.keys(getCommandMap(Sub.prototype))).toEqual(['page/{n:int}', 'shop/page/{n:int}'])
+    expect(getMessageHandlers(Sub.prototype).map(handler => handler.pattern)).toEqual(['roll', 'ping'])
+  })
+
+  it('keeps every route of a method it overrides without decorating, and the nearest class that declares one decides', () => {
+    @Controller({ inheritedRoutes: 'replace' })
+    class Mid extends Base {
+      @Command('shop/page/{n:int}', CommandType.BUTTON)
+      page() {}
+
+      override roll() {}
+    }
+    @Controller()
+    class Leaf extends Mid {
+      override page() {}
+    }
+
+    expect(getMessageHandlers(Mid.prototype).map(handler => handler.pattern)).toEqual(['roll'])
+    expect(Object.keys(getCommandMap(Leaf.prototype))).toEqual(['ping', 'shop/page/{n:int}'])
+  })
+})
+
+describe('inspectHandler', () => {
+  it('names the routes a handler answers by inheritance', () => {
+    @Controller()
+    class Sub extends Base {
+      @Command('shop/page/{n:int}', CommandType.BUTTON)
+      page() {}
+    }
+
+    expect(inspectHandler(Sub, 'page').inheritedRoutes).toEqual(['button "page/{n:int}"'])
+    expect(inspectHandler(Sub, 'ping').inheritedRoutes).toEqual(['slash "ping"'])
+    expect(inspectHandler(Base, 'ping').inheritedRoutes).toEqual([])
   })
 })

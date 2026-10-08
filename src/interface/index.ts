@@ -586,6 +586,15 @@ export interface ControllerOptions {
    * @defaultValue `true`
    */
   inheritStages?: boolean
+  /**
+   * What a handler this class re-decorates answers of the routes its base classes declare for it. `'keep'` answers
+   * them as well as its own; `'replace'` answers only the routes this class declares for it, of every kind: commands,
+   * component patterns, message patterns, reactions and autocompletes. A command no handler answers any more is not
+   * registered. A method overridden without decorators keeps every route it inherits either way.
+   *
+   * @defaultValue `'keep'`; the next major version (5.0) replaces them by default
+   */
+  inheritedRoutes?: 'keep' | 'replace'
 }
 
 /**
