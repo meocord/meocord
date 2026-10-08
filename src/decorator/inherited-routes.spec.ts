@@ -247,6 +247,30 @@ describe("@Controller({ inheritedRoutes: 'replace' })", () => {
     ])
   })
 
+  // Answering an inherited route again through its own declaration is not inheriting it
+  it('names nothing when the replacing subclass re-declares the route a class between inherits', () => {
+    @Controller()
+    class Top {
+      @Command('a', PingBuilder)
+      m() {}
+    }
+    @Controller()
+    class Mid extends Top {
+      @Command('b', PingBuilder)
+      override m() {}
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Leaf extends Mid {
+      @Command('a', PingBuilder)
+      override m() {}
+    }
+
+    start(Leaf)
+
+    expect(Object.keys(getCommandMap(Leaf.prototype))).toEqual(['a'])
+    expect(warnings()).toEqual([])
+  })
+
   it('keeps every route of a method it overrides without decorating, and the nearest class that declares one decides', () => {
     @Controller({ inheritedRoutes: 'replace' })
     class Mid extends Base {

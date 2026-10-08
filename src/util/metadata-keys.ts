@@ -47,6 +47,8 @@ export const META = {
   inheritedFrom: 'meocord:inherited-from',
   /** `false` when `@Controller({ inheritStages: false })` stops class stages at this class. */
   inheritStages: 'meocord:inherit-stages',
+  /** `true` when `@Controller({ inheritedRoutes: 'replace' })` drops the routes this class's re-decorated methods inherit. */
+  replacesInheritedRoutes: 'meocord:replaces-inherited-routes',
 
   /** A controller's class-level `@Cooldown`s. */
   classCooldowns: 'meocord:class-cooldowns',

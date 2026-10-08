@@ -44,7 +44,10 @@ export function Controller(options: ControllerOptions = {}) {
     if (deprecatedOnMethod('@Controller', target, propertyKey)) return
     makeInjectable(target)
     if (options.inheritStages === false) Reflect.defineMetadata(META.inheritStages, false, target)
-    if (options.inheritedRoutes === 'replace') dropInheritedRoutes(target.prototype as object)
+    if (options.inheritedRoutes === 'replace') {
+      dropInheritedRoutes(target.prototype as object)
+      Reflect.defineMetadata(META.replacesInheritedRoutes, true, target.prototype as object)
+    }
     guardOwnHandlersWithBaseGuards(target)
   }
 }
