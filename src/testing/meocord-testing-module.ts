@@ -598,6 +598,8 @@ export class TestingModule {
       messageOptions: this.messageOptions,
       logger,
       routeTies: this.routeTies,
+      // A test's fake clock can pass 5 s inside a handler, so the slow-handler warning waits to be asked for
+      warnSlowMessageHandlers: false,
       // Strict: an answer MeoCord fails to build rejects the dispatch, where a bot logs it and carries on
       fallback: createFallback(logger, () => this.messageOptions, {
         strict: true,

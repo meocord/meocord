@@ -724,8 +724,9 @@ export interface MessageCommandOptions {
   handlers?: 'sequential' | 'concurrent'
   /**
    * Warns, once per handler, when a message's handler takes 5 seconds or more with listeners waiting after it, under
-   * `handlers: 'sequential'`, naming the handler and how many it held back.
-   * @defaultValue `true`
+   * `handlers: 'sequential'`, naming the handler and how many it held back. A testing module warns only when this is
+   * `true`, since a test's fake clock can pass 5 seconds inside a handler.
+   * @defaultValue `true` in a running bot, `false` in a `MeoCordTestingModule`
    */
   slowHandlerWarning?: boolean
 }
