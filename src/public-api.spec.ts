@@ -100,6 +100,7 @@ const PUBLIC_API: Record<string, string[]> = {
     'resolveRoute',
     'testCooldownStore',
     'useMockFn',
+    'useStrictMocks',
     'withTheme',
   ],
 }

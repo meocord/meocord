@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { GuildMember, TextChannel, ThreadChannel } from 'discord.js'
+import { GuildMember, TextChannel, ThreadChannel, VoiceChannel } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { createMockChannel, createMockInteraction, createMockMessage } from './mock-interaction.js'
@@ -23,6 +23,12 @@ describe('a boolean discord.js computes, which a mock reads as a placeholder', (
       expect.stringMatching(/^Message\.editable reads a placeholder.*5\.0.*message\.editable = false/s),
       expect.stringMatching(/^GuildMember\.kickable reads a placeholder.*5\.0/s),
     ])
+  })
+
+  it("warns for a subclass's own getter of one, such as a voice channel's joinable", () => {
+    void createMockChannel(VoiceChannel).joinable
+
+    expect(warned).toEqual([expect.stringMatching(/^VoiceChannel\.joinable reads a placeholder.*useStrictMocks\(\)/s)])
   })
 
   it('says nothing for one the test set', () => {
