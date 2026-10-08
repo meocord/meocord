@@ -14,6 +14,7 @@ import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { META } from '@src/util/metadata-keys.js'
 import { listed } from '@src/util/user-text.util.js'
 
 type ControllerClass = new (...args: any[]) => unknown
@@ -334,19 +335,21 @@ function unasked(
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for
  * `@Command`, `@MessageHandler`, `@ReactionHandler` and `@Autocomplete` alike. The next major version (5.0) drops
  * the inherited routes. Every class a listed controller extends is checked, a base that is not listed included, for
- * the routes that controller still answers.
+ * the methods the controller still inherits through it.
  */
 export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[]): void {
   // A set, so a class two listed controllers extend is named once, for the routes either of them still answers
   const problems = new Set<string>()
   for (const controllerClass of controllerClasses) {
-    // The routes the listed controller answers: an inherited one @Controller({ inheritedRoutes: 'replace' }) drops is not
-    const answered = new Set(getHandlerRoutes(controllerClass.prototype as object).map(route => `${route.method}\0${route.label}`))
+    // Methods a class below re-declares with @Controller({ inheritedRoutes: 'replace' }): the listed controller inherits
+    // nothing of them from above it, so a class above is not named for them
+    const cut = new Set<string>()
     for (let prototype = controllerClass.prototype as object | null; prototype && prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype) as object | null) {
       const declared = getDeclaredRoutes(prototype)
       const base = Object.getPrototypeOf(prototype) as object | null
       if (declared.length === 0 || !base) continue
-      const inherited = getHandlerRoutes(base).filter(route => answered.has(`${route.method}\0${route.label}`))
+      if (Reflect.getOwnMetadata(META.replacesInheritedRoutes, prototype)) for (const route of declared) cut.add(route.method)
+      const inherited = getHandlerRoutes(base).filter(route => !cut.has(route.method))
       for (const method of new Set(declared.map(route => route.method))) {
         const own = [...new Set(declared.filter(route => route.method === method).map(route => route.label))]
         const kept = [...new Set(inherited.filter(route => route.method === method).map(route => route.label))].filter(label => !own.includes(label))
