@@ -1,5 +1,11 @@
 # meocord
 
+## 4.1.2
+
+### Patch Changes
+
+- [#454](https://github.com/meocord/meocord/pull/454) [`1f71fe1`](https://github.com/meocord/meocord/commit/1f71fe12b96c339bf3e1f19f714f24ebd8e7e853) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock interaction's type guards, such as `isButton()` and `isRepliable()`, and its `inGuild()`, `inCachedGuild()` and `inRawGuild()` keep answering as discord.js does after `resetAllMocks()`. They returned `undefined` after a reset, so a mock made once for several tests, such as in `beforeAll`, failed every type check after the first test in a project that resets between tests, as a generated one does.
+
 ## 4.1.1
 
 ### Patch Changes
