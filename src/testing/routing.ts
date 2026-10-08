@@ -78,7 +78,8 @@ export interface ResolvedRoute {
   values?: Record<string, string | number | boolean>
   /**
    * For a component route, the other patterns of its type that match the `customId` too, in the order they rank
-   * behind it: the ones that lost to it. Absent when no other pattern matches.
+   * behind it: the ones that lost to it. Absent when no other pattern matches. A test reads it; `toEqual` doesn't
+   * compare it, so an assertion on the other fields holds either way.
    */
   alsoMatches?: string[]
 }
@@ -94,7 +95,10 @@ export interface RouteConflict {
   type: ComponentCommandType
   /** The two patterns. */
   patterns: [string, string]
-  /** The pattern that runs for the `customId`s both match, under the app's `routeTies`. */
+  /**
+   * The pattern that runs for the `customId`s both match, under the app's `routeTies`. Like `decidedBy`, a test reads
+   * it; `toEqual` doesn't compare it, so an assertion on `type` and `patterns` alone holds.
+   */
   runs: string
   /**
    * What decides which one runs: `'specificity'`, a more specific pattern; `'literal'`, with `routeTies:
@@ -181,14 +185,8 @@ export function resolveRoute(
   // The routes ranked behind it that the customId matches too, which dispatch never reaches for it
   const behind = routes.slice(routes.indexOf(route) + 1)
   const alsoMatches = behind.filter(other => other.meta.type === input.type && readCustomId(other.pattern, other.meta.regex!, input.customId)).map(other => other.pattern)
-  return {
-    controller: route.controllerClass,
-    method,
-    handler: route.controllerClass.prototype[method],
-    params: text,
-    ...(typed && { values: params }),
-    ...(alsoMatches.length > 0 && { alsoMatches }),
-  }
+  const resolved: ResolvedRoute = { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params: text, ...(typed && { values: params }) }
+  return alsoMatches.length > 0 ? readableOnly(resolved, { alsoMatches }) : resolved
 }
 
 /**
@@ -222,5 +220,16 @@ export function resolveRoute(
  */
 export function findRouteConflicts(app: ControllerClass): RouteConflict[] {
   const { routeTies } = appOptionsOf(app)
-  return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app), { routeTies }), routeTies) as RouteConflict[]
+  return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app), { routeTies }), routeTies).map(({ type, patterns, runs, decidedBy }) =>
+    readableOnly({ type: type as ComponentCommandType, patterns }, { runs, decidedBy }),
+  )
+}
+
+/**
+ * `target` with `fields` added as properties a test reads but `toEqual` and its kin, which compare enumerable keys,
+ * don't see, so an assertion written for the fields it had before still holds.
+ */
+function readableOnly<T extends object, F extends object>(target: T, fields: F): T & F {
+  for (const [key, value] of Object.entries(fields)) Object.defineProperty(target, key, { value, enumerable: false, configurable: true })
+  return target as T & F
 }

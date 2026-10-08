@@ -11,4 +11,6 @@ Things that help without changing what a bot does:
 - `findRouteConflicts` reports, for each pair, the pattern that `runs` and what it was `decidedBy`.
 - `resolveRoute` lists, in `alsoMatches`, the other patterns that match the id and lost to it.
 
+A test reads these added fields, but `toEqual` doesn't compare them, so an existing assertion on `findRouteConflicts` or `resolveRoute` still holds.
+
 See https://meocord.dev/docs/4.2/components.
