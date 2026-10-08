@@ -14,13 +14,13 @@ import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.j
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
-import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages } from '@src/core/handler-pipeline.js'
+import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
 import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
+import { makeInjectable } from '@src/util/injectable.util.js'
 import { meocordClasses } from '@src/core/meocord-classes.js'
 import { buildMessageRoutes } from '@src/core/message-routes.js'
 import { appObservers, bindObservers } from '@src/core/observer-runner.js'
-import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import {
   assertProvided,
@@ -270,16 +270,17 @@ export class MeoCordFactory {
     assertStartupClasses(runs, { translator: options.i18n !== undefined || providers.has(Translator) })
     // Outside a built application, the kept errors of the stages and other classes the app's classes reach
     if (!isBuiltApplication()) declaredErrorsOf(runs.classes).forEach(startupError)
-    // Each pass of checks ends before the next step that is no check, so a run with one error stops where it always did
+    // The checks of the wiring below run on classes that passed these, so a mistake in one is not reported again there
     stopOnStartupErrors()
+    // The checks bind into this container and change nothing else: what they bind is made once all have passed
     const container = new Container()
     const translator = options.i18n !== undefined || providers.has(Translator)
     markStartupChecked(container, [...runs.classes, ...meocordClasses()], lateGuardCheck(providers, translator))
     bindGlobalStages(container, stages)
 
-    // Bind the Discord client as a constant value
-    const discordClient = new Client(clientOptionsWithSharding(this.effectiveConfig(meocordConfig), options.clientOptions))
-    container.bind(Client).toConstantValue(discordClient)
+    // Bound now, so no provider stands in for it; made once the checks pass, the one Client the app logs in with
+    const clientOptions = clientOptionsWithSharding(this.effectiveConfig(meocordConfig), options.clientOptions)
+    container.bind(Client).toDynamicValue(() => new Client(clientOptions)).inSingletonScope()
     if (options.i18n) {
       container.bind(Translator).toConstantValue(options.i18n)
       bindsOwnToken(container, Translator)
@@ -290,11 +291,11 @@ export class MeoCordFactory {
     container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, options.messages, () => options.i18n))
     container
       .bind(ShardContext)
-      .toConstantValue(
-        new ShardContext(discordClient, (service, method, args) =>
-          (Reflect.get(discordClient, SHARD_CALL_KEY) as ShardCallHandler)(service, method, args),
-        ),
-      )
+      .toDynamicValue(() => {
+        const client = container.get(Client)
+        return new ShardContext(client, (service, method, args) => (Reflect.get(client, SHARD_CALL_KEY) as ShardCallHandler)(service, method, args))
+      })
+      .inSingletonScope()
     bindsOwnToken(container, HandlerRegistry)
     bindsOwnToken(container, ShardContext)
 
@@ -330,6 +331,7 @@ export class MeoCordFactory {
     // Observers are services too: bound here so their lifecycle hooks run in dependency order
     const observers = appObservers(target as object)
     for (const observer of observers) bindDependencies(container, observer, providers)
+    // What follows walks what these bound, so a class refused here is not reported again as missing
     stopOnStartupErrors()
     // Providers first, then the services, the controllers and the observers, each after what it depends on. The app's
     // own classes, which a class injecting CooldownStore does not make of the store
@@ -371,18 +373,20 @@ export class MeoCordFactory {
         names.add(cls.name)
       }
     }
-    Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
+    prepareHandlerStages(container, appClasses)
+    bindObservers(container, observers)
+    // Read here with the rest, so a pattern that cannot be read is reported with them, before the dispatcher warns
+    buildMessageRoutes(options.controllers, options.messages)
 
+    // Every check has run, and touched only the container: from here the app is made, once none found an error
+    stopOnStartupErrors()
+    const discordClient = container.get(Client)
+    Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
     // Stamp every class the app runs with the container, so @UseGuard resolves guards on a direct call to any of them
     for (const cls of runs.classes) {
       Reflect.defineMetadata(META.container, container, cls)
     }
-
-    prepareHandlerStages(container, appClasses)
-    bindObservers(container, observers)
-    // Checked here with the rest, so a pattern that cannot be read is reported with them, before the dispatcher warns
-    buildMessageRoutes(options.controllers, options.messages)
-    stopOnStartupErrors()
+    prepareThemes(container, appClasses)
 
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory
     // has made its value, including those that return a promise

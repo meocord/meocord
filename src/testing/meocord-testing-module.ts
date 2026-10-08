@@ -29,7 +29,9 @@ import {
   bindAppPresenter,
   bindGlobalStages,
   type GlobalStages,
+  prepareAppPresenter,
   prepareHandlerStages,
+  prepareThemes,
   type RunOptions,
   runHandler,
 } from '@src/core/handler-pipeline.js'
@@ -62,11 +64,11 @@ import {
 } from '@src/core/command-conflicts.js'
 import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
-import { makeInjectable } from '@src/util/injectable.util.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
 import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
+import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
@@ -1098,13 +1100,10 @@ export class TestingModuleBuilder {
         // Before the controllers, so a class token that is provided is not also bound as itself
         for (const provider of providers.values()) bindProvider(container, provider, bindClass)
 
-        for (const ctrl of this.options.controllers ?? []) {
-          bindClass(ctrl)
-          // Stamp container on controller class so @UseGuard works in tests too
-          Reflect.defineMetadata(META.container, container, ctrl)
-        }
+        for (const ctrl of this.options.controllers ?? []) bindClass(ctrl)
         for (const service of services) bindClass(service)
         if (themeResolver) bindClass(themeResolver)
+        // What follows walks what these bound, so a class refused here is not reported again as missing
         stopOnStartupErrors()
 
         // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
@@ -1119,23 +1118,16 @@ export class TestingModuleBuilder {
           }),
         )
         assertProvided(container, providers, startup.classes, "the testing module's providers")
-        // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
-        for (const cls of startup.classes) Reflect.defineMetadata(META.container, container, cls)
         prepareHandlerStages(container, appClasses)
         const messages = messagesOf(this.options.app)
         // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
         buildMessageRoutes(this.options.controllers ?? [], messages)
         // As the app does when it is created, so a test sees the refusal the bot would give
         assertDistinctCommands(this.options.controllers ?? [])
-        stopOnStartupErrors()
-        // A handler with no builder is how a fixture is written, so only what is always a mistake is named
-        warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
-        warnInheritedRoutes(this.options.controllers ?? [])
-        warnOverlappingPatterns(this.options.controllers ?? [], routeTiesOf(this.options.app))
-        warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
-        if (this.options.app) bindAppPresenter(container, this.options.app)
+        if (this.options.app) prepareAppPresenter(container, this.options.app)
         const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
         assertObservers("the testing module's observers", observers)
+        // Only @Observer classes are bound as observers
         stopOnStartupErrors()
         bindObservers(container, observers)
         // The store calls ask: the test's own when it provides CooldownStore, else the app's
@@ -1155,6 +1147,18 @@ export class TestingModuleBuilder {
           dependencies: tokenDependencies(container, providers, token),
           ...(token === boundStore && { cooldownStore: true }),
         }))
+
+        // Every check has run, and touched only the container: from here the module is made, once none found an error
+        stopOnStartupErrors()
+        // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
+        for (const cls of [...(this.options.controllers ?? []), ...startup.classes]) Reflect.defineMetadata(META.container, container, cls)
+        prepareThemes(container, appClasses)
+        // A handler with no builder is how a fixture is written, so only what is always a mistake is named
+        warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
+        warnInheritedRoutes(this.options.controllers ?? [])
+        warnOverlappingPatterns(this.options.controllers ?? [], routeTiesOf(this.options.app))
+        warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
+        if (this.options.app) bindAppPresenter(container, this.options.app)
         // Recorded as the container makes each one, so close() shuts down exactly what exists
         const constructed = new Set<unknown>()
         for (const { token } of lifecycle) {
