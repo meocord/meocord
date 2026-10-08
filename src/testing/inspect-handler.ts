@@ -4,7 +4,7 @@ import { HandlerExecutionContext } from '@src/common/execution-context.js'
 import { type MetadataDecorator } from '@src/common/metadata.js'
 import { appStages, handlerStages } from '@src/core/handler-pipeline.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
-import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
+import { getDeclaredRoutes, getHandlerRoutes, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { appObservers } from '@src/core/observer-runner.js'
 import { type CooldownScope } from '@src/common/errors.js'
 
@@ -68,6 +68,11 @@ export interface HandlerInspection {
 
   /** The `@MessageHandler` pattern, or `undefined` for a listener and for any other kind of handler. */
   readonly pattern: string | undefined
+  /**
+   * The routes the handler answers because a class its controller extends declares them, such as `slash "ping"`:
+   * those its own class doesn't declare for it. Empty for a handler that declares all it answers.
+   */
+  readonly inheritedRoutes: readonly string[]
   /** The `app`'s observers, in the order they are told about the call; empty without an `app`. */
   readonly observers: readonly (new (...args: any[]) => DispatchObserver)[]
 
@@ -192,8 +197,20 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
       ),
     ),
     pattern: getMessageHandlers(controller.prototype).find(handler => handler.method === methodName)?.pattern,
+    inheritedRoutes: Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName)),
     observers: Object.freeze(options.app ? appObservers(options.app) : []),
     get: (metadata: MetadataDecorator<unknown> | string | symbol) => context.get(metadata as string),
     getAll: (metadata: MetadataDecorator<unknown> | string | symbol) => context.getAll(metadata as string),
   } as HandlerInspection
+}
+
+/** The routes `methodName` answers that the class declaring it last doesn't declare for it: those it inherits. */
+function inheritedRoutesOf(prototype: object, methodName: string): string[] {
+  const answered = [...new Set(getHandlerRoutes(prototype).filter(route => route.method === methodName).map(route => route.label))]
+  // The nearest class with its own decorators on the method; a class that only overrides it declares none
+  for (let at: object | null = prototype; at && at !== Object.prototype; at = Object.getPrototypeOf(at) as object | null) {
+    const own = getDeclaredRoutes(at).filter(route => route.method === methodName).map(route => route.label)
+    if (own.length > 0) return at === prototype ? answered.filter(label => !own.includes(label)) : answered
+  }
+  return []
 }

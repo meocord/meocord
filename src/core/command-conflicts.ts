@@ -345,7 +345,9 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
       const declared = getDeclaredRoutes(prototype)
       const base = Object.getPrototypeOf(prototype) as object | null
       if (declared.length === 0 || !base) continue
-      const inherited = getHandlerRoutes(base)
+      // Inherited routes the class still answers, which @Controller({ inheritedRoutes: 'replace' }) leaves none of
+      const answered = new Set(getHandlerRoutes(prototype).map(route => `${route.method}\0${route.label}`))
+      const inherited = getHandlerRoutes(base).filter(route => answered.has(`${route.method}\0${route.label}`))
       for (const method of new Set(declared.map(route => route.method))) {
         const own = [...new Set(declared.filter(route => route.method === method).map(route => route.label))]
         const kept = [...new Set(inherited.filter(route => route.method === method).map(route => route.label))].filter(label => !own.includes(label))
@@ -361,7 +363,8 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
   logger.warn(
     `${problems.length} re-declared ${one ? 'handler still answers routes it inherits' : 'handlers still answer routes they inherit'}:\n` +
       `${problems.join('\n')}\nIn the next major version (5.0), a handler's own routes replace the ones it inherits. ` +
-      "To keep an inherited route, declare it on the subclass's method as well.",
+      "To keep an inherited route, declare it on the subclass's method as well; to drop it now, give the subclass " +
+      "@Controller({ inheritedRoutes: 'replace' }).",
   )
 }
 

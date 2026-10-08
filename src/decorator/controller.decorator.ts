@@ -109,6 +109,38 @@ function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (ot
   Reflect.defineMetadata(key, handlers, target)
 }
 
+/**
+ * Leaves each method the class's own decorators declare only those routes, of every kind, dropping the ones it inherits
+ * for it: what `@Controller({ inheritedRoutes: 'replace' })` does once the class's method decorators have run.
+ */
+export function dropInheritedRoutes(prototype: object): void {
+  const redeclared = new Set(getDeclaredRoutes(prototype).map(route => route.method))
+  if (redeclared.size === 0) return
+  const base = Object.getPrototypeOf(prototype) as object
+  // An entry the class takes from its base, for a method it re-declares
+  const inheritedFor = (inherited: readonly unknown[], method: (entry: never) => string) => (entry: unknown) =>
+    inherited.includes(entry) && redeclared.has(method(entry as never))
+
+  const commands = ownCommandMap(prototype)
+  const baseCommands: Record<string, CommandMeta[]> = Reflect.getMetadata(META.commands, base) ?? {}
+  for (const [name, metas] of Object.entries(commands)) {
+    const kept = metas.filter(meta => !inheritedFor(baseCommands[name] ?? [], (entry: CommandMeta) => entry.methodName)(meta))
+    if (kept.length > 0) commands[name] = kept
+    else delete commands[name]
+  }
+  Reflect.defineMetadata(META.commands, commands, prototype)
+
+  const lists: [MetaKey, (entry: never) => string][] = [
+    [META.messageHandlers, (entry: MessageHandlerMetadata) => entry.method],
+    [META.reactionHandlers, (entry: ReactionHandlerMetadata) => entry.method],
+    [META.autocompleteHandlers, (entry: AutocompleteMeta) => entry.methodName],
+  ]
+  for (const [key, method] of lists) {
+    const inherited: unknown[] = Reflect.getMetadata(key, base) ?? []
+    Reflect.defineMetadata(key, ownHandlerList<unknown>(key, prototype).filter(entry => !inheritedFor(inherited, method)(entry)), prototype)
+  }
+}
+
 /** The class's own command map, started from a copy of the inherited one, for the same reason. */
 function ownCommandMap(target: object): Record<string, CommandMeta[]> {
   const own: Record<string, CommandMeta[]> | undefined = Reflect.getOwnMetadata(META.commands, target)
