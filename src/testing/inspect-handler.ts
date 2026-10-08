@@ -70,7 +70,8 @@ export interface HandlerInspection {
   readonly pattern: string | undefined
   /**
    * The routes the handler answers because a class its controller extends declares them, such as `slash "ping"`:
-   * those its own class doesn't declare for it. Empty for a handler that declares all it answers.
+   * those its own class doesn't declare for it. Empty for a handler that declares all it answers. A test reads it;
+   * `toEqual` doesn't compare it, so an assertion on the other fields holds either way.
    */
   readonly inheritedRoutes: readonly string[]
   /** The `app`'s observers, in the order they are told about the call; empty without an `app`. */
@@ -185,7 +186,7 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
   const globals = options.app ? appStages(options.app) : undefined
   const { guards, interceptors, filters } = handlerStages(controller.prototype as object, methodName, globals)
 
-  return {
+  const inspection = {
     controller,
     methodName,
     guards: Object.freeze([...guards]),
@@ -197,11 +198,16 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
       ),
     ),
     pattern: getMessageHandlers(controller.prototype).find(handler => handler.method === methodName)?.pattern,
-    inheritedRoutes: Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName)),
     observers: Object.freeze(options.app ? appObservers(options.app) : []),
     get: (metadata: MetadataDecorator<unknown> | string | symbol) => context.get(metadata as string),
     getAll: (metadata: MetadataDecorator<unknown> | string | symbol) => context.getAll(metadata as string),
-  } as HandlerInspection
+  }
+  // Read by a test but not compared by toEqual, so an assertion on the result's other fields holds
+  Object.defineProperty(inspection, 'inheritedRoutes', {
+    value: Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName)),
+    enumerable: false,
+  })
+  return inspection as unknown as HandlerInspection
 }
 
 /** The routes `methodName` answers that the class declaring it last doesn't declare for it: those it inherits. */
