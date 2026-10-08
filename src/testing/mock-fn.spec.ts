@@ -219,6 +219,17 @@ describe('clearAllMocks and resetAllMocks', () => {
     await expect(interaction.reply({ content: 'again' })).rejects.toThrow('already been sent')
   })
 
+  it("keeps a mock interaction's type guards and server checks answering as discord.js does", () => {
+    const inServer = createMockInteraction(ButtonInteraction, { guildId: '100000000000000001' })
+    const inDm = createMockInteraction(ButtonInteraction)
+
+    resetAllMocks()
+
+    expect([inServer.isButton(), inServer.isChatInputCommand(), inServer.isRepliable()]).toEqual([true, false, true])
+    expect([inServer.inGuild(), inServer.inCachedGuild(), inServer.inRawGuild()]).toEqual([true, false, true])
+    expect([inDm.inGuild(), inDm.inRawGuild()]).toEqual([false, false])
+  })
+
   it('leaves vi.fn mocks to vitest', () => {
     const native = vi.fn().mockReturnValue('kept')
 
