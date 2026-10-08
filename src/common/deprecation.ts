@@ -23,7 +23,8 @@ export function warnPlaceholder(logger: Logger, value: string, outcome: string, 
   warnOnce(logger, `${value} reads a placeholder here; in the next major version (5.0) ${outcome}. ${how}`)
 }
 
-function warnOnce(logger: Logger, text: string): void {
+/** Logs `text` once per run, however often it is asked for. */
+export function warnOnce(logger: Logger, text: string): void {
   if (warned.has(text)) return
   warned.add(text)
   logger.warn(text)

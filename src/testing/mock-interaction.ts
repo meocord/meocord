@@ -100,7 +100,7 @@ import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
 import { discordDefault, REAL_GETTER } from './discord-defaults.js'
 import { Logger } from '@src/common/logger.js'
-import { warnPlaceholder } from '@src/common/deprecation.js'
+import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
 import { noteMockMade, strictMocks } from './strict-mocks.js'
@@ -1008,10 +1008,17 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     defineCreatedTime(instance, generatedId)
     // A raw member is from a server the bot isn't in: no cached guild, and its user the interaction's, as discord.js reads it
     const raw = own('member')
-    if (isRawMember(raw)) {
+    // Given with a guild, a raw-shaped member is kept as the cached server's member it was before raw members
+    if (isRawMember(raw) && own('guild')) {
+      warnOnce(
+        mockLogger,
+        "The member given is a raw member, from a server the bot isn't in, but the mock was given a guild, so it reads as a " +
+          'cached server: leave the guild out for a raw member, or give a GuildMember.',
+      )
+    } else if (isRawMember(raw)) {
       const rawOnly = "The member given is a raw member, from a server the bot isn't in"
-      if (own('guild')) throw new Error(`${rawOnly}, but the mock was given a guild: leave the guild out, or give a GuildMember.`)
       if (!own('guildId')) throw new Error(`${rawOnly}, so the mock needs that server's guildId.`)
+      if (own('channel') !== undefined) throw new Error(`${rawOnly}, where discord.js caches no channel, but the mock was given a channel: leave the channel out.`)
       const givenUser = own('user') as { id: string } | undefined
       if (givenUser && givenUser.id !== raw.user.id) {
         throw new Error(`The member given is user ${raw.user.id}'s, but the mock's user is ${givenUser.id}: give the same user, or leave one of them out.`)
@@ -1021,6 +1028,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         instance.user = createMockUser({ id, username, globalName: globalName ?? null, discriminator, avatar: avatar ?? null })
       }
       Object.defineProperty(instance, 'guild', { value: null, writable: true, enumerable: true, configurable: true })
+      // Only its channelId: discord.js caches no channel from a server the bot isn't in
+      Object.defineProperty(instance, 'channel', { value: null, writable: true, enumerable: true, configurable: true })
     }
     const userGiven = !unset('user')
     if (!userGiven) instance.user = mockUser()
@@ -1631,8 +1640,8 @@ export type MockRawMemberOverrides = Partial<Omit<APIInteractionGuildMember, 'pe
  * Creates the member Discord sends with an interaction from a server the bot isn't in, as discord.js keeps it.
  *
  * Give it as an interaction's `member`, with the server's `guildId` and no `guild`, to test a user-installed command
- * run there: the interaction reads `inRawGuild()` true, `guild` null, `user` the member's user and `memberPermissions`
- * the member's, and a user option's member is the plain member Discord resolves too.
+ * run there: the interaction reads `inRawGuild()` true, `guild` and `channel` null, `user` the member's user and
+ * `memberPermissions` the member's, and a user option's member is the plain member Discord resolves too.
  *
  * @remarks
  * It is plain data, not a `GuildMember`: `roles` are role ids, `permissions` is the permission bitfield as a string,
@@ -2423,7 +2432,7 @@ export function createChatInputOptions<Cached extends CacheType = any>(
       if (!unowned.has(name)) unowned.set(name, memberIn(undefined, user.id, user))
       return unowned.get(name)!
     }
-    const rawOwner = isRawMember(Object.getOwnPropertyDescriptor(owner, 'member')?.value)
+    const rawOwner = !owner.guild && isRawMember(Object.getOwnPropertyDescriptor(owner, 'member')?.value)
     if (!members.has(name)) members.set(name, owner.guildId ? (rawOwner ? rawResolvedMember() : memberFor(owner.guild, user, true)) : null)
     return members.get(name) ?? null
   }
