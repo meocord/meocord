@@ -18,6 +18,7 @@ import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages } f
 import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { meocordClasses } from '@src/core/meocord-classes.js'
+import { buildMessageRoutes } from '@src/core/message-routes.js'
 import { appObservers, bindObservers } from '@src/core/observer-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
@@ -317,7 +318,6 @@ export class MeoCordFactory {
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))
     }
-    stopOnStartupErrors()
 
     // Bind all controllers and their transitive dependencies
     for (const ctrl of options.controllers as any[]) {
@@ -346,7 +346,6 @@ export class MeoCordFactory {
       }),
     )
     assertProvided(container, providers, runs.classes, '@MeoCord({ providers })')
-    stopOnStartupErrors()
     // The store first, after only what it injects: it is ready before anything a call reaches, and shuts down last
     const store = options.cooldownStore
     const lifecycle: LifecycleUnit[] = (store ? resolutionOrder(container, providers, [store, ...order]) : order).map(token => ({
@@ -372,7 +371,6 @@ export class MeoCordFactory {
         names.add(cls.name)
       }
     }
-    stopOnStartupErrors()
     Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
 
     // Stamp every class the app runs with the container, so @UseGuard resolves guards on a direct call to any of them
@@ -381,8 +379,10 @@ export class MeoCordFactory {
     }
 
     prepareHandlerStages(container, appClasses)
-    stopOnStartupErrors()
     bindObservers(container, observers)
+    // Checked here with the rest, so a pattern that cannot be read is reported with them, before the dispatcher warns
+    buildMessageRoutes(options.controllers, options.messages)
+    stopOnStartupErrors()
 
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory
     // has made its value, including those that return a promise

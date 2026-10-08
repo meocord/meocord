@@ -1117,15 +1117,12 @@ export class TestingModuleBuilder {
           }),
         )
         assertProvided(container, providers, startup.classes, "the testing module's providers")
-        stopOnStartupErrors()
         // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
         for (const cls of startup.classes) Reflect.defineMetadata(META.container, container, cls)
         prepareHandlerStages(container, appClasses)
-        stopOnStartupErrors()
         const messages = messagesOf(this.options.app)
         // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
         buildMessageRoutes(this.options.controllers ?? [], messages)
-        stopOnStartupErrors()
         // As the app does when it is created, so a test sees the refusal the bot would give
         assertDistinctCommands(this.options.controllers ?? [])
         stopOnStartupErrors()

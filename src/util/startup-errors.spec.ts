@@ -4,7 +4,7 @@ import { type ButtonInteraction, type ChatInputCommandInteraction } from 'discor
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { Logger } from '@src/common/logger.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { Command, Controller, Cooldown, Defer, MeoCord, Service } from '@src/decorator/index.js'
+import { Command, Controller, Cooldown, Defer, MeoCord, MessageHandler, Service } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordTestingModule, reportAllStartupErrors } from '@src/testing/index.js'
 import { describeRefusal, forgetDeclaredErrors, sourceFileOf, startupErrorsOf } from '@src/util/refusal.util.js'
@@ -116,6 +116,39 @@ describe("create()'s own startup checks", () => {
     expect(error.message.startsWith('Ctx: resolved once and shared')).toBe(true)
     expect(startupErrorsOf(error)).toEqual([error])
     expect(warned.filter(text => text.includes('help'))).toEqual([])
+  })
+
+  // Two same-named classes with a cooldown, found as the handler stages are prepared, and a pattern that cannot be read
+  const nameAndPattern = () => {
+    const shop = (command: string) => {
+      @Controller()
+      class Shop {
+        @Command(command, CommandType.SLASH)
+        @Cooldown({ seconds: 5 })
+        async buy(_interaction: ChatInputCommandInteraction) {}
+      }
+      return Shop
+    }
+    @Controller()
+    class Chat {
+      @MessageHandler('baka {rest...} {x}')
+      async baka() {}
+    }
+    return [shop('buy'), shop('sell'), Chat] as const
+  }
+
+  it('report a later pass of checks with an earlier one, where no step between them has an effect', () => {
+    const controllers = nameAndPattern()
+    @MeoCord({ controllers: [...controllers], clientOptions: { intents: [] } })
+    class App {}
+
+    const fromCreate = thrownBy(() => MeoCordFactory.create(App))
+    const fromCompile = thrownBy(() => MeoCordTestingModule.create({ controllers: [...controllers] }).compile())
+
+    for (const error of [fromCreate, fromCompile]) {
+      expect(error.message.startsWith('Shop: two classes have this name')).toBe(true)
+      expect(startupErrorsOf(error).map(each => each.message.split(':')[0])).toEqual(['Shop', "Chat.baka"])
+    }
   })
 
   it("report every error in a testing module's compile() too", () => {
