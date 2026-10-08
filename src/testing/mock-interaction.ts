@@ -2,6 +2,12 @@ import 'reflect-metadata'
 import { createMockFn, type MockedFunction, type Mock } from './mock-fn.js'
 import {
   type APIAuthorizingIntegrationOwnersMap,
+  type APIInteractionDataResolvedGuildMember,
+  type APIInteractionGuildMember,
+  type APIUser,
+  type GuildMemberFlags,
+  type PermissionResolvable,
+  PermissionsBitField,
   type APIEmbed,
   type APIMessageTopLevelComponent,
   Component,
@@ -10,7 +16,6 @@ import {
   type MessageFlagsResolvable,
   type GuildBasedChannel,
   ApplicationCommandManager,
-  PermissionsBitField,
   VoiceChannel,
   ApplicationCommandOptionType,
   ApplicationCommandType,
@@ -761,6 +766,32 @@ export function createMockInteraction<T extends object>(
   props?: MockProps<T>,
 ): DeepMocked<T>
 /**
+ * Creates a mock interaction from a server the bot isn't in: one given a {@link createMockRawMember | raw member} and
+ * that server's `guildId`, as a user-installed command run there arrives.
+ *
+ * It is typed as discord.js types an interaction from such a server, `'raw'`: its `guild` is `null` and its `member`
+ * the raw member. Everything else is as {@link createMockInteraction} builds it.
+ *
+ * @param Class - The discord.js interaction class to mock.
+ * @param props - The interaction's properties, with the raw `member` and the server's `guildId`; see {@link MockProps}.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const command = createMockInteraction(ChatInputCommandInteraction, { guildId: '100000000000000001', member: createMockRawMember() })
+ * expect(command.inRawGuild()).toBe(true)
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ */
+export function createMockInteraction<T extends object>(
+  Class: InteractionClass<T>,
+  // Options from createChatInputOptions are typed for any server, so a raw interaction takes them as they are
+  props: Omit<MockProps<WithCache<T, 'raw'>>, 'options'> & { options?: object; guildId: string; member: APIInteractionGuildMember },
+): DeepMocked<WithCache<T, 'raw'>>
+/**
  * Creates a mock interaction from outside a server: one given `guild: null`, `member: null` or a DM channel, as from a
  * direct message or a server the bot isn't in.
  *
@@ -975,6 +1006,22 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const unset = (key: string) => !Object.prototype.hasOwnProperty.call(instance, key)
     const generatedId = unset('id') ? (instance.id = nextSnowflake()) : undefined
     defineCreatedTime(instance, generatedId)
+    // A raw member is from a server the bot isn't in: no cached guild, and its user the interaction's, as discord.js reads it
+    const raw = own('member')
+    if (isRawMember(raw)) {
+      const rawOnly = "The member given is a raw member, from a server the bot isn't in"
+      if (own('guild')) throw new Error(`${rawOnly}, but the mock was given a guild: leave the guild out, or give a GuildMember.`)
+      if (!own('guildId')) throw new Error(`${rawOnly}, so the mock needs that server's guildId.`)
+      const givenUser = own('user') as { id: string } | undefined
+      if (givenUser && givenUser.id !== raw.user.id) {
+        throw new Error(`The member given is user ${raw.user.id}'s, but the mock's user is ${givenUser.id}: give the same user, or leave one of them out.`)
+      }
+      if (!givenUser) {
+        const { id, username, global_name: globalName, discriminator, avatar } = raw.user
+        instance.user = createMockUser({ id, username, globalName: globalName ?? null, discriminator, avatar: avatar ?? null })
+      }
+      Object.defineProperty(instance, 'guild', { value: null, writable: true, enumerable: true, configurable: true })
+    }
     const userGiven = !unset('user')
     if (!userGiven) instance.user = mockUser()
     // Assigned once by discord.js's Base constructor, as on a message, and the gateway caches the user on it
@@ -1566,6 +1613,81 @@ function guildRoleManager(guildId: string, roles: readonly Role[] | undefined): 
  * @group Testing
  * @category Mocks
  */
+/**
+ * What {@link createMockRawMember} builds a member with: any field Discord sends, with `permissions` as a permission
+ * set and `user` as the fields of the user given.
+ *
+ * @group Testing
+ * @category Mocks
+ */
+export type MockRawMemberOverrides = Partial<Omit<APIInteractionGuildMember, 'permissions' | 'user'>> & {
+  /** The member's permissions in the channel; Discord's defaults for a new server unless given. */
+  permissions?: PermissionResolvable
+  /** The member's user; a new person, `username` `'user'`, unless given. */
+  user?: Partial<APIUser>
+}
+
+/**
+ * Creates the member Discord sends with an interaction from a server the bot isn't in, as discord.js keeps it.
+ *
+ * Give it as an interaction's `member`, with the server's `guildId` and no `guild`, to test a user-installed command
+ * run there: the interaction reads `inRawGuild()` true, `guild` null, `user` the member's user and `memberPermissions`
+ * the member's, and a user option's member is the plain member Discord resolves too.
+ *
+ * @remarks
+ * It is plain data, not a `GuildMember`: `roles` are role ids, `permissions` is the permission bitfield as a string,
+ * and the rest are as Discord sends them, `null` for what may be absent and `false` for a flag. Code that reads
+ * `member.roles.cache` throws on it, as it does in Discord.
+ *
+ * @param overrides - Fields for the member; see {@link MockRawMemberOverrides}.
+ * @returns The member, as an `APIInteractionGuildMember`.
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const member = createMockRawMember({ roles: ['300000000000000001'], permissions: [PermissionFlagsBits.SendMessages] })
+ * const command = createMockInteraction(ChatInputCommandInteraction, { guildId: '100000000000000001', member })
+ * expect(command.inRawGuild()).toBe(true)
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link createMockMember}
+ */
+export function createMockRawMember(overrides: MockRawMemberOverrides = {}): APIInteractionGuildMember {
+  const { permissions, user, ...given } = overrides
+  return {
+    user: { id: nextSnowflake(), username: 'user', discriminator: '0', global_name: null, avatar: null, ...user },
+    roles: [],
+    nick: null,
+    avatar: null,
+    banner: null,
+    premium_since: null,
+    communication_disabled_until: null,
+    joined_at: new Date().toISOString(),
+    deaf: false,
+    mute: false,
+    pending: false,
+    flags: 0 as GuildMemberFlags,
+    ...given,
+    permissions: String(new PermissionsBitField(permissions ?? PermissionsBitField.Default).bitfield),
+  }
+}
+
+/** Whether `value` is a member Discord sends from a server the bot isn't in: plain data, not a `GuildMember`. */
+export function isRawMember(value: unknown): value is APIInteractionGuildMember {
+  if (typeof value !== 'object' || value === null || value instanceof GuildMember) return false
+  const { roles, permissions, user } = value as Partial<APIInteractionGuildMember>
+  return Array.isArray(roles) && typeof permissions === 'string' && typeof user === 'object' && user !== null
+}
+
+/** A user option's member as Discord resolves it with an interaction from a server the bot isn't in. */
+function rawResolvedMember(): APIInteractionDataResolvedGuildMember {
+  const { user: _user, deaf: _deaf, mute: _mute, ...resolved } = createMockRawMember()
+  return resolved
+}
+
 export interface MockMemberOverrides {
   /** The member's user, a new person unless given. */
   user?: User
@@ -2301,7 +2423,8 @@ export function createChatInputOptions<Cached extends CacheType = any>(
       if (!unowned.has(name)) unowned.set(name, memberIn(undefined, user.id, user))
       return unowned.get(name)!
     }
-    if (!members.has(name)) members.set(name, owner.guildId ? memberFor(owner.guild, user, true) : null)
+    const rawOwner = isRawMember(Object.getOwnPropertyDescriptor(owner, 'member')?.value)
+    if (!members.has(name)) members.set(name, owner.guildId ? (rawOwner ? rawResolvedMember() : memberFor(owner.guild, user, true)) : null)
     return members.get(name) ?? null
   }
 

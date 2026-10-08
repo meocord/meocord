@@ -18,10 +18,19 @@ export {
   createMockClient,
   createMockGuild,
   createMockMember,
+  createMockRawMember,
   createMockChannel,
   createMockMessage,
 } from './mock-interaction.js'
-export type { DeepMocked, ChatInputOptions, MockGuildOverrides, MockMemberOverrides, MockMessageOverrides, MockProps } from './mock-interaction.js'
+export type {
+  DeepMocked,
+  ChatInputOptions,
+  MockGuildOverrides,
+  MockMemberOverrides,
+  MockMessageOverrides,
+  MockProps,
+  MockRawMemberOverrides,
+} from './mock-interaction.js'
 
 export { clearAllMocks, createMockFn, isMockFunction, resetAllMocks, useMockFn } from './mock-fn.js'
 export { useStrictMocks } from './strict-mocks.js'
