@@ -30,6 +30,9 @@ const CASE_TIMEOUT_MS = 10_000
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+/** How far a store's clock may run from this process's, as a store's server keeps its own time. */
+const CLOCK_SLACK_MS = 50
+
 /**
  * Checks that a `CooldownStore` counts calls as `MemoryCooldownStore` does, as a suite of test cases.
  *
@@ -40,7 +43,8 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  * The cases cover what a shared store most often gets wrong: a sliding window rather than fixed buckets,
  * `retryAfterMs` from the oldest call still in the window, calls in the same millisecond kept apart, and concurrent
  * calls at the limit where exactly one may pass. They use real time, with windows short enough that the suite takes
- * a few seconds, and each case counts under keys of its own. Each window is a whole number of milliseconds, as
+ * a few seconds and margins wide enough that a correct store passes when timers fire late, as on a busy CI runner,
+ * and each case counts under keys of its own. Each window is a whole number of milliseconds, as
  * `@Cooldown` gives a store: it rounds its `seconds` to the millisecond.
  *
  * @param name - What the store is called in the report.
@@ -83,30 +87,36 @@ export function testCooldownStore(
     })
 
     test('slides its window: a call is allowed once the oldest leaves it, not when a bucket resets', async store => {
-      const limit = { uses: 2, windowMs: 500 }
+      // A second between calls, in a 2 s window, leaves room for a timer that fires late on a busy runner
+      const limit = { uses: 2, windowMs: 2_000 }
       await store.consume(key('sliding'), limit)
-      await sleep(250)
+      await sleep(1_000)
       await store.consume(key('sliding'), limit)
 
       const refused = await store.consume(key('sliding'), limit)
       expect(refused.allowed).toBe(false)
       await sleep(refused.retryAfterMs + 40)
 
-      // The first call has left the window; the second, 250ms younger, still holds its use.
+      // The first call has left the window; the second, a second younger, still holds its use.
       expect((await store.consume(key('sliding'), limit)).allowed).toBe(true)
       expect((await store.consume(key('sliding'), limit)).allowed).toBe(false)
     })
 
     test('counts retryAfterMs from the oldest call still in the window', async store => {
-      const limit = { uses: 2, windowMs: 1_000 }
+      const limit = { uses: 2, windowMs: 2_000 }
+      const firstSent = Date.now()
       await store.consume(key('retry'), limit)
-      await sleep(300)
+      const firstDone = Date.now()
+      await sleep(1_000)
+      const secondSent = Date.now()
       await store.consume(key('retry'), limit)
 
-      // From the oldest call, about 700ms remain; from the newest, about 1000ms would.
       const { retryAfterMs } = await store.consume(key('retry'), limit)
-      expect(retryAfterMs).toBeGreaterThan(limit.windowMs - 600)
-      expect(retryAfterMs).toBeLessThanOrEqual(limit.windowMs - 200)
+      const thirdDone = Date.now()
+      // What is left of the oldest call's window, by the times measured around each call, as timers may fire late;
+      // counted from the newest call, nearly the whole window would be left instead
+      expect(retryAfterMs).toBeLessThanOrEqual(limit.windowMs - (secondSent - firstDone) + CLOCK_SLACK_MS)
+      expect(retryAfterMs).toBeGreaterThanOrEqual(limit.windowMs - (thirdDone - firstSent) - CLOCK_SLACK_MS)
     })
 
     test('counts each key on its own', async store => {

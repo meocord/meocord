@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { CooldownStore, type CooldownLimit, type CooldownVerdict, MemoryCooldownStore } from '@src/common/index.js'
 import { testCooldownStore } from '@src/testing/index.js'
 
@@ -38,6 +39,32 @@ class TwoStepStore extends CooldownStore {
     if (times.length >= uses) return { allowed: false, retryAfterMs: times[times.length - uses] + windowMs - now }
     this.memory.set(key, [...(this.memory.get(key) ?? []), now])
     return { allowed: true, retryAfterMs: 0 }
+  }
+}
+
+/** A store that counts in fixed windows from a key's first call, freeing every use at once rather than sliding. */
+class FixedWindowStore extends CooldownStore {
+  private readonly windows = new Map<string, { start: number; count: number }>()
+  consume(key: string, { uses, windowMs }: CooldownLimit): Promise<CooldownVerdict> {
+    const now = Date.now()
+    let window = this.windows.get(key)
+    if (!window || now - window.start >= windowMs) this.windows.set(key, (window = { start: now, count: 0 }))
+    if (window.count >= uses) return Promise.resolve({ allowed: false, retryAfterMs: window.start + windowMs - now })
+    window.count++
+    return Promise.resolve({ allowed: true, retryAfterMs: 0 })
+  }
+}
+
+/** Runs `body` with every timer of 200 ms or more firing `lateMs` late, as on a busy CI runner. */
+async function withLateTimers<T>(lateMs: number, body: () => Promise<T>): Promise<T> {
+  const setTimer = globalThis.setTimeout
+  const late = vi
+    .spyOn(globalThis, 'setTimeout')
+    .mockImplementation(((handler: () => void, ms = 0, ...args: unknown[]) => setTimer(handler, ms >= 200 ? ms + lateMs : ms, ...args)) as never)
+  try {
+    return await body()
+  } finally {
+    late.mockRestore()
   }
 }
 
@@ -85,7 +112,8 @@ class BlindPeekStore extends MemoryCooldownStore {
   }
 }
 
-describe('testCooldownStore', () => {
+// Each test runs the whole suite against one store, real waits included: about 4 s, more on a slow runner
+describe('testCooldownStore', { timeout: 30_000 }, () => {
   it('fails a store that checks and records in two steps, where several concurrent calls at the limit pass', async () => {
     // It keeps the default consumeMany, which takes each key with its consume
     expect(await failures(() => new TwoStepStore())).toEqual([
@@ -96,6 +124,21 @@ describe('testCooldownStore', () => {
 
   it('fails a store that merges calls made in the same millisecond', async () => {
     expect(await failures(() => new MergingStore())).toContainEqual(expect.stringContaining('the same instant'))
+  })
+
+  it('fails a store that frees every use when a fixed window resets, rather than sliding', async () => {
+    expect(await failures(() => new FixedWindowStore())).toContainEqual(expect.stringContaining('slides its window'))
+  })
+
+  it('passes a correct store when timers fire late', async () => {
+    expect(await withLateTimers(400, () => failures(() => new MemoryCooldownStore()))).toEqual([])
+  })
+
+  it.each([
+    ['frees every use when a fixed window resets', () => new FixedWindowStore(), 'slides its window'],
+    ['counts retryAfterMs from the newest call', () => new NewestStore(), 'from the oldest call'],
+  ])('still fails a store that %s when timers fire late', async (_what, factory, failing) => {
+    expect(await withLateTimers(400, () => failures(factory))).toContainEqual(expect.stringContaining(failing))
   })
 
   it('fails a store that counts retryAfterMs from the newest call', async () => {
