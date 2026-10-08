@@ -1,9 +1,10 @@
 import 'reflect-metadata'
 import { vi } from 'vitest'
 import { type ButtonInteraction, type ChatInputCommandInteraction } from 'discord.js'
+import { ExecutionContext } from '@src/common/execution-context.js'
 import { Logger } from '@src/common/logger.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { Command, Controller, Cooldown, Defer, MeoCord } from '@src/decorator/index.js'
+import { Command, Controller, Cooldown, Defer, MeoCord, Service } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { MeoCordTestingModule, reportAllStartupErrors } from '@src/testing/index.js'
 import { describeRefusal, forgetDeclaredErrors, sourceFileOf, startupErrorsOf } from '@src/util/refusal.util.js'
@@ -90,6 +91,31 @@ describe("create()'s own startup checks", () => {
 
     expect(startupErrorsOf(error)).toEqual([error])
     expect(logged).toEqual([])
+  })
+
+  it('stop where they always did when there is one error, logging nothing a later step would', () => {
+    const warned: string[] = []
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
+    @Service()
+    class Ctx {
+      constructor(readonly context: ExecutionContext) {}
+    }
+    @Controller()
+    class Ping {
+      constructor(readonly ctx: Ctx) {}
+
+      @Command('ping', CommandType.SLASH)
+      async ping(_interaction: ChatInputCommandInteraction) {}
+    }
+    // With help on and no prefix, the dispatcher create() goes on to build would warn that help never answers
+    @MeoCord({ controllers: [Ping], messages: { help: true }, clientOptions: { intents: [] } })
+    class App {}
+
+    const error = thrownBy(() => MeoCordFactory.create(App))
+
+    expect(error.message.startsWith('Ctx: resolved once and shared')).toBe(true)
+    expect(startupErrorsOf(error)).toEqual([error])
+    expect(warned.filter(text => text.includes('help'))).toEqual([])
   })
 
   it("report every error in a testing module's compile() too", () => {
