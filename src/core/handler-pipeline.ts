@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
-import { refuse, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
+import { refuse, startupError } from '@src/util/refusal.util.js'
 import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
@@ -225,7 +225,6 @@ export function handlerStageClasses(cls: object): [unknown, string][] {
  */
 export function prepareHandlerStages(container: Container, controllers: readonly (new (...args: any[]) => unknown)[]): void {
   assertDistinctNamesWhereKeyed(controllers)
-  stopOnStartupErrors()
   const globals = globalStagesOf(container)
   configureThemes(container, globals.theme, controllers, globals.themeFor)
   for (const entry of globals.interceptors) prepareInterceptor(container, entry)
