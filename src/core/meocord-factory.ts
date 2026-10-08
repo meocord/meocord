@@ -56,7 +56,17 @@ import { type MeoCordConfig } from '@src/interface/index.js'
 import { registerClientTheme } from '@src/core/theme-runtime.js'
 import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
-import { allDeclaredErrors, collectStartupErrors, declaredErrorsOf, describeRefusal, isRefusal, logStartupErrors, refuse, startupError } from '@src/util/refusal.util.js'
+import {
+  allDeclaredErrors,
+  collectStartupErrors,
+  declaredErrorsOf,
+  describeRefusal,
+  isRefusal,
+  logStartupErrors,
+  refuse,
+  startupError,
+  stopOnStartupErrors,
+} from '@src/util/refusal.util.js'
 import { endFailedShard } from '@src/core/shard-exit.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
 import { META } from '@src/util/metadata-keys.js'
@@ -259,6 +269,8 @@ export class MeoCordFactory {
     assertStartupClasses(runs, { translator: options.i18n !== undefined || providers.has(Translator) })
     // Outside a built application, the kept errors of the stages and other classes the app's classes reach
     if (!isBuiltApplication()) declaredErrorsOf(runs.classes).forEach(startupError)
+    // Each pass of checks ends before the next step that is no check, so a run with one error stops where it always did
+    stopOnStartupErrors()
     const container = new Container()
     const translator = options.i18n !== undefined || providers.has(Translator)
     markStartupChecked(container, [...runs.classes, ...meocordClasses()], lateGuardCheck(providers, translator))
@@ -305,6 +317,7 @@ export class MeoCordFactory {
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))
     }
+    stopOnStartupErrors()
 
     // Bind all controllers and their transitive dependencies
     for (const ctrl of options.controllers as any[]) {
@@ -317,6 +330,7 @@ export class MeoCordFactory {
     // Observers are services too: bound here so their lifecycle hooks run in dependency order
     const observers = appObservers(target as object)
     for (const observer of observers) bindDependencies(container, observer, providers)
+    stopOnStartupErrors()
     // Providers first, then the services, the controllers and the observers, each after what it depends on. The app's
     // own classes, which a class injecting CooldownStore does not make of the store
     const order = resolutionOrder(
@@ -332,6 +346,7 @@ export class MeoCordFactory {
       }),
     )
     assertProvided(container, providers, runs.classes, '@MeoCord({ providers })')
+    stopOnStartupErrors()
     // The store first, after only what it injects: it is ready before anything a call reaches, and shuts down last
     const store = options.cooldownStore
     const lifecycle: LifecycleUnit[] = (store ? resolutionOrder(container, providers, [store, ...order]) : order).map(token => ({
@@ -357,6 +372,7 @@ export class MeoCordFactory {
         names.add(cls.name)
       }
     }
+    stopOnStartupErrors()
     Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
 
     // Stamp every class the app runs with the container, so @UseGuard resolves guards on a direct call to any of them
@@ -365,6 +381,7 @@ export class MeoCordFactory {
     }
 
     prepareHandlerStages(container, appClasses)
+    stopOnStartupErrors()
     bindObservers(container, observers)
 
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory

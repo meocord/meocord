@@ -146,6 +146,15 @@ export function collectStartupErrors<T>(checks: () => T): T {
   return result
 }
 
+/**
+ * Ends the checks under way with the errors found so far, before a step that is no check, such as binding or a warning:
+ * a run with one error stops where it stopped when the first error was thrown, and the errors of one pass of the
+ * checks are still reported together.
+ */
+export function stopOnStartupErrors(): void {
+  if (kept && kept.length > 0) throw kept[0]
+}
+
 function firstOf(errors: Error[]): Error {
   const [first] = errors as [Error, ...Error[]]
   Object.defineProperty(first, STARTUP_ERRORS, { value: errors, configurable: true })

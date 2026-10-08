@@ -69,6 +69,7 @@ import {
 import { messageCommandHooks, subcommandUsageError } from '@src/core/message-params.js'
 import { CommandNotFoundError } from '@src/common/errors.js'
 import { existingResponse } from '@src/common/response/response-state.js'
+import { stopOnStartupErrors } from '@src/util/refusal.util.js'
 
 /**
  * How long a component or modal submission no route takes is left to the client's other listeners, such as a
@@ -176,6 +177,8 @@ export class Dispatcher {
     this.fallback = options.fallback
     // Built now, so a pattern that cannot be read or two that match the same messages stop the bot before login
     this.messageRoutes = buildMessageRoutes([...this.controllerClasses], this.messageOptions)
+    // A pattern refused while create() reports every startup error ends its checks here, before any warning
+    stopOnStartupErrors()
     // The app's own help command reads this table too, so it lists the commands dispatch reaches
     if (this.container.isBound(HandlerRegistry)) shareMessageRoutes(this.container.get(HandlerRegistry), this.messageRoutes)
     this.warnUnreachableHelp()

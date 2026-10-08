@@ -75,7 +75,7 @@ import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
-import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError } from '@src/util/refusal.util.js'
+import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
 import {
   assertProvided,
@@ -1000,6 +1000,8 @@ export class TestingModuleBuilder {
         const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
         for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
         for (const [token, override] of this.overrides) providers.set(token, override)
+        // Each pass of checks ends before the next step that is no check, so a module with one error stops where it always did
+        stopOnStartupErrors()
         const services = this.wiring?.services ?? []
         const appOptions = this.options.app
           ? (Reflect.getMetadata(META.appOptions, this.options.app) as
@@ -1028,6 +1030,7 @@ export class TestingModuleBuilder {
         assertStartupClasses(startup, { translator: hasTranslator })
         // Those of the stages, guards and other classes they reach
         declaredErrorsOf(startup.classes).forEach(startupError)
+        stopOnStartupErrors()
         markStartupChecked(container, [...startup.classes, ...meocordClasses()], lateGuardCheck(providers, hasTranslator))
         // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
         const needClient = startup.classes.filter(cls => injectedTokens(cls).includes(Client))
@@ -1102,6 +1105,7 @@ export class TestingModuleBuilder {
         }
         for (const service of services) bindClass(service)
         if (themeResolver) bindClass(themeResolver)
+        stopOnStartupErrors()
 
         // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
         // controllers, and what they inject; factories resolve in the same order
@@ -1115,14 +1119,18 @@ export class TestingModuleBuilder {
           }),
         )
         assertProvided(container, providers, startup.classes, "the testing module's providers")
+        stopOnStartupErrors()
         // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
         for (const cls of startup.classes) Reflect.defineMetadata(META.container, container, cls)
         prepareHandlerStages(container, appClasses)
+        stopOnStartupErrors()
         const messages = messagesOf(this.options.app)
         // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
         buildMessageRoutes(this.options.controllers ?? [], messages)
+        stopOnStartupErrors()
         // As the app does when it is created, so a test sees the refusal the bot would give
         assertDistinctCommands(this.options.controllers ?? [])
+        stopOnStartupErrors()
         // A handler with no builder is how a fixture is written, so only what is always a mistake is named
         warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
         warnInheritedRoutes(this.options.controllers ?? [])
@@ -1131,6 +1139,7 @@ export class TestingModuleBuilder {
         if (this.options.app) bindAppPresenter(container, this.options.app)
         const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
         assertObservers("the testing module's observers", observers)
+        stopOnStartupErrors()
         bindObservers(container, observers)
         // The store calls ask: the test's own when it provides CooldownStore, else the app's
         const boundStore = store ?? (providers.has(CooldownStore) ? CooldownStore : undefined)
