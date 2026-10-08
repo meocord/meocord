@@ -745,16 +745,10 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
   }
 
-  // Wire each type guard as a mock fn calling the real prototype implementation.
-  // Correct by default; overridable per test via .mockReturnValue().
+  // Each type guard runs the real prototype implementation, as the mock's own, so a reset keeps it; a test may override it
   for (const name of TYPE_GUARD_METHODS) {
     const method = findPrototypeMethod(instance, name)
-    if (method !== null) {
-      stubs.set(
-        name,
-        createMockFn().mockImplementation(() => method.call(instance)),
-      )
-    }
+    if (method !== null) stubs.set(name, createMockFn(() => method.call(instance)))
   }
 
   // Guild checks read the mock's own data, since discord.js resolves `guild` through a client the
@@ -768,7 +762,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     inRawGuild: () => Boolean(own('guildId') && !own('guild') && hasMember()),
   }
   for (const [name, check] of Object.entries(guildChecks)) {
-    if (findPrototypeMethod(instance, name) !== null) stubs.set(name, createMockFn().mockImplementation(check))
+    if (findPrototypeMethod(instance, name) !== null) stubs.set(name, createMockFn(check))
   }
 
   // Set up reply state machine for repliable interactions
