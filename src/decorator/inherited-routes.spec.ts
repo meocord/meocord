@@ -217,6 +217,36 @@ describe("@Controller({ inheritedRoutes: 'replace' })", () => {
     expect(getMessageHandlers(Sub.prototype).map(handler => handler.pattern)).toEqual(['roll', 'ping'])
   })
 
+  // Only routes the listed controller still answers are named: a class between that keeps its base's is not
+  it('names no route a class between keeps, once the listed subclass replaces it', () => {
+    @Controller()
+    class Top {
+      @Command('a', PingBuilder)
+      m() {}
+    }
+    @Controller()
+    class Mid extends Top {
+      @Command('b', PingBuilder)
+      override m() {}
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Leaf extends Mid {
+      @Command('c', PingBuilder)
+      override m() {}
+    }
+
+    start(Leaf)
+    expect(Object.keys(getCommandMap(Leaf.prototype))).toEqual(['c'])
+    expect(warnings()).toEqual([])
+
+    start(Mid)
+    expect(warnings()).toEqual([
+      '1 re-declared handler still answers routes it inherits:\n' +
+        '  Mid.m answers slash "a", which it inherits, as well as its own slash "b".\n' +
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, declare it on the subclass's method as well; to drop it now, give the subclass @Controller({ inheritedRoutes: 'replace' }).",
+    ])
+  })
+
   it('keeps every route of a method it overrides without decorating, and the nearest class that declares one decides', () => {
     @Controller({ inheritedRoutes: 'replace' })
     class Mid extends Base {
