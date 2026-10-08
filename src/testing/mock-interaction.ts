@@ -1617,12 +1617,6 @@ function guildRoleManager(guildId: string, roles: readonly Role[] | undefined): 
 }
 
 /**
- * What {@link createMockMember} builds a member with.
- *
- * @group Testing
- * @category Mocks
- */
-/**
  * What {@link createMockRawMember} builds a member with: any field Discord sends, with `permissions` as a permission
  * set and `user` as the fields of the user given.
  *
@@ -1697,6 +1691,12 @@ function rawResolvedMember(): APIInteractionDataResolvedGuildMember {
   return resolved
 }
 
+/**
+ * What {@link createMockMember} builds a member with.
+ *
+ * @group Testing
+ * @category Mocks
+ */
 export interface MockMemberOverrides {
   /** The member's user, a new person unless given. */
   user?: User
