@@ -31,7 +31,7 @@ import {
   User,
   VoiceChannel,
 } from 'discord.js'
-import { createMockChannel, createMockGuild, createMockUser, memberRoles } from './mock-interaction.js'
+import { createMockChannel, createMockGuild, createMockUser, isRawMember, memberRoles } from './mock-interaction.js'
 import { strictMocks } from './strict-mocks.js'
 
 /** A permission set with none, frozen as discord.js freezes the ones it gives. */
@@ -157,7 +157,14 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     version: () => 1,
     context: () => null,
     // What Discord sends with an interaction in a server, the member's permissions there; typed for a cached one
-    memberPermissions: interaction => (interaction.guildId && interaction.member instanceof GuildMember ? interaction.member.permissions : null) as never,
+    memberPermissions: interaction => {
+      const { guildId } = interaction
+      const member: unknown = interaction.member
+      if (!guildId) return null as never
+      if (member instanceof GuildMember) return member.permissions as never
+      // A raw member's permissions are the string Discord sends, read as discord.js reads them
+      return (isRawMember(member) ? new PermissionsBitField(BigInt(member.permissions)).freeze() : null) as never
+    },
     // The bot's permissions where the interaction was made: its member's in the channel, or none outside a server
     appPermissions: interaction => {
       const { guild, channel } = interaction

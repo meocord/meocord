@@ -38,6 +38,7 @@ import {
   type OmitPartialGroupDMChannel,
   TextChannel,
   ThreadChannel,
+  type APIInteractionGuildMember,
 } from 'discord.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
@@ -51,6 +52,7 @@ import {
   createMockGuild,
   createMockInteraction,
   createMockMember,
+  createMockRawMember,
   createMockMessage,
   createMockUser,
 } from './mock-interaction.js'
@@ -158,6 +160,13 @@ describe('an overloaded method', () => {
 })
 
 describe('an interaction outside a server', () => {
+  it('is a raw-server interaction when given a raw member, its member the API member', () => {
+    const command = createMockInteraction(ChatInputCommandInteraction, { guildId: '100000000000000001', member: createMockRawMember() })
+
+    expectTypeOf(command).toExtend<ChatInputCommandInteraction<'raw'>>()
+    expectTypeOf(command.member).toExtend<APIInteractionGuildMember>()
+  })
+
   it('is built in a DM, and is no cached-guild interaction', () => {
     const dm = createMockInteraction(ChatInputCommandInteraction, { channel: createMockChannel(DMChannel), guild: null })
 
