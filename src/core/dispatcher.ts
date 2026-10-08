@@ -126,6 +126,8 @@ export interface DispatcherOptions {
   botUserId: (event: { client?: { user?: { id?: unknown } | null } }) => string | undefined
   /** Whether to warn, once per handler, about an interaction a handler left unanswered. */
   warnUnanswered?: boolean
+  /** Whether a slow message handler is named, unless `messages.slowHandlerWarning` says; on unless given. */
+  warnSlowMessageHandlers?: boolean
   /** Waits for the observers before a call settles, as the testing module does. */
   awaitObservers?: boolean
   /** How equally specific customId patterns rank; the app's `routeTies`. */
@@ -510,7 +512,7 @@ export class Dispatcher {
 
   /** Runs a message's handlers one after another, warning once about one that held the rest back for long. */
   private async runInTurn(runs: readonly MessageRun[], call: Call): Promise<void> {
-    const warn = this.messageOptions.slowHandlerWarning !== false
+    const warn = this.messageOptions.slowHandlerWarning ?? this.options.warnSlowMessageHandlers ?? true
     for (const [index, { name, run }] of runs.entries()) {
       const started = performance.now()
       await run(call)

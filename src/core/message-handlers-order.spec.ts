@@ -1,9 +1,13 @@
 import { vi } from 'vitest'
-import { type Message } from 'discord.js'
+import { Client, type Message } from 'discord.js'
 import { Catch, Controller, MeoCord, MessageHandler, UseFilter } from '@src/decorator/index.js'
+import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { Logger } from '@src/common/logger.js'
 import { type ExceptionFilter, type MessageCommandOptions } from '@src/interface/index.js'
 import { createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
+
+vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'token' }) }))
+vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
 /** A promise and the function that settles it, for a handler a test holds open. */
 function gate() {
@@ -51,10 +55,32 @@ class Listeners {
   }
 }
 
-function moduleFor(messages: MessageCommandOptions) {
+function appFor(messages: MessageCommandOptions) {
   @MeoCord({ controllers: [Commands, Listeners], messages, clientOptions: { intents: [] } })
   class App {}
-  return MeoCordTestingModule.fromApp(App).compile()
+  return App
+}
+
+const moduleFor = (messages: MessageCommandOptions) => MeoCordTestingModule.fromApp(appFor(messages)).compile()
+
+/** Sends messages as a running bot receives them, from its client's `messageCreate`. */
+async function runningBot(messages: MessageCommandOptions) {
+  const clients: Client[] = []
+  vi.spyOn(Client.prototype, 'login').mockImplementation(function (this: Client) {
+    clients.push(this)
+    return Promise.resolve('token')
+  })
+  const app = MeoCordFactory.create(appFor(messages))
+  await app.start()
+  const client = clients[0]!
+  Object.defineProperty(client, 'user', { value: { id: '111', setActivity: () => {} }, configurable: true })
+  return {
+    stop: () => app.stop(),
+    dispatch: async (message: Message) => {
+      Object.defineProperty(message, 'client', { value: client })
+      await Promise.all(client.rawListeners('messageCreate').map(listener => (listener as (m: unknown) => unknown)(message)))
+    },
+  }
 }
 
 beforeEach(() => {
@@ -131,9 +157,9 @@ describe('the slow-handler warning', () => {
     warn.mockRestore()
   })
 
-  /** Dispatches `!report` with the command held open for `seconds` of fake time. */
-  async function slowReport(module: ReturnType<typeof moduleFor>, seconds: number) {
-    const dispatched = module.dispatch(createMockMessage({ content: '!report' }))
+  /** Sends `!report` with the command held open for `seconds` of fake time. */
+  async function slowReport(target: { dispatch: (message: Message) => Promise<unknown> }, seconds: number) {
+    const dispatched = target.dispatch(createMockMessage({ content: '!report' }))
     await vi.waitFor(() => expect(events).toContain('report:start'))
     setTimeout(() => commandGate.open(), seconds * 1000)
     await vi.advanceTimersByTimeAsync(seconds * 1000)
@@ -145,7 +171,7 @@ describe('the slow-handler warning', () => {
   const slowWarnings = () => warn.mock.calls.map(([text]) => String(text)).filter(text => text.includes('held back'))
 
   it('names a handler that held the message’s listeners back for 5 s or more, once, and how to run them side by side', async () => {
-    const module = moduleFor({ prefix: '!' })
+    const module = moduleFor({ prefix: '!', slowHandlerWarning: true })
 
     await slowReport(module, 6)
     await slowReport(module, 6)
@@ -155,10 +181,23 @@ describe('the slow-handler warning', () => {
     ])
   })
 
+  // A running bot warns by default; a test, whose fake clock can jump past 5 s, only when asked
   it.each([
-    ['under 5 s', { prefix: '!' }, 4.9],
-    ['with slowHandlerWarning: false', { prefix: '!', slowHandlerWarning: false }, 6],
-    ["with handlers: 'concurrent', which holds no one back", { prefix: '!', handlers: 'concurrent' as const }, 6],
+    ['by default', { prefix: '!' }, 1],
+    ['not with slowHandlerWarning: false', { prefix: '!', slowHandlerWarning: false }, 0],
+  ])('warns in a running bot %s', async (_, messages, count) => {
+    const bot = await runningBot(messages)
+
+    await slowReport(bot, 6)
+    await bot.stop()
+
+    expect(slowWarnings()).toHaveLength(count)
+  })
+
+  it.each([
+    ['under 5 s', { prefix: '!', slowHandlerWarning: true }, 4.9],
+    ['in a testing module unless asked', { prefix: '!' }, 6],
+    ["with handlers: 'concurrent', which holds no one back", { prefix: '!', handlers: 'concurrent' as const, slowHandlerWarning: true }, 6],
   ])('says nothing %s', async (_, messages, seconds) => {
     await slowReport(moduleFor(messages), seconds)
 
