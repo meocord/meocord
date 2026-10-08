@@ -200,7 +200,7 @@ export class MeoCordFactory {
     if (!isShardProcess()) {
       warnUnregisteredCommands(options.controllers)
       warnInheritedRoutes(options.controllers)
-      warnOverlappingPatterns(options.controllers)
+      warnOverlappingPatterns(options.controllers, options.routeTies)
       warnHandlersOffControllers(options.controllers, reachableClasses(roots, providers))
       const developmentEnv = bunDevelopmentValues()
       if (developmentEnv.keys.length > 0) {
@@ -384,6 +384,7 @@ export class MeoCordFactory {
       options.messages,
       // In development only, unless the app says otherwise
       options.warnUnanswered ?? process.env.NODE_ENV === 'development',
+      options.routeTies,
     )
   }
 }

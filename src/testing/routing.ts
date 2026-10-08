@@ -4,6 +4,8 @@ import {
   type ControllerClass,
   findComponentRouteConflicts,
   matchComponentRoute,
+  readCustomId,
+  type RouteTies,
 } from '@src/core/component-routes.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { buildMessageRoutes, fitsScope, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
@@ -74,6 +76,11 @@ export interface ResolvedRoute {
    * handler receives `params`.
    */
   values?: Record<string, string | number | boolean>
+  /**
+   * For a component route, the other patterns of its type that match the `customId` too, in the order they rank
+   * behind it: the ones that lost to it. Absent when no other pattern matches.
+   */
+  alsoMatches?: string[]
 }
 
 /**
@@ -87,12 +94,19 @@ export interface RouteConflict {
   type: ComponentCommandType
   /** The two patterns. */
   patterns: [string, string]
+  /** The pattern that runs for the `customId`s both match, under the app's `routeTies`. */
+  runs: string
+  /**
+   * What decides which one runs: `'specificity'`, a more specific pattern; `'literal'`, with `routeTies:
+   * 'literalFirst'`, a literal segment where the other has a param; `'order'`, the order they are listed in.
+   */
+  decidedBy: 'specificity' | 'literal' | 'order'
 }
 
 /** The options `@MeoCord` declares on an application class. */
-function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions } {
+function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions; routeTies?: RouteTies } {
   const options = Reflect.getMetadata(META.appOptions, app) as
-    | { controllers?: ControllerClass[]; messages?: MessageCommandOptions }
+    | { controllers?: ControllerClass[]; messages?: MessageCommandOptions; routeTies?: RouteTies }
     | undefined
   if (!options) throw new TypeError(`${app.name || 'The given class'} is not decorated with @MeoCord().`)
   return options
@@ -158,13 +172,23 @@ export function resolveRoute(
   if (!isCustomIdRouted(input.type)) {
     throw new TypeError(`${input.type} commands are routed by name, not by customId.`)
   }
-  const routes = buildComponentRoutes(controllersOf(app))
+  const routes = buildComponentRoutes(controllersOf(app), { routeTies: appOptionsOf(app).routeTies })
   const matched = matchComponentRoute(routes, type => type === input.type, input.customId)
   if (!matched) return undefined
   const { route, params, text } = matched
   const method = route.meta.methodName
   const typed = Object.keys(route.types).length > 0
-  return { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params: text, ...(typed && { values: params }) }
+  // The routes ranked behind it that the customId matches too, which dispatch never reaches for it
+  const behind = routes.slice(routes.indexOf(route) + 1)
+  const alsoMatches = behind.filter(other => other.meta.type === input.type && readCustomId(other.pattern, other.meta.regex!, input.customId)).map(other => other.pattern)
+  return {
+    controller: route.controllerClass,
+    method,
+    handler: route.controllerClass.prototype[method],
+    params: text,
+    ...(typed && { values: params }),
+    ...(alsoMatches.length > 0 && { alsoMatches }),
+  }
 }
 
 /**
@@ -197,5 +221,6 @@ export function resolveRoute(
  * @see {@link resolveRoute}
  */
 export function findRouteConflicts(app: ControllerClass): RouteConflict[] {
-  return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app))) as RouteConflict[]
+  const { routeTies } = appOptionsOf(app)
+  return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app), { routeTies }), routeTies) as RouteConflict[]
 }
