@@ -99,6 +99,7 @@ const PUBLIC_API: Record<string, string[]> = {
     'resetAllMocks',
     'resolveRoute',
     'testCooldownStore',
+    'useMockFn',
     'withTheme',
   ],
 }
@@ -278,6 +279,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'InvocationResult',
     'MessageToResolve',
     'Mock',
+    'MockFnFactory',
     'MockGuildOverrides',
     'MockInstance',
     'MockMemberOverrides',
@@ -291,6 +293,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'ResolvedRoute',
     'ResponseReport',
     'RouteConflict',
+    'RunnerMock',
     'TestingModuleInitOptions',
     'TestingModuleOptions',
     'ValueProvider',

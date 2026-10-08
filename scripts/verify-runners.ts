@@ -91,12 +91,11 @@ const runners: Record<string, (dir: string) => void> = {
   },
   bun: dir => {
     const output = run('bun test: test', process.execPath, ['test', 'bun.test.ts'], dir)
-    // The test.failing case counts as a pass while it fails as expected
     expectCounts('bun test', output, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 2)
-    // Bun lists no passing test by name outside a terminal, so the expected-failure case runs again on its own
-    const failing = "bun's mock matchers read meocord's mocks"
-    const alone = run('bun test: the test.failing case', process.execPath, ['test', 'bun.test.ts', '-t', failing], dir)
-    expectCounts(`bun test, "${failing}" failing as expected`, alone, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 1)
+    // Bun lists no passing test by name outside a terminal, so the matcher case runs again on its own
+    const matchers = "bun's mock matchers read meocord's mocks"
+    const alone = run("bun test: bun's matchers", process.execPath, ['test', 'bun.test.ts', '-t', matchers], dir)
+    expectCounts(`bun test, "${matchers}"`, alone, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 1)
   },
 }
 
