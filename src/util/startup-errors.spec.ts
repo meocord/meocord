@@ -137,6 +137,30 @@ describe("a decorator's startup error", () => {
   })
 })
 
+describe('an error compared as a test compared it before', () => {
+  // What it now carries is readable, but not its own enumerable keys, which toEqual and toStrictEqual compare
+  it("still equals an Error of its message, create()'s with the rest found and a decorator's with its declaration", () => {
+    const controllers = twoMistakes()
+    @MeoCord({ controllers: [...controllers], clientOptions: { intents: [] } })
+    class App {}
+    const fromCreate = thrownBy(() => MeoCordFactory.create(App))
+    const fromDecorator = thrownBy(() => {
+      class Shop {
+        @Cooldown({ seconds: -1 })
+        buy() {}
+      }
+      return Shop
+    })
+
+    expect(startupErrorsOf(fromCreate)).toHaveLength(2)
+    expect((fromDecorator as { declaration?: string }).declaration).toBe('Shop.buy')
+    for (const error of [fromCreate, fromDecorator]) {
+      expect(error).toEqual(new Error(error.message))
+      expect(error).toStrictEqual(new Error(error.message))
+    }
+  })
+})
+
 describe("reportAllStartupErrors(), as startupErrors: 'all' does for a built bot", () => {
   // Three mistakes in two controllers, defined once collecting is on, as a setup file has it before tests import them
   const threeMistakes = () => {
