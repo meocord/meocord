@@ -23,8 +23,12 @@ function assertMessageOptions(appName: string, messages: MessageCommandOptions |
   if (prefix !== undefined && !isText(prefix) && typeof prefix !== 'function' && !(Array.isArray(prefix) && prefix.every(isText))) {
     throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { prefix } }) takes a string, a list of strings, or a function of the message returning them.`))
   }
-  for (const [name, value] of Object.entries({ caseSensitive, replyEmoji: messages.replyEmoji, dmOnError: messages.dmOnError, dmOnCooldown: messages.dmOnCooldown })) {
+  const flags = { caseSensitive, replyEmoji: messages.replyEmoji, dmOnError: messages.dmOnError, dmOnCooldown: messages.dmOnCooldown, slowHandlerWarning: messages.slowHandlerWarning }
+  for (const [name, value] of Object.entries(flags)) {
     if (value !== undefined && typeof value !== 'boolean') throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { ${name} } }) takes true or false.`))
+  }
+  if (messages.handlers !== undefined && messages.handlers !== 'sequential' && messages.handlers !== 'concurrent') {
+    throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { handlers } }) takes 'sequential' or 'concurrent'.`))
   }
   if (mention !== undefined && typeof mention !== 'boolean' && mention !== 'only') {
     throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { mention } }) takes true, false or 'only'.`))
