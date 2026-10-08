@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { type ClientEvents } from 'discord.js'
 import { ownHandlerList } from '@src/decorator/controller.decorator.js'
 import { META } from '@src/util/metadata-keys.js'
-import { refuseOnClass } from '@src/util/refusal.util.js'
+import { refuseOnClass, declaring } from '@src/util/refusal.util.js'
 
 /** One `@On` or `@Once` declaration: the event, the method handling it, and whether it runs only once. */
 export interface EventHandlerMetadata {
@@ -13,7 +13,7 @@ export interface EventHandlerMetadata {
 
 function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
   // Generic over the method, so it is checked against the event's arguments rather than required to match exactly
-  return function <F extends (...args: ClientEvents[E]) => unknown>(
+  return declaring(function <F extends (...args: ClientEvents[E]) => unknown>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<F>,
@@ -22,7 +22,7 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
     const handlers = ownHandlerList<EventHandlerMetadata>(META.eventHandlers, target)
     handlers.push({ event, method: propertyKey, once })
     Reflect.defineMetadata(META.eventHandlers, handlers, target)
-  }
+  })
 }
 
 /**

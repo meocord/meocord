@@ -31,7 +31,7 @@ import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
-import { refuse, refuseOnClass } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
 
@@ -299,7 +299,7 @@ export function MessageHandler<
   const Pattern extends string = string,
 >(pattern: Pattern, options?: MessageHandlerOptions): PatternedMessageHandlerDecorator<T, R, Pattern>
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
-  return function (target: object, propertyKey: string) {
+  return declaring(function (target: object, propertyKey: string) {
     refuseOnClass('@MessageHandler', target, propertyKey)
     // An empty pattern means every message, as no pattern does
     if (pattern === '') {
@@ -309,7 +309,7 @@ export function MessageHandler(pattern?: string, options: MessageHandlerOptions 
     const declared = { pattern: pattern || undefined, method, options }
     addOwnHandler<MessageHandlerMetadata>(META.messageHandlers, target, declared, other => other.method === method && other.pattern === declared.pattern)
     declareRoute(target, messageRoute(method, declared.pattern))
-  }
+  })
 }
 
 /** A `@ReactionHandler` as the decorator stores it. */
@@ -381,7 +381,7 @@ export function ReactionHandler(
   settings: ReactionHandlerSettings = {},
 ): ReactionHandlerDecorator<MessageReaction | PartialMessageReaction, unknown> {
   const [emoji, own] = typeof emojiOrSettings === 'object' ? [undefined, emojiOrSettings] : [emojiOrSettings, settings]
-  return function (target: object, propertyKey: string) {
+  return declaring(function (target: object, propertyKey: string) {
     refuseOnClass('@ReactionHandler', target, propertyKey)
     const method = propertyKey.toString()
     addOwnHandler<ReactionHandlerMetadata>(
@@ -391,7 +391,7 @@ export function ReactionHandler(
       other => other.method === method && other.emoji === emoji,
     )
     declareRoute(target, reactionRoute(method, emoji))
-  }
+  })
 }
 
 /** A custom emoji as Discord writes it in a message: `<:name:id>`, or `<a:name:id>` for an animated one. */
@@ -689,7 +689,7 @@ export function Command<
   N extends string | Route = string,
 >(name: N, builderOrType: T) {
   const commandName = typeof name === 'string' ? name : (name as Route).pattern
-  return function <P extends Record<string, any>, R>(
+  return declaring(function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,
     _descriptor: (
@@ -818,7 +818,7 @@ export function Command<
 
     Reflect.defineMetadata(META.commands, commands, target)
     declareRoute(target, commandRoute(propertyKey, commandType, commandName))
-  }
+  })
 }
 
 /** The interaction class Discord sends for each context menu kind. */
@@ -892,7 +892,7 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @see {@link https://meocord.dev/docs/4.1/autocomplete | Autocomplete}
  */
 export function Autocomplete<_R = unknown>(commandPath: string, optionName?: string) {
-  return function <P extends Record<string, any>, R>(
+  return declaring(function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,
     _descriptor:
@@ -909,7 +909,7 @@ export function Autocomplete<_R = unknown>(commandPath: string, optionName?: str
       other => other.methodName === methodName && other.commandPath === commandPath && other.optionName === optionName,
     )
     declareRoute(target, autocompleteRoute(methodName, commandPath, optionName))
-  }
+  })
 }
 
 /**

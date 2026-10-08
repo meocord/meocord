@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { installStackRemapper } from './stack-remap.js'
 import { listenForDevRunnerStop } from '../util/dev-runner.util.js'
-import { BUILD_MODE_KEY, BUNDLE_ENTRY_KEY } from '../util/bundle-entry.util.js'
+import { BUILD_MODE_KEY, BUNDLE_ENTRY_KEY, STARTUP_ERRORS_KEY } from '../util/bundle-entry.util.js'
 import { loadMeoCordConfig } from '../util/meocord-config-loader.util.js'
 
 // First, so a restart `meocord start --dev` asks for while the bundle still loads is heard
@@ -25,5 +25,8 @@ __webpack_public_path__ = `${path.dirname(bundle).replace(/\\/g, '/')}/`
 // Beside the bundle, wherever the bot was started from, by the loader the runtime uses: the same module when meocord is
 // bundled, else a copy of it, and require's cache evaluates the config once either way; the factory reports a failure
 const config = loadMeoCordConfig()
+
+// Before the entry's decorators run, so with 'all' they keep their startup errors for create() to report together
+if (config?.startupErrors === 'all') globalThis[STARTUP_ERRORS_KEY] = 'all'
 
 if (config?.sourceMappedStacks !== false) installStackRemapper(bundle)

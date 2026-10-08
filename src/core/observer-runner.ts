@@ -7,7 +7,7 @@ import { type DispatchObserver, type DispatchOutcome, type DispatchResult } from
 import { bindShared } from '@src/core/interceptor-runner.js'
 import { appliesTo } from '@src/core/stage-scope.js'
 import { respond, type ResponsePhase } from '@src/common/response/response-state.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { startupError } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /** Where a container keeps the observers its calls are reported to, in order. */
@@ -17,12 +17,13 @@ type ObserverClass = new (...args: any[]) => DispatchObserver
 
 const logger = new Logger('Observer')
 
-/** Throws unless every entry is an `@Observer` class, naming where it was listed. */
+/** Reports each entry that is not an `@Observer` class, naming where it was listed. */
 export function assertObservers(where: string, observers: readonly unknown[]): void {
   for (const observer of observers) {
     if (typeof observer !== 'function' || !Reflect.getMetadata(META.observerClass, observer)) {
       const name = typeof observer === 'function' ? observer.name : String(observer)
-      throw refuse(new Error(`${where} takes classes decorated with @Observer(), not ${name}.`))
+      startupError(new Error(`${where} takes classes decorated with @Observer(), not ${name}.`))
+      continue
     }
   }
 }

@@ -11,7 +11,7 @@ import {
   type ProviderToken,
   type ValueProvider,
 } from '@src/interface/provider.interface.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, startupError } from '@src/util/refusal.util.js'
 
 /** The providers an app or a testing module binds, by the token each is bound under. */
 export type ProviderMap = Map<unknown, Provider>
@@ -33,9 +33,9 @@ const isToken = (value: unknown): value is ProviderToken =>
   typeof value === 'function' || typeof value === 'string' || typeof value === 'symbol'
 
 /**
- * Checks each provider's shape and indexes them by token, throwing on the first that cannot be bound, such as one with
- * no token, not exactly one of `useValue`, `useClass` and `useFactory`, one that injects `ExecutionContext`, or a
- * token provided twice.
+ * Checks each provider's shape and indexes them by token, reporting each that cannot be bound, such as one with no
+ * token, not exactly one of `useValue`, `useClass` and `useFactory`, one that injects `ExecutionContext`, or a token
+ * provided twice, as a startup error; see `startupError`.
  */
 export function providerMap(providers: readonly Provider[], where: string): ProviderMap {
   const map: ProviderMap = new Map()
@@ -47,44 +47,52 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
       const listing = where.includes('@MeoCord')
         ? 'list a service in @MeoCord({ services })'
         : 'a class a controller or service injects is bound for you, so it needs no listing'
-      throw refuse(new Error(
+      startupError(new Error(
         `${where}: ${name} is a class, not a provider: ${listing}. To put something in its place, write ` +
           `{ provide: ${name}, useValue } or { provide: ${name}, useClass }.`,
       ))
+      continue
     }
     if (!entry || typeof entry !== 'object' || !isToken(entry.provide)) {
-      throw refuse(new Error(`${where}: a provider has no token: set provide to a class, a string or a symbol.`))
+      startupError(new Error(`${where}: a provider has no token: set provide to a class, a string or a symbol.`))
+      continue
     }
     const name = tokenName(entry.provide)
     const kinds = (['useValue', 'useClass', 'useFactory'] as const).filter(kind => kind in entry)
     if (kinds.length !== 1) {
-      throw refuse(new Error(`${where}: the provider for ${name} needs exactly one of useValue, useClass and useFactory.`))
+      startupError(new Error(`${where}: the provider for ${name} needs exactly one of useValue, useClass and useFactory.`))
+      continue
     }
     if ('useClass' in entry && typeof entry.useClass !== 'function') {
-      throw refuse(new Error(`${where}: the provider for ${name} has a useClass that is not a class.`))
+      startupError(new Error(`${where}: the provider for ${name} has a useClass that is not a class.`))
+      continue
     }
     if ('useClass' in entry && injectedTokens(entry.useClass as AnyClass).includes(ExecutionContext)) {
-      throw refuse(new Error(
+      startupError(new Error(
         `${where}: the provider for ${name} uses ${tokenName(entry.useClass)}, which injects ExecutionContext, but it is ` +
           "made once and shared, so it would keep the first call's context for every later call. Inject " +
           'ExecutionContext only into guards.',
       ))
+      continue
     }
     if ('useFactory' in entry) {
       if (typeof entry.useFactory !== 'function') {
-        throw refuse(new Error(`${where}: the provider for ${name} has a useFactory that is not a function.`))
+        startupError(new Error(`${where}: the provider for ${name} has a useFactory that is not a function.`))
+        continue
       }
       if (entry.inject !== undefined && !(Array.isArray(entry.inject) && entry.inject.every(isToken))) {
-        throw refuse(new Error(`${where}: the provider for ${name} has an inject that is not a list of tokens.`))
+        startupError(new Error(`${where}: the provider for ${name} has an inject that is not a list of tokens.`))
+        continue
       }
       if (entry.inject?.includes(ExecutionContext)) {
-        throw refuse(new Error(
+        startupError(new Error(
           `${where}: the provider for ${name} injects ExecutionContext, but its factory runs once and its value is ` +
             "shared, so it would keep the first call's context for every later call. Inject ExecutionContext only into guards.",
         ))
+        continue
       }
     }
-    if (map.has(entry.provide)) throw refuse(new Error(`${where}: ${name} is provided twice.`))
+    if (map.has(entry.provide)) { startupError(new Error(`${where}: ${name} is provided twice.`)); continue }
     map.set(entry.provide, provider)
   }
   return map
@@ -137,16 +145,16 @@ export function bindProvider(container: Container, provider: Provider, bindClass
 }
 
 /**
- * Throws when a class or a factory asks for a string or symbol token that nothing binds, naming both,
- * rather than failing when the class is first resolved. A class token is bound on demand, so it is
- * never missing.
+ * Reports a class or a factory that asks for a string or symbol token nothing binds, naming both, rather than failing
+ * when the class is first resolved. A class token is bound on demand, so it is never missing.
  */
 export function assertProvided(container: Container, providers: ProviderMap, classes: readonly AnyClass[], where: string): void {
   const missing = (token: unknown) => (typeof token === 'string' || typeof token === 'symbol') && !container.isBound(token)
   for (const cls of classes) {
     const token = injectedTokens(cls).find(missing)
     if (token !== undefined) {
-      throw refuse(new Error(`${cls.name}: it injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`))
+      startupError(new Error(`${cls.name}: it injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`))
+      continue
     }
   }
   for (const [provided, provider] of providers) {
@@ -157,9 +165,10 @@ export function assertProvided(container: Container, providers: ProviderMap, cla
         : []
     const token = dependencies.find(missing)
     if (token !== undefined) {
-      throw refuse(new Error(
+      startupError(new Error(
         `${tokenName(provided)}: its provider injects ${tokenName(token)}, which nothing provides: add a provider for it to ${where}.`,
       ))
+      continue
     }
   }
 }
@@ -196,13 +205,14 @@ export function reachableClasses(roots: readonly unknown[], providers: ProviderM
 export function assertTypedParameters(classes: readonly AnyClass[], decorators: ReadonlyMap<unknown, string>): void {
   for (const cls of classes) {
     const instead = meocordClassAdvice(cls)
-    if (instead && undecoratedConstructor(cls)) throw refuse(new Error(`${cls.name}: MeoCord does not inject it; ${instead}.`))
+    if (instead && undecoratedConstructor(cls)) { startupError(new Error(`${cls.name}: MeoCord does not inject it; ${instead}.`)); continue }
     if (undecoratedConstructor(cls)) {
       const decorator = decorators.get(cls)
-      throw refuse(new Error(
+      startupError(new Error(
         `${cls.name}: its constructor takes parameters, but ${cls.name} has no decorator, so TypeScript recorded none of ` +
           `their types and it cannot be created. ${decorator ? `Decorate it with ${decorator}.` : 'Decorate it with @Service(), or give a class from a package a provider in @MeoCord({ providers }).'}`,
       ))
+      continue
     }
     const index = untypedParameter(cls)
     if (index === -1) continue
@@ -212,12 +222,13 @@ export function assertTypedParameters(classes: readonly AnyClass[], decorators: 
         ? ''
         : ` (${injectors.length === 1 ? injectors[0] : `${injectors.slice(0, -1).join(', ')} and ${injectors.at(-1)}`} ` +
           `inject${injectors.length === 1 ? 's' : ''} ${cls.name})`
-    throw refuse(new Error(
+    startupError(new Error(
       `${cls.name}: parameter ${index + 1} of its constructor has no runtime type, so it cannot be created. Usually ` +
         `${cls.name} and a class it injects import each other${injectedBy}, or the parameter is typed with an ` +
         'interface or an `import type`. Move what they both need into a third service, or inject the parameter ' +
         'with @Inject(token).',
     ))
+    continue
   }
 }
 

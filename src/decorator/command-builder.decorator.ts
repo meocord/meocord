@@ -3,7 +3,7 @@ import { type BuildableCommandType, type CommandBuilderBase } from '@src/interfa
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { type CommandBuilderOptions } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
-import { deprecatedOnMethod } from '@src/util/refusal.util.js'
+import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as a command's builder, which describes the command MeoCord registers with Discord.
@@ -35,7 +35,7 @@ import { deprecatedOnMethod } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.1/slash-commands | Slash commands}
  */
 export function CommandBuilder<T extends BuildableCommandType>(commandType: T, options: CommandBuilderOptions = {}) {
-  return function (target: new () => CommandBuilderBase<T>, propertyKey?: string | symbol) {
+  return declaring(function (target: new () => CommandBuilderBase<T>, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@CommandBuilder', target, propertyKey)) return
     makeInjectable(target)
 
@@ -47,5 +47,5 @@ export function CommandBuilder<T extends BuildableCommandType>(commandType: T, o
     )
 
     if (options.guilds) Reflect.defineMetadata(META.builderGuilds, [...options.guilds], target)
-  }
+  })
 }

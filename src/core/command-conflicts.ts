@@ -13,7 +13,7 @@ import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts,
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { startupError } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 import { listed } from '@src/util/user-text.util.js'
 
@@ -51,7 +51,7 @@ function overlap(a: CommandMeta, b: CommandMeta): boolean {
  * Refuses commands of which only one could run or be registered: two handlers of one slash command name or subcommand
  * path or of one context menu name and kind, or two builders of one command; a command's subcommands, and a user and a
  * message context menu of one name, are no clash. The app, `meocord register`, the shard manager and testing call it.
- * @throws Error naming both handlers, or both builders, with what to do instead.
+ * Each clash is a startup error, naming both handlers or both builders with what to do instead; see `startupError`.
  */
 export function assertDistinctCommands(controllerClasses: readonly ControllerClass[]): void {
   const handlers = new Map<string, Declared[]>()
@@ -69,11 +69,12 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
         const key = `${meta.type}\0${name}`
         const earlier = (handlers.get(key) ?? []).find(other => overlap(other.meta, meta))
         if (earlier) {
-          throw refuse(new Error(
+          startupError(new Error(
             `${where(earlier)}: it and ${where(here)} both handle the ${describe(meta.type, name, contextMenuKind(meta) ?? contextMenuKind(earlier.meta))}, ` +
               `so only ${where(earlier)} would ever run. Keep one handler for it, or give the other a name or ` +
               `subcommand path of its own.`,
           ))
+          continue
         }
         handlers.set(key, [...(handlers.get(key) ?? []), here])
 
@@ -90,7 +91,7 @@ export function assertDistinctCommands(controllerClasses: readonly ControllerCla
         if (!built) {
           builders.set(registered, { ...here, name: typeof body.name === 'string' ? body.name : name })
         } else if (built.meta.builderClass !== meta.builderClass) {
-          throw refuse(new Error(
+          startupError(new Error(
             `${where(built)}: its builder ${built.meta.builderClass!.name} and ${meta.builderClass.name} on ${where(here)} both ` +
               `build the ${describe(meta.type, built.name, contextMenuKind(meta))}, and Discord registers one command ` +
               `per name and type, so only the first would be. Keep one builder, on a single @Command, and declare ` +

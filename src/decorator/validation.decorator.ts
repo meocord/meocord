@@ -7,7 +7,7 @@ import { type PipeEntry, type ValidationMetadata } from '@src/core/input-runner.
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries } from '@src/core/stage-scope.js'
-import { refuse, refuseOnClass, refuseOnMethod } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass, refuseOnMethod, declaring } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 export type Handler = (interaction: any, params: any, ...rest: any[]) => unknown
@@ -76,7 +76,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends Validat
   schema: S,
   options: ValidateOptions<Pipes> = {},
 ) {
-  return function <M extends Handler>(
+  return declaring(function <M extends Handler>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsInput<ParamsOf<M>, ValidatedInput<S, Pipes>>,
@@ -99,7 +99,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends Validat
     assertStageEntries('@Validate', 'pipe', `${target.constructor.name}.${propertyKey}`, inlinePipes)
     const metadata: ValidationMetadata = { schema, pipes: (options.pipes ?? {}) as ValidationMetadata['pipes'] }
     Reflect.defineMetadata(META.methodValidation, metadata, target, propertyKey)
-  }
+  })
 }
 
 /** Allows the descriptor when the handler's params take the pipe's output at `key`. */
@@ -147,7 +147,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
   key: K,
   ...pipes: Pipes & { [I in keyof Pipes]: CheckedEntry<Pipes[I], new (...args: any[]) => PipeInterface> }
 ) {
-  return function <M extends Handler>(
+  return declaring(function <M extends Handler>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsPiped<ParamsOf<M>, K, LastPipeOutput<Pipes>>,
@@ -157,7 +157,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
     // Decorators apply bottom-up, so a higher @UsePipe's pipes go first, in the order they read.
     const existing = (Reflect.getOwnMetadata(META.methodPipes, target, propertyKey) as { key: string; entry: PipeEntry }[]) ?? []
     Reflect.defineMetadata(META.methodPipes, [...pipes.map(entry => ({ key, entry: entry as PipeEntry })), ...existing], target, propertyKey)
-  }
+  })
 }
 
 /**
@@ -187,8 +187,8 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
  * @see {@link https://meocord.dev/docs/4.1/validation | Validation and pipes}
  */
 export function Pipe() {
-  return function (target: new (...args: any[]) => PipeInterface, propertyKey?: string | symbol) {
+  return declaring(function (target: new (...args: any[]) => PipeInterface, propertyKey?: string | symbol) {
     refuseOnMethod('@Pipe', target, propertyKey)
     makeInjectable(target)
-  }
+  })
 }

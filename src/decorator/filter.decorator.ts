@@ -8,7 +8,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { describeValue, isConstructor } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
-import { refuseOnMethod } from '@src/util/refusal.util.js'
+import { refuseOnMethod, declaring } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as an exception filter for the given error types.
@@ -40,7 +40,7 @@ import { refuseOnMethod } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
  */
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
-  return function (target: new (...args: any[]) => ExceptionFilter<any>, propertyKey?: string | symbol) {
+  return declaring(function (target: new (...args: any[]) => ExceptionFilter<any>, propertyKey?: string | symbol) {
     refuseOnMethod('@Catch', target, propertyKey)
     makeInjectable(target)
     errorTypes.forEach((type, index) => {
@@ -54,7 +54,7 @@ export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[
       )
     })
     Reflect.defineMetadata(META.catchTypes, errorTypes, target)
-  }
+  })
 }
 
 const logger = new Logger('Catch')
@@ -95,7 +95,7 @@ const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth']
 export function UseFilter<const T extends readonly unknown[]>(
   ...filters: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => ExceptionFilter<any>> }
 ): ClassDecorator & MethodDecorator {
-  return function (target: object, propertyKey?: string | symbol) {
+  return declaring(function (target: object, propertyKey?: string | symbol) {
     const where = propertyKey === undefined ? (target as { name: string }).name : `${target.constructor.name}.${String(propertyKey)}`
     assertStageEntries('@UseFilter', 'filter', where, filters)
     // Decorators apply bottom-up, so a higher decorator's filters are tried first.
@@ -106,5 +106,5 @@ export function UseFilter<const T extends readonly unknown[]>(
       const existing: FilterEntry[] = Reflect.getOwnMetadata(META.methodFilters, target, propertyKey) ?? []
       Reflect.defineMetadata(META.methodFilters, [...filters, ...existing], target, propertyKey)
     }
-  } as ClassDecorator & MethodDecorator
+  }) as ClassDecorator & MethodDecorator
 }

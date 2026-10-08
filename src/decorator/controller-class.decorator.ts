@@ -3,7 +3,7 @@ import { dropInheritedRoutes } from '@src/decorator/controller.decorator.js'
 import { guardOwnHandlersWithBaseGuards } from '@src/decorator/guard.decorator.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { META } from '@src/util/metadata-keys.js'
-import { deprecatedOnMethod } from '@src/util/refusal.util.js'
+import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as a controller, whose methods handle commands, components, messages, reactions or events.
@@ -40,7 +40,7 @@ import { deprecatedOnMethod } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.1/how-a-call-runs | How a call runs}
  */
 export function Controller(options: ControllerOptions = {}) {
-  return function (target: abstract new (...args: any[]) => unknown, propertyKey?: string | symbol) {
+  return declaring(function (target: abstract new (...args: any[]) => unknown, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@Controller', target, propertyKey)) return
     makeInjectable(target)
     if (options.inheritStages === false) Reflect.defineMetadata(META.inheritStages, false, target)
@@ -49,5 +49,5 @@ export function Controller(options: ControllerOptions = {}) {
       Reflect.defineMetadata(META.replacesInheritedRoutes, true, target.prototype as object)
     }
     guardOwnHandlersWithBaseGuards(target)
-  }
+  })
 }

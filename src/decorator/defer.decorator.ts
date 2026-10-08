@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { deferMisuseError, type DeferOptions, nonInteractionHandler } from '@src/core/defer.js'
-import { refuse, refuseOnClass } from '@src/util/refusal.util.js'
+import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -40,11 +40,11 @@ import { META } from '@src/util/metadata-keys.js'
  * @see {@link https://meocord.dev/docs/4.1/defer | Deferring}
  */
 export function Defer(options: DeferOptions = {}): MethodDecorator {
-  return (target: object, propertyKey: string | symbol) => {
+  return declaring((target: object, propertyKey: string | symbol) => {
     refuseOnClass('@Defer', target, propertyKey)
     const methodName = String(propertyKey)
     const kind = nonInteractionHandler(target, methodName)
     if (kind) throw refuse(deferMisuseError(target.constructor.name, methodName, kind))
     Reflect.defineMetadata(META.deferOptions, { ...options }, target, methodName)
-  }
+  })
 }

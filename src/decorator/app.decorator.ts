@@ -11,7 +11,7 @@ import { BUILT_IN_TYPES } from '@src/core/message-params.js'
 import { assertObservers } from '@src/core/observer-runner.js'
 import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
-import { deprecatedOnMethod, refuse } from '@src/util/refusal.util.js'
+import { deprecatedOnMethod, refuse, declaring } from '@src/util/refusal.util.js'
 import { timeoutProblem } from '@src/util/timer-limit.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -104,7 +104,7 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
 export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(
   options: MeoCordOptions<G, I, F>,
 ): (target: any, propertyKey?: string | symbol) => void {
-  return (target: any, propertyKey?: string | symbol): void => {
+  return declaring((target: any, propertyKey?: string | symbol): void => {
     if (deprecatedOnMethod('@MeoCord', target, propertyKey)) return
     assertStageEntries('@MeoCord({ guards })', 'guard', target.name, options.guards ?? [])
     assertStageEntries('@MeoCord({ interceptors })', 'interceptor', target.name, options.interceptors ?? [])
@@ -124,7 +124,7 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     makeInjectable(target)
 
     Reflect.defineMetadata(META.appOptions, theme === undefined ? options : { ...options, theme }, target)
-  }
+  })
 }
 
 /** Refuses theme resolvers and cache options the runtime cannot follow, where the app is declared. */
