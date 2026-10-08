@@ -80,3 +80,32 @@ describe('inspectHandler', () => {
     expect(Reflect.getMetadata(MetadataKey.Guards, ModerationController.prototype, 'warn')).toEqual([RolesGuard])
   })
 })
+
+describe("inspectHandler's inheritedRoutes", () => {
+  @Controller()
+  class Base {
+    @Command('ping', CommandType.SLASH)
+    async ping(_interaction: ChatInputCommandInteraction) {}
+  }
+  @Controller()
+  class Sub extends Base {}
+
+  // A field added to the result is read, and a test that compared the whole result before still passes
+  it('is read, but not compared by toEqual', () => {
+    const inspection = inspectHandler(Sub, 'ping')
+
+    expect(inspection.inheritedRoutes).toEqual(['slash "ping"'])
+    expect(inspection).toEqual({
+      controller: Sub,
+      methodName: 'ping',
+      guards: [],
+      interceptors: [],
+      filters: [],
+      cooldowns: [],
+      pattern: undefined,
+      observers: [],
+      get: expect.any(Function),
+      getAll: expect.any(Function),
+    })
+  })
+})
