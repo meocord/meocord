@@ -1,7 +1,7 @@
 import { warnDeprecated } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { MetadataKey } from '@src/enum/index.js'
-import { decoratedName, refuse } from '@src/util/refusal.util.js'
+import { decoratedName, refuse, declaring } from '@src/util/refusal.util.js'
 
 /**
  * Composes several class or method decorators into one.
@@ -33,7 +33,7 @@ import { decoratedName, refuse } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.1/custom-decorators | Custom decorators}
  */
 export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator)[]): ClassDecorator & MethodDecorator {
-  return function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor): any {
+  return declaring(function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor): any {
     // Last first, as TypeScript applies decorators stacked, each given what the one before it returned
     const ordered = [...decorators].reverse()
     if (propertyKey !== undefined && descriptor !== undefined) {
@@ -44,7 +44,7 @@ export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator
     let current = target
     for (const decorator of ordered) current = (decorator as ClassDecorator)(current) ?? current
     return current
-  } as any
+  }) as any
 }
 
 const logger = new Logger('SetMetadata')
@@ -87,7 +87,7 @@ const INJECTION_KEYS: ReadonlySet<string> = new Set([MetadataKey.Injectable, Met
  */
 export function SetMetadata<V = any>(metadataKey: string, metadataValue: V): ClassDecorator & MethodDecorator {
   warnDeprecated(logger, 'SetMetadata', 'createMetadata')
-  return function (target: any, propertyKey?: string | symbol): void {
+  return declaring(function (target: any, propertyKey?: string | symbol): void {
     // Checked where it applies, so the refusal names the handler or controller
     const owner = metadataKey.startsWith(MEOCORD_PREFIX)
       ? `MeoCord keeps its own metadata under keys beginning "${MEOCORD_PREFIX}"`
@@ -107,5 +107,5 @@ export function SetMetadata<V = any>(metadataKey: string, metadataValue: V): Cla
     } else {
       Reflect.defineMetadata(metadataKey, metadataValue, target)
     }
-  } as any
+  }) as any
 }

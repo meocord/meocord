@@ -4,7 +4,7 @@ import { type ExceptionFilter } from '@src/interface/index.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
 import { perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
 import { bindShared } from '@src/core/interceptor-runner.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { startupError } from '@src/util/refusal.util.js'
 import { isConstructor } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -57,7 +57,7 @@ const ownFilterLevels = perHandler((prototype: object, methodName: string) => {
 export function prepareFilter(container: Container, entry: FilterEntry): void {
   const cls = filterClass(entry)
   if (!Reflect.hasOwnMetadata(META.catchTypes, cls)) {
-    throw refuse(new Error(`${cls.name || 'A filter'}: used as an exception filter, but not decorated with @Catch().`))
+    return startupError(new Error(`${cls.name || 'A filter'}: used as an exception filter, but not decorated with @Catch().`))
   }
   bindShared(container, cls)
 }

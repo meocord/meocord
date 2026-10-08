@@ -5,7 +5,7 @@ import { assertTypedParameters, type ProviderMap, reachableClasses } from '@src/
 import { themeResolverClass, type ThemeResolverClass } from '@src/core/theme-resolvers.js'
 import { type ThemeResolvers } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { startupError } from '@src/util/refusal.util.js'
 
 type AnyClass = new (...args: any[]) => unknown
 
@@ -79,6 +79,5 @@ export function lateGuardCheck(providers: ProviderMap, translator: boolean): (gu
 export function assertStartupClasses({ classes, decorators }: StartupClasses, { translator }: { translator: boolean }): void {
   assertTypedParameters(classes, decorators)
   if (translator) return
-  const needsOne = classes.find(cls => injectedTokens(cls).includes(Translator))
-  if (needsOne) throw refuse(missingTranslatorError(needsOne))
+  for (const needsOne of classes.filter(cls => injectedTokens(cls).includes(Translator))) startupError(missingTranslatorError(needsOne))
 }

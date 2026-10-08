@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { makeInjectable } from '@src/util/injectable.util.js'
-import { deprecatedOnMethod } from '@src/util/refusal.util.js'
+import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as a service, which controllers and other services inject by its type.
@@ -30,8 +30,8 @@ import { deprecatedOnMethod } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.1/services | Services}
  */
 export function Service<T>() {
-  return function (target: new (...args: any[]) => T, propertyKey?: string | symbol) {
+  return declaring(function (target: new (...args: any[]) => T, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@Service', target, propertyKey)) return
     makeInjectable(target)
-  }
+  })
 }

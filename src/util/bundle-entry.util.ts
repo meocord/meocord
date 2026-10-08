@@ -6,6 +6,9 @@ export const BUNDLE_ENTRY_KEY = Symbol.for('meocord.bundleEntry')
 /** Where the built bundle's pre-entry records the mode the bundle was built in. */
 export const BUILD_MODE_KEY = Symbol.for('meocord.buildMode')
 
+/** Where the built bot's pre-entry records `startupErrors` from its config, before the application's modules load. */
+export const STARTUP_ERRORS_KEY = Symbol.for('meocord.startupErrorsMode')
+
 /**
  * The file a shard process runs: the built bundle, as its pre-entry recorded it, else the script this
  * process was started with; undefined when there is none, as for code run with `node -e` outside a built bundle.

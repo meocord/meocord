@@ -1222,6 +1222,20 @@ export interface MeoCordConfig {
    */
   sourceMappedStacks?: boolean
   /**
+   * How a startup error a decorator finds, such as an invalid customId pattern, is reported.
+   *
+   * With `'first'`, a decorator throws its error as its class is defined, when its file is imported, so a bot with
+   * three mistakes shows one per run. With `'all'`, decorators keep their errors, and `MeoCordFactory.create()` logs
+   * every one, each with its handler and file, alongside the errors its own checks find, then throws the first. The
+   * built bot reads it before your modules load. In a test, call `reportAllStartupErrors()` from `meocord/testing` in
+   * the setup file instead.
+   *
+   * Whichever you choose, `create()` reports every error its own checks find, such as two handlers of one command.
+   *
+   * @defaultValue `'first'`; `'all'` in the next major version (5.0)
+   */
+  startupErrors?: 'first' | 'all'
+  /**
    * How long, in milliseconds, shutdown waits for the `onShutdown` hooks before destroying the client
    * anyway: from 0 to 2147478647, the longest a timer keeps less the margin the shard manager waits on top. The limit covers the whole sequence, not each hook,
    * including the calls under way that the cooldown store's shutdown waits for.

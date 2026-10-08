@@ -6,7 +6,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { META } from '@src/util/metadata-keys.js'
-import { refuseOnMethod } from '@src/util/refusal.util.js'
+import { refuseOnMethod, declaring } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as an interceptor, which wraps a handler to act before and after it.
@@ -45,11 +45,11 @@ import { refuseOnMethod } from '@src/util/refusal.util.js'
 export function Interceptor(
   options: InterceptorOptions = {},
 ) {
-  return function (target: new (...args: any[]) => InterceptorInterface, propertyKey?: string | symbol) {
+  return declaring(function (target: new (...args: any[]) => InterceptorInterface, propertyKey?: string | symbol) {
     refuseOnMethod('@Interceptor', target, propertyKey)
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Interceptor')
-  }
+  })
 }
 
 /**
@@ -86,7 +86,7 @@ export function Interceptor(
 export function UseInterceptor<const T extends readonly unknown[]>(
   ...interceptors: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => InterceptorInterface> }
 ): ClassDecorator & MethodDecorator {
-  return function (target: object, propertyKey?: string | symbol) {
+  return declaring(function (target: object, propertyKey?: string | symbol) {
     const where = propertyKey === undefined ? (target as { name: string }).name : `${target.constructor.name}.${String(propertyKey)}`
     assertStageEntries('@UseInterceptor', 'interceptor', where, interceptors)
     // Decorators apply bottom-up, so a higher decorator's interceptors go first, as with @UseGuard.
@@ -97,5 +97,5 @@ export function UseInterceptor<const T extends readonly unknown[]>(
       const existing: InterceptorEntry[] = Reflect.getOwnMetadata(META.methodInterceptors, target, propertyKey) ?? []
       Reflect.defineMetadata(META.methodInterceptors, [...interceptors, ...existing], target, propertyKey)
     }
-  } as ClassDecorator & MethodDecorator
+  }) as ClassDecorator & MethodDecorator
 }

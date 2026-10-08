@@ -99,6 +99,7 @@ function configShape(problems: ConfigProblems): Record<keyof MeoCordConfig, Chec
     optionalExternals: optional(stringList('package names')),
     rsbuild: optional(func),
     sourceMappedStacks: optional(boolean),
+    startupErrors: optional(oneOf('first', 'all')),
     shutdownTimeout: optional((value, key) => {
       const problem = shutdownTimeoutProblem(value)
       return problem && `${key} ${problem}`

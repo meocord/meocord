@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, startupError } from '@src/util/refusal.util.js'
 import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
@@ -234,7 +234,7 @@ export function prepareHandlerStages(container: Container, controllers: readonly
     const prototype = controller.prototype as object
     for (const method of handlerMethods(prototype)) {
       const kind = handlerDefer(prototype, method) ? nonInteractionHandler(prototype, method) : undefined
-      if (kind) throw refuse(deferMisuseError(controller.name, method, kind))
+      if (kind) { startupError(deferMisuseError(controller.name, method, kind)); continue }
       for (const entry of handlerInterceptors(prototype, method)) prepareInterceptor(container, entry)
       for (const entry of handlerFilterLevels(prototype, method, []).flat()) prepareFilter(container, entry)
       for (const { entry } of handlerInputStages(prototype, method).pipes) preparePipe(container, entry)
@@ -264,10 +264,11 @@ function assertDistinctNamesWhereKeyed(classes: readonly (new (...args: any[]) =
   for (const cls of classes) {
     const other = byName.get(cls.name)
     if (other && other !== cls && (keyedByName(cls) || keyedByName(other))) {
-      throw refuse(new Error(
+      startupError(new Error(
         `${cls.name}: two classes have this name; @Cooldown and @Once tell classes apart by name, so they would share ` +
           `their counts. Rename one of them.`,
       ))
+      continue
     }
     byName.set(cls.name, cls)
   }
@@ -290,14 +291,15 @@ function assertInputStagesOnInteractions(controller: new (...args: any[]) => unk
         ? 'a message handler without a pattern'
         : `${kind === 'autocomplete' || kind === 'event' ? 'an' : 'a'} ${kind} handler`
     if (schema || pipes.length > 0) {
-      throw refuse(new Error(
+      startupError(new Error(
         `${controller.name}.${method}: @Validate and @UsePipe are for interaction and patterned message handlers, ` +
           `whose options, customId params, modal fields and pattern params they check, and this is ${handler}.`,
       ))
+      continue
     }
     // A controller's own @Cooldown skips these handlers; one on the method itself is a mistake.
     if (kind !== 'message' && methodCooldowns(prototype, method).length > 0) {
-      throw refuse(new Error(
+      startupError(new Error(
         `${controller.name}.${method}: @Cooldown is for interaction and message handlers, and this is ${handler}.`,
       ))
     }

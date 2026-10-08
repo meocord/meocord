@@ -94,7 +94,7 @@ describe('configProblems', () => {
   // names what is checked, so a change to either shows up in review.
   it('checks every option MeoCordConfig declares', () => {
     expect([...CHECKED_CONFIG_KEYS].sort()).toEqual(
-      ['appName', 'bundleDependencies', 'commands', 'discordToken', 'externals', 'logLevel', 'optionalExternals', 'rsbuild', 'sharding', 'shutdownTimeout', 'sourceMappedStacks'].sort(),
+      ['appName', 'bundleDependencies', 'commands', 'discordToken', 'externals', 'logLevel', 'optionalExternals', 'rsbuild', 'sharding', 'shutdownTimeout', 'sourceMappedStacks', 'startupErrors'].sort(),
     )
   })
 

@@ -56,7 +56,7 @@ import { type MeoCordConfig } from '@src/interface/index.js'
 import { registerClientTheme } from '@src/core/theme-runtime.js'
 import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
-import { describeRefusal, isRefusal, refuse } from '@src/util/refusal.util.js'
+import { allDeclaredErrors, collectStartupErrors, declaredErrorsOf, describeRefusal, isRefusal, logStartupErrors, refuse, startupError } from '@src/util/refusal.util.js'
 import { endFailedShard } from '@src/core/shard-exit.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
 import { META } from '@src/util/metadata-keys.js'
@@ -67,7 +67,7 @@ import { META } from '@src/util/metadata-keys.js'
 function bindDependencies(container: Container, cls: any, providers: ProviderMap): void {
   // A provided class is bound by its own provider, wherever in the list that provider comes
   if (container.isBound(cls) || providers.has(cls)) return
-  if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
+  if (injectedTokens(cls).includes(ExecutionContext)) return startupError(singletonContextError(cls))
   assertStartupChecked(container, cls)
 
   makeInjectable(cls)
@@ -76,8 +76,8 @@ function bindDependencies(container: Container, cls: any, providers: ProviderMap
 
   // By constructor type or @inject token; an interface-typed parameter records Object, which is skipped
   for (const dep of injectedTokens(cls)) {
-    if (dep === Translator && !container.isBound(Translator)) throw refuse(missingTranslatorError(cls))
-    if (isAppClassToken(dep)) bindDependencies(container, dep, providers)
+    if (dep === Translator && !container.isBound(Translator)) startupError(missingTranslatorError(cls))
+    else if (isAppClassToken(dep)) bindDependencies(container, dep, providers)
   }
 }
 
@@ -151,9 +151,11 @@ export class MeoCordFactory {
    *   load, naming the file and the reason, with what to do about it, when a provider cannot
    *   be bound, such as one for a token MeoCord binds itself, when two handlers take one command, or two builder
    *   classes build one, naming both, and for any other mistake it refuses as the app loads, such as two component
-   *   patterns that match the same customIds. In a built application it is logged first, with where in the source it
-   *   comes from, so `isExplainedError()` tells a caller not to log it again; in a shard of process sharding, the
-   *   manager logs it.
+   *   patterns that match the same customIds. Each check reports every error it finds, and the first is thrown,
+   *   unchanged. When there are several, each is logged first, with where in the source it comes from; a lone one is
+   *   logged in a built application. Either way `isExplainedError()` then tells a caller not to log it again; in a
+   *   shard of process sharding, the manager logs it. With `startupErrors: 'all'` in `meocord.config.ts`, the errors
+   *   decorators kept are among them.
    */
   static create(target: ServiceIdentifier): MeoCordApplication {
     try {
@@ -163,9 +165,13 @@ export class MeoCordFactory {
       if (isShardProcess()) endFailedShard(error)
       // Reported here in a built application, so it reads the same whether main.ts catches it or not; main.ts, or the
       // report of an uncaught refusal, exits 1. A test or script gets the error as it is.
-      else if (isBuiltApplication() && isRefusal(error) && !isExplainedError(error)) {
-        this.logger.error(describeRefusal(error, process.cwd()))
-        markExplained(error)
+      else if (isRefusal(error) && !isExplainedError(error)) {
+        // Every startup error found together is logged, in a test too; a lone one is logged in a built application
+        if (logStartupErrors(error, text => this.logger.error(text), 'the bot did not start')) markExplained(error)
+        else if (isBuiltApplication()) {
+          this.logger.error(describeRefusal(error, process.cwd()))
+          markExplained(error)
+        }
       }
       throw error
     }
@@ -174,7 +180,11 @@ export class MeoCordFactory {
   private static createApplication(target: ServiceIdentifier): MeoCordApplication {
     const options = Reflect.getMetadata(META.appOptions, target)
 
+    // With startupErrors: 'all', what the decorators kept: a built bot's every one, else the app's and its controllers'
+    const declared = isBuiltApplication() ? allDeclaredErrors() : declaredErrorsOf([target, ...(options?.controllers ?? [])])
     if (!options) {
+      // A refused @MeoCord stores no options, so its own errors say why
+      collectStartupErrors(() => declared.forEach(startupError))
       throw refuse(new Error(`${typeof target === 'function' ? target.name : String(target)}: not decorated with @MeoCord(), so there is no app to create.`))
     }
 
@@ -183,9 +193,13 @@ export class MeoCordFactory {
       throw refuse(new Error(compiledConfigMessage()))
     }
 
-    // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take
-    assertDistinctCommands(options.controllers)
-    const providers = providerMap(options.providers ?? [], '@MeoCord({ providers })')
+    // Before any of the three ways a bot runs, so none registers or dispatches a command only one handler could take; every
+    // error each check finds is reported, the first thrown
+    const providers = collectStartupErrors(() => {
+      declared.forEach(startupError)
+      assertDistinctCommands(options.controllers)
+      return providerMap(options.providers ?? [], '@MeoCord({ providers })')
+    })
     // A themeFor class is bound on its own, as the cooldown store is, and resolved like a service
     const themeResolver = themeResolverClass(options.themeFor)
     // The app's classes and every class they inject, which the container binds
@@ -227,6 +241,8 @@ export class MeoCordFactory {
       })
     }
 
+    // The checks of what the app binds and runs report every error each finds, and the first is thrown
+    return collectStartupErrors(() => {
     // Every class the app runs, its stages and presenter included, checked before binding, where inversify would
     // otherwise fail first with an error about compiler options, or a guard only at its first call
     const stages = appStages(target as object)
@@ -241,6 +257,8 @@ export class MeoCordFactory {
       observers: appObservers(target as object),
     })
     assertStartupClasses(runs, { translator: options.i18n !== undefined || providers.has(Translator) })
+    // Outside a built application, the kept errors of the stages and other classes the app's classes reach
+    if (!isBuiltApplication()) declaredErrorsOf(runs.classes).forEach(startupError)
     const container = new Container()
     const translator = options.i18n !== undefined || providers.has(Translator)
     markStartupChecked(container, [...runs.classes, ...meocordClasses()], lateGuardCheck(providers, translator))
@@ -282,7 +300,8 @@ export class MeoCordFactory {
     // a class token that is provided is not also bound as itself
     for (const [token, provider] of providers) {
       if (container.isBound(token as ServiceIdentifier)) {
-        throw refuse(new Error(`${(target as { name?: string }).name}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`))
+        startupError(new Error(`${(target as { name?: string }).name}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`))
+        continue
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))
     }
@@ -329,10 +348,11 @@ export class MeoCordFactory {
       const names = new Set<string>()
       for (const cls of callable) {
         if (names.has(cls.name)) {
-          throw refuse(new Error(
+          startupError(new Error(
             `${cls.name}: two classes have this name; with process sharding, ShardContext.call finds a class in another ` +
               'shard by its name, so give each controller, service and provided class a distinct name.',
           ))
+          continue
         }
         names.add(cls.name)
       }
@@ -386,5 +406,6 @@ export class MeoCordFactory {
       options.warnUnanswered ?? process.env.NODE_ENV === 'development',
       options.routeTies,
     )
+    })
   }
 }

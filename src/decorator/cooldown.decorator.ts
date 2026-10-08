@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { type CooldownOptions, type StoredCooldown } from '@src/core/cooldown-runner.js'
 import { type Handler, type NoInput, type ParamsOf } from '@src/decorator/validation.decorator.js'
-import { decoratedName, refuse } from '@src/util/refusal.util.js'
+import { decoratedName, refuse, declaring } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -83,7 +83,7 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
   const { seconds, uses = 1, per = 'user', by } = options
   const cooldown: StoredCooldown = { ...options, uses, per, windowMs: Math.round(seconds * 1000) }
 
-  return function (target: object, propertyKey?: string | symbol) {
+  return declaring(function (target: object, propertyKey?: string | symbol) {
     // Checked where it applies, so the refusal names the handler or controller
     const problem = cooldownProblem(seconds, uses, per, by)
     if (problem) throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${problem}`))
@@ -95,7 +95,7 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
       const existing = (Reflect.getOwnMetadata(META.methodCooldowns, target, propertyKey) as StoredCooldown[]) ?? []
       Reflect.defineMetadata(META.methodCooldowns, [cooldown, ...existing], target, propertyKey)
     }
-  } as ClassDecorator & MethodDecorator
+  }) as ClassDecorator & MethodDecorator
 }
 
 /**

@@ -74,6 +74,8 @@ import { createMockClient } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
+import { isExplainedError, markExplained } from '@src/common/explained-error.js'
+import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError } from '@src/util/refusal.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
 import {
   assertProvided,
@@ -953,207 +955,232 @@ export class TestingModuleBuilder {
    * its command's builder does not register, a customId pattern given as a command name, a builder that registers
    * another name, and component patterns that can match the same customId are named, as the bot names them.
    *
+   * Each check reports every startup error it finds, and the first is thrown, unchanged; when there are several, each
+   * is logged first, with the file it comes from. After {@link reportAllStartupErrors}, the errors decorators kept on
+   * the classes the module runs are among them.
+   *
    * @returns The compiled module.
+   * @throws Error for the first startup error the checks find.
    */
   compile(): TestingModule {
     // The bound the bot's config gives it, with the same words
     const shutdownTimeout = this.options.shutdownTimeout === undefined ? undefined : shutdownTimeoutProblem(this.options.shutdownTimeout)
     if (shutdownTimeout) throw new TypeError(`shutdownTimeout ${shutdownTimeout}.`)
-    const container = new Container()
-    const stages = this.globalStages()
-    if (stages) bindGlobalStages(container, stages)
+    // With startupErrors: 'all', what the decorators kept on the classes this module runs
+    const declared = declaredErrorsOf([
+      ...(this.options.app ? [this.options.app] : []),
+      ...(this.options.controllers ?? []),
+      ...(this.wiring?.services ?? []),
+      ...(this.options.observers ?? []),
+    ])
+    // Every error each check finds is reported, as the bot reports them, and the first is thrown
+    try {
+      return collectStartupErrors(() => {
+        declared.forEach(startupError)
+        const container = new Container()
+        const stages = this.globalStages()
+        if (stages) bindGlobalStages(container, stages)
 
-    // Bound first, as in the app, so a class that injects it gets this instance
-    const appClasses: (new (...args: any[]) => unknown)[] = []
-    const translator = () => (container.isBound(Translator) ? container.get(Translator) : undefined)
-    container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app), translator))
-    // A testing module runs as one process, so a cross-shard call runs once, here
-    container.bind(ShardContext).toConstantValue(
-      new ShardContext(
-        undefined,
-        shardCallHandler(container, () => [...appClasses, ...[...providers.keys()].filter(isAppClassToken)], 'this testing module'),
-      ),
-    )
-    bindsOwnToken(container, HandlerRegistry)
-    bindsOwnToken(container, ShardContext)
+        // Bound first, as in the app, so a class that injects it gets this instance
+        const appClasses: (new (...args: any[]) => unknown)[] = []
+        const translator = () => (container.isBound(Translator) ? container.get(Translator) : undefined)
+        container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app), translator))
+        // A testing module runs as one process, so a cross-shard call runs once, here
+        container.bind(ShardContext).toConstantValue(
+          new ShardContext(
+            undefined,
+            shardCallHandler(container, () => [...appClasses, ...[...providers.keys()].filter(isAppClassToken)], 'this testing module'),
+          ),
+        )
+        bindsOwnToken(container, HandlerRegistry)
+        bindsOwnToken(container, ShardContext)
 
-    // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them
-    // by token, then the overrides, which win
-    const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
-    for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
-    for (const [token, override] of this.overrides) providers.set(token, override)
-    const services = this.wiring?.services ?? []
-    const appOptions = this.options.app
-      ? (Reflect.getMetadata(META.appOptions, this.options.app) as
-          | { cooldownStore?: new (...args: any[]) => CooldownStore; cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }
-          | undefined)
-      : undefined
-    // The app's own store, as the bot binds it, whether the module is given the app or built from it; none when the
-    // test provides the CooldownStore, so nothing builds the app's or asks for what it injects
-    const store = providers.has(CooldownStore) ? undefined : appOptions?.cooldownStore
-    // The themeFor class this module runs, the app's or overrideThemeFor's, bound on its own as the app binds it
-    const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
-    // Every class the module runs, as the app finds them, except stage classes an override stands in for
-    const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
-    const startup = startupClasses({
-      controllers: this.options.controllers ?? [],
-      services,
-      providers,
-      stages,
-      presenter: this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter,
-      cooldownStore: store,
-      themeFor: stages?.themeFor?.resolvers,
-      observers: [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
-      stubs: [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()],
-    })
-    const hasTranslator = i18n !== undefined || providers.has(Translator)
-    assertStartupClasses(startup, { translator: hasTranslator })
-    markStartupChecked(container, [...startup.classes, ...meocordClasses()], lateGuardCheck(providers, hasTranslator))
-    // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
-    const needClient = startup.classes.filter(cls => injectedTokens(cls).includes(Client))
-    if (needClient.length > 0 && !providers.has(Client)) {
-      container.bind(Client).toDynamicValue(() => {
-        throw new Error(
-          `${needClient.map(cls => cls.name).join(', ')} ${needClient.length === 1 ? 'injects' : 'inject'} the Discord Client, ` +
-            'which a testing module does not make: give one in its providers, such as ' +
-            '{ provide: Client, useValue: createMockClient() }.',
+        // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them
+        // by token, then the overrides, which win
+        const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
+        for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
+        for (const [token, override] of this.overrides) providers.set(token, override)
+        const services = this.wiring?.services ?? []
+        const appOptions = this.options.app
+          ? (Reflect.getMetadata(META.appOptions, this.options.app) as
+              | { cooldownStore?: new (...args: any[]) => CooldownStore; cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }
+              | undefined)
+          : undefined
+        // The app's own store, as the bot binds it, whether the module is given the app or built from it; none when the
+        // test provides the CooldownStore, so nothing builds the app's or asks for what it injects
+        const store = providers.has(CooldownStore) ? undefined : appOptions?.cooldownStore
+        // The themeFor class this module runs, the app's or overrideThemeFor's, bound on its own as the app binds it
+        const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
+        // Every class the module runs, as the app finds them, except stage classes an override stands in for
+        const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
+        const startup = startupClasses({
+          controllers: this.options.controllers ?? [],
+          services,
+          providers,
+          stages,
+          presenter: this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter,
+          cooldownStore: store,
+          themeFor: stages?.themeFor?.resolvers,
+          observers: [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
+          stubs: [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()],
+        })
+        const hasTranslator = i18n !== undefined || providers.has(Translator)
+        assertStartupClasses(startup, { translator: hasTranslator })
+        // Those of the stages, guards and other classes they reach
+        declaredErrorsOf(startup.classes).forEach(startupError)
+        markStartupChecked(container, [...startup.classes, ...meocordClasses()], lateGuardCheck(providers, hasTranslator))
+        // The bot binds the Client it logs in with; a test gives its own, and is told so where one is needed
+        const needClient = startup.classes.filter(cls => injectedTokens(cls).includes(Client))
+        if (needClient.length > 0 && !providers.has(Client)) {
+          container.bind(Client).toDynamicValue(() => {
+            throw new Error(
+              `${needClient.map(cls => cls.name).join(', ')} ${needClient.length === 1 ? 'injects' : 'inject'} the Discord Client, ` +
+                'which a testing module does not make: give one in its providers, such as ' +
+                '{ provide: Client, useValue: createMockClient() }.',
+            )
+          })
+        }
+
+        // Bind guard overrides — prevents inversify from auto-wiring guard dependencies
+        for (const [guardClass, stub] of this.guardOverrides) {
+          container.bind(guardClass).toConstantValue(stub as GuardInterface)
+        }
+
+        for (const [filterClass, stub] of this.filterOverrides) {
+          container.bind(filterClass).toConstantValue(stub as ExceptionFilter)
+        }
+
+        for (const [interceptorClass, stub] of this.interceptorOverrides) {
+          container.bind(interceptorClass).toConstantValue(stub as InterceptorInterface)
+        }
+
+        // The app's cooldown policy, so a test of a failing store sees what the bot would do
+        if (appOptions && !container.isBound(COOLDOWN_POLICY)) container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(appOptions))
+
+        // The app's translator, unless a provider stands in for it
+        if (i18n && !providers.has(Translator)) {
+          container.bind(Translator).toConstantValue(i18n)
+          bindsOwnToken(container, Translator)
+        }
+
+        // Recursively bind controllers and their dependencies, skipping already-bound tokens
+        const bindClass = (cls: new (...args: any[]) => any) => {
+          // A provided class is bound by its own provider, wherever in the list that provider comes
+          if (container.isBound(cls) || providers.has(cls)) return
+          if (injectedTokens(cls).includes(ExecutionContext)) return startupError(singletonContextError(cls))
+          assertStartupChecked(container, cls)
+
+          makeInjectable(cls)
+          container.bind(cls).toSelf().inSingletonScope()
+
+          // By constructor type or @inject token, as the app binds them
+          for (const dep of injectedTokens(cls)) {
+            if (dep === Translator && !container.isBound(Translator)) startupError(missingTranslatorError(cls))
+            else if (isAppClassToken(dep)) bindClass(dep)
+          }
+        }
+
+        // The app's own store, resolved like a service, unless the test provides the CooldownStore itself; bound first, as the
+        // app binds it, so a class that injects the token gets the store
+        if (!providers.has(CooldownStore)) {
+          if (store) {
+            bindClass(store)
+            container.bind(CooldownStore).toService(store)
+          } else {
+            container.bind(CooldownStore).toConstantValue(new MemoryCooldownStore())
+          }
+          bindsOwnToken(container, CooldownStore, store)
+        }
+
+        // Before the controllers, so a class token that is provided is not also bound as itself
+        for (const provider of providers.values()) bindProvider(container, provider, bindClass)
+
+        for (const ctrl of this.options.controllers ?? []) {
+          bindClass(ctrl)
+          // Stamp container on controller class so @UseGuard works in tests too
+          Reflect.defineMetadata(META.container, container, ctrl)
+        }
+        for (const service of services) bindClass(service)
+        if (themeResolver) bindClass(themeResolver)
+
+        // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
+        // controllers, and what they inject; factories resolve in the same order
+        const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(themeResolver ? [themeResolver] : []), ...(this.options.controllers ?? [])], {
+          followOwnTokens: false,
+        })
+        appClasses.push(
+          ...order.filter((token): token is new (...args: any[]) => unknown => {
+            const provider = providers.get(token)
+            return isAppClassToken(token) && (!provider || (isClassProvider(provider) && provider.useClass === token))
+          }),
+        )
+        assertProvided(container, providers, startup.classes, "the testing module's providers")
+        // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
+        for (const cls of startup.classes) Reflect.defineMetadata(META.container, container, cls)
+        prepareHandlerStages(container, appClasses)
+        const messages = messagesOf(this.options.app)
+        // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
+        buildMessageRoutes(this.options.controllers ?? [], messages)
+        // As the app does when it is created, so a test sees the refusal the bot would give
+        assertDistinctCommands(this.options.controllers ?? [])
+        // A handler with no builder is how a fixture is written, so only what is always a mistake is named
+        warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
+        warnInheritedRoutes(this.options.controllers ?? [])
+        warnOverlappingPatterns(this.options.controllers ?? [], routeTiesOf(this.options.app))
+        warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
+        if (this.options.app) bindAppPresenter(container, this.options.app)
+        const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
+        assertObservers("the testing module's observers", observers)
+        bindObservers(container, observers)
+        // The store calls ask: the test's own when it provides CooldownStore, else the app's
+        const boundStore = store ?? (providers.has(CooldownStore) ? CooldownStore : undefined)
+        // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
+        // after what it injects
+        const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
+          ...(boundStore ? [boundStore] : []),
+          ...providers.keys(),
+          ...services,
+          ...(themeResolver ? [themeResolver] : []),
+          ...(this.options.controllers ?? []),
+          ...observers,
+        ]).map(token => ({
+          token,
+          name: tokenName(token),
+          dependencies: tokenDependencies(container, providers, token),
+          ...(token === boundStore && { cooldownStore: true }),
+        }))
+        // Recorded as the container makes each one, so close() shuts down exactly what exists
+        const constructed = new Set<unknown>()
+        for (const { token } of lifecycle) {
+          container.onActivation(token as ServiceIdentifier, (_context, instance) => {
+            constructed.add(token)
+            return instance
+          })
+        }
+
+        const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
+
+        return new TestingModule(
+          container,
+          [...(this.options.controllers ?? [])],
+          appClasses,
+          providers,
+          order,
+          messages,
+          lifecycle,
+          constructed,
+          warnUnanswered,
+          services,
+          this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+          routeTiesOf(this.options.app),
         )
       })
-    }
-
-    // Bind guard overrides — prevents inversify from auto-wiring guard dependencies
-    for (const [guardClass, stub] of this.guardOverrides) {
-      container.bind(guardClass).toConstantValue(stub as GuardInterface)
-    }
-
-    for (const [filterClass, stub] of this.filterOverrides) {
-      container.bind(filterClass).toConstantValue(stub as ExceptionFilter)
-    }
-
-    for (const [interceptorClass, stub] of this.interceptorOverrides) {
-      container.bind(interceptorClass).toConstantValue(stub as InterceptorInterface)
-    }
-
-    // The app's cooldown policy, so a test of a failing store sees what the bot would do
-    if (appOptions && !container.isBound(COOLDOWN_POLICY)) container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(appOptions))
-
-    // The app's translator, unless a provider stands in for it
-    if (i18n && !providers.has(Translator)) {
-      container.bind(Translator).toConstantValue(i18n)
-      bindsOwnToken(container, Translator)
-    }
-
-    // Recursively bind controllers and their dependencies, skipping already-bound tokens
-    const bindClass = (cls: new (...args: any[]) => any) => {
-      // A provided class is bound by its own provider, wherever in the list that provider comes
-      if (container.isBound(cls) || providers.has(cls)) return
-      if (injectedTokens(cls).includes(ExecutionContext)) throw singletonContextError(cls)
-      assertStartupChecked(container, cls)
-
-      makeInjectable(cls)
-      container.bind(cls).toSelf().inSingletonScope()
-
-      // By constructor type or @inject token, as the app binds them
-      for (const dep of injectedTokens(cls)) {
-        if (dep === Translator && !container.isBound(Translator)) throw missingTranslatorError(cls)
-        if (isAppClassToken(dep)) bindClass(dep)
+    } catch (error) {
+      if (isRefusal(error) && !isExplainedError(error)) {
+        if (logStartupErrors(error, text => new Logger('TestingModule').error(text), 'the testing module did not compile')) markExplained(error)
       }
+      throw error
     }
-
-    // The app's own store, resolved like a service, unless the test provides the CooldownStore itself; bound first, as the
-    // app binds it, so a class that injects the token gets the store
-    if (!providers.has(CooldownStore)) {
-      if (store) {
-        bindClass(store)
-        container.bind(CooldownStore).toService(store)
-      } else {
-        container.bind(CooldownStore).toConstantValue(new MemoryCooldownStore())
-      }
-      bindsOwnToken(container, CooldownStore, store)
-    }
-
-    // Before the controllers, so a class token that is provided is not also bound as itself
-    for (const provider of providers.values()) bindProvider(container, provider, bindClass)
-
-    for (const ctrl of this.options.controllers ?? []) {
-      bindClass(ctrl)
-      // Stamp container on controller class so @UseGuard works in tests too
-      Reflect.defineMetadata(META.container, container, ctrl)
-    }
-    for (const service of services) bindClass(service)
-    if (themeResolver) bindClass(themeResolver)
-
-    // The classes whose @On and @Once handlers emit reaches: class providers bound as themselves, the
-    // controllers, and what they inject; factories resolve in the same order
-    const order = resolutionOrder(container, providers, [...providers.keys(), ...services, ...(themeResolver ? [themeResolver] : []), ...(this.options.controllers ?? [])], {
-      followOwnTokens: false,
-    })
-    appClasses.push(
-      ...order.filter((token): token is new (...args: any[]) => unknown => {
-        const provider = providers.get(token)
-        return isAppClassToken(token) && (!provider || (isClassProvider(provider) && provider.useClass === token))
-      }),
-    )
-    assertProvided(container, providers, startup.classes, "the testing module's providers")
-    // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
-    for (const cls of startup.classes) Reflect.defineMetadata(META.container, container, cls)
-    prepareHandlerStages(container, appClasses)
-    const messages = messagesOf(this.options.app)
-    // As the app would at startup, refuses a message pattern that cannot be read or two that match the same messages
-    buildMessageRoutes(this.options.controllers ?? [], messages)
-    // As the app does when it is created, so a test sees the refusal the bot would give
-    assertDistinctCommands(this.options.controllers ?? [])
-    // A handler with no builder is how a fixture is written, so only what is always a mistake is named
-    warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
-    warnInheritedRoutes(this.options.controllers ?? [])
-    warnOverlappingPatterns(this.options.controllers ?? [], routeTiesOf(this.options.app))
-    warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
-    if (this.options.app) bindAppPresenter(container, this.options.app)
-    const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
-    assertObservers("the testing module's observers", observers)
-    bindObservers(container, observers)
-    // The store calls ask: the test's own when it provides CooldownStore, else the app's
-    const boundStore = store ?? (providers.has(CooldownStore) ? CooldownStore : undefined)
-    // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
-    // after what it injects
-    const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
-      ...(boundStore ? [boundStore] : []),
-      ...providers.keys(),
-      ...services,
-      ...(themeResolver ? [themeResolver] : []),
-      ...(this.options.controllers ?? []),
-      ...observers,
-    ]).map(token => ({
-      token,
-      name: tokenName(token),
-      dependencies: tokenDependencies(container, providers, token),
-      ...(token === boundStore && { cooldownStore: true }),
-    }))
-    // Recorded as the container makes each one, so close() shuts down exactly what exists
-    const constructed = new Set<unknown>()
-    for (const { token } of lifecycle) {
-      container.onActivation(token as ServiceIdentifier, (_context, instance) => {
-        constructed.add(token)
-        return instance
-      })
-    }
-
-    const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
-
-    return new TestingModule(
-      container,
-      [...(this.options.controllers ?? [])],
-      appClasses,
-      providers,
-      order,
-      messages,
-      lifecycle,
-      constructed,
-      warnUnanswered,
-      services,
-      this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
-      routeTiesOf(this.options.app),
-    )
   }
 }
 

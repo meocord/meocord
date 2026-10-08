@@ -97,6 +97,7 @@ const PUBLIC_API: Record<string, string[]> = {
     'getResponse',
     'inspectHandler',
     'isMockFunction',
+    'reportAllStartupErrors',
     'resetAllMocks',
     'resolveRoute',
     'testCooldownStore',

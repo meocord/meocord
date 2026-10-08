@@ -3,7 +3,7 @@ import { type ThemeOverride } from '@src/interface/index.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { THEMED_CLASSES } from '@src/core/theme-runtime.js'
 import { copyLayer } from '@src/core/theme-scope.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { refuse, declaring } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -37,7 +37,7 @@ import { META } from '@src/util/metadata-keys.js'
  * @category Controllers
  */
 export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator {
-  return function (target: object, propertyKey?: string | symbol) {
+  return declaring(function (target: object, propertyKey?: string | symbol) {
     const onClass = propertyKey === undefined
     const owner = (onClass ? target : target.constructor) as { name: string }
     const where = `${owner.name}${onClass ? '' : `.${String(propertyKey)}`}: @UseTheme`
@@ -49,5 +49,5 @@ export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator
     if (onClass) Reflect.defineMetadata(key, layer, target)
     else Reflect.defineMetadata(key, layer, target, propertyKey!)
     THEMED_CLASSES.add(owner)
-  } as ClassDecorator & MethodDecorator
+  }) as ClassDecorator & MethodDecorator
 }

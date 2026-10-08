@@ -6,7 +6,7 @@ import { injectedTokens, perHandler, singletonContextError, sourcePrototype, sta
 import { ExecutionContext, type HandlerExecutionContext } from '@src/common/execution-context.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
-import { refuse } from '@src/util/refusal.util.js'
+import { startupError } from '@src/util/refusal.util.js'
 import { Logger } from '@src/common/logger.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -59,7 +59,7 @@ export const handlerInterceptors = perHandler((prototype: object, methodName: st
 /** Binds `cls` and its unbound dependencies as singletons, refusing any that injects `ExecutionContext`. */
 export function bindShared(container: Container, cls: new (...args: any[]) => unknown): void {
   if (container.isBound(cls)) return
-  if (injectedTokens(cls).includes(ExecutionContext)) throw refuse(singletonContextError(cls))
+  if (injectedTokens(cls).includes(ExecutionContext)) return startupError(singletonContextError(cls))
   assertStartupChecked(container, cls)
 
   makeInjectable(cls)

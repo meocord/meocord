@@ -385,6 +385,13 @@ const appWithSameNamedShops = templateFile('src/app.ts')
   .replace('  controllers: [\n', '  controllers: [\n    BuyShop,\n    BrowseShop,\n')
 const SAME_NAMED_SHOPS = '@Cooldown and @Once tell classes apart by name'
 
+/** The sample slash command with a cooldown of no time, which @Cooldown refuses as the class loads. */
+const refusedCooldownSlash = templateFile('src/controllers/slash/sample.slash.controller.ts').replace(
+  "@Cooldown({ uses: 5, seconds: 60 })\n  async handleSampleSlash(",
+  "@Cooldown({ uses: 5, seconds: -1 })\n  async handleSampleSlash(",
+)
+const REFUSED_COOLDOWN = 'SampleSlashController.handleSampleSlash:'
+
 /** The refused message pattern, its module importing a helper class of the controller's own name. */
 const refusedBesideSameNamedHelper = `import { SampleMessageController as Helper } from '@src/helpers/sample-message-controller'\nReflect.set(globalThis, 'helper', new Helper())\n${refusedMessagePattern}`
 
@@ -1728,6 +1735,61 @@ const scenarios: Scenario[] = [
     argv: ['start', '--prod', '--build'],
     timeoutMs: 60_000,
     expect: { code: 1, says: [SAME_NAMED_SHOPS], never: ['Starting bot'] },
+  },
+  // Every startup error MeoCordFactory.create finds is reported at once, before the bot fails
+  {
+    name: 'start --prod reports every startup error MeoCordFactory.create finds, not only the first',
+    tier: 'fast',
+    files: {
+      '.env': INVALID_TOKEN_ENV,
+      'src/app.ts': appWithSameNamedShops,
+      'src/controllers/shop/buy.controller.ts': sameNamedShop('buy', true),
+      'src/controllers/shop/browse.controller.ts': sameNamedShop('browse', false),
+      'src/controllers/message/sample.message.controller.ts': refusedMessagePattern,
+      dist: null,
+    },
+    argv: ['start', '--prod', '--build'],
+    timeoutMs: 60_000,
+    expect: {
+      code: 1,
+      says: [SAME_NAMED_SHOPS, REFUSED_MESSAGE_PATTERN, 'MeoCord found 2 startup errors; the bot did not start.'],
+      never: [...RAW_REPORT, 'Starting bot'],
+    },
+  },
+  // With startupErrors: 'all', decorators keep theirs for create() to report together, in one run; a check of what the
+  // app binds waits for a clean declaration, so a half-applied class is never checked
+  {
+    name: "start --prod with startupErrors: 'all' reports every decorator's startup error at once",
+    tier: 'fast',
+    files: {
+      '.env': INVALID_TOKEN_ENV,
+      'meocord.config.ts': configWith("startupErrors: 'all',"),
+      'src/controllers/button/sample.button.controller.ts': refusedPatternButton,
+      'src/controllers/slash/sample.slash.controller.ts': refusedCooldownSlash,
+      'src/controllers/message/sample.message.controller.ts': refusedMessagePattern,
+      dist: null,
+    },
+    argv: ['start', '--prod', '--build'],
+    timeoutMs: 60_000,
+    expect: {
+      code: 1,
+      says: [REFUSED_PATTERN, REFUSED_COOLDOWN, 'MeoCord found 2 startup errors; the bot did not start.'],
+      never: [...RAW_REPORT, 'Starting bot', REFUSED_MESSAGE_PATTERN],
+    },
+  },
+  // Without it, the first decorator's error stops the bot as its file loads, as it always has
+  {
+    name: "start --prod without startupErrors: 'all' stops at the first decorator's startup error",
+    tier: 'fast',
+    files: {
+      '.env': INVALID_TOKEN_ENV,
+      'src/controllers/button/sample.button.controller.ts': refusedPatternButton,
+      'src/controllers/slash/sample.slash.controller.ts': refusedCooldownSlash,
+      dist: null,
+    },
+    argv: ['start', '--prod', '--build'],
+    timeoutMs: 60_000,
+    expect: { code: 1, counts: { '@Cooldown needs': 1, 'Invalid pattern': 0 }, never: [...RAW_REPORT, 'Starting bot', 'startup errors'] },
   },
   {
     name: 'start --prod names a controller as its source does, beside a same-named class in another module',
