@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { vi } from 'vitest'
+import { createMockFn } from './mock-fn.js'
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
@@ -1671,6 +1672,22 @@ describe('createMock', () => {
     get(key: string): string | null
     nested: { flush(): void }
   }
+
+  it("keeps an interaction's answer methods' keys those of any mock function", () => {
+    const interaction = createMockInteraction(ButtonInteraction)
+
+    expect(Object.keys(interaction.reply).sort()).toEqual(Object.keys(createMockFn()).sort())
+  })
+
+  it('keeps the nested stubs it makes out of a member’s own keys', () => {
+    const cache = createMock<Cache>()
+    const before = Object.keys(cache.nested)
+
+    cache.nested.flush()
+
+    expect(Object.keys(cache.nested)).toEqual(before)
+    expect(before).not.toContain('flush')
+  })
 
   it('auto-stubs every method as a mock fn', () => {
     const service = createMock<NotificationService>()
