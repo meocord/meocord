@@ -650,6 +650,8 @@ jobs:
     environment: Production
     outputs:
       published: ${{ steps.publish.outputs.published }}
+      # The one package this repository publishes, as changesets reports it
+      version: ${{ fromJSON(steps.publish.outputs.published-packages || '[]')[0].version }}
     concurrency:
       group: publish-${{ github.ref }}
     permissions:
@@ -696,19 +698,43 @@ jobs:
 
   # Starts meocord/docs's version sync (.github/workflows/sync-versions.yml) rather than wait for its hourly run, as the
   # docs bot, a GitHub App whose token here may only start workflows there; DOCS_BOT_CLIENT_ID and DOCS_BOT_PRIVATE_KEY
-  # live in Production. A job of its own, away from the publishing identity, and nothing in it fails the release.
+  # live in Production. A job of its own, away from the publishing identity: the release is published before it runs,
+  # and only a version npm never serves fails it.
   docs-sync:
     name: Docs sync
     needs: publish
     # Named directly, with !cancelled(): the implicit success() also reads the skipped slow scenarios job on a push
     if: ${{ !cancelled() && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: Production
     permissions: {}
     steps:
       - name: Skip without the docs bot
         if: vars.DOCS_BOT_CLIENT_ID == ''
         run: echo "::notice title=Docs sync not configured::The docs site's hourly schedule will pick up this release."
+
+      # npm serves a new version a minute or two after it is published, and a sync started earlier finds nothing to add
+      - name: Wait for npm to serve the version
+        if: vars.DOCS_BOT_CLIENT_ID != ''
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+          WAIT_SECONDS: 600
+          POLL_SECONDS: 15
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "::error title=Docs sync not started::The publish job reported no version of meocord."
+            exit 1
+          fi
+          deadline=$((SECONDS + WAIT_SECONDS))
+          until [ "$(npm view "meocord@$VERSION" version --prefer-online 2>/dev/null)" = "$VERSION" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error title=Docs sync not started::npm still doesn't serve meocord@$VERSION after $WAIT_SECONDS s; start meocord/docs's Sync versions by hand once it does."
+              exit 1
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          echo "npm serves meocord@$VERSION, after ${SECONDS} s."
 
       - name: Mint the docs bot's token
         id: token
