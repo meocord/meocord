@@ -1,6 +1,7 @@
 import {
   AutocompleteInteraction,
   BaseGuild,
+  BaseGuildVoiceChannel,
   BaseChannel,
   BaseInteraction,
   ChannelType,
@@ -19,6 +20,7 @@ import {
   Locale,
   MediaChannel,
   Message,
+  MessageReaction,
   MessageType,
   NewsChannel,
   PermissionsBitField,
@@ -29,7 +31,8 @@ import {
   User,
   VoiceChannel,
 } from 'discord.js'
-import { createMockGuild, createMockUser, memberRoles } from './mock-interaction.js'
+import { createMockChannel, createMockGuild, createMockUser, memberRoles } from './mock-interaction.js'
+import { strictMocks } from './strict-mocks.js'
 
 /** A permission set with none, frozen as discord.js freezes the ones it gives. */
 const noPermissions = () => new PermissionsBitField().freeze()
@@ -181,11 +184,39 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(BaseGuild, { nameAcronym: REAL_GETTER }),
 ])
 
-/** The default a mock of `target`'s class has for `key`, read from the nearest class that has one. */
+/**
+ * What strict mocks also read as Discord sends it, for discord.js's getters that read it: a server for a channel or
+ * thread made without one, a thread's parent text channel in it, and data that is otherwise a placeholder.
+ */
+const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
+  defaultsOf(Message, { content: () => '' }),
+  defaultsOf(Guild, { rulesChannelId: () => null, publicUpdatesChannelId: () => null }),
+  defaultsOf(ThreadChannel, {
+    guild: () => createMockGuild(),
+    guildId: thread => thread.guild.id,
+    parentId: thread => {
+      const parent = createMockChannel(TextChannel, { guild: thread.guild } as never)
+      thread.guild.channels.cache.set(parent.id, parent as never)
+      return parent.id
+    },
+    parent: REAL_GETTER,
+    ownerId: snowflake,
+    archived: () => false,
+    locked: () => false,
+  }),
+  defaultsOf(GuildChannel, { guild: () => createMockGuild() }),
+  // Full once its members reach a user limit, which a voice channel has none of unless given one
+  defaultsOf(BaseGuildVoiceChannel, { userLimit: () => 0, full: REAL_GETTER }),
+  defaultsOf(MessageReaction, { count: () => 1 }),
+])
+
+/** The default a mock of `target`'s class has for `key`, read from the nearest class that has one, strict ones first. */
 export function discordDefault(target: object, key: string): Default<unknown, never> | undefined {
-  for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
-    const found = DEFAULTS.get(proto)?.[key as never]
-    if (found !== undefined) return found as Default<unknown, never>
+  for (const defaults of strictMocks() ? [STRICT_DEFAULTS, DEFAULTS] : [DEFAULTS]) {
+    for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
+      const found = defaults.get(proto)?.[key as never]
+      if (found !== undefined) return found as Default<unknown, never>
+    }
   }
   return undefined
 }

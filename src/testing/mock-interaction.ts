@@ -10,6 +10,8 @@ import {
   type MessageFlagsResolvable,
   type GuildBasedChannel,
   ApplicationCommandManager,
+  PermissionsBitField,
+  VoiceChannel,
   ApplicationCommandOptionType,
   ApplicationCommandType,
   Attachment,
@@ -96,6 +98,7 @@ import { Logger } from '@src/common/logger.js'
 import { warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
+import { noteMockMade, strictMocks } from './strict-mocks.js'
 
 // ---------------------------------------------------------------------------
 // DeepMocked<T>
@@ -170,6 +173,7 @@ const SKIP = new Set(['constructor', 'toString', 'valueOf', 'toJSON', 'then'])
 type StubValue = Mock | object | string | number | boolean | null
 
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
+  noteMockMade()
   const stubs = externalStubs ?? new Map<string, StubValue>()
 
   const proxy: object = new Proxy(instance, {
@@ -218,7 +222,11 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
         const desc = Object.getOwnPropertyDescriptor(proto, key)
         if (desc !== undefined) {
           protoValue = desc.value
-          if (desc.get && PLACEHOLDER_BOOLEANS.get(proto)?.has(key)) warnBooleanPlaceholder(target, key)
+          if (desc.get && isPlaceholder(proto, key)) {
+            // Strict mocks run discord.js's getter, read live; otherwise the placeholder, with a warning once
+            if (strictMocks()) return Reflect.get(target, prop, proxy) as StubValue
+            warnBooleanPlaceholder(target, key)
+          }
           break
         }
         proto = Object.getPrototypeOf(proto)
@@ -263,9 +271,12 @@ const REAL_METHODS = new Map<object, ReadonlySet<string>>([
   [MessageMentions.prototype, new Set(['has'])],
 ])
 
+// What strict mocks also run for real: a thread's permissions are its parent channel's, as discord.js reads them
+const STRICT_REAL_METHODS = new Map<object, ReadonlySet<string>>([[ThreadChannel.prototype, new Set(['permissionsFor'])]])
+
 function isRealMethod(target: object, key: string): boolean {
   for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
-    if (REAL_METHODS.get(proto)?.has(key)) return true
+    if (REAL_METHODS.get(proto)?.has(key) || (strictMocks() && STRICT_REAL_METHODS.get(proto)?.has(key))) return true
   }
   return false
 }
@@ -279,10 +290,19 @@ const PLACEHOLDER_BOOLEANS = new Map<object, ReadonlySet<string>>([
   [GuildChannel.prototype, new Set(['viewable', 'manageable', 'deletable'])],
   [ThreadChannel.prototype, new Set(['joinable', 'joined', 'sendable', 'unarchivable', 'editable', 'manageable', 'viewable'])],
   [BaseGuildVoiceChannel.prototype, new Set(['joinable'])],
+  [VoiceChannel.prototype, new Set(['speakable'])],
   [User.prototype, new Set(['partial'])],
   [BaseChannel.prototype, new Set(['partial'])],
   [MessageReaction.prototype, new Set(['partial'])],
 ])
+
+/** Whether `proto`'s getter for `key` is one of those, or a subclass's override of one, such as a voice channel's `joinable`. */
+function isPlaceholder(proto: object | null, key: string): boolean {
+  for (; proto !== null; proto = Object.getPrototypeOf(proto) as object | null) {
+    if (PLACEHOLDER_BOOLEANS.get(proto)?.has(key)) return true
+  }
+  return false
+}
 
 const mockLogger = new Logger('Mocks')
 
@@ -293,7 +313,7 @@ function warnBooleanPlaceholder(target: object, key: string): void {
     mockLogger,
     `${name}.${key}`,
     'the mock computes it as discord.js does',
-    `Set it on the mock, such as ${variable}.${key} = false, to test either way.`,
+    `Set it on the mock, such as ${variable}.${key} = false, to test either way, or call useStrictMocks() to have the mock compute it now.`,
   )
 }
 
@@ -1514,8 +1534,15 @@ export function memberRoles(member: object, roles: readonly Role[]): GuildMember
   return stubDeep(manager) as GuildMemberRoleManager
 }
 
-/** A server's @everyone role, which has the server's id and ranks lowest, at position 0. */
-const everyoneRole = (guildId: string): Role => createMockInteraction(Role, { id: guildId, name: '@everyone', position: 0 }) as Role
+// A server's @everyone role, which has the server's id and ranks lowest, at position 0; with strict mocks, the
+// permissions Discord gives it in a new server
+const everyoneRole = (guildId: string): Role =>
+  createMockInteraction(Role, {
+    id: guildId,
+    name: '@everyone',
+    position: 0,
+    ...(strictMocks() ? { permissions: new PermissionsBitField(PermissionsBitField.Default).freeze() } : {}),
+  }) as Role
 
 /**
  * A guild's role manager with `roles` in its cache, and the guild's @everyone role: the one given with the guild's id,
@@ -1691,6 +1718,8 @@ function settleGuild(instance: Record<string, unknown>, guild: object): void {
       if (!Object.prototype.hasOwnProperty.call(item, 'guild')) (item as Record<string, unknown>).guild = guild
     }
   }
+  // Strict mocks cache the bot's member from the start, as the gateway does when the bot joins, so lookups find it
+  if (strictMocks()) void (members as { me: unknown }).me
 }
 
 /**
@@ -1964,11 +1993,12 @@ export function createMockMessage(
     get: () => {
       const found = cacheOf((instance.channel as { threads?: unknown }).threads)?.get(instance.id as string)
       if (found) return found
+      if (strictMocks()) return null
       warnPlaceholder(
         mockLogger,
         'Message.thread',
         'it is null unless the channel caches a thread under the message id, as discord.js reads it',
-        'Cache one with message.channel.threads.cache.set(message.id, thread).',
+        'Cache one with message.channel.threads.cache.set(message.id, thread), or call useStrictMocks() to have it read null now.',
       )
       return (placeholderThread ??= stubDeep(Object.create(ThreadChannel.prototype)))
     },
