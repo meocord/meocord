@@ -108,8 +108,8 @@ export interface CommandMeta<T extends string = string> {
   /**
    * How specific this pattern is, as 4.1 ranked patterns: more literal text first.
    *
-   * @deprecated Since 4.2, and removed in the next major version (5.0). Component routing ranks patterns segment by
-   * segment and no longer reads it.
+   * @deprecated Since 4.2, and removed in the next major version (5.0). Internal: nothing replaces it. Component routing
+   * ranks patterns segment by segment and no longer reads it.
    */
   specificity?: number
   /** The builder's own `guilds` option, when it has one. */
