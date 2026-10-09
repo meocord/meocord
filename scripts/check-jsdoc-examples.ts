@@ -1,7 +1,8 @@
 /**
  * Checks that every public symbol has a `@group`, checks its JSDoc and compiles its `@example`, and the README's
  * blocks, against the built package, after `bun run build`. `--coverage` lists the symbols still missing parts; `--fix`
- * moves every documentation link onto the package's own line, as a new minor version needs.
+ * only moves every documentation link onto the package's own line, with no build: `release:version` runs it after
+ * setting the version, so a new minor's release carries its links.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
@@ -213,7 +214,7 @@ const DOCS_LINK = /https:\/\/meocord\.dev\/docs\/([^/\s|}]+)\//g
 
 /**
  * The links to another line of the documentation than the package's, which would send a reader to pages for another
- * version; `fix` rewrites them to the package's line instead.
+ * version; `fix` rewrites them to the package's line instead, and returns the files it rewrote.
  */
 function staleDocsLinks(line: string, fix: boolean): string[] {
   const stale: string[] = []
@@ -221,7 +222,10 @@ function staleDocsLinks(line: string, fix: boolean): string[] {
     const text = readFileSync(file, 'utf8')
     if (fix) {
       const fixed = text.replace(DOCS_LINK, (link, linked: string) => (linked === line ? link : `https://meocord.dev/docs/${line}/`))
-      if (fixed !== text) writeFileSync(file, fixed)
+      if (fixed !== text) {
+        writeFileSync(file, fixed)
+        stale.push(path.relative(repoRoot, file))
+      }
       continue
     }
     text.split('\n').forEach((content, index) => {
@@ -323,7 +327,6 @@ function readmeBlocks(): { code: string; firstLine: number }[] {
 
 function main(): void {
   const line = docsLine()
-  if (process.argv.includes('--fix')) staleDocsLinks(line, true)
   const entries = entryPoints()
   // The declarations an example's `import … from 'discord.js'` resolves to
   const discordTypes = ts.resolveModuleName('discord.js', path.join(examplesDir, 'x.ts'), compilerOptions, ts.sys).resolvedModule
@@ -499,6 +502,12 @@ function main(): void {
   }
 }
 
+if (process.argv.includes('--fix')) {
+  const line = docsLine()
+  const moved = staleDocsLinks(line, true)
+  console.log(moved.length > 0 ? `Moved the documentation links of ${moved.length} file(s) to docs/${line}.` : `Every documentation link names docs/${line}.`)
+  process.exit(0)
+}
 if (!existsSync(path.join(repoRoot, 'dist/types'))) {
   console.error('dist/types is missing. Run bun run build first.')
   process.exit(1)
