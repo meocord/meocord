@@ -68,14 +68,27 @@ const major =
 
 const problems: string[] = []
 const allowed = new Set<string>()
+// The generic signatures that changed as text, once per entry: its .d.ts and .d.cts declare the same ones
+const review = new Set<string>()
 for (const { file, before, after } of pairs) {
-  for (const { path: where, problem } of apiBreaks(checker, program.getSourceFile(before)!, program.getSourceFile(after)!)) {
-    const id = `${file.replace(/^dist\/types\//, '').replace(/\/index\.d\.c?ts$|\.d\.c?ts$/, '')} ${where}`
+  const entry = file.replace(/^dist\/types\//, '').replace(/\/index\.d\.c?ts$|\.d\.c?ts$/, '')
+  const compared = apiBreaks(checker, program.getSourceFile(before)!, program.getSourceFile(after)!)
+  for (const line of compared.review) review.add(`${entry} ${line}`)
+  for (const { path: where, problem } of compared.breaks) {
+    const id = `${entry} ${where}`
     if (allowlist[id]) allowed.add(id)
     else problems.push(`${file}: ${where} ${problem}`)
   }
 }
 const stale = Object.keys(allowlist).filter(id => !allowed.has(id))
+
+// Listed for a reviewer to read, not failed: the checker cannot relate a generic's parameters and return across versions
+if (review.size > 0) {
+  console.log(
+    `${review.size} generic signature(s) changed since meocord@${against}; check each still accepts and returns what it did:\n` +
+      [...review].map(line => `  - ${line}`).join('\n'),
+  )
+}
 
 if (problems.length > 0) {
   console.error(
