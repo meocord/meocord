@@ -15,8 +15,8 @@ export class SampleButtonController {
     await respond(interaction).send({ content: 'Button clicked!' })
   }
 
-  // Only the user whose id the customId carries gets past OwnerGuard
-  @Command('button-with/{ownerId}', CommandType.BUTTON)
+  // Only the user whose id the customId carries gets past OwnerGuard; `:snowflake` takes only a Discord id
+  @Command('button-with/{ownerId:snowflake}', CommandType.BUTTON)
   @UseGuard(OwnerGuard)
   @Cooldown({ uses: 5, seconds: 60 })
   @Defer()

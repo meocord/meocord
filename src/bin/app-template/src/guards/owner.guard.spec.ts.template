@@ -7,30 +7,34 @@ import { OwnerGuard } from '@src/guards/owner.guard.js'
 
 @Controller()
 class CardController {
-  @Command('card/{ownerId}', CommandType.BUTTON)
+  @Command('card/{ownerId:snowflake}', CommandType.BUTTON)
   @UseGuard(OwnerGuard)
   async open(interaction: ButtonInteraction) {
     await interaction.deferUpdate()
   }
 }
 
+// Discord user ids, as the customId and the guard compare them
+const owner = '200000000000000001'
+const stranger = '200000000000000002'
+
 const clickBy = (userId: string) => {
   const user = createMockUser()
   user.id = userId
   // invoke reads ownerId from the customId, as dispatch does
-  return createMockInteraction(ButtonInteraction, { customId: 'card/owner', user })
+  return createMockInteraction(ButtonInteraction, { customId: `card/${owner}`, user })
 }
 
 describe('OwnerGuard', () => {
   const module = MeoCordTestingModule.create({ controllers: [CardController] }).compile()
 
   it("lets the button's owner through", async () => {
-    const { ran } = await module.invoke(CardController, 'open', clickBy('owner'))
+    const { ran } = await module.invoke(CardController, 'open', clickBy(owner))
 
     expect(ran).toBe(true)
   })
 
   it('denies anyone else with a GuardDeniedError', async () => {
-    await expect(module.invoke(CardController, 'open', clickBy('stranger'))).rejects.toThrow(GuardDeniedError)
+    await expect(module.invoke(CardController, 'open', clickBy(stranger))).rejects.toThrow(GuardDeniedError)
   })
 })
