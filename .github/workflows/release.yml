@@ -325,10 +325,23 @@ jobs:
       - name: Check the built declarations
         run: bun run check:dist-types
 
+      - name: Find the latest release
+        id: published
+        run: echo "version=$(npm view meocord dist-tags.latest)" >> "$GITHUB_OUTPUT"
+
+      # Its unpacked declarations, which a version never changes
+      - name: Cache the latest release's declarations
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/api-compat/${{ steps.published.outputs.version }}
+          key: api-compat-${{ steps.published.outputs.version }}
+
       # Nothing the latest release's declarations export, or any member of it, is removed, narrowed where it is given or
       # widened where it is returned; a deliberate break needs a major release and scripts/api-compat-allowlist.json
       - name: Check the public API against the latest release
-        run: bun run check:api-compat
+        env:
+          AGAINST: ${{ steps.published.outputs.version }}
+        run: bun run check:api-compat --against "$AGAINST"
 
       # The CommonJS build loads with Node's require() and logs, as a project that require()s meocord runs it
       - name: Check the CommonJS build
@@ -474,9 +487,22 @@ jobs:
       - name: Build package
         run: bun run build
 
+      - name: Find the latest release
+        id: published
+        run: echo "version=$(npm view meocord dist-tags.latest)" >> "$GITHUB_OUTPUT"
+
+      # Its unpacked declarations, which a version never changes
+      - name: Cache the latest release's declarations
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/api-compat/${{ steps.published.outputs.version }}
+          key: api-compat-${{ steps.published.outputs.version }}
+
       # Against the release this one follows, before anything is published
       - name: Check the public API against the latest release
-        run: bun run check:api-compat
+        env:
+          AGAINST: ${{ steps.published.outputs.version }}
+        run: bun run check:api-compat --against "$AGAINST"
 
       # Installs an application from the packed build and runs its own lint, typecheck,
       # tests, coverage and builds. Rendering a template says nothing about whether the

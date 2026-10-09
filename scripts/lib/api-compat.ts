@@ -41,8 +41,9 @@ const isRest = (parameter: ts.Symbol | undefined) =>
  * Finds the breaks between two entry files of one program: `before` as published, `after` as built. Every export,
  * member and signature of `before` is checked; only what `after` adds goes unchecked.
  */
-export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after: ts.SourceFile): ApiBreak[] {
+export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after: ts.SourceFile): { breaks: ApiBreak[]; review: string[] } {
   const breaks: ApiBreak[] = []
+  const review: string[] = []
   const seen = new Set<string>()
   const report = (path: string, problem: string) => breaks.push({ path, problem })
   const show = (type: ts.Type) => checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation)
@@ -69,12 +70,76 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
   }
   const assignable = relate
 
+  /** Two texts as `before → after`, a long pair cut to where they differ, with some context on either side. */
+  const changed = (before: string, after: string) => {
+    if (before.length + after.length <= 400) return `${before} → ${after}`
+    let start = 0
+    while (start < before.length && before[start] === after[start]) start++
+    let end = 0
+    while (end < before.length - start && end < after.length - start && before.at(-1 - end) === after.at(-1 - end)) end++
+    const cut = (text: string) => {
+      const [from, to] = [Math.max(0, start - 60), Math.min(text.length, text.length - end + 60)]
+      const shown = text.slice(from, Math.min(to, from + 300))
+      return `${from > 0 ? '…' : ''}${shown}${from + shown.length < text.length ? '…' : ''}`
+    }
+    return `${cut(before)} → ${cut(after)}`
+  }
+
+  /** `text` with each of `parameters`' names replaced by its position, `T0`, `T1` and so on. */
+  const byPosition = (text: string, parameters: readonly ts.TypeParameter[]) =>
+    parameters.reduce((out, parameter, index) => out.replace(new RegExp(`\\b${parameter.symbol.name}\\b`, 'g'), `T${index}`), text)
+
+  /**
+   * A generic's type parameters, by position: none removed, none whose default is dropped, and each constraint the
+   * same or wider, so every type argument the old version took is still taken.
+   */
+  function compareTypeParameters(path: string, olds: readonly ts.TypeParameter[], news: readonly ts.TypeParameter[]) {
+    if (news.length < olds.length) report(path, `has ${news.length} type parameters where it had ${olds.length}`)
+    olds.forEach((old, index) => {
+      const next = news[index]
+      if (!next) return
+      if (old.getDefault() && !next.getDefault()) report(path, `requires type parameter ${next.symbol.name}, which had a default`)
+      const [oldConstraint, newConstraint] = [old.getConstraint(), next.getConstraint()]
+      if (!newConstraint) return
+      const shown = (constraint: ts.Type | undefined, parameters: readonly ts.TypeParameter[]) =>
+        constraint ? byPosition(show(constraint), parameters) : 'unknown'
+      if (oldConstraint && shown(oldConstraint, olds) === shown(newConstraint, news)) return
+      if (!oldConstraint || !relate(oldConstraint, newConstraint)) {
+        report(path, `narrowed type parameter ${old.symbol.name}: extends ${oldConstraint ? show(oldConstraint) : 'unknown'} → extends ${show(newConstraint)}`)
+      }
+    })
+  }
+
+  /** The type parameters a type or a class declares, in order. */
+  const declaredParameters = (symbol: ts.Symbol): ts.TypeParameter[] => {
+    const declaration = (symbol.declarations ?? []).find(node => ts.getEffectiveTypeParameterDeclarations(node as ts.DeclarationWithTypeParameterChildren).length > 0)
+    return declaration
+      ? ts.getEffectiveTypeParameterDeclarations(declaration as ts.DeclarationWithTypeParameterChildren).map(node => checker.getTypeAtLocation(node) as ts.TypeParameter)
+      : []
+  }
+
   /** A function's signatures: each old one must be matched, in order, by one that accepts and returns as it did. */
   function compareSignatures(path: string, olds: readonly ts.Signature[], news: readonly ts.Signature[], what: string) {
     if (olds.length === 0) return
     if (news.length === 0) return report(path, `is no longer ${what}`)
     if (news.length < olds.length) report(path, `has ${news.length} ${what === 'callable' ? 'call' : 'construct'} signatures where it had ${olds.length}`)
+    // A generic overload the old version has no counterpart for, compared as text, can change which overload a call
+    // resolves to: listed for review
+    const asText = (signature: ts.Signature) =>
+      byPosition(
+        checker.signatureToString(signature, undefined, ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrowStyleSignature),
+        signature.getTypeParameters() ?? [],
+      )
+    if (news.length > olds.length) {
+      news.forEach((next, index) => {
+        if (next.getTypeParameters()?.length && !olds.some(old => asText(old) === asText(next))) {
+          review.push(`${path} (overload ${index + 1} of ${news.length}): added ${changed('', asText(next)).replace(/^ → /, '')}`)
+        }
+      })
+    }
     olds.forEach((old, index) => {
+      // Kept as it was, wherever it now stands in the list
+      if (news.some(candidate => asText(candidate) === asText(old))) return
       const next = news[index]
       if (!next) return
       const at = olds.length > 1 ? `${path} (overload ${index + 1})` : path
@@ -82,13 +147,15 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
       const newParams = next.getParameters()
       const required = (params: readonly ts.Symbol[]) => params.filter(param => !parameterOptional(param)).length
       if (required(newParams) > required(oldParams)) report(at, `requires ${required(newParams)} arguments where it required ${required(oldParams)}`)
-      if (old.getTypeParameters()?.length !== next.getTypeParameters()?.length) {
-        report(at, `has ${next.getTypeParameters()?.length ?? 0} type parameters where it had ${old.getTypeParameters()?.length ?? 0}`)
+      const oldParameters = old.getTypeParameters() ?? []
+      if (oldParameters.length > 0 || (next.getTypeParameters() ?? []).length > 0) {
+        compareTypeParameters(at, oldParameters, next.getTypeParameters() ?? [])
+        // Its parameters and return name its own type parameters, which the checker cannot relate across two
+        // declarations: compared as text, with each type parameter named by its position, and listed for review
+        const text = asText
+        if (text(old) !== text(next)) review.push(`${at}: ${changed(text(old), text(next))}`)
         return
       }
-      // A generic signature's parameters and return name its own type parameters, which the checker cannot relate across
-      // two declarations; its arity is checked above, and the rest of it by the overloads and members around it
-      if (old.getTypeParameters()?.length) return
       oldParams.forEach((param, at2) => {
         const nextParam = newParams[at2] ?? (isRest(newParams.at(-1)) ? newParams.at(-1) : undefined)
         if (!nextParam) return report(at, `takes no argument ${param.name}, which it took`)
@@ -173,9 +240,10 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
       if (params(next) > params(old) && (next.declarations ?? []).some(declaration => (ts.getEffectiveTypeParameterDeclarations(declaration as ts.DeclarationWithTypeParameterChildren) ?? []).slice(params(old)).some(parameter => !parameter.default))) {
         report(name, `requires ${params(next)} type arguments where it took ${params(old)}`)
       }
+      compareTypeParameters(name, declaredParameters(old), declaredParameters(next))
       if (oldType.flags & ts.TypeFlags.Object) compareType(name, oldType, newType)
       else if (!assignable(oldType, newType)) report(name, `narrowed: ${show(oldType)} → ${show(newType)}`)
     }
   }
-  return breaks
+  return { breaks, review }
 }
