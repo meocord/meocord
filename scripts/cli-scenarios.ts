@@ -101,15 +101,22 @@ const PNPM = 'npx --yes pnpm@12.8.1'
 const emptyDir = path.join(workDir, 'empty')
 const hiddenDir = path.join(workDir, 'hidden')
 
-const validConfig = readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', 'meocord.config.ts.template'), 'utf8').replace(
-  '{{displayName}}',
-  'Generated Check',
-)
+/** `source` with each [text, replacement] applied; a text it lacks throws, so a template edit can't disarm a scenario. */
+const edited = (file: string, source: string, ...edits: [string, string][]) =>
+  edits.reduce((current, [text, replacement]) => {
+    if (!current.includes(text)) throw new Error(`The ${file} template no longer contains ${JSON.stringify(text)}; update the scenario that edits it.`)
+    return current.replace(text, replacement)
+  }, source)
+/** A template file of the generated app, with each [text, replacement] applied. */
+const templateFile = (file: string, ...edits: [string, string][]) =>
+  edited(file, readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', `${file}.template`), 'utf8'), ...edits)
+
+const validConfig = templateFile('meocord.config.ts', ['{{displayName}}', 'Generated Check'])
 
 const config = (body: string) => `export default ${body}\n`
 
 /** The template's configuration with `options` set where it suggests sharding. */
-const configWith = (options: string) => validConfig.replace("// sharding: { shards: 'auto' },", options)
+const configWith = (options: string) => edited('meocord.config.ts', validConfig, ["// sharding: { shards: 'auto' },", options])
 
 /** A token Discord refuses, so a login or registration fails the way a wrong token does. */
 const INVALID_TOKEN_ENV = 'DISCORD_TOKEN=not-a-real-token\n'
@@ -121,13 +128,13 @@ const LOGIN_FAILED_IN_WATCH = 'watch mode starts it again on the next change'
 /** An entry that exits with code 3 before logging in, as a startup error in the app's own code does. */
 const selfExitingMain = `console.log('Leaving before logging in')\nprocess.exitCode = 3\n`
 
-const templateMain = readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', 'src', 'main.ts.template'), 'utf8')
+const templateMain = templateFile('src/main.ts')
 
 /** The template's configuration with its dependencies bundled, and an eval devtool set as a hook sets one. */
-const evalBundledConfig = configWith('bundleDependencies: true,').replace(
+const evalBundledConfig = edited('meocord.config.ts', configWith('bundleDependencies: true,'), [
   '    return config',
   "    config.output = { ...config.output, sourceMap: { js: 'eval-source-map' } }\n    return config",
-)
+])
 
 /** The template's entry, first using lodash-es, an ES module that probes for CommonJS with `typeof exports`. */
 const lodashMain = `import { camelCase } from 'lodash-es'\nconsole.log(\`lodash-es: \${camelCase('bundled module')}\`)\n${templateMain}`
@@ -178,11 +185,13 @@ const appWithGenerated = (() => {
     })),
   )
   const observers = generatedNames.map(({ dir, className, file }) => ({ name: `${className}Observer`, from: `@src/observers/${dir}${file}.observer` }))
-  const template = readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', 'src', 'app.ts.template'), 'utf8')
   const imports = [...controllers, ...observers].map(({ name, from }) => `import { ${name} } from '${from}'`).join('\n')
-  return `${imports}\n${template}`
-    .replace('  controllers: [\n', `  controllers: [\n${controllers.map(({ name }) => `    ${name},\n`).join('')}`)
-    .replace('  presenter: AppPresenter,\n', `  presenter: AppPresenter,\n  observers: [${observers.map(({ name }) => name).join(', ')}],\n`)
+  const app = templateFile(
+    'src/app.ts',
+    ['  controllers: [\n', `  controllers: [\n${controllers.map(({ name }) => `    ${name},\n`).join('')}`],
+    ['  presenter: AppPresenter,\n', `  presenter: AppPresenter,\n  observers: [${observers.map(({ name }) => name).join(', ')}],\n`],
+  )
+  return `${imports}\n${app}`
 })()
 
 /** Where the stalled API listens: it accepts requests and never answers them. */
@@ -346,22 +355,19 @@ const HALF_WRITTEN = '\nexport const halfWritten = {\n'
 const touched = (current: string) => `${current}\n`
 /** A save of the bytes a file already holds, which rebuilds it as a second filesystem event for one save does. */
 const resaved = (current: string) => current
-/** A template file of the generated app, to change one line of. */
-const templateFile = (file: string) =>
-  readFileSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', `${file}.template`), 'utf8')
 
 /** A customId pattern whose param shares its segment with a literal, which @Command refuses as the class loads. */
-const refusedPatternButton = templateFile('src/controllers/button/sample.button.controller.ts').replace(
-  "'button-with/{ownerId}'",
-  "'button-with-{ownerId}'",
-)
-const REFUSED_PATTERN = 'SampleButtonController.handleButtonWithId: Invalid pattern "button-with-{ownerId}"'
+const refusedPatternButton = templateFile('src/controllers/button/sample.button.controller.ts', [
+  "'button-with/{ownerId:snowflake}'",
+  "'button-with-{ownerId:snowflake}'",
+])
+const REFUSED_PATTERN = 'SampleButtonController.handleButtonWithId: Invalid pattern "button-with-{ownerId:snowflake}": {ownerId} must occupy a whole segment'
 
 /** A message pattern with words after its rest param, which MeoCordFactory.create refuses. */
-const refusedMessagePattern = templateFile('src/controllers/message/sample.message.controller.ts').replace(
+const refusedMessagePattern = templateFile('src/controllers/message/sample.message.controller.ts', [
   "@MessageHandler('baka')",
   "@MessageHandler('baka {rest...} {x}')",
-)
+])
 const REFUSED_MESSAGE_PATTERN = "SampleMessageController.baka: @MessageHandler('baka {rest...} {x}')"
 
 /** Two controllers of one name, one counting a cooldown: MeoCordFactory.create refuses them, whichever build runs. */
@@ -377,19 +383,21 @@ export class Shop {
   }
 }
 `
-const appWithSameNamedShops = templateFile('src/app.ts')
-  .replace(
-    "import { AppPresenter }",
+const appWithSameNamedShops = templateFile(
+  'src/app.ts',
+  [
+    'import { AppPresenter }',
     "import { Shop as BuyShop } from '@src/controllers/shop/buy.controller'\nimport { Shop as BrowseShop } from '@src/controllers/shop/browse.controller'\nimport { AppPresenter }",
-  )
-  .replace('  controllers: [\n', '  controllers: [\n    BuyShop,\n    BrowseShop,\n')
+  ],
+  ['  controllers: [\n', '  controllers: [\n    BuyShop,\n    BrowseShop,\n'],
+)
 const SAME_NAMED_SHOPS = '@Cooldown and @Once tell classes apart by name'
 
 /** The sample slash command with a cooldown of no time, which @Cooldown refuses as the class loads. */
-const refusedCooldownSlash = templateFile('src/controllers/slash/sample.slash.controller.ts').replace(
-  "@Cooldown({ uses: 5, seconds: 60 })\n  async handleSampleSlash(",
-  "@Cooldown({ uses: 5, seconds: -1 })\n  async handleSampleSlash(",
-)
+const refusedCooldownSlash = templateFile('src/controllers/slash/sample.slash.controller.ts', [
+  '@Cooldown({ uses: 5, seconds: 60 })\n  async handleSampleSlash(',
+  '@Cooldown({ uses: 5, seconds: -1 })\n  async handleSampleSlash(',
+])
 const REFUSED_COOLDOWN = 'SampleSlashController.handleSampleSlash:'
 
 /** The refused message pattern, its module importing a helper class of the controller's own name. */
@@ -1382,7 +1390,7 @@ const scenarios: Scenario[] = [
     tier: 'slow',
     files: {
       '.env': INVALID_TOKEN_ENV,
-      'meocord.config.ts': configWith("sharding: { mode: 'process', shards: 2 },").replace('commands: {', 'commands: {\n    register: false,'),
+      'meocord.config.ts': edited('meocord.config.ts', configWith("sharding: { mode: 'process', shards: 2 },"), ['commands: {', 'commands: {\n    register: false,']),
       dist: null,
     },
     argv: ['start', '--prod', '--build'],
@@ -1501,8 +1509,8 @@ const scenarios: Scenario[] = [
       discord: { readyDelayMs: 0 },
       argv: ['start', '--dev'],
       edits: [
-        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => current.replace('config.tools ??= {}', HOOK_THROWS) } },
-        { after: 'Rebuilding failed', files: { 'meocord.config.ts': current => current.replace(HOOK_THROWS, 'config.tools ??= {}') } },
+        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => edited('meocord.config.ts', current, ['config.tools ??= {}', HOOK_THROWS]) } },
+        { after: 'Rebuilding failed', files: { 'meocord.config.ts': current => edited('meocord.config.ts', current, [HOOK_THROWS, 'config.tools ??= {}']) } },
       ],
       signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
       timeoutMs: 60_000,
@@ -1599,7 +1607,7 @@ const scenarios: Scenario[] = [
       discord: { readyDelayMs: 0 },
       argv: ['start', '--dev'],
       edits: [
-        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => current.replace('config.tools ??= {}', PLUGIN_THROWS) } },
+        { after: 'Ready hook ran', files: { 'meocord.config.ts': current => edited('meocord.config.ts', current, ['config.tools ??= {}', PLUGIN_THROWS]) } },
         { after: 'Rebuilding failed', files: { 'src/ready.service.ts': touched } },
       ],
       signal: { name: 'SIGINT', after: 'Ready hook ran', times: 2 },
@@ -1853,10 +1861,10 @@ const scenarios: Scenario[] = [
           '.env': INVALID_TOKEN_ENV,
           ...app,
           // Registration off, so the refused token stops the shards rather than the manager before them
-          'meocord.config.ts': configWith("sharding: { mode: 'process', shards: 2 },\n  shutdownTimeout: 1000,").replace(
+          'meocord.config.ts': edited('meocord.config.ts', configWith("sharding: { mode: 'process', shards: 2 },\n  shutdownTimeout: 1000,"), [
             'commands: {',
             'commands: {\n    register: false,',
-          ),
+          ]),
           dist: null,
         },
         discord,
@@ -1996,7 +2004,7 @@ const scenarios: Scenario[] = [
   {
     name: 'start --dev exits 1 when its first build cannot start',
     tier: 'fast',
-    files: { '.env': INVALID_TOKEN_ENV, 'meocord.config.ts': validConfig.replace('config.tools ??= {}', HOOK_THROWS) },
+    files: { '.env': INVALID_TOKEN_ENV, 'meocord.config.ts': edited('meocord.config.ts', validConfig, ['config.tools ??= {}', HOOK_THROWS]) },
     argv: ['start', '--dev'],
     timeoutMs: 60_000,
     expect: { code: 1, says: ['Failed to start: hook broke'] },
