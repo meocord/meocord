@@ -28,6 +28,7 @@ import {
 import { interactionClassName, isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
+import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
@@ -436,7 +437,7 @@ export const PARAM_SEPARATOR = '/'
 const escapeLiteral = (literal: string): string => literal.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')
 
 /**
- * Compiles a pattern into a regex, its parameter names and their types. A `{name}` takes a
+ * Compiles a pattern into a regex, its parameter names, their types and its 4.1 specificity. A `{name}` takes a
  * whole `/`-separated segment, so a uuid is captured whole and `profile/{uuid}` never overlaps
  * `profile/{uuid}/{id}`; a param that shares a segment with literal text is refused.
  */
@@ -444,12 +445,14 @@ export function createRegexFromPattern(pattern: string): {
   regex: RegExp
   params: string[]
   types: Record<string, string>
+  specificity: number
 } {
   const params: string[] = []
   // By the param's own name, so one named like an inherited key, such as `__proto__`, keeps its type
   const types: Record<string, string> = Object.create(null)
   let regexPattern = ''
   let cursor = 0
+  let literalLength = 0
 
   PLACEHOLDER_PATTERN.lastIndex = 0
   let match: RegExpExecArray | null
@@ -478,17 +481,26 @@ export function createRegexFromPattern(pattern: string): {
       if (type !== 'string') types[param] = type
     }
 
+    literalLength += literal.length
     regexPattern += escapeLiteral(literal)
     regexPattern += `(?<${param}>[^${PARAM_SEPARATOR}]+)`
     params.push(param)
     cursor = match.index + placeholder.length
   }
 
-  regexPattern += escapeLiteral(pattern.slice(cursor))
+  const trailing = pattern.slice(cursor)
+  literalLength += trailing.length
+  regexPattern += escapeLiteral(trailing)
 
   const regex = new RegExp(`^${regexPattern}$`)
 
-  return { regex, params, types: lookupTable(types) }
+  // What 4.1 ranked by, kept for code that reads CommandMeta.specificity; routing ranks segment by segment
+  const specificity = routeSpecificity({
+    literals: literalLength,
+    params: params.length,
+    typed: Object.values(types).reduce((sum, type) => sum + narrowness(type), 0),
+  })
+  return { regex, params, types: lookupTable(types), specificity }
 }
 
 /** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
@@ -710,6 +722,7 @@ export function Command<
     let commandType: CommandType
     let regex: RegExp | undefined
     let dynamicParams: string[] = []
+    let specificity: number | undefined
     let guilds: (string | undefined)[] | undefined
 
     // Determine command type and builder
@@ -777,6 +790,7 @@ export function Command<
       }
       regex = pattern.regex
       dynamicParams = pattern.params
+      specificity = pattern.specificity
     }
 
     const declared: CommandMeta = {
@@ -786,6 +800,7 @@ export function Command<
       type: commandType,
       regex,
       dynamicParams,
+      specificity,
       ...(guilds && { guilds }),
     }
     // One the class inherits for this method and route is replaced where it stands, so this one's options apply
