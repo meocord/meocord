@@ -55,9 +55,8 @@ describe('route', () => {
     expect(resolveRoute(App, { type: CommandType.BUTTON, customId: newTicket.build({ action: 'open' }) })?.handler).toBe(
       TicketController.prototype.create,
     )
-    expect(findRouteConflicts(App)).toEqual([
-      { type: CommandType.BUTTON, patterns: ['ticket/new/{action}', 'ticket/{id}/{action}'] },
-    ])
+    // The literal `new` ranks it first, so the pair is no conflict
+    expect(findRouteConflicts(App)).toEqual([])
   })
 
   it('is refused beside a route or string of the same shape, as the string would be', () => {

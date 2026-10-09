@@ -9,7 +9,7 @@ import {
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
-import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts, literalFirst, type RouteTies } from '@src/core/component-routes.js'
+import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
@@ -372,41 +372,25 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
 }
 
 /**
- * Warns of customId patterns of one component type that can match one customId, naming the handler that runs and why;
- * an app whose patterns overlap works, so refusing to start would turn a latent mis-route into an outage.
+ * Warns of customId patterns of one component type that rank equally and can match one customId, naming an id both
+ * match and the handler that runs. An app with such a pair works, so it starts; the next major version (5.0) refuses.
  * @throws Error for two handlers whose patterns match the same customIds, which the app refuses as well.
  */
-export function warnOverlappingPatterns(controllerClasses: readonly ControllerClass[], routeTies: RouteTies = 'listed'): void {
-  const routes = buildComponentRoutes(controllerClasses, { routeTies })
-  // With 'literalFirst', a pair the ids themselves decide, by specificity or a literal segment, needs no word
-  const conflicts = findComponentRouteConflicts(routes, routeTies).filter(({ decidedBy }) => routeTies === 'listed' || decidedBy === 'order')
+export function warnOverlappingPatterns(controllerClasses: readonly ControllerClass[]): void {
+  const routes = buildComponentRoutes(controllerClasses)
+  const conflicts = findComponentRouteConflicts(routes)
   if (conflicts.length === 0) return
 
   const routeOf = new Map(routes.map(route => [`${route.meta.type}\0${route.pattern}`, route]))
-  const lines = conflicts.map(({ type, patterns: [left, right] }) => {
-    const outcome = ambiguityOutcome(routeOf.get(`${type}\0${left}`)!, routeOf.get(`${type}\0${right}`)!)
-    return `  "${left}"  vs  "${right}": ${outcome}`
+  const name = ({ controllerClass, meta }: ComponentRoute) => `${controllerClass.name}.${meta.methodName}`
+  const lines = conflicts.map(({ type, patterns: [left, right], customId }) => {
+    const [runs, other] = [routeOf.get(`${type}\0${left}`)!, routeOf.get(`${type}\0${right}`)!]
+    const listed = runs.controllerClass === other.controllerClass ? 'it is declared first' : 'its controller is listed first'
+    return `  "${left}"  vs  "${right}", which both match "${customId}": ${name(runs)} runs, as ${listed}.`
   })
   logger.warn(
-    `${conflicts.length} pattern pair(s) can match the same customId, so which one runs is decided by ranking rather ` +
-      `than by the ids themselves:\n${lines.join('\n')}`,
-  )
-}
-
-/**
- * Which of two overlapping routes runs for the ids both match, and why: `runs` ranks first. Between equally
- * specific patterns, the order they are listed in decides until 5.0, which prefers the earlier literal segment.
- */
-function ambiguityOutcome(runs: ComponentRoute, other: ComponentRoute): string {
-  const name = ({ controllerClass, meta }: ComponentRoute) => `${controllerClass.name}.${meta.methodName}`
-  if ((runs.meta.specificity ?? 0) !== (other.meta.specificity ?? 0)) return `${name(runs)} runs, as its pattern is more specific.`
-  const together = runs.controllerClass === other.controllerClass
-  const listed = together ? 'it is declared first' : 'its controller is listed first'
-  if (!literalFirst(other.pattern, runs.pattern)) return `${name(runs)} runs, as ${listed}.`
-  const reorder = together ? `Declare ${name(other)} first` : `List ${other.controllerClass.name} first`
-  return (
-    `${name(runs)} runs, as ${listed}. In the next major version (5.0), ${name(other)} runs instead, as ` +
-    `"${other.pattern}" spells out the first segment where the two differ. ${reorder}, make the patterns distinct, or ` +
-    "set @MeoCord({ routeTies: 'literalFirst' })."
+    `${conflicts.length} pattern pair(s) rank equally and can match the same customId, so the order they are listed in ` +
+      `decides which one runs:\n${lines.join('\n')}\nMake the patterns distinct: in the next major version (5.0), ` +
+      'MeoCord refuses to start with such a pair.',
   )
 }

@@ -32,7 +32,6 @@ import {
   type ComponentRoute,
   matchComponentRoute,
   type RouteParamValue,
-  type RouteTies,
 } from '@src/core/component-routes.js'
 import {
   appPresenterOf,
@@ -130,8 +129,6 @@ export interface DispatcherOptions {
   warnSlowMessageHandlers?: boolean
   /** Waits for the observers before a call settles, as the testing module does. */
   awaitObservers?: boolean
-  /** How equally specific customId patterns rank; the app's `routeTies`. */
-  routeTies?: RouteTies
 }
 
 /** A handler of a message, by name, and how to run it in a call. */
@@ -236,14 +233,14 @@ export class Dispatcher {
   }
 
   /**
-   * Every pattern-matched route, most specific first, built once, as the app is created. The ordering lets
-   * `gi-profile/summary/{uid}` win over `gi-profile/{uuid}/{uid}` regardless of registration order.
+   * Every pattern-matched route, in the order dispatch tries them, built once, as the app is created. The ordering
+   * lets `gi-profile/summary/{uid}` win over `gi-profile/{uuid}/{uid}` regardless of registration order.
    */
   private componentRoutes?: ComponentRoute[]
 
   /** The component routes, built on first use; the app calls it as it is created. */
   getComponentRoutes(): ComponentRoute[] {
-    return (this.componentRoutes ??= buildComponentRoutes([...this.controllerClasses], { routeTies: this.options.routeTies }))
+    return (this.componentRoutes ??= buildComponentRoutes([...this.controllerClasses]))
   }
 
   /**

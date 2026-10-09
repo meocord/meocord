@@ -28,7 +28,6 @@ import {
 import { interactionClassName, isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
-import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
@@ -437,7 +436,7 @@ export const PARAM_SEPARATOR = '/'
 const escapeLiteral = (literal: string): string => literal.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')
 
 /**
- * Compiles a pattern into a regex, its parameter names, their types and its specificity. A `{name}` takes a
+ * Compiles a pattern into a regex, its parameter names and their types. A `{name}` takes a
  * whole `/`-separated segment, so a uuid is captured whole and `profile/{uuid}` never overlaps
  * `profile/{uuid}/{id}`; a param that shares a segment with literal text is refused.
  */
@@ -445,14 +444,12 @@ export function createRegexFromPattern(pattern: string): {
   regex: RegExp
   params: string[]
   types: Record<string, string>
-  specificity: number
 } {
   const params: string[] = []
   // By the param's own name, so one named like an inherited key, such as `__proto__`, keeps its type
   const types: Record<string, string> = Object.create(null)
   let regexPattern = ''
   let cursor = 0
-  let literalLength = 0
 
   PLACEHOLDER_PATTERN.lastIndex = 0
   let match: RegExpExecArray | null
@@ -481,33 +478,18 @@ export function createRegexFromPattern(pattern: string): {
       if (type !== 'string') types[param] = type
     }
 
-    literalLength += literal.length
     regexPattern += escapeLiteral(literal)
     regexPattern += `(?<${param}>[^${PARAM_SEPARATOR}]+)`
     params.push(param)
     cursor = match.index + placeholder.length
   }
 
-  const trailing = pattern.slice(cursor)
-  literalLength += trailing.length
-  regexPattern += escapeLiteral(trailing)
+  regexPattern += escapeLiteral(pattern.slice(cursor))
 
   const regex = new RegExp(`^${regexPattern}$`)
 
-  // Literal text is the signal: a pattern spelling out more of the id describes it
-  // more exactly than one leaving it to a parameter. Fewer parameters breaks a tie
-  // between equal-length patterns, then narrower typed params; the order the controllers
-  // and handlers are listed in settles what is left, and the startup warning names the pair.
-  const specificity = routeSpecificity({
-    literals: literalLength,
-    params: params.length,
-    typed: Object.values(types).reduce((sum, type) => sum + narrowness(type), 0),
-  })
-  return { regex, params, types: lookupTable(types), specificity }
+  return { regex, params, types: lookupTable(types) }
 }
-
-/** How few values a segment type takes, so a narrower type ranks first: words to choose from, then bool, int, number. */
-const narrowness = (type: string): number => (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : 1)
 
 /** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
 function segmentTypeProblem(param: string, type: string): string {
@@ -644,10 +626,11 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * the keys the handler's params require are checked against the pattern or route, a typed segment's value against
  * its type, and a select menu's choices, such as `values: string[]`, against what discord.js gives; a key a pipe
  * produces is declared `Piped<T>`, and left to the pipe. Two component handlers of one type whose patterns match
- * exactly the same ids stop the bot at startup; patterns that only overlap are warned about, naming the one that
- * runs: the more specific, or between equally specific ones, the one listed first. In the next major version (5.0),
- * the one that spells out the first segment where two equally specific patterns differ runs instead, and the warning
- * names the pairs that changes. A context menu handler receives the kind its builder's `setType()` names, and one
+ * exactly the same ids stop the bot at startup. Patterns that both match an id rank segment by segment, left to
+ * right: at the first segment one spells out as literal text and the other leaves to a param, the literal one runs,
+ * so `profile/me/{section}` takes `profile/me/edit` from `profile/{userId}/edit`; between patterns that leaves tied,
+ * the narrower type at the first param where they differ. Two still tied are warned about as the bot starts, and the
+ * one listed first runs. A context menu handler receives the kind its builder's `setType()` names, and one
  * declaring the other kind fails to compile; when the compiler cannot tell the kind, `@Command` checks the parameter
  * type it emits as it applies. A subclass that re-declares an inherited handler on the same name or pattern takes its
  * own builder and options; on another it still answers the inherited one too, which the bot warns about as it
@@ -727,7 +710,6 @@ export function Command<
     let commandType: CommandType
     let regex: RegExp | undefined
     let dynamicParams: string[] = []
-    let specificity: number | undefined
     let guilds: (string | undefined)[] | undefined
 
     // Determine command type and builder
@@ -793,10 +775,8 @@ export function Command<
       } catch (error) {
         throw refuse(new Error(`${target.constructor.name}.${propertyKey}: ${(error as Error).message}`, { cause: error }))
       }
-      const { regex: generatedRegex, params, specificity: patternSpecificity } = pattern
-      regex = generatedRegex
-      dynamicParams = params
-      specificity = patternSpecificity
+      regex = pattern.regex
+      dynamicParams = pattern.params
     }
 
     const declared: CommandMeta = {
@@ -806,7 +786,6 @@ export function Command<
       type: commandType,
       regex,
       dynamicParams,
-      specificity,
       ...(guilds && { guilds }),
     }
     // One the class inherits for this method and route is replaced where it stands, so this one's options apply
@@ -939,42 +918,35 @@ function segmentParamType(segment: string): string | undefined {
   return match ? typeKey(match[2]) : undefined
 }
 
-/** Whether a segment's two readings can both take one value: a literal, text, or a typed param. */
-function segmentsOverlap(left: string, right: string): boolean {
+/** How few values a segment type takes, so a narrower type ranks first: words to choose from, then bool, int, number. */
+const narrowness = (type: string): number => (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : type === '' ? 0 : 1)
+
+/**
+ * How narrow a pattern segment that is a param, `{name}` or `{name:type}`, is: from `0` for text to `4` for words to
+ * choose from. `undefined` for a segment of literal text.
+ */
+export function paramNarrowness(segment: string): number | undefined {
+  const type = segmentParamType(segment)
+  return type === undefined ? undefined : narrowness(type)
+}
+
+/** A value both readings of a segment take: a literal, text, or a typed param; `undefined` when they share none. */
+function sharedValue(left: string, right: string): string | undefined {
   const [a, b] = [segmentParamType(left), segmentParamType(right)]
-  if (a === undefined && b === undefined) return left === right
-  if (a === undefined || b === undefined) {
-    const [type, literal] = a === undefined ? [b!, left] : [a, right]
-    return type === '' || parseSegment(type, literal) !== undefined
-  }
-  if (a === '' || b === '' || a === b) return true
-  // Words to choose from overlap another type when one of them is a value of it
-  const [wordsA, wordsB] = [choicesOf(a), choicesOf(b)]
-  if (wordsA) return wordsA.some(word => parseSegment(b, word) !== undefined)
-  if (wordsB) return wordsB.some(word => parseSegment(a, word) !== undefined)
-  // Of the scalar types, only a whole number and a number share values
-  return (a === 'int' && b === 'number') || (a === 'number' && b === 'int')
+  const takes = (type: string | undefined, segment: string, value: string): boolean =>
+    type === undefined ? segment === value : type === '' || parseSegment(type, value) !== undefined
+  // Every type takes one of these when it takes anything another reading takes: a literal, a listed word, 1 or true
+  const candidates = [...(a === undefined ? [left] : []), ...(b === undefined ? [right] : []), ...(choicesOf(a ?? '') ?? []), ...(choicesOf(b ?? '') ?? []), '1', 'true']
+  return candidates.find(value => takes(a, left, value) && takes(b, right, value))
 }
 
 /**
- * Finds pairs of customId patterns that can both match one id, such as `a/{x}/c` and `a/b/{y}`.
- * @returns Each ambiguous pair once, in the order the patterns were given.
+ * A customId both patterns match, such as `ticket/1/close` for `ticket/{id}/close` and `ticket/{n:int}/close`;
+ * `undefined` when no id matches both.
  */
-export function findAmbiguousRoutes(patterns: string[]): [string, string][] {
-  const segmentsOf = (pattern: string): string[] => pattern.split(PARAM_SEPARATOR)
-  const collisions: [string, string][] = []
-
-  for (let i = 0; i < patterns.length; i++) {
-    for (let j = i + 1; j < patterns.length; j++) {
-      const left = segmentsOf(patterns[i])
-      const right = segmentsOf(patterns[j])
-      if (left.length !== right.length) continue
-
-      const disjoint = left.some((segment, index) => !segmentsOverlap(segment, right[index]))
-
-      if (!disjoint) collisions.push([patterns[i], patterns[j]])
-    }
-  }
-
-  return collisions
+export function sharedCustomId(left: string, right: string): string | undefined {
+  const [a, b] = [left.split(PARAM_SEPARATOR), right.split(PARAM_SEPARATOR)]
+  if (a.length !== b.length) return undefined
+  const values = a.map((segment, index) => sharedValue(segment, b[index]))
+  return values.every(value => value !== undefined) ? values.join(PARAM_SEPARATOR) : undefined
 }

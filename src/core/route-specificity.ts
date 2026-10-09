@@ -1,8 +1,7 @@
 /**
- * How specific a route pattern is, for ranking the patterns that can match one input: more literal
- * text first, then a fixed length before one taking the rest, then no optional param before one, then
- * fewer params, then narrower typed params, whose segments take fewer values. Component patterns count literal
- * characters; message patterns count literal words.
+ * How specific a message pattern is, for ranking the patterns that can match one message: more literal
+ * words first, then a fixed length before one taking the rest, then no optional param before one, then
+ * fewer params, then narrower typed params, whose words take fewer values.
  */
 export function routeSpecificity({
   literals,
