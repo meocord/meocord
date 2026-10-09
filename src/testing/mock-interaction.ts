@@ -1591,6 +1591,9 @@ export function memberRoles(member: object, roles: readonly Role[]): GuildMember
   return stubDeep(manager) as GuildMemberRoleManager
 }
 
+/** The permissions Discord gives a server's @everyone role in a server made today. */
+const NEW_SERVER_EVERYONE_PERMISSIONS = 2248473465835073n
+
 // A server's @everyone role, which has the server's id and ranks lowest, at position 0; with strict mocks, the
 // permissions Discord gives it in a new server
 const everyoneRole = (guildId: string): Role =>
@@ -1598,7 +1601,7 @@ const everyoneRole = (guildId: string): Role =>
     id: guildId,
     name: '@everyone',
     position: 0,
-    ...(strictMocks() ? { permissions: new PermissionsBitField(PermissionsBitField.Default).freeze() } : {}),
+    ...(strictMocks() ? { permissions: new PermissionsBitField(NEW_SERVER_EVERYONE_PERMISSIONS).freeze() } : {}),
   }) as Role
 
 /**
@@ -1624,7 +1627,7 @@ function guildRoleManager(guildId: string, roles: readonly Role[] | undefined): 
  * @category Mocks
  */
 export type MockRawMemberOverrides = Partial<Omit<APIInteractionGuildMember, 'permissions' | 'user'>> & {
-  /** The member's permissions in the channel; Discord's defaults for a new server unless given. */
+  /** The member's permissions in the channel; unless given, what @everyone has in a server Discord makes today. */
   permissions?: PermissionResolvable
   /** The member's user; a new person, `username` `'user'`, unless given. */
   user?: Partial<APIUser>
@@ -1674,7 +1677,7 @@ export function createMockRawMember(overrides: MockRawMemberOverrides = {}): API
     pending: false,
     flags: 0 as GuildMemberFlags,
     ...given,
-    permissions: String(new PermissionsBitField(permissions ?? PermissionsBitField.Default).bitfield),
+    permissions: String(new PermissionsBitField(permissions ?? NEW_SERVER_EVERYONE_PERMISSIONS).bitfield),
   }
 }
 

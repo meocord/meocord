@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { ChatInputCommandInteraction, PermissionFlagsBits, PermissionsBitField, TextChannel, User } from 'discord.js'
+import { ChatInputCommandInteraction, PermissionFlagsBits, TextChannel, User } from 'discord.js'
 import { Command, Controller, Guard, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
@@ -18,7 +18,7 @@ describe('createMockRawMember', () => {
     expect(member).toEqual({
       user: { id: expect.any(String), username: 'user', discriminator: '0', global_name: null, avatar: null },
       roles: [],
-      permissions: String(PermissionsBitField.Default),
+      permissions: '2248473465835073',
       nick: null,
       avatar: null,
       banner: null,
@@ -80,7 +80,7 @@ describe('an interaction given a raw member', () => {
 
     const resolved = command.options.getMember('target') as unknown as Record<string, unknown>
 
-    expect(resolved).toEqual(expect.objectContaining({ roles: [], permissions: String(PermissionsBitField.Default), nick: null }))
+    expect(resolved).toEqual(expect.objectContaining({ roles: [], permissions: '2248473465835073', nick: null }))
     expect('user' in resolved).toBe(false)
     expect(command.options.getUser('target')).toBe(target)
   })

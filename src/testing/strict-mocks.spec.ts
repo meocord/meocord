@@ -100,6 +100,13 @@ describe('useStrictMocks', () => {
     expect([below.editable, above.editable]).toEqual([true, false])
   })
 
+  it('gives @everyone the permissions Discord gives it in a server made today', () => {
+    const { everyone } = server().channel.guild.roles
+    expect(everyone.permissions.bitfield).toBe(2248473465835073n)
+    expect(everyone.permissions.has([PermissionFlagsBits.UseApplicationCommands, PermissionFlagsBits.SendMessagesInThreads])).toBe(true)
+    expect(everyone.permissions.has(PermissionFlagsBits.SendTTSMessages)).toBe(false)
+  })
+
   it("reads a channel as one the bot can view under Discord's default permissions, and not manage", () => {
     const { channel } = server()
     expect([channel.viewable, channel.manageable, channel.deletable]).toEqual([true, false, false])
@@ -117,7 +124,7 @@ describe('useStrictMocks', () => {
     const thread = createMockChannel(ThreadChannel)
     const voice = createMockChannel(VoiceChannel)
 
-    expect([thread.joinable, thread.joined, thread.sendable, thread.unarchivable, thread.viewable]).toEqual([true, false, false, false, true])
+    expect([thread.joinable, thread.joined, thread.sendable, thread.unarchivable, thread.viewable]).toEqual([true, false, true, false, true])
     expect([thread.archived, thread.locked]).toEqual([false, false])
     expect([voice.joinable, voice.speakable, voice.full]).toEqual([true, true, false])
   })
