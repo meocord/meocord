@@ -103,7 +103,7 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
  * @see {@link MeoCordOptions}
  * @see {@link MeoCordFactory}
  * @see {@link MeoCordConfig}
- * @see {@link https://meocord.dev/docs/4.1/configuration | Configuration}
+ * @see {@link https://meocord.dev/docs/4.2/configuration | Configuration}
  */
 export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(
   options: MeoCordOptions<G, I, F>,

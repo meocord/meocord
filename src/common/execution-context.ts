@@ -51,7 +51,7 @@ export type ExecutionContextType = 'interaction' | 'autocomplete' | 'message' | 
  * @group Utilities
  * @see {@link createMetadata}
  * @see {@link StageParams}
- * @see {@link https://meocord.dev/docs/4.1/guards | Guards}
+ * @see {@link https://meocord.dev/docs/4.2/guards | Guards}
  */
 export abstract class ExecutionContext {
   /**

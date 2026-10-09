@@ -37,7 +37,7 @@ import { META } from '@src/util/metadata-keys.js'
  * @category Pipeline stages
  * @see {@link DeferOptions}
  * @see {@link respond}
- * @see {@link https://meocord.dev/docs/4.1/defer | Deferring}
+ * @see {@link https://meocord.dev/docs/4.2/defer | Deferring}
  */
 export function Defer(options: DeferOptions = {}): MethodDecorator {
   return declaring((target: object, propertyKey: string | symbol) => {

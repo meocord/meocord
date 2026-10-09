@@ -27,7 +27,7 @@ import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
  * @group Decorators
  * @category App
  * @see {@link Inject}
- * @see {@link https://meocord.dev/docs/4.1/services | Services}
+ * @see {@link https://meocord.dev/docs/4.2/services | Services}
  */
 export function Service<T>() {
   return declaring(function (target: new (...args: any[]) => T, propertyKey?: string | symbol) {

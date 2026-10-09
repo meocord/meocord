@@ -1,5 +1,103 @@
 # meocord
 
+## 4.2.0
+
+### Minor Changes
+
+- [#463](https://github.com/meocord/meocord/pull/463) [`4d6b965`](https://github.com/meocord/meocord/commit/4d6b965ced8ecad9aceedb92ab7d084c0c2761bb) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@MeoCord({ messages: { handlers: 'concurrent' } })` runs a message's matched command and its `@MessageHandler()` listeners together, so a slow or hung command no longer holds back logging, moderation and the other listeners. Each keeps its own guards, interceptors, filters and observers, and the call settles once all have; no order holds between them, so a listener that reads what the command writes for the same message should keep the default, `'sequential'`. ([docs](https://meocord.dev/docs/4.2/message-commands))
+
+  Under `'sequential'`, a running bot now warns, once per handler, when a message's handler takes 5 seconds or more with listeners waiting after it, naming the option. `messages: { slowHandlerWarning: false }` turns the warning off. A `MeoCordTestingModule` doesn't warn unless `slowHandlerWarning` is `true`, so a test whose fake clock passes 5 seconds inside a handler sees nothing new.
+
+- [#460](https://github.com/meocord/meocord/pull/460) [`ded179f`](https://github.com/meocord/meocord/commit/ded179fc74d83e0228f89dc271033d61c04d0809) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@Controller({ inheritedRoutes: 'replace' })` makes a handler the class re-decorates answer only the routes the class declares for it, dropping the ones its base classes declare for that method. That covers every kind: commands, component patterns, message patterns and listeners, reactions and autocompletes. A slash or context menu command that no handler answers any more is not registered. A method overridden without decorators keeps every route it inherits. `'keep'`, the default, answers both, as before; the next major version (5.0) replaces them by default.
+
+  Two things help with the move, without changing what a bot does:
+
+  - The warning that names a re-declared handler still answering an inherited route now says how to drop that route now.
+  - `inspectHandler` reports the routes a handler answers by inheritance, as `inheritedRoutes`.
+
+  See https://meocord.dev/docs/4.2/how-a-call-runs.
+
+- [#459](https://github.com/meocord/meocord/pull/459) [`ff45ac5`](https://github.com/meocord/meocord/commit/ff45ac5b7fedbcfa6a51aef774cbc464c442df19) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `createMockRawMember()` builds the member Discord sends with an interaction from a server the bot isn't in: plain data with `roles` as role ids and `permissions` as a bitfield string, as discord.js keeps it. To test a user-installed command run there, give it as an interaction's `member` with the server's `guildId` and no `guild`:
+
+  - the interaction reads `inRawGuild()` true, `guild` and `channel` `null` (with its `channelId` kept), `user` the member's user and `memberPermissions` the member's;
+  - a user option's member is the resolved member Discord sends;
+  - the interaction is typed as a `'raw'` one;
+  - a guard that reads `member.roles.cache` throws, as it would in Discord.
+
+  A raw member with a `channel`, without a `guildId`, or with a different `user` is refused. Given with a `guild`, it reads as a cached server's member, as before, with a warning once to leave the guild out. A `guildId` given alone builds the interaction as before. See https://meocord.dev/docs/4.2/mocks.
+
+- [#476](https://github.com/meocord/meocord/pull/476) [`586a493`](https://github.com/meocord/meocord/commit/586a493c39b5a834157d9ab084a5607733ba915c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - customId patterns take two new param types: `{id:snowflake}` and `{id:uuid}`. The handler gets each as text, typed `string`, and `route().build()` refuses text that isn't one. `build()` takes either only as a string and throws a `TypeError` for a number, which may have lost an ID's digits before `build()` sees it: `12345678901234567` arrives as `12345678901234568`.
+
+  - `{id:snowflake}` takes a Discord ID: 17 to 20 digits with no leading zero, up to the largest 64-bit value. Every ID Discord has made since 2015-01-28 has at least 17 digits, because an ID's top 42 bits count milliseconds since 2015-01-01. The handler keeps the ID as text: from 17 digits on, a JavaScript number can't hold it exactly.
+  - `{id:uuid}` takes a UUID in its canonical 8-4-4-4-12 hex form, in either case, kept as written.
+
+  Both rank ahead of an untyped param, so `ticket/{id:snowflake}` takes an ID before `ticket/{name}` does, whatever the listing. Neither shares a value with `int`, `bool` or the other, so they never tie with those. Shorter digits stay an `int` while a JavaScript number holds them exactly. A 16-digit value above `Number.MAX_SAFE_INTEGER` is neither an `int` nor a snowflake, so it goes to a `number` param or to text. Between a snowflake and a `number` param, which also takes those digits, the snowflake wins. Use `{id:snowflake}` for Discord IDs: `{id:number}` rounds one, giving `12345678901234568` for `12345678901234567`.
+
+  See https://meocord.dev/docs/4.2/components.
+
+- [#462](https://github.com/meocord/meocord/pull/462) [`db96d3d`](https://github.com/meocord/meocord/commit/db96d3ddcdaa940f6f86f32b9fb5c0f2a9f55de9) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `MeoCordFactory.create()` and a testing module's `compile()` report every startup error their checks find, not only the first. These include two handlers of one command, two same-named classes with a cooldown, a provider for a token MeoCord binds itself, and a class nothing can make. Each error is logged with the file it comes from, and then the first is thrown as before: the same error, with the same message, so code and tests that catch it or match its text keep working. A lone error is reported as before.
+
+  A decorator's startup error, such as an invalid customId pattern, is still thrown as its class is defined, with its message unchanged. It now names what it is about and where:
+
+  - `error.declaration` is the handler or class it was applied to, such as `Tickets.close`;
+  - `error.file` is the source file it is declared in.
+
+  The built bot's report puts the handler first wherever the message doesn't already name it.
+
+  New, and opt-in: set `startupErrors: 'all'` in `meocord.config.ts` to report every startup error in one run.
+
+  - Decorators keep their errors instead of throwing them as each file loads.
+  - `create()` logs those together with its own errors, so a bot with three mistakes shows all three in one run.
+  - In a test, call `reportAllStartupErrors()` from `meocord/testing` in the setup file instead.
+
+  The default stays `'first'`, where a decorator throws as its class is defined. The next major version (5.0) makes `'all'` the default. See https://meocord.dev/docs/4.2/configuration.
+
+- [#457](https://github.com/meocord/meocord/pull/457) [`ea32209`](https://github.com/meocord/meocord/commit/ea322096a1050dc725e2ab339a1f3fa3f02320f2) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `useStrictMocks()`, called once in a test setup file, has every mock from `meocord/testing` compute the values discord.js computes, where it reads a truthy placeholder otherwise. Those values include:
+
+  - a message's `editable`, `deletable`, `pinnable`, `crosspostable`, `bulkDeletable`, `hasThread` and `partial`;
+  - a member's `manageable`, `kickable`, `bannable` and `moderatable`;
+  - a role's `editable`;
+  - a channel's and a thread's `viewable`, `manageable`, `deletable` and `joinable`;
+  - `partial` on users, channels and reactions.
+
+  `message.thread` is `null` unless the channel caches a thread under the message's id, and no placeholder warning is logged.
+
+  To give those values what Discord would, strict mocks:
+
+  - cache the bot's member in its server from the start;
+  - give @everyone the permissions Discord gives it in a new server;
+  - give a channel or thread made without a server one of its own.
+
+  So a default message from another user is not `editable` or `deletable`, and a member is not `kickable` until the bot's member has a role above theirs with the permission. A value a test sets on a mock still wins. The next major version (5.0) computes these values by default. See https://meocord.dev/docs/4.2/mocks.
+
+  Without the call, mocks read as before. A voice channel's `joinable` and `speakable` and a DM channel's `partial`, which read a placeholder without the warning, now give it too. Every placeholder warning now ends ", or call useStrictMocks() to have the mock compute it now.", so a test that matches a warning's whole text needs the new ending.
+
+- [#455](https://github.com/meocord/meocord/pull/455) [`602285b`](https://github.com/meocord/meocord/commit/602285b5e709909ae9e88ede8d296f6924053f50) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `useMockFn(vi.fn)`, called once in a test setup file, makes every mock from `meocord/testing` with the test runner's own mock function. The runner then treats them as its own: Vitest's `clearMocks` and `mockReset` config, `vi.clearAllMocks()` and `vi.mocked(...)` reach them, and bun's matchers, which accept only bun's mocks, read them with `useMockFn(mock)`. jest takes `useMockFn(jest.fn)`. Without the call, mocks are meocord's own as before. Under jest and bun, whose `mockReset` drops a mock's starting behaviour, reset with meocord's `resetAllMocks()`, which puts it back. node:test keeps meocord's own mock function.
+
+  A new project's `vitest.setup.ts` calls `useMockFn(vi.fn)`. An existing project can add the same line to its setup file, before any mock is made. See https://meocord.dev/docs/4.2/mocks.
+
+### Patch Changes
+
+- [#466](https://github.com/meocord/meocord/pull/466) [`e646771`](https://github.com/meocord/meocord/commit/e646771ca9a92a28fe00cecd6a265b2d7ede409d) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `testCooldownStore` no longer fails a correct store on a slow CI runner. Its sliding-window and `retryAfterMs` cases measured elapsed time against their nominal waits, with margins of tens of milliseconds, so a timer that fired a few hundred milliseconds late failed them. They now check against the times measured around each call, in a 2-second window with a second between calls, and still fail a store that resets fixed buckets or counts from the newest call. The suite takes about 2 seconds longer.
+
+- [#474](https://github.com/meocord/meocord/pull/474) [`4f6b307`](https://github.com/meocord/meocord/commit/4f6b307d6d9a886e9b0bbcaa0439b36e9b4bae62) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Component customId patterns now rank segment by segment, left to right, the way most routers rank paths. When several patterns match an id, the first segment where one pattern spells out literal text and the other leaves a param decides it: the literal one runs, whatever order the controllers are listed in. So `profile/me/{section}` takes `profile/me/edit` from `profile/{userId}/edit`, while `profile/123/edit` still goes to `{userId}`. If that leaves a pair tied, the narrower type at the first param where they differ runs, the same type order as before: words to choose from, then `bool`, `int`, `number`, then text.
+
+  4.1 ranked by how much literal text a whole pattern had. Only these overlapping pairs change handler, and 4.1 named every one of them in its startup warning:
+
+  - A pattern with more literal text, or more literal segments, now loses to one that spells out an earlier segment. For example, `a/{x}` now runs for `a/abcd` instead of `{x}/abcd`.
+  - Pairs 4.1 left to listing order, such as `a/{x}/c` and `a/b/{y}`, now go to the earlier literal whatever the listing, which is the handler 4.1's warning said would run in 5.0.
+  - Typed params are compared position by position instead of summed. For example, `{n:int}/{s}` now runs for `7/7` instead of the one listed first among it and `{s}/{n:int}`.
+
+  Two patterns that the ranking still can't tell apart log a warning at startup, with an id both match. Such a pair has the same literals and equally narrow params at every position, such as `t/{a:on|off}` and `t/{b:off|no}`, which both take `t/off`, and the one listed first runs. Pairs the ranking decides log no warning.
+
+  `findRouteConflicts` lists only those tied pairs. A test asserting `toEqual([])` passes for every app whose patterns the ranking tells apart. A test expecting a pair the ranking now decides, such as `profile/summary/{uid}` and `profile/{ownerId}/{uid}`, gets `[]` instead.
+
+  The internal `CommandMetadata`'s `specificity` still holds the value 4.1 gave, but routing no longer reads it. It's deprecated and goes in the next major version (5.0).
+
+  See https://meocord.dev/docs/4.2/components.
+
+- [#484](https://github.com/meocord/meocord/pull/484) [`cecfe6a`](https://github.com/meocord/meocord/commit/cecfe6ad53bd2f834d8f17472eb5690a3be9865b) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A new app from `meocord create` turns on strict mocks in its `vitest.setup.ts`, with `useStrictMocks()`, so its mocks compute what discord.js computes, such as a message's `editable` or a member's `kickable`, rather than placeholders. Its sample button and `OwnerGuard` read the owner's id as `{ownerId:snowflake}`, so a customId that isn't a Discord id matches nothing. An existing app can add `useStrictMocks()` to its own setup file, before any mock is made ([docs](https://meocord.dev/docs/4.2/mocks)).
+
 ## 4.1.2
 
 ### Patch Changes

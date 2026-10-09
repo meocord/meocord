@@ -79,7 +79,7 @@ function strayParams(translation: unknown, original: unknown): string[] {
  * @group Testing
  * @category Inspection
  * @see {@link createTranslator}
- * @see {@link https://meocord.dev/docs/4.1/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.2/localisation | Localisation}
  */
 export function expectCompleteCatalog(translator: Translator<any>, options: { meocord?: boolean } = {}): void {
   const catalogs = (translator as unknown as { [CATALOGS]?: Partial<Record<string, CatalogShape>> })[CATALOGS]

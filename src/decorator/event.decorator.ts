@@ -51,7 +51,7 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
  * @group Decorators
  * @category Handlers
  * @see {@link Once}
- * @see {@link https://meocord.dev/docs/4.1/gateway-events | Gateway events}
+ * @see {@link https://meocord.dev/docs/4.2/gateway-events | Gateway events}
  */
 export function On<E extends keyof ClientEvents>(event: E) {
   return eventDecorator(event, false)
@@ -80,7 +80,7 @@ export function On<E extends keyof ClientEvents>(event: E) {
  * @group Decorators
  * @category Handlers
  * @see {@link On}
- * @see {@link https://meocord.dev/docs/4.1/gateway-events | Gateway events}
+ * @see {@link https://meocord.dev/docs/4.2/gateway-events | Gateway events}
  */
 export function Once<E extends keyof ClientEvents>(event: E) {
   return eventDecorator(event, true)

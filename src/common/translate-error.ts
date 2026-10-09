@@ -66,7 +66,7 @@ export function errorText(error: unknown, translator: Translator<any> | undefine
  * @group Utilities
  * @category Localisation
  * @see {@link createTranslator}
- * @see {@link https://meocord.dev/docs/4.1/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.2/localisation | Localisation}
  */
 export function translateError(error: unknown, t: Translator<any>, target: Interaction | Message | Locale | `${Locale}`): string {
   const locale =

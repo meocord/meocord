@@ -175,7 +175,7 @@ export interface ReadyInfo {
  *
  * @group Types
  * @see {@link OnShutdown}
- * @see {@link https://meocord.dev/docs/4.1/lifecycle-hooks | Lifecycle hooks}
+ * @see {@link https://meocord.dev/docs/4.2/lifecycle-hooks | Lifecycle hooks}
  */
 export interface OnReady {
   /**
@@ -223,7 +223,7 @@ export interface OnReady {
  *
  * @group Types
  * @see {@link OnReady}
- * @see {@link https://meocord.dev/docs/4.1/lifecycle-hooks | Lifecycle hooks}
+ * @see {@link https://meocord.dev/docs/4.2/lifecycle-hooks | Lifecycle hooks}
  */
 export interface OnShutdown {
   /** Runs before the client is destroyed. */
@@ -634,7 +634,7 @@ export type MessagePrefix = string | readonly string[]
  * @group Configuration
  * @category App options
  * @see {@link MessageHandler}
- * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.2/message-commands | Message commands}
  */
 export interface MessageCommandOptions {
   /**
@@ -835,7 +835,7 @@ export interface MessageHelpParam {
  * ```
  *
  * @group Types
- * @see {@link https://meocord.dev/docs/4.1/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.2/localisation | Localisation}
  */
 export type MeoCordMessages = (typeof MEOCORD_MESSAGES)['meocord']
 
@@ -867,7 +867,7 @@ export type MeoCordMessages = (typeof MEOCORD_MESSAGES)['meocord']
  *
  * @group Configuration
  * @category App options
- * @see {@link https://meocord.dev/docs/4.1/message-params | Message params}
+ * @see {@link https://meocord.dev/docs/4.2/message-params | Message params}
  */
 export interface MessageParamType<T = unknown> {
   /** A noun such as `hex colour`, read in "is not a valid hex colour". Defaults to the type's key. */
@@ -1101,7 +1101,7 @@ export type MessageScope = 'guild' | 'dm' | 'any'
  * @group Configuration
  * @category App options
  * @see {@link MessageHandler}
- * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.2/message-commands | Message commands}
  */
 export interface MessageHandlerOptions {
   /**
@@ -1160,7 +1160,7 @@ export interface MessageHandlerOptions {
  * @group Configuration
  * @category Config file
  * @see {@link MeoCord}
- * @see {@link https://meocord.dev/docs/4.1/configuration | Configuration}
+ * @see {@link https://meocord.dev/docs/4.2/configuration | Configuration}
  */
 export interface MeoCordConfig {
   /** Shown as a prefix on every log line. Omitted when unset. */
@@ -1296,7 +1296,7 @@ export interface MeoCordConfig {
  * @group Configuration
  * @category Config file
  * @see {@link ShardContext}
- * @see {@link https://meocord.dev/docs/4.1/sharding | Sharding}
+ * @see {@link https://meocord.dev/docs/4.2/sharding | Sharding}
  */
 export interface ShardingConfig {
   /**
@@ -1340,7 +1340,7 @@ export interface ShardingConfig {
  *
  * @group Configuration
  * @category Config file
- * @see {@link https://meocord.dev/docs/4.1/slash-commands | Slash commands}
+ * @see {@link https://meocord.dev/docs/4.2/slash-commands | Slash commands}
  */
 export interface CommandRegistrationConfig {
   /**

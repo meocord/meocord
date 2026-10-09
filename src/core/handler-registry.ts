@@ -320,7 +320,7 @@ export function shareMessageRoutes(registry: HandlerRegistry, routes: readonly M
  *
  * @group Controllers
  * @see {@link HandlerEntry}
- * @see {@link https://meocord.dev/docs/4.1/handler-discovery | Handler discovery}
+ * @see {@link https://meocord.dev/docs/4.2/handler-discovery | Handler discovery}
  */
 export class HandlerRegistry {
   private entries?: HandlerEntry[]

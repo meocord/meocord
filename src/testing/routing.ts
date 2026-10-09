@@ -149,7 +149,7 @@ function controllersOf(app: ControllerClass): ControllerClass[] {
  * @group Testing
  * @category Inspection
  * @see {@link findRouteConflicts}
- * @see {@link https://meocord.dev/docs/4.1/components | Buttons, selects and modals}
+ * @see {@link https://meocord.dev/docs/4.2/components | Buttons, selects and modals}
  */
 export function resolveRoute(
   app: ControllerClass,

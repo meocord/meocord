@@ -70,7 +70,7 @@ type AcceptsInput<P, Input> = [P] extends [NoInput]
  * @category Pipeline stages
  * @see {@link UsePipe}
  * @see {@link ValidationError}
- * @see {@link https://meocord.dev/docs/4.1/validation | Validation and pipes}
+ * @see {@link https://meocord.dev/docs/4.2/validation | Validation and pipes}
  */
 export function Validate<S extends StandardSchemaV1, const Pipes extends ValidatePipes<S> = Record<never, never>>(
   schema: S,
@@ -141,7 +141,7 @@ type AcceptsPiped<P, K extends string, Out> = [P] extends [NoInput]
  * @category Pipeline stages
  * @see {@link Pipe}
  * @see {@link Validate}
- * @see {@link https://meocord.dev/docs/4.1/validation | Validation and pipes}
+ * @see {@link https://meocord.dev/docs/4.2/validation | Validation and pipes}
  */
 export function UsePipe<K extends string, const Pipes extends readonly [PipeEntryOf, ...PipeEntryOf[]]>(
   key: K,
@@ -184,7 +184,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UsePipe}
- * @see {@link https://meocord.dev/docs/4.1/validation | Validation and pipes}
+ * @see {@link https://meocord.dev/docs/4.2/validation | Validation and pipes}
  */
 export function Pipe() {
   return declaring(function (target: new (...args: any[]) => PipeInterface, propertyKey?: string | symbol) {

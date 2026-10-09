@@ -32,7 +32,7 @@ import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
  * @group Decorators
  * @category Handlers
  * @see {@link Command}
- * @see {@link https://meocord.dev/docs/4.1/slash-commands | Slash commands}
+ * @see {@link https://meocord.dev/docs/4.2/slash-commands | Slash commands}
  */
 export function CommandBuilder<T extends BuildableCommandType>(commandType: T, options: CommandBuilderOptions = {}) {
   return declaring(function (target: new () => CommandBuilderBase<T>, propertyKey?: string | symbol) {
