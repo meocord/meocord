@@ -325,6 +325,11 @@ jobs:
       - name: Check the built declarations
         run: bun run check:dist-types
 
+      # Nothing the latest release's declarations export, or any member of it, is removed, narrowed where it is given or
+      # widened where it is returned; a deliberate break needs a major release and scripts/api-compat-allowlist.json
+      - name: Check the public API against the latest release
+        run: bun run check:api-compat
+
       # The CommonJS build loads with Node's require() and logs, as a project that require()s meocord runs it
       - name: Check the CommonJS build
         run: bun run check:dist-cjs
@@ -468,6 +473,10 @@ jobs:
 
       - name: Build package
         run: bun run build
+
+      # Against the release this one follows, before anything is published
+      - name: Check the public API against the latest release
+        run: bun run check:api-compat
 
       # Installs an application from the packed build and runs its own lint, typecheck,
       # tests, coverage and builds. Rendering a template says nothing about whether the

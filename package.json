@@ -29,6 +29,7 @@
     "notices:check": "bun scripts/third-party-notices.ts --check",
     "check:jsdoc-examples": "bun scripts/check-jsdoc-examples.ts",
     "check:dist-types": "bun scripts/check-dist-types.ts",
+    "check:api-compat": "bun scripts/check-api-compat.ts",
     "check:dist-cjs": "bun scripts/check-dist-cjs.ts",
     "brand": "bun tools/brand/brand.ts"
   },
