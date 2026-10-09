@@ -228,6 +228,21 @@ describe('@Command', () => {
     })
   })
 
+  // Deprecated and unread by routing, but code reading the metadata still gets what 4.1.2 recorded
+  it.each([
+    ['profile/summary/{ownerId}/{uid}', 16998],
+    ['profile/{uuid}/{uid}', 8998],
+    ['a/{n:int}/{w:on|off}', 2998.006],
+    ['x/{f:bool}/{n:number}', 2998.004],
+    ['plain', 5000],
+  ])('records the specificity 4.1 gave %s', (pattern, specificity) => {
+    class TestController {
+      @Command(pattern, CommandType.BUTTON)
+      handle(..._args: any[]) {}
+    }
+    expect(getCommandMap(TestController.prototype)[pattern][0].specificity).toBe(specificity)
+  })
+
   it('registers multiple commands on the same class', () => {
     class TestController {
       @Command('ping', CommandType.SLASH)

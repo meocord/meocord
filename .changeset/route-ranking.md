@@ -14,4 +14,6 @@ Two patterns that the ranking still can't tell apart log a warning at startup, w
 
 `findRouteConflicts` lists only those tied pairs. A test asserting `toEqual([])` passes for every app whose patterns the ranking tells apart. A test expecting a pair the ranking now decides, such as `profile/summary/{uid}` and `profile/{ownerId}/{uid}`, gets `[]` instead.
 
+The internal `CommandMetadata`'s `specificity` still holds the value 4.1 gave, but routing no longer reads it. It's deprecated and goes in the next major version (5.0).
+
 See https://meocord.dev/docs/4.2/components.
