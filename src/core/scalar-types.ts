@@ -36,10 +36,11 @@ export function duration(word: string): number | undefined {
 const MAX_SNOWFLAKE = 2n ** 64n - 1n
 
 /**
- * A Discord ID, kept as its text: 17 to 20 digits up to the largest 64-bit value. An ID's top 42 bits are milliseconds
- * since 2015-01-01, so every ID made from 2015-01-28 on has 17 digits or more, and none is a safe integer.
+ * A Discord ID, kept as its text: 17 to 20 digits, no leading zero, up to the largest 64-bit value. An ID's top 42 bits
+ * are milliseconds since 2015-01-01, so every ID made from 2015-01-28 on has 17 digits or more, and none is a safe
+ * integer.
  */
-export const snowflake = (word: string): string | undefined => (/^\d{17,20}$/.test(word) && BigInt(word) <= MAX_SNOWFLAKE ? word : undefined)
+export const snowflake = (word: string): string | undefined => (/^[1-9]\d{16,19}$/.test(word) && BigInt(word) <= MAX_SNOWFLAKE ? word : undefined)
 
 /** A UUID in its canonical 8-4-4-4-12 form, in either case, kept as written. */
 export const uuid = (word: string): string | undefined =>
