@@ -24,7 +24,7 @@
     "bench:messages": "bun scripts/bench-messages.ts",
     "bench:theme": "bun scripts/bench-theme.ts",
     "changeset": "changeset",
-    "release:version": "changeset version && bun scripts/release-notes.ts && prettier --write CHANGELOG.md",
+    "release:version": "changeset version && bun scripts/check-jsdoc-examples.ts --fix && bun scripts/release-notes.ts && prettier --write CHANGELOG.md",
     "notices": "bun scripts/third-party-notices.ts",
     "notices:check": "bun scripts/third-party-notices.ts --check",
     "check:jsdoc-examples": "bun scripts/check-jsdoc-examples.ts",

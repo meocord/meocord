@@ -158,8 +158,8 @@ structured enough for the generator. On hover the whole comment fits a screen, a
   `Configuration`, `Config file`, `App options` or `ESLint`; for `Testing`, `Module`, `Mocks` or `Inspection`.
 - **`@see`:** up to four related symbols, `{@link Symbol}`, or guide pages by their `https://meocord.dev/docs/4.1/…`
   URL: the line of the package's own version, so a reader lands on pages for the version they installed. The check
-  fails a link to another line, and `bun run check:jsdoc-examples --fix` moves every link to the package's line, as
-  a new minor version needs.
+  fails a link to another line. `bun run check:jsdoc-examples --fix` only moves every link to the package's line,
+  with no build, and `release:version` runs it, so the release pull request of a new minor carries the move.
 - **`@deprecated`** links its replacement; **`@internal`** marks an export that is not public API.
 - Leave out what is derived: signatures and types, the entry point, the version a symbol first appeared in, and
   anchors.
