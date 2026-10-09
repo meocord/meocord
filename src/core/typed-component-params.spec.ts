@@ -196,3 +196,72 @@ describe('typed customId params of one shape', () => {
     }
   })
 })
+
+// A snowflake made from 2015-01-28 on, by Discord's epoch math, has 17 to 20 digits; 16 or fewer read as an int
+describe('snowflake and uuid params', () => {
+  const ran: unknown[] = []
+  const snowflake = '1234567890123456789'
+  const uuid = '0F8FAD5B-D9CB-469F-A165-70867728950E'
+  const handler = (kind: string) => {
+    @Controller()
+    class Routed {
+      @Command(`id/{value:${kind}}`, CommandType.BUTTON)
+      async handle(_i: ButtonInteraction, { value }: { value: unknown }) {
+        ran.push([kind, value])
+      }
+    }
+    return Routed
+  }
+  const kinds = ['snowflake', 'uuid', 'int', 'number', 'bool', 'string']
+
+  beforeEach(() => {
+    ran.length = 0
+  })
+
+  it.each([
+    ['1234567890123456', 'int', 1234567890123456],
+    ['12345678901234567', 'snowflake', '12345678901234567'],
+    [snowflake, 'snowflake', snowflake],
+    ['18446744073709551615', 'snowflake', '18446744073709551615'],
+    ['18446744073709551616', 'number', 18446744073709552000],
+    ['123456789012345678901', 'number', 123456789012345680000],
+    ['-12345678901234567', 'number', -12345678901234567],
+    [uuid, 'uuid', uuid],
+    [uuid.toLowerCase(), 'uuid', uuid.toLowerCase()],
+    ['0f8fad5bd9cb469fa16570867728950e', 'string', '0f8fad5bd9cb469fa16570867728950e'],
+    ['{0f8fad5b-d9cb-469f-a165-70867728950e}', 'string', '{0f8fad5b-d9cb-469f-a165-70867728950e}'],
+    ['true', 'bool', true],
+  ])('gives %s to the %s handler, whatever the listing', async (segment, kind, value) => {
+    for (const listed of [kinds, [...kinds].reverse()]) {
+      ran.length = 0
+      const module = MeoCordTestingModule.create({ controllers: listed.map(handler) }).compile()
+      await module.dispatch(press(`id/${segment}`))
+      expect(ran).toEqual([[kind, value]])
+    }
+  })
+
+  it('ranks apart from every other type, so no pair of them collides', () => {
+    @MeoCord({ controllers: kinds.map(handler), clientOptions: { intents: [] } })
+    class Kinds {}
+    expect(findRouteConflicts(Kinds)).toEqual([])
+  })
+
+  it('builds a segment from its text, and refuses text that is not one', () => {
+    const member = route('member/{id:snowflake}/{session:uuid}')
+    expect(member.build({ id: snowflake, session: uuid })).toBe(`member/${snowflake}/${uuid}`)
+    expect(() => member.build({ id: '1234567890123456', session: uuid })).toThrow('got "1234567890123456" for {id:snowflake}')
+    expect(() => member.build({ id: snowflake, session: 'not-a-uuid' })).toThrow('got "not-a-uuid" for {session:uuid}')
+  })
+})
+
+it('reports two tied patterns that share a snowflake and a word, with an id both match', () => {
+  @Controller()
+  class Tied {
+    @Command('t/{a:snowflake}/{b:on|off}', CommandType.BUTTON) first() {}
+    @Command('t/{c:snowflake}/{d:off|no}', CommandType.BUTTON) second() {}
+  }
+  expect(buildComponentRoutes([Tied]).length).toBe(2)
+  @MeoCord({ controllers: [Tied], clientOptions: { intents: [] } })
+  class TiedApp {}
+  expect(findRouteConflicts(TiedApp)).toEqual([{ type: CommandType.BUTTON, patterns: ['t/{a:snowflake}/{b:on|off}', 't/{c:snowflake}/{d:off|no}'] }])
+})

@@ -498,14 +498,14 @@ export function createRegexFromPattern(pattern: string): {
   const specificity = routeSpecificity({
     literals: literalLength,
     params: params.length,
-    typed: Object.values(types).reduce((sum, type) => sum + narrowness(type), 0),
+    typed: Object.values(types).reduce((sum, type) => sum + (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : 1), 0),
   })
   return { regex, params, types: lookupTable(types), specificity }
 }
 
 /** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
 function segmentTypeProblem(param: string, type: string): string {
-  const kinds = 'string, int, number, bool, or words to choose from such as {mode:on|off}'
+  const kinds = 'string, int, number, bool, snowflake, uuid, or words to choose from such as {mode:on|off}'
   if (['member', 'user', 'role', 'channel'].includes(type)) {
     return `{${param}:${type}} is a type only a message command reads. A customId holds text: write {${param}} for its ID, and fetch it in the handler.`
   }
@@ -933,8 +933,12 @@ function segmentParamType(segment: string): string | undefined {
   return match ? typeKey(match[2]) : undefined
 }
 
-/** How few values a segment type takes, so a narrower type ranks first: words to choose from, then bool, int, number. */
-const narrowness = (type: string): number => (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : type === '' ? 0 : 1)
+/**
+ * How few values a segment type takes, so a narrower type ranks first: words to choose from, then bool, uuid,
+ * snowflake, int, number, and text last. A snowflake is narrower than a number, which takes all its values.
+ */
+const NARROWNESS: Readonly<Record<string, number | undefined>> = lookupTable({ bool: 5, uuid: 4, snowflake: 3, int: 2, number: 1, '': 0 })
+const narrowness = (type: string): number => (choicesOf(type) ? 6 : NARROWNESS[type]!)
 
 /**
  * How narrow a pattern segment that is a param, `{name}` or `{name:type}`, is: from `0` for text to `4` for words to
@@ -945,13 +949,23 @@ export function paramNarrowness(segment: string): number | undefined {
   return type === undefined ? undefined : narrowness(type)
 }
 
+/** A value of each scalar segment type: an int, a bool, a snowflake and a uuid; text takes any. */
+const SAMPLE_VALUES = ['1', 'true', '10000000000000000', '00000000-0000-0000-0000-000000000000']
+
 /** A value both readings of a segment take: a literal, text, or a typed param; `undefined` when they share none. */
 function sharedValue(left: string, right: string): string | undefined {
   const [a, b] = [segmentParamType(left), segmentParamType(right)]
   const takes = (type: string | undefined, segment: string, value: string): boolean =>
     type === undefined ? segment === value : type === '' || parseSegment(type, value) !== undefined
-  // Every type takes one of these when it takes anything another reading takes: a literal, a listed word, 1 or true
-  const candidates = [...(a === undefined ? [left] : []), ...(b === undefined ? [right] : []), ...(choicesOf(a ?? '') ?? []), ...(choicesOf(b ?? '') ?? []), '1', 'true']
+  // Every type takes one of these when it takes anything another reading takes: a literal, a listed word, or a value
+  // of each scalar type
+  const candidates = [
+    ...(a === undefined ? [left] : []),
+    ...(b === undefined ? [right] : []),
+    ...(choicesOf(a ?? '') ?? []),
+    ...(choicesOf(b ?? '') ?? []),
+    ...SAMPLE_VALUES,
+  ]
   return candidates.find(value => takes(a, left, value) && takes(b, right, value))
 }
 
