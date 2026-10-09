@@ -221,6 +221,8 @@ describe('snowflake and uuid params', () => {
   it.each([
     ['1234567890123456', 'int', 1234567890123456],
     ['12345678901234567', 'snowflake', '12345678901234567'],
+    // Discord writes no leading zero, so this is a number with one
+    ['01234567890123456', 'int', 1234567890123456],
     [snowflake, 'snowflake', snowflake],
     ['18446744073709551615', 'snowflake', '18446744073709551615'],
     ['18446744073709551616', 'number', 18446744073709552000],
