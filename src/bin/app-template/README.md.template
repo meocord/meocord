@@ -95,8 +95,9 @@ interceptors, filters })`. An observer hears about every call once listed in
 dependencies, `invoke` for running a handler through its guards, interceptors and
 filters as the bot does, and `createMockInteraction` and friends for driving it without
 a Discord connection. `vitest.setup.ts` has those mocks made with `vi.fn`, so Vitest
-treats them as its own, and resets them after every test, so set what a mock returns in
-the test, or in `beforeEach`, that relies on it.
+treats them as its own, and has them compute what discord.js computes, such as a
+message's `editable`, rather than placeholders. It resets them after every test, so set
+what a mock returns in the test, or in `beforeEach`, that relies on it.
 
 ## Linting
 

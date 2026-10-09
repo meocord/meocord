@@ -106,7 +106,7 @@ describe('AppGeneratorHelper', () => {
   // every generated application crashing on the first import.
   it('ships the sample button pattern with its param in a segment of its own', () => {
     expect(read(path.join('src', 'controllers', 'button', 'sample.button.controller.ts'))).toContain(
-      "@Command('button-with/{ownerId}', CommandType.BUTTON)",
+      "@Command('button-with/{ownerId:snowflake}', CommandType.BUTTON)",
     )
   })
 

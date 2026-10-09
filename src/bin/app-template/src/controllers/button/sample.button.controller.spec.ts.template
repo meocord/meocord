@@ -9,6 +9,10 @@ import {
 } from 'meocord/testing'
 import { SampleButtonController } from '@src/controllers/button/sample.button.controller.js'
 
+// Discord user ids, as the customId and the guard compare them
+const owner = '200000000000000001'
+const stranger = '200000000000000002'
+
 const clickBy = (userId: string, customId = 'button-click') => {
   const user = createMockUser()
   user.id = userId
@@ -19,7 +23,7 @@ describe('SampleButtonController', () => {
   const module = MeoCordTestingModule.create({ controllers: [SampleButtonController] }).compile()
 
   it('locks the message while it works, then answers', async () => {
-    const interaction = clickBy('someone')
+    const interaction = clickBy(stranger)
 
     await module.invoke(SampleButtonController, 'handleButton', interaction)
 
@@ -29,16 +33,16 @@ describe('SampleButtonController', () => {
   })
 
   it('answers the owner of the button', async () => {
-    const interaction = clickBy('owner', 'button-with/owner')
+    const interaction = clickBy(owner, `button-with/${owner}`)
 
     // The customId's route gives the handler its ownerId
     await module.invoke(SampleButtonController, 'handleButtonWithId', interaction)
 
-    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: 'Button of <@owner> clicked!' })
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ content: `Button of <@${owner}> clicked!` })
   })
 
   it('denies anyone else before touching the message', async () => {
-    const interaction = clickBy('stranger', 'button-with/owner')
+    const interaction = clickBy(stranger, `button-with/${owner}`)
 
     await expect(module.invoke(SampleButtonController, 'handleButtonWithId', interaction)).rejects.toThrow(
       GuardDeniedError,
