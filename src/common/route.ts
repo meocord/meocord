@@ -96,6 +96,9 @@ export function decodeRouteParams(groups: Record<string, string> | undefined): R
   return Object.fromEntries(Object.entries(groups ?? {}).map(([name, value]) => [name, decodeSegment(value)]))
 }
 
+/** The segment types whose value is text, which `build` takes only as a string. */
+const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
+
 /**
  * Makes a typed route from a customId pattern, so one declaration serves the handler and the ids that reach it.
  *
@@ -144,6 +147,11 @@ export function route<const T extends string>(pattern: T): Route<T> {
       const value = Object.hasOwn(values, name) ? values[name] : undefined
       const type = Object.hasOwn(types, name) ? types[name] : undefined
       if (value === undefined || value === null) throw new TypeError(`route('${pattern}').build() needs a value for ${placeholder}.`)
+      // A snowflake's or uuid's value is its text: a number for a snowflake may have lost digits before it got here
+      if (type && TEXT_TYPES.has(type) && typeof value !== 'string') {
+        const lost = type === 'snowflake' ? ' A number may have lost digits already: pass the ID as text, such as user.id.' : ''
+        throw new TypeError(`route('${pattern}').build() got the ${typeof value} ${String(value)} for ${placeholder}, which takes its value as a string.${lost}`)
+      }
       const text = String(value)
       if (text === '') throw new TypeError(`route('${pattern}').build() got an empty {${name}}, which no customId segment can hold.`)
       // A typed segment must read back as the value it was built from, or the route could never match it

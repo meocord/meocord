@@ -2,7 +2,7 @@
 'meocord': minor
 ---
 
-customId patterns take two new param types: `{id:snowflake}` and `{id:uuid}`. The handler gets each as text, typed `string`, and `route().build()` refuses text that isn't one.
+customId patterns take two new param types: `{id:snowflake}` and `{id:uuid}`. The handler gets each as text, typed `string`, and `route().build()` refuses text that isn't one. `build()` takes either only as a string and throws a `TypeError` for a number, which may have lost an ID's digits before `build()` sees it: `12345678901234567` arrives as `12345678901234568`.
 
 - `{id:snowflake}` takes a Discord ID: 17 to 20 digits with no leading zero, up to the largest 64-bit value. Every ID Discord has made since 2015-01-28 has at least 17 digits, because an ID's top 42 bits count milliseconds since 2015-01-01. The handler keeps the ID as text: from 17 digits on, a JavaScript number can't hold it exactly.
 - `{id:uuid}` takes a UUID in its canonical 8-4-4-4-12 hex form, in either case, kept as written.

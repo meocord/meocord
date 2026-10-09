@@ -80,6 +80,22 @@ describe('route', () => {
     expect(() => ticket.build({ id: 'x'.repeat(90), action: 'close' })).toThrow(RangeError)
   })
 
+  it('refuses a snowflake or a uuid given as anything but text, as a number may have lost digits already', () => {
+    const member = route('member/{id:snowflake}/{session:uuid}')
+    const build = member.build as (values: Record<string, unknown>) => string
+    const session = '0f8fad5b-d9cb-469f-a165-70867728950e'
+
+    // 12345678901234567 reaches build() as 12345678901234568, a valid snowflake of another member
+    expect(() => build({ id: 12345678901234567, session })).toThrow(
+      "route('member/{id:snowflake}/{session:uuid}').build() got the number 12345678901234568 for {id:snowflake}, which " +
+        'takes its value as a string. A number may have lost digits already: pass the ID as text, such as user.id.',
+    )
+    expect(() => build({ id: 12345678901234567n, session })).toThrow('got the bigint 12345678901234567 for {id:snowflake}')
+    expect(() => build({ id: '12345678901234567', session: 42 })).toThrow(
+      "route('member/{id:snowflake}/{session:uuid}').build() got the number 42 for {session:uuid}, which takes its value as a string.",
+    )
+  })
+
   it('refuses a pattern @Command would refuse, where it is made', () => {
     expect(() => route('ticket-{id}')).toThrow('must occupy a whole segment')
   })
