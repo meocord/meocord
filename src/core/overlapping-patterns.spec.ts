@@ -21,8 +21,8 @@ afterEach(() => {
   config.current = { discordToken: 'token' }
 })
 
-const create = (controllers: (new () => unknown)[], routeTies?: 'listed' | 'literalFirst') => {
-  @MeoCord({ controllers, clientOptions: { intents: [] }, routeTies })
+const create = (controllers: (new () => unknown)[]) => {
+  @MeoCord({ controllers, clientOptions: { intents: [] } })
   class App {}
   MeoCordFactory.create(App)
 }
@@ -32,95 +32,80 @@ const overlapWarnings = () => warned.filter(line => line.includes('can match the
 /** The pair lines of the one overlap warning. */
 const pairLines = () => overlapWarnings()[0]?.split('\n').filter(line => line.startsWith('  '))
 
-// `a/{x}/c` and `a/b/{y}` both take `a/b/c`, and neither is more literal than the other, so the order they are listed
-// in settles it. Saying so at startup beats letting one of them quietly win every click.
+// `t/{a:on|off}` and `t/{b:off|no}` both take `t/off`, and the ranking has nothing to tell them apart by, so the
+// order they are listed in settles it. Saying so at startup beats letting one of them quietly win every click.
 describe('patterns that can match the same customId', () => {
   const pair = () => {
     @Controller()
-    class XC {
+    class OnOff {
+      @Command('t/{a:on|off}', CommandType.BUTTON)
+      onOff() {}
+
       @Command('a/{x}/c', CommandType.BUTTON)
       xc() {}
-
-      @Command('a/{x}', CommandType.BUTTON)
-      x() {}
     }
     @Controller()
-    class BY {
+    class OffNo {
+      @Command('t/{b:off|no}', CommandType.BUTTON)
+      offNo() {}
+
       @Command('a/b/{y}', CommandType.BUTTON)
       by() {}
-
-      @Command('a/b', CommandType.BUTTON)
-      b() {}
     }
     @Controller()
     class Both {
-      @Command('a/{x}/c', CommandType.BUTTON)
-      xc() {}
+      @Command('t/{a:on|off}', CommandType.BUTTON)
+      onOff() {}
 
-      @Command('a/b/{y}', CommandType.BUTTON)
-      by() {}
+      @Command('t/{b:off|no}', CommandType.BUTTON)
+      offNo() {}
     }
-    return { XC, BY, Both }
+    return { OnOff, OffNo, Both }
   }
 
   it.each([
-    [
-      'XC listed first',
-      ['XC', 'BY'],
-      [
-        '  "a/{x}/c"  vs  "a/b/{y}": XC.xc runs, as its controller is listed first. In the next major version (5.0), ' +
-          'BY.by runs instead, as "a/b/{y}" spells out the first segment where the two differ. List BY first, make the ' +
-          "patterns distinct, or set @MeoCord({ routeTies: 'literalFirst' }).",
-        '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.',
-      ],
-    ],
-    [
-      'BY listed first',
-      ['BY', 'XC'],
-      ['  "a/b/{y}"  vs  "a/{x}/c": BY.by runs, as its controller is listed first.', '  "a/b"  vs  "a/{x}": BY.b runs, as its pattern is more specific.'],
-    ],
-    [
-      'both in one controller',
-      ['Both'],
-      [
-        '  "a/{x}/c"  vs  "a/b/{y}": Both.xc runs, as it is declared first. In the next major version (5.0), Both.by ' +
-          'runs instead, as "a/b/{y}" spells out the first segment where the two differ. Declare Both.by first, make the ' +
-          "patterns distinct, or set @MeoCord({ routeTies: 'literalFirst' }).",
-      ],
-    ],
-  ] as const)('names the handler that runs for each pair, and the one that runs in 5.0: %s', (_order, listed, lines) => {
+    ['OnOff listed first', ['OnOff', 'OffNo'], '  "t/{a:on|off}"  vs  "t/{b:off|no}", which both match "t/off": OnOff.onOff runs, as its controller is listed first.'],
+    ['OffNo listed first', ['OffNo', 'OnOff'], '  "t/{b:off|no}"  vs  "t/{a:on|off}", which both match "t/off": OffNo.offNo runs, as its controller is listed first.'],
+    ['both in one controller', ['Both'], '  "t/{a:on|off}"  vs  "t/{b:off|no}", which both match "t/off": Both.onOff runs, as it is declared first.'],
+  ] as const)('names an id both match and the handler that runs, and only for a tied pair: %s', (_order, listed, line) => {
     const controllers = pair()
     create(listed.map(name => controllers[name]))
 
-    expect(pairLines()).toEqual(lines)
+    expect(pairLines()).toEqual([line])
   })
 
-  // A param owns its segment, so "/" already separates every pair; the warning says only what runs and why
-  it('is one message: how many pairs, and a line for each', () => {
+  it('is one message: how many pairs, a line for each, and what to do', () => {
     const { Both } = pair()
 
     create([Both])
 
     expect(overlapWarnings()).toEqual([
-      '1 pattern pair(s) can match the same customId, so which one runs is decided by ranking rather than by the ids ' +
-        'themselves:\n' +
-        '  "a/{x}/c"  vs  "a/b/{y}": Both.xc runs, as it is declared first. In the next major version (5.0), Both.by ' +
-        'runs instead, as "a/b/{y}" spells out the first segment where the two differ. Declare Both.by first, make the ' +
-        "patterns distinct, or set @MeoCord({ routeTies: 'literalFirst' }).",
+      '1 pattern pair(s) rank equally and can match the same customId, so the order they are listed in decides which ' +
+        'one runs:\n' +
+        '  "t/{a:on|off}"  vs  "t/{b:off|no}", which both match "t/off": Both.onOff runs, as it is declared first.\n' +
+        'Make the patterns distinct: in the next major version (5.0), MeoCord refuses to start with such a pair.',
     ])
   })
 
-  it('stays quiet when the patterns cannot collide', () => {
-    @Controller()
-    class Distinct {
-      @Command('profile/{uuid}', CommandType.BUTTON)
-      one() {}
-
-      @Command('profile/{uuid}/{id}', CommandType.BUTTON)
-      two() {}
-    }
-
-    create([Distinct])
+  // The ranking decides these, whatever the listing: a literal before a param, then the narrower type
+  it.each([
+    [['profile/{userId}/edit', 'profile/me/{section}']],
+    [['profile/me/{section}', 'profile/{userId}/edit']],
+    [['a/{x}/c', 'a/b/{y}']],
+    [['{p:int}/{q}', '{r}/{s:int}']],
+    [['profile/{uuid}', 'profile/{uuid}/{id}']],
+    [['t/{a:on|off}', 't/{b:yes|no}']],
+  ])('stays quiet for %j', patterns => {
+    create(
+      patterns.map(pattern => {
+        @Controller()
+        class Routed {
+          @Command(pattern, CommandType.BUTTON)
+          handle() {}
+        }
+        return Routed
+      }),
+    )
 
     expect(overlapWarnings()).toEqual([])
   })
@@ -180,28 +165,5 @@ describe('patterns that can match the same customId', () => {
     MeoCordTestingModule.create({ controllers: [Both] }).compile()
 
     expect(overlapWarnings()).toHaveLength(1)
-  })
-})
-
-describe("@MeoCord({ routeTies: 'literalFirst' })", () => {
-  it('names only the pairs listing order still decides, which literal-first leaves', () => {
-    @Controller()
-    class Ties {
-      @Command('a/{x}/c', CommandType.BUTTON)
-      xc() {}
-
-      @Command('a/b/{y}', CommandType.BUTTON)
-      by() {}
-
-      @Command('{p:int}/{q}', CommandType.BUTTON)
-      pq() {}
-
-      @Command('{r}/{s:int}', CommandType.BUTTON)
-      rs() {}
-    }
-
-    create([Ties], 'literalFirst')
-
-    expect(pairLines()).toEqual(['  "{p:int}/{q}"  vs  "{r}/{s:int}": Ties.pq runs, as it is declared first.'])
   })
 })

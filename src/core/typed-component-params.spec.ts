@@ -138,7 +138,7 @@ describe('typed customId params beside other routes of one shape', () => {
     expect(got).toEqual([5, 'abc'])
   })
 
-  it('reports only patterns whose typed segments can take one value', () => {
+  it('reports none of the pairs a literal or a narrower type ranks apart', () => {
     @Controller()
     class Paths {
       @Command('p/last/x', CommandType.BUTTON) last() {}
@@ -150,13 +150,13 @@ describe('typed customId params beside other routes of one shape', () => {
     }
     @MeoCord({ controllers: [Paths], clientOptions: { intents: [] } })
     class PathsApp {}
-    // 'on' and 'off' read as booleans, so those two can both take r/on
-    expect(findRouteConflicts(PathsApp).map(({ patterns }) => patterns)).toEqual([['r/{w:on|off}', 'r/{f:bool}']])
+    // 'on' and 'off' read as booleans, so r/on matches both, and the words, narrower than bool, take it
+    expect(findRouteConflicts(PathsApp)).toEqual([])
   })
 })
 
 describe('typed customId params of one shape', () => {
-  it('keeps words beside bool and reports the pair, with a shared value going to the words; the same words in another order are refused', async () => {
+  it('keeps words beside bool, with a shared value going to the words; the same words in another order are refused', async () => {
     const ran: unknown[] = []
     @Controller()
     class Toggle {
@@ -165,7 +165,7 @@ describe('typed customId params of one shape', () => {
     }
     @MeoCord({ controllers: [Toggle], clientOptions: { intents: [] } })
     class ToggleApp {}
-    expect(findRouteConflicts(ToggleApp).map(({ patterns }) => patterns)).toEqual([['r/{w:on|off}', 'r/{f:bool}']])
+    expect(findRouteConflicts(ToggleApp)).toEqual([])
     const module = MeoCordTestingModule.create({ controllers: [Toggle] }).compile()
     for (const id of ['r/on', 'r/yes']) await module.dispatch(press(id))
     expect(ran).toEqual([['words', 'on'], ['bool', true]])

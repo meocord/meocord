@@ -5,7 +5,6 @@ import {
   findComponentRouteConflicts,
   matchComponentRoute,
   readCustomId,
-  type RouteTies,
 } from '@src/core/component-routes.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { buildMessageRoutes, fitsScope, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
@@ -85,7 +84,8 @@ export interface ResolvedRoute {
 }
 
 /**
- * Two patterns of one component type that can both match a `customId`, as {@link findRouteConflicts} reports them.
+ * Two patterns of one component type that rank equally and can both match a `customId`, as {@link findRouteConflicts}
+ * reports them.
  *
  * @group Testing
  * @category Inspection
@@ -96,22 +96,15 @@ export interface RouteConflict {
   /** The two patterns. */
   patterns: [string, string]
   /**
-   * The pattern that runs for the `customId`s both match, under the app's `routeTies`. Like `decidedBy`, a test reads
-   * it; `toEqual` doesn't compare it, so an assertion on `type` and `patterns` alone holds.
+   * The pattern that runs for the `customId`s both match: the one listed first. A test reads it; `toEqual` doesn't
+   * compare it, so an assertion on `type` and `patterns` alone holds.
    */
   runs: string
-  /**
-   * What decides which one runs: `'specificity'`, a more specific pattern; `'literal'`, with `routeTies:
-   * 'literalFirst'`, a literal segment where the other has a param; `'order'`, the order they are listed in.
-   */
-  decidedBy: 'specificity' | 'literal' | 'order'
 }
 
 /** The options `@MeoCord` declares on an application class. */
-function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions; routeTies?: RouteTies } {
-  const options = Reflect.getMetadata(META.appOptions, app) as
-    | { controllers?: ControllerClass[]; messages?: MessageCommandOptions; routeTies?: RouteTies }
-    | undefined
+function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions } {
+  const options = Reflect.getMetadata(META.appOptions, app) as { controllers?: ControllerClass[]; messages?: MessageCommandOptions } | undefined
   if (!options) throw new TypeError(`${app.name || 'The given class'} is not decorated with @MeoCord().`)
   return options
 }
@@ -176,7 +169,7 @@ export function resolveRoute(
   if (!isCustomIdRouted(input.type)) {
     throw new TypeError(`${input.type} commands are routed by name, not by customId.`)
   }
-  const routes = buildComponentRoutes(controllersOf(app), { routeTies: appOptionsOf(app).routeTies })
+  const routes = buildComponentRoutes(controllersOf(app))
   const matched = matchComponentRoute(routes, type => type === input.type, input.customId)
   if (!matched) return undefined
   const { route, params, text } = matched
@@ -190,26 +183,29 @@ export function resolveRoute(
 }
 
 /**
- * Finds component patterns that can match the same `customId`, which MeoCord otherwise only warns about at startup.
+ * Finds component patterns that rank equally and can match the same `customId`, which MeoCord otherwise only warns
+ * about at startup.
  *
- * Use it in a test to keep the warning from reaching production: two patterns that trade a literal for a parameter
- * in opposite places both take one id, and neither is more specific. Patterns are compared within a component type.
+ * Use it in a test to keep the warning from reaching production. Patterns rank segment by segment, a literal before a
+ * param and then the narrower type, so two collide only with the same literals and equally narrow params at each
+ * position, such as `{action:close|reopen}` and `{step:close|confirm}`, which both take `close`; the one listed
+ * first runs. Patterns are compared within a component type.
  *
  * @param app - The application class decorated with `@MeoCord`.
- * @returns Each pair of patterns that can match the same `customId`, with its component type.
+ * @returns Each pair of patterns that rank equally and can match the same `customId`, with its component type.
  *
  * @example
  * ```ts
  * import { expect } from 'vitest'
  *
  * @Controller()
- * class CardController {
- *   @Command('card/{id}/open', CommandType.BUTTON)
- *   async open(interaction: ButtonInteraction) { await respond(interaction).send('Opened.') }
- *   @Command('card/new/{kind}', CommandType.BUTTON)
- *   async create(interaction: ButtonInteraction) { await respond(interaction).send('Created.') }
+ * class TicketController {
+ *   @Command('ticket/{action:close|reopen}', CommandType.BUTTON)
+ *   async act(interaction: ButtonInteraction) { await respond(interaction).send('Done.') }
+ *   @Command('ticket/{step:close|confirm}', CommandType.BUTTON)
+ *   async step(interaction: ButtonInteraction) { await respond(interaction).send('Next.') }
  * }
- * @MeoCord({ controllers: [CardController], clientOptions: { intents: [] } })
+ * @MeoCord({ controllers: [TicketController], clientOptions: { intents: [] } })
  * class App {}
  * expect(findRouteConflicts(App)).toHaveLength(1)
  * ```
@@ -219,9 +215,8 @@ export function resolveRoute(
  * @see {@link resolveRoute}
  */
 export function findRouteConflicts(app: ControllerClass): RouteConflict[] {
-  const { routeTies } = appOptionsOf(app)
-  return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app), { routeTies }), routeTies).map(({ type, patterns, runs, decidedBy }) =>
-    readableOnly({ type: type as ComponentCommandType, patterns }, { runs, decidedBy }),
+  return findComponentRouteConflicts(buildComponentRoutes(controllersOf(app))).map(({ type, patterns, runs }) =>
+    readableOnly({ type: type as ComponentCommandType, patterns }, { runs }),
   )
 }
 

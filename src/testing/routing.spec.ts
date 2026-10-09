@@ -94,17 +94,20 @@ describe('findRouteConflicts', () => {
     expect(findRouteConflicts(App)).toEqual([])
   })
 
-  it('reports patterns of one component type that can match the same id', () => {
+  it('reports patterns of one component type that rank equally and can match the same id', () => {
     @Controller()
     class Overlapping {
-      @Command('a/{x}/c', CommandType.BUTTON)
+      @Command('a/{x:on|off}', CommandType.BUTTON)
       async left(_i: unknown, _params: Record<string, string>) {}
 
-      @Command('a/b/{y}', CommandType.BUTTON)
+      @Command('a/{y:off|no}', CommandType.BUTTON)
       async right(_i: unknown, _params: Record<string, string>) {}
 
-      // Same shape, another type: never in competition with the buttons.
-      @Command('a/b/{z}', CommandType.MODAL_SUBMIT)
+      // Ranked apart by a literal, and a modal of the same shape never competes with the buttons
+      @Command('a/off', CommandType.BUTTON)
+      async off(_i: unknown) {}
+
+      @Command('a/{z:off|no}', CommandType.MODAL_SUBMIT)
       async modal(_i: unknown, _params: Record<string, string>) {}
     }
 
@@ -112,36 +115,12 @@ describe('findRouteConflicts', () => {
     class OverlappingApp {}
 
     // What a test compared before stays equal: what the pair adds is read, not compared
-    expect(findRouteConflicts(OverlappingApp)).toEqual([{ type: CommandType.BUTTON, patterns: ['a/{x}/c', 'a/b/{y}'] }])
-    expect(findRouteConflicts(OverlappingApp)).toMatchObject([{ runs: 'a/{x}/c', decidedBy: 'order' }])
-  })
-
-  it("says which pattern runs, and why, under the app's routeTies", () => {
-    @Controller()
-    class Ties {
-      @Command('a/{x}/c', CommandType.BUTTON)
-      async xc() {}
-
-      @Command('a/b/{y}', CommandType.BUTTON)
-      async by() {}
-
-      @Command('a/{z}', CommandType.BUTTON)
-      async z() {}
-
-      @Command('a/b', CommandType.BUTTON)
-      async b() {}
-    }
-    @MeoCord({ controllers: [Ties], clientOptions: { intents: [] }, routeTies: 'literalFirst' })
-    class LiteralApp {}
-
-    expect(findRouteConflicts(LiteralApp)).toMatchObject([
-      { type: CommandType.BUTTON, patterns: ['a/b/{y}', 'a/{x}/c'], runs: 'a/b/{y}', decidedBy: 'literal' },
-      { type: CommandType.BUTTON, patterns: ['a/b', 'a/{z}'], runs: 'a/b', decidedBy: 'specificity' },
-    ])
-    const resolved = resolveRoute(LiteralApp, { type: CommandType.BUTTON, customId: 'a/b/c' })
-    expect(resolved?.alsoMatches).toEqual(['a/{x}/c'])
-    expect(resolved).toEqual({ controller: Ties, method: 'by', handler: Ties.prototype.by, params: { y: 'c' } })
-    expect(resolveRoute(LiteralApp, { type: CommandType.BUTTON, customId: 'a/q/c' })).not.toHaveProperty('alsoMatches')
+    expect(findRouteConflicts(OverlappingApp)).toEqual([{ type: CommandType.BUTTON, patterns: ['a/{x:on|off}', 'a/{y:off|no}'] }])
+    expect(findRouteConflicts(OverlappingApp)).toMatchObject([{ runs: 'a/{x:on|off}' }])
+    const resolved = resolveRoute(OverlappingApp, { type: CommandType.BUTTON, customId: 'a/off' })
+    expect(resolved?.alsoMatches).toEqual(['a/{x:on|off}', 'a/{y:off|no}'])
+    expect(resolved).toEqual({ controller: Overlapping, method: 'off', handler: Overlapping.prototype.off, params: {} })
+    expect(resolveRoute(OverlappingApp, { type: CommandType.BUTTON, customId: 'a/on' })).not.toHaveProperty('alsoMatches')
   })
 
   it('throws, as the bot does at startup, for two handlers with the same pattern', () => {

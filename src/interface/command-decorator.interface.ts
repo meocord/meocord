@@ -105,11 +105,6 @@ export interface CommandMeta<T extends string = string> {
   regex?: RegExp
   /** The params a component's customId pattern captures, in the order they appear. */
   dynamicParams?: T[]
-  /**
-   * How specific this pattern is; the highest wins when several routes match one customId, so
-   * `gi-profile/summary/{ownerId}/{uid}` beats `gi-profile/{uuid}/{uid}` whatever the declaration order.
-   */
-  specificity?: number
   /** The builder's own `guilds` option, when it has one. */
   guilds?: (string | undefined)[]
 }

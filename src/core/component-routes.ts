@@ -1,6 +1,6 @@
 import { type CommandType } from '@src/enum/index.js'
 import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
-import { createRegexFromPattern, findAmbiguousRoutes, getCommandMap, patternShape } from '@src/decorator/controller.decorator.js'
+import { createRegexFromPattern, getCommandMap, paramNarrowness, patternShape, sharedCustomId } from '@src/decorator/controller.decorator.js'
 import { decodeRouteParams } from '@src/common/route.js'
 import { parseSegment } from '@src/core/scalar-types.js'
 import { refuse } from '@src/util/refusal.util.js'
@@ -19,45 +19,47 @@ export interface ComponentRoute {
   types: Record<string, string>
 }
 
-/** Two patterns of one component type that can both match a customId, the one that runs, and what decides it. */
+/** Two patterns of one component type that rank equally and both match a customId, the one that runs, and such an id. */
 export interface ComponentRouteConflict {
   type: CommandType
   patterns: [string, string]
   runs: string
-  decidedBy: 'specificity' | 'literal' | 'order'
+  customId: string
 }
 
-/** How equally specific patterns rank: in the order they are listed, or a literal segment first. */
-export type RouteTies = 'listed' | 'literalFirst'
-
-/** Each segment of a pattern as literal, `L`, or a param, `P`; compared as text, a literal ranks first. */
-const literalMask = (pattern: string): string =>
-  pattern
-    .split('/')
-    .map(segment => (segment.includes('{') ? 'P' : 'L'))
-    .join('')
+/**
+ * How a pattern ranks, one character per segment twice over: `L` for literal text or `P` for a param, then how narrow
+ * each param is, the narrowest as the lowest digit. Two keys of one length compare as text: literal before param at
+ * the first segment where they differ, then the narrower type.
+ */
+function rankKey(pattern: string): string {
+  const narrowness = pattern.split('/').map(paramNarrowness)
+  const kinds = narrowness.map(rank => (rank === undefined ? 'L' : 'P')).join('')
+  return `${kinds}/${narrowness.map(rank => String(rank === undefined ? 0 : 9 - rank)).join('')}`
+}
 
 /**
- * Orders two routes as `routeTies` ranks them: the more specific first, and with `'literalFirst'`, between equally
- * specific patterns, the one literal at the first segment where they differ. Patterns of different lengths, which no
- * customId matches both of, are ordered by length only so the order is total. What remains keeps its listing order.
+ * Orders two routes as dispatch tries them. Left to right, the first segment one pattern spells out as literal text
+ * while the other leaves it to a param ranks the literal one first: `a/{x}` before `{x}/abcd`, `profile/me/{section}`
+ * before `profile/{userId}/edit`. Between patterns that leaves tied, the first param where one type is narrower ranks
+ * it first: words to choose from, then `bool`, `int`, `number`, then text. Patterns of different segment counts, which
+ * no customId matches both of, are ordered by count only so the order is total; component patterns have no catch-all
+ * param. What remains tied keeps its listing order.
  */
-function rank(routeTies: RouteTies): (a: ComponentRoute, b: ComponentRoute) => number {
+function rank(keys: Map<ComponentRoute, string>): (a: ComponentRoute, b: ComponentRoute) => number {
   return (a, b) => {
-    const bySpecificity = (b.meta.specificity ?? 0) - (a.meta.specificity ?? 0)
-    if (bySpecificity !== 0 || routeTies === 'listed') return bySpecificity
-    const [left, right] = [literalMask(a.pattern), literalMask(b.pattern)]
+    const [left, right] = [keys.get(a)!, keys.get(b)!]
     if (left.length !== right.length) return left.length - right.length
     return left < right ? -1 : left > right ? 1 : 0
   }
 }
 
 /**
- * Every customId-pattern route of the given controllers, most specific first, read from metadata alone.
+ * Every customId-pattern route of the given controllers, in the order dispatch tries them, read from metadata alone.
  * Throws for two handlers whose patterns match the same customIds of one component type; one handler
  * declared under two spellings of a pattern keeps one route.
  */
-export function buildComponentRoutes(controllerClasses: readonly ControllerClass[], { routeTies = 'listed' }: { routeTies?: RouteTies } = {}): ComponentRoute[] {
+export function buildComponentRoutes(controllerClasses: readonly ControllerClass[]): ComponentRoute[] {
   const routes: ComponentRoute[] = []
   // By component type and pattern shape: the route that shape already has
   const seen = new Map<string, ComponentRoute>()
@@ -87,20 +89,7 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
     }
   }
   // A stable sort, so what the ranking leaves tied keeps the order controllers and handlers are listed in
-  return routes.sort(rank(routeTies))
-}
-
-/**
- * Whether `a` spells out the first segment where it and `b` differ as literal text while `b` leaves it to a
- * parameter, the tie-break between equally specific patterns in the next major version (5.0).
- */
-export function literalFirst(a: string, b: string): boolean {
-  const [left, right] = [a.split('/'), b.split('/')]
-  for (let i = 0; i < Math.min(left.length, right.length); i++) {
-    const leftLiteral = !left[i].includes('{')
-    if (leftLiteral !== !right[i].includes('{')) return leftLiteral
-  }
-  return false
+  return routes.sort(rank(new Map(routes.map(route => [route, rankKey(route.pattern)]))))
 }
 
 /** A component type as an error names it: `button`, `modal submit`, `select menu`. */
@@ -160,24 +149,27 @@ function readCustomIdSegments(
 }
 
 /**
- * Pattern pairs that can match one customId, compared only within a component type, as dispatch does, each with the
- * pattern that runs, the one ranked first in `routes`, and what decides it under `routeTies`, which ranked them.
+ * Pattern pairs of one component type that the ranking leaves tied and that can match one customId, each with the
+ * pattern that runs, the one ranked first in `routes`, and an id both match. Only patterns of one rank key, read
+ * together, can tie, so each group is compared within itself.
  */
-export function findComponentRouteConflicts(routes: readonly ComponentRoute[], routeTies: RouteTies = 'listed'): ComponentRouteConflict[] {
-  const byType = new Map<CommandType, ComponentRoute[]>()
-  for (const route of routes) byType.set(route.meta.type, [...(byType.get(route.meta.type) ?? []), route])
-  return [...byType].flatMap(([type, typed]) =>
-    findAmbiguousRoutes(typed.map(route => route.pattern)).map(([left, right]) => {
-      const [first, second] = [typed.find(route => route.pattern === left)!, typed.find(route => route.pattern === right)!]
-      const runs = routes.indexOf(first) < routes.indexOf(second) ? first : second
-      const other = runs === first ? second : first
-      const decidedBy =
-        (runs.meta.specificity ?? 0) !== (other.meta.specificity ?? 0)
-          ? 'specificity'
-          : routeTies === 'literalFirst' && literalMask(runs.pattern) !== literalMask(other.pattern)
-            ? 'literal'
-            : 'order'
-      return { type, patterns: [left, right] as [string, string], runs: runs.pattern, decidedBy }
-    }),
-  )
+export function findComponentRouteConflicts(routes: readonly ComponentRoute[]): ComponentRouteConflict[] {
+  const groups = new Map<string, ComponentRoute[]>()
+  for (const route of routes) {
+    // The literal text and each param's narrowness: patterns that differ in either rank apart or match no id in common
+    const key = `${route.meta.type}\0${route.pattern.split('/').map(segment => paramNarrowness(segment) ?? `=${segment}`).join('\0')}`
+    groups.set(key, [...(groups.get(key) ?? []), route])
+  }
+  const conflicts: ComponentRouteConflict[] = []
+  for (const group of groups.values()) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const customId = sharedCustomId(group[i].pattern, group[j].pattern)
+        if (customId === undefined) continue
+        const patterns: [string, string] = [group[i].pattern, group[j].pattern]
+        conflicts.push({ type: group[i].meta.type, patterns, runs: group[i].pattern, customId })
+      }
+    }
+  }
+  return conflicts
 }

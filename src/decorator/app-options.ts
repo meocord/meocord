@@ -142,16 +142,6 @@ export interface MeoCordOptions<
   messages?: MessageCommandOptions
 
   /**
-   * Which of two equally specific customId patterns that both match an id runs. `'listed'` runs the one whose
-   * controller, or method, is listed first. `'literalFirst'` runs the one that spells out as literal text the first
-   * segment where the two differ, such as `a/b/{y}` over `a/{x}/c` for `a/b/c`, whatever the listing; what that
-   * leaves tied keeps the listing order. A more specific pattern runs first either way.
-   *
-   * @defaultValue `'listed'`; the next major version (5.0) ranks `'literalFirst'` by default
-   */
-  routeTies?: 'listed' | 'literalFirst'
-
-  /**
    * `@Observer` classes told about every dispatched call once it has settled, with its outcome and duration, in the
    * order listed. The call never waits for them.
    */

@@ -2,7 +2,6 @@ import {
   Autocomplete,
   Command,
   getAutocompleteHandlers,
-  findAmbiguousRoutes,
   getCommandMap,
   getMessageHandlers,
   getReactionHandlers,
@@ -226,59 +225,6 @@ describe('@Command', () => {
 
     it('leaves patterns without parameters alone', () => {
       expect(declare('gi-profile-static')).not.toThrow()
-    })
-  })
-
-  describe('specificity', () => {
-    const rank = (pattern: string) => {
-      class TestController {
-        @Command(pattern, CommandType.BUTTON)
-        handle(..._args: any[]) {}
-      }
-      return getCommandMap(TestController.prototype)[pattern][0].specificity!
-    }
-
-    it('ranks the pattern spelling out more of the id above the one leaving it to a parameter', () => {
-      expect(rank('profile/summary/{ownerId}/{uid}')).toBeGreaterThan(rank('profile/{uuid}/{uid}'))
-    })
-
-    it('breaks a tie between equal-length patterns by parameter count', () => {
-      expect(rank('abcd/{a}')).toBeGreaterThan(rank('abc/{a}/{b}'))
-    })
-  })
-
-  // Two patterns collide when they have as many segments and each pair of segments can
-  // take one value: equal literals, or a param and anything it accepts. `a/{x}/c` and
-  // `a/b/{y}` both take `a/b/c`.
-  describe('findAmbiguousRoutes', () => {
-    it('reports a pair that trades a literal for a parameter in each direction', () => {
-      expect(findAmbiguousRoutes(['a/{x}/c', 'a/b/{y}'])).toEqual([['a/{x}/c', 'a/b/{y}']])
-    })
-
-    it('clears patterns of different segment counts', () => {
-      expect(findAmbiguousRoutes(['profile/{uuid}', 'profile/{uuid}/{id}'])).toEqual([])
-    })
-
-    it('clears patterns whose literals differ', () => {
-      expect(findAmbiguousRoutes(['profile/{uuid}', 'settings/{uuid}'])).toEqual([])
-    })
-
-    it('reports a broad pattern against a literal sibling of the same shape', () => {
-      expect(findAmbiguousRoutes(['profile/summary/{uid}', 'profile/{uuid}/{uid}'])).toEqual([
-        ['profile/summary/{uid}', 'profile/{uuid}/{uid}'],
-      ])
-    })
-
-    it('reports each pair once rather than in both orders', () => {
-      expect(findAmbiguousRoutes(['a/{x}', 'a/{y}', 'a/{z}'])).toHaveLength(3)
-    })
-
-    it('returns nothing for a single pattern', () => {
-      expect(findAmbiguousRoutes(['profile/{uuid}'])).toEqual([])
-    })
-
-    it('returns nothing for no patterns', () => {
-      expect(findAmbiguousRoutes([])).toEqual([])
     })
   })
 
