@@ -18,7 +18,10 @@ type RouteParamSpecs<T extends string> = T extends `${string}{${infer Param}}${i
 /** The words a type such as `open|closed` chooses from, as a union. */
 type Choices<T extends string> = T extends `${infer Word}|${infer Rest}` ? Word | Choices<Rest> : T
 
-/** The value a typed customId segment gives its handler: a number, a boolean, or one of the words to choose from. */
+/**
+ * The value a typed customId segment gives its handler: a number, a boolean, one of the words to choose from, or text,
+ * as a snowflake or a uuid is.
+ */
 type SegmentValue<T extends string> = T extends 'int' | 'number' ? number : T extends 'bool' ? boolean : T extends `${string}|${string}` ? Choices<T> : string
 
 /**

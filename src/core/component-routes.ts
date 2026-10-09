@@ -42,9 +42,9 @@ function rankKey(pattern: string): string {
  * Orders two routes as dispatch tries them. Left to right, the first segment one pattern spells out as literal text
  * while the other leaves it to a param ranks the literal one first: `a/{x}` before `{x}/abcd`, `profile/me/{section}`
  * before `profile/{userId}/edit`. Between patterns that leaves tied, the first param where one type is narrower ranks
- * it first: words to choose from, then `bool`, `int`, `number`, then text. Patterns of different segment counts, which
- * no customId matches both of, are ordered by count only so the order is total; component patterns have no catch-all
- * param. What remains tied keeps its listing order.
+ * it first: words to choose from, then `bool`, `uuid`, `snowflake`, `int`, `number`, then text. Patterns of different
+ * segment counts, which no customId matches both of, are ordered by count only so the order is total; component
+ * patterns have no catch-all param. What remains tied keeps its listing order.
  */
 function rank(keys: Map<ComponentRoute, string>): (a: ComponentRoute, b: ComponentRoute) => number {
   return (a, b) => {

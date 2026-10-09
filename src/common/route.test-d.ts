@@ -210,3 +210,27 @@ describe('typed customId params', () => {
     expectTypeOf(Counters).toBeConstructibleWith()
   })
 })
+
+describe('snowflake and uuid params', () => {
+  it('build each from its text, and give the handler the text', () => {
+    const member = route('member/{id:snowflake}/{session:uuid}')
+
+    member.build({ id: '1234567890123456789', session: '0f8fad5b-d9cb-469f-a165-70867728950e' })
+    // @ts-expect-error a snowflake is built from its text, which keeps every digit
+    member.build({ id: 1234567890123456789, session: '0f8fad5b-d9cb-469f-a165-70867728950e' })
+
+    class Members {
+      @Command(member, CommandType.BUTTON)
+      show(_interaction: ButtonInteraction, _params: { id: string; session: string }) {
+        return undefined
+      }
+
+      // @ts-expect-error the handler gets a snowflake as text, not a number
+      @Command(member, CommandType.BUTTON)
+      wrong(_interaction: ButtonInteraction, _params: { id: number; session: string }) {
+        return undefined
+      }
+    }
+    expectTypeOf(Members).toBeConstructibleWith()
+  })
+})
