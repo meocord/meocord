@@ -749,7 +749,8 @@ jobs:
         if: vars.DOCS_BOT_CLIENT_ID == ''
         run: echo "::notice title=Docs sync not configured::The docs site's hourly schedule will pick up this release."
 
-      # npm serves a new version a minute or two after it is published, and a sync started earlier finds nothing to add
+      # npm lists a new version a minute or two after it is published, and can answer 404 for its tarball and attestations
+      # for a while after that. The sync downloads both, so one started earlier finds nothing to add or fails to fetch them.
       - name: Wait for npm to serve the version
         if: vars.DOCS_BOT_CLIENT_ID != ''
         env:
@@ -761,15 +762,23 @@ jobs:
             echo "::error title=Docs sync not started::The publish job reported no version of meocord."
             exit 1
           fi
+          # Names the first of what the sync fetches that npm doesn't serve yet, and nothing once it serves all of it
+          unserved() {
+            tarball=$(npm view "meocord@$VERSION" dist.tarball --prefer-online 2>/dev/null)
+            if [ -z "$tarball" ]; then echo "meocord@$VERSION"; return; fi
+            for url in "$tarball" "https://registry.npmjs.org/-/npm/v1/attestations/meocord@$VERSION"; do
+              if [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" != 200 ]; then echo "$url"; return; fi
+            done
+          }
           deadline=$((SECONDS + WAIT_SECONDS))
-          until [ "$(npm view "meocord@$VERSION" version --prefer-online 2>/dev/null)" = "$VERSION" ]; do
+          while waiting=$(unserved); [ -n "$waiting" ]; do
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "::error title=Docs sync not started::npm still doesn't serve meocord@$VERSION after $WAIT_SECONDS s; start meocord/docs's Sync versions by hand once it does."
+              echo "::error title=Docs sync not started::npm still doesn't serve $waiting after $WAIT_SECONDS s; start meocord/docs's Sync versions by hand once it does."
               exit 1
             fi
             sleep "$POLL_SECONDS"
           done
-          echo "npm serves meocord@$VERSION, after ${SECONDS} s."
+          echo "npm serves meocord@$VERSION, its tarball and its attestations, after ${SECONDS} s."
 
       - name: Mint the docs bot's token
         id: token
