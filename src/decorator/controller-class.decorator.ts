@@ -37,7 +37,7 @@ import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
  * @category Controllers
  * @see {@link Command}
  * @see {@link ControllerOptions}
- * @see {@link https://meocord.dev/docs/4.1/how-a-call-runs | How a call runs}
+ * @see {@link https://meocord.dev/docs/4.2/how-a-call-runs | How a call runs}
  */
 export function Controller(options: ControllerOptions = {}) {
   return declaring(function (target: abstract new (...args: any[]) => unknown, propertyKey?: string | symbol) {

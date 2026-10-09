@@ -37,7 +37,7 @@ import { refuseOnMethod, declaring } from '@src/util/refusal.util.js'
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseFilter}
- * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
+ * @see {@link https://meocord.dev/docs/4.2/exception-filters | Exception filters}
  */
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
   return declaring(function (target: new (...args: any[]) => ExceptionFilter<any>, propertyKey?: string | symbol) {
@@ -90,7 +90,7 @@ const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth']
  * @group Decorators
  * @category Pipeline stages
  * @see {@link Catch}
- * @see {@link https://meocord.dev/docs/4.1/exception-filters | Exception filters}
+ * @see {@link https://meocord.dev/docs/4.2/exception-filters | Exception filters}
  */
 export function UseFilter<const T extends readonly unknown[]>(
   ...filters: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => ExceptionFilter<any>> }

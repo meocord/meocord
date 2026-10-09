@@ -37,7 +37,7 @@ import { META } from '@src/util/metadata-keys.js'
  * @pipeline observers-settled once the call has settled and been answered, however it ended
  * @group Decorators
  * @category Pipeline stages
- * @see {@link https://meocord.dev/docs/4.1/observers | Observers}
+ * @see {@link https://meocord.dev/docs/4.2/observers | Observers}
  */
 export function Observer(
   options: ObserverOptions = {},

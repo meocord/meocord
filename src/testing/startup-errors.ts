@@ -18,7 +18,7 @@ import { setStartupErrorsMode } from '@src/util/refusal.util.js'
  * @group Testing
  * @category Module
  * @see {@link MeoCordTestingModule}
- * @see {@link https://meocord.dev/docs/4.1/configuration | Configuration}
+ * @see {@link https://meocord.dev/docs/4.2/configuration | Configuration}
  */
 export function reportAllStartupErrors(): void {
   setStartupErrorsMode('all')

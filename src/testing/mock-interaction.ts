@@ -759,7 +759,7 @@ type OutsideServer = { guild: null } | { member: null } | { channel: DMChannel |
  * @category Mocks
  * @see {@link MockProps}
  * @see {@link createChatInputOptions}
- * @see {@link https://meocord.dev/docs/4.1/mocks | Mocks}
+ * @see {@link https://meocord.dev/docs/4.2/mocks | Mocks}
  */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,

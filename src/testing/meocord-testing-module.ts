@@ -285,7 +285,7 @@ export interface EmitResult {
  * @category Module
  * @see {@link MeoCordTestingModule}
  * @see {@link getResponse}
- * @see {@link https://meocord.dev/docs/4.1/invoke-and-dispatch | Invoke and dispatch}
+ * @see {@link https://meocord.dev/docs/4.2/invoke-and-dispatch | Invoke and dispatch}
  */
 export class TestingModule {
   constructor(
@@ -780,7 +780,7 @@ function messagesOf(app: object | undefined): MessageCommandOptions | undefined 
  * @group Testing
  * @category Module
  * @see {@link MeoCordTestingModule}
- * @see {@link https://meocord.dev/docs/4.1/testing | The testing module}
+ * @see {@link https://meocord.dev/docs/4.2/testing | The testing module}
  */
 export class TestingModuleBuilder {
   private readonly overrides = new Map<unknown, Provider>()
@@ -1212,7 +1212,7 @@ export class TestingModuleBuilder {
  * @category Module
  * @see {@link TestingModuleBuilder}
  * @see {@link TestingModule}
- * @see {@link https://meocord.dev/docs/4.1/testing | The testing module}
+ * @see {@link https://meocord.dev/docs/4.2/testing | The testing module}
  */
 export class MeoCordTestingModule {
   /**

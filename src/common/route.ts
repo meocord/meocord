@@ -133,7 +133,7 @@ const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
  *
  * @group Utilities
  * @see {@link Route}
- * @see {@link https://meocord.dev/docs/4.1/components | Buttons, selects and modals}
+ * @see {@link https://meocord.dev/docs/4.2/components | Buttons, selects and modals}
  */
 export function route<const T extends string>(pattern: T): Route<T> {
   const { params, types } = createRegexFromPattern(pattern)

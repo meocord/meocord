@@ -84,7 +84,7 @@ const VISIBLE = new Set<ResponseCall['method']>(['reply', 'update', 'editReply',
  * @group Testing
  * @category Inspection
  * @see {@link TestingModule}
- * @see {@link https://meocord.dev/docs/4.1/invoke-and-dispatch | Invoke and dispatch}
+ * @see {@link https://meocord.dev/docs/4.2/invoke-and-dispatch | Invoke and dispatch}
  */
 export function getResponse(interaction: Interaction): ResponseReport {
   const state = existingResponse(interaction)

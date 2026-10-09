@@ -25,7 +25,7 @@ import { refuseOnClass, declaring } from '@src/util/refusal.util.js'
  * @category Params
  * @see {@link Service}
  * @see {@link createToken}
- * @see {@link https://meocord.dev/docs/4.1/services | Services}
+ * @see {@link https://meocord.dev/docs/4.2/services | Services}
  */
 export function Inject(
   token: ProviderToken,

@@ -248,7 +248,7 @@ type ParamsFit<P, Given> = [Given] extends [Unpiped<P>]
  * @group Decorators
  * @category Handlers
  * @see {@link ReactionHandler}
- * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.2/message-commands | Message commands}
  */
 export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boolean>>, R>(): (
   target: object,
@@ -291,7 +291,7 @@ export function MessageHandler<T extends OmitPartialGroupDMChannel<Message<boole
  * @group Decorators
  * @category Handlers
  * @see {@link ParamsOf}
- * @see {@link https://meocord.dev/docs/4.1/message-commands | Message commands}
+ * @see {@link https://meocord.dev/docs/4.2/message-commands | Message commands}
  */
 export function MessageHandler<
   T extends OmitPartialGroupDMChannel<Message<boolean>>,
@@ -361,7 +361,7 @@ type ReactionHandlerDecorator<T extends MessageReaction | PartialMessageReaction
  * @group Decorators
  * @category Handlers
  * @see {@link ReactionEvent}
- * @see {@link https://meocord.dev/docs/4.1/reactions | Reactions}
+ * @see {@link https://meocord.dev/docs/4.2/reactions | Reactions}
  */
 export function ReactionHandler<T extends MessageReaction | PartialMessageReaction, R>(
   emoji?: string,
@@ -675,8 +675,8 @@ type TypedParamsAccept<N, T, P> = T extends CommandType
  * @category Handlers
  * @see {@link CommandBuilder}
  * @see {@link route}
- * @see {@link https://meocord.dev/docs/4.1/slash-commands | Slash commands}
- * @see {@link https://meocord.dev/docs/4.1/components | Buttons, selects and modals}
+ * @see {@link https://meocord.dev/docs/4.2/slash-commands | Slash commands}
+ * @see {@link https://meocord.dev/docs/4.2/components | Buttons, selects and modals}
  */
 export function Command<
   CBC extends BuildableCommandType,
@@ -883,7 +883,7 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @group Decorators
  * @category Handlers
  * @see {@link Command}
- * @see {@link https://meocord.dev/docs/4.1/autocomplete | Autocomplete}
+ * @see {@link https://meocord.dev/docs/4.2/autocomplete | Autocomplete}
  */
 export function Autocomplete<_R = unknown>(commandPath: string, optionName?: string) {
   return declaring(function <P extends Record<string, any>, R>(
