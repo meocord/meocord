@@ -860,22 +860,21 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * `member` is its user: for a `user` given, when the test gives the `guild`, the guild's cached member for that user,
  * so a message and an interaction from one user in that server share it, and `memberPermissions` are that member's
  * permissions, with its channel's overwrites applied under `useStrictMocks()` (`null` in a DM). A user is a person,
- * `bot: false`, and a member has the server's @everyone role and the
- * roles {@link createMockMember} gave it; with a `guildId` but no `guild`, a server the bot isn't in, that @everyone role
- * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel. Its
- * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel. A
- * `channel` given sets what the test leaves out of `channelId`, `guildId` and `guild`, as discord.js reads them from
- * it: a DM channel is no server, and a server's channel its server; one in another server than the `guildId` given is
- * refused, naming both. Under `useStrictMocks()` a `message` given places it in the message's channel and server, a
- * `guild` or a member's guild in that server, and a `guildId` alone in a server the bot isn't in, with no `guild` or
- * `channel` and a raw member for its user; a `channel`, `guild` or `guildId` other than the message's is refused. In
- * default mode it is placed as before, and reading where it is warns once where strict mocks place it otherwise.
- * A select menu has picked nothing unless given: its
- * `values` are the ids of the `users` and `members`, `roles` or `channels` given, the collections of what it picks,
- * each empty unless given. Other data Discord always sends reads as
- * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
- * or `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and
- * {@link getResponse} reports every answer the interaction got. Every method is a mock function, and one that returns a
+ * `bot: false`, and a member has the server's @everyone role and the roles {@link createMockMember} gave it; with a
+ * `guildId` but no `guild`, a server the bot isn't in, that @everyone role has the `guildId`. A DM sent to a member
+ * goes through its user's `send()` and the user's one DM channel. Its `channel` is a text channel of its server, the
+ * one its guild caches under `channelId`, or the user's DM channel. A `channel` given sets what the test leaves out of
+ * `channelId`, `guildId` and `guild`, as discord.js reads them from it: a DM channel is no server, and a server's
+ * channel its server; one in another server than the `guildId` given is refused, naming both. Under `useStrictMocks()`
+ * a `message` given places it in the message's channel and server, a `guild` or a member's guild in that server, and a
+ * `guildId` alone in a server the bot isn't in, with no `guild` or `channel` and a raw member for its user; a
+ * `channel`, `guild` or `guildId` other than the message's is refused. In default mode it stays where its own channel
+ * and guild fields place it, and reading where it is warns once where strict mocks would place it otherwise. A select
+ * menu has picked nothing unless given: its `values` are the ids of the `users` and `members`, `roles` or `channels`
+ * given, the collections of what it picks, each empty unless given. Other data Discord always sends reads as Discord
+ * sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName` or
+ * `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and {@link
+ * getResponse} reports every answer the interaction got. Every method is a mock function, and one that returns a
  * promise in discord.js resolves.
  *
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
