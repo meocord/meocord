@@ -185,6 +185,9 @@ const SKIP = new Set(['constructor', 'toString', 'valueOf', 'toJSON', 'then'])
 // Each mock's own instance, which the proxy's traps receive as their target
 const mockTargets = new WeakMap<object, object>()
 
+// Warnings a read answered by the stub logs first, by the mock's instance and the property
+const stubReadWarnings = new WeakMap<object, Map<string, () => void>>()
+
 type StubValue = Mock | object | string | number | boolean | null
 
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
@@ -209,6 +212,8 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
       if (Object.prototype.hasOwnProperty.call(target, key)) {
         return Reflect.get(target, prop, target)
       }
+
+      stubReadWarnings.get(target)?.get(key)?.()
 
       // Skip passthrough props — return prototype value as-is
       if (SKIP.has(key)) {
@@ -861,7 +866,11 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel. A
  * `channel` given sets what the test leaves out of `channelId`, `guildId` and `guild`, as discord.js reads them from
  * it: a DM channel is no server, and a server's channel its server; one in another server than the `guildId` given is
- * refused, naming both. A select menu has picked nothing unless given: its
+ * refused, naming both. Under `useStrictMocks()` a `message` given places it in the message's channel and server, a
+ * `guild` or a member's guild in that server, and a `guildId` alone in a server the bot isn't in, with no `guild` or
+ * `channel` and a raw member for its user; a `channel`, `guild` or `guildId` other than the message's is refused. In
+ * default mode it is placed as before, and reading where it is warns once where strict mocks place it otherwise.
+ * A select menu has picked nothing unless given: its
  * `values` are the ids of the `users` and `members`, `roles` or `channels` given, the collections of what it picks,
  * each empty unless given. Other data Discord always sends reads as
  * Discord sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName`
@@ -981,6 +990,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
   // mock lacks: a guildId is a guild, a guild object with it a cached one, neither a DM. A member
   // not given is the user's on an interaction, and the auto-stub elsewhere, so only one set to null or undefined fails.
   const own = (key: string) => (Object.prototype.hasOwnProperty.call(instance, key) ? instance[key] : undefined)
+  let strictPlace: StrictPlace | undefined
   const hasMember = () => !Object.prototype.hasOwnProperty.call(instance, 'member') || Boolean(instance.member)
   const guildChecks = {
     inGuild: () => Boolean(own('guildId') && hasMember()),
@@ -1233,6 +1243,20 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const unset = (key: string) => !Object.prototype.hasOwnProperty.call(instance, key)
     const generatedId = unset('id') ? (instance.id = nextSnowflake()) : undefined
     defineCreatedTime(instance, generatedId)
+    // Strict mocks place it where its message, guild or member is, and a guildId alone in a server the bot isn't in
+    strictPlace = strictPlaceOf(own)
+    if (strictPlace && strictMocks()) {
+      if (strictPlace.refused) throw new Error(strictPlace.refused)
+      const set = (key: string, value: unknown) => Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true })
+      if (strictPlace.channel && unset('channel')) set('channel', strictPlace.channel)
+      if (strictPlace.guildId !== undefined && unset('guildId')) set('guildId', strictPlace.guildId)
+      if (strictPlace.guild !== undefined && unset('guild')) set('guild', strictPlace.guild)
+      if (strictPlace.raw) {
+        const user = own('user') as User | undefined
+        const rawUser = user && { id: user.id, username: user.username, global_name: user.globalName ?? null, discriminator: user.discriminator, avatar: user.avatar ?? null }
+        set('member', createMockRawMember(rawUser ? { user: rawUser } : {}))
+      }
+    }
     // A raw member is from a server the bot isn't in: no cached guild, and its user the interaction's, as discord.js reads it
     const raw = own('member')
     // Given with a guild, a raw-shaped member is kept as the cached server's member it was before raw members
@@ -1355,6 +1379,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
     for (const kind of choices) if (!Object.prototype.hasOwnProperty.call(instance, kind)) instance[kind] = new Collection()
   }
+
+  // In default mode, where strict mocks place it elsewhere, reading where it is warns
+  if (strictPlace && !strictMocks()) warnOnPlaceReads(instance, strictPlace, new Set(Object.keys(props ?? {})))
 
   // Options assigned after creation, directly or through Object.assign, belong to it as those given do
   return stubDeep(instance, stubs, (prop, value) => {
@@ -2033,6 +2060,123 @@ interface ChannelPlace {
 
 /** A server's id as a refusal names it, or a DM. */
 const placeName = (guildId: string | null) => (guildId === null ? 'a DM' : `server ${guildId}`)
+
+/** Where strict mocks place an interaction beyond a channel given, and why; `refused` when what was given disagrees. */
+interface StrictPlace {
+  given: 'message' | 'guild' | 'member' | 'guildId'
+  channel?: object
+  guildId?: string | null
+  guild?: object | null
+  raw?: boolean
+  refused?: string
+}
+
+/**
+ * Where strict mocks place an interaction: in its message's channel and server, in a guild's or a member's server, and
+ * with a guildId alone in a server the bot isn't in. Undefined where a channel given, or nothing, places it.
+ */
+function strictPlaceOf(own: (key: string) => unknown): StrictPlace | undefined {
+  const message = own('message') as { channelId?: unknown; guildId?: string | null; guild?: object | null; channel?: object } | undefined
+  const channel = own('channel') as { id?: string } | null | undefined
+  const guild = own('guild') as { id?: string } | null | undefined
+  const guildId = own('guildId') as string | null | undefined
+  const member = own('member')
+  if (typeof message === 'object' && message !== null && typeof message.channelId === 'string') {
+    const at = message.guildId ?? null
+    const refused =
+      channel && channel.id !== message.channelId
+        ? `The message given is in channel ${message.channelId}, but the mock's channel is ${channel.id}: give the message's channel, or leave one of them out.`
+        : guild !== undefined && (guild?.id ?? null) !== at
+          ? `The message given is in ${placeName(at)}, but the mock's guild is ${placeName(guild?.id ?? null)}: give the message's guild, or leave one of them out.`
+          : guildId !== undefined && guildId !== at
+            ? `The message given is in ${placeName(at)}, but the mock's guildId is ${placeName(guildId)}: give the message's guildId, or leave one of them out.`
+            : undefined
+    return { given: 'message', channel: message.channel, guildId: at, guild: message.guild ?? null, refused }
+  }
+  if (guild instanceof Guild && guildId === undefined) return { given: 'guild', guildId: guild.id }
+  if (member instanceof GuildMember && member.guild instanceof Guild && guild === undefined && guildId === undefined) {
+    return { given: 'member', guild: member.guild, guildId: member.guild.id }
+  }
+  if (typeof guildId === 'string' && guild === undefined && channel === undefined && !(member instanceof GuildMember) && !isRawMember(member)) {
+    return { given: 'guildId', raw: true }
+  }
+  return undefined
+}
+
+// Set while one of the reads below runs, so what it reads in turn doesn't warn again
+let readingPlace = 0
+
+/**
+ * Has each of an interaction's `guildId`, `guild`, `channelId`, `channel` and `member` that strict mocks read otherwise
+ * warn once when read, unless the test gave it.
+ */
+function warnOnPlaceReads(instance: Record<string, unknown>, place: StrictPlace, given: ReadonlySet<string>): void {
+  const value = (key: string) => {
+    const descriptor = Object.getOwnPropertyDescriptor(instance, key)
+    return descriptor?.get ? undefined : descriptor?.value
+  }
+  const keys = place.refused
+    ? ['guildId', 'guild', 'channelId', 'channel']
+    : place.raw
+      ? ['guild', 'channel', 'member']
+      : place.guildId !== value('guildId')
+        ? ['guildId', 'guild', 'channelId', 'channel', 'member']
+        : place.channel && (place.channel as { id?: string }).id !== value('channelId')
+          ? ['channelId', 'channel']
+          : []
+  const name = (Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name
+  const why = {
+    message: [
+      'a place other than its message\'s',
+      "the mock is in its message's channel and server",
+      "Give it the message's channel, or call useStrictMocks() to place it there now.",
+    ],
+    guild: ["a DM's value, though the mock was given a guild", 'the mock is in that guild', 'Give its guildId or one of its channels too, or call useStrictMocks() to place it there now.'],
+    member: [
+      "a DM's value, though the mock was given a member of a server",
+      "the mock is in the member's server",
+      "Give the member's guild too, or call useStrictMocks() to place it there now.",
+    ],
+    guildId: [
+      'a server the bot is in, though the mock was given only a guildId',
+      "a guildId alone is a server the bot isn't in: guild and channel are null, and the member is a raw one",
+      'Give a guild too, or call useStrictMocks() to read it so now.',
+    ],
+  }[place.given]
+  for (const key of keys.filter(each => !given.has(each))) {
+    const warn = () => {
+      if (readingPlace > 0) return
+      warnOnce(
+        mockLogger,
+        place.refused
+          ? `${name}.${key} reads where the mock's channel, guild or guildId put it, not where its message is; under useStrictMocks(), as in the next major version (5.0), the mock is refused: ${place.refused}`
+          : `${name}.${key} reads ${why[0]} here; in the next major version (5.0) ${why[1]}. ${why[2]}`,
+      )
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(instance, key)
+    // One the mock answers with a stub stays unset, as the mock's own checks read it, and warns as the stub is read
+    if (!descriptor) {
+      if (!stubReadWarnings.has(instance)) stubReadWarnings.set(instance, new Map())
+      stubReadWarnings.get(instance)!.set(key, warn)
+      continue
+    }
+    const read = () => (descriptor.get ? descriptor.get.call(instance) : descriptor.value)
+    Object.defineProperty(instance, key, {
+      get: () => {
+        warn()
+        readingPlace++
+        try {
+          return read()
+        } finally {
+          readingPlace--
+        }
+      },
+      set: (next: unknown) => Object.defineProperty(instance, key, { value: next, writable: true, enumerable: true, configurable: true }),
+      enumerable: true,
+      configurable: true,
+    })
+  }
+}
 
 /**
  * Where a channel a test gives puts the mock made in it, read from the channel as discord.js reads it: no server for a

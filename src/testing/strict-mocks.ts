@@ -30,11 +30,12 @@ export function noteMockMade(): void {
  * or thread made without a server has one of its own, a thread with a text channel as its parent. A message has empty
  * `content`, a thread is neither archived nor locked, and a reaction's `count` is 1. A user, server or channel made
  * with a generated id was created when the mock was made, as a message is. An interaction's `memberPermissions` apply
- * its channel's overwrites, a thread's parent's for a thread, to its member's permissions. Give the bot's member a role
- * to let it do more, such as kick a member its role ranks above. A value the test sets on a mock wins over the computed
- * one. An interaction's answer that discord.js would refuse, such as a second `reply()` after one a test set with
- * `mockResolvedValue`, is refused too, where without it the mock runs it and warns. The next major version (5.0)
- * computes these values, and refuses those answers, without the call.
+ * its channel's overwrites, a thread's parent's for a thread, to its member's permissions. An interaction is in its
+ * message's channel and server, a guild's or a member's server, or, given a `guildId` alone, a server the bot isn't in.
+ * Give the bot's member a role to let it do more, such as kick a member its role ranks above. A value the test sets on
+ * a mock wins over the computed one. An interaction's answer that discord.js would refuse, such as a second `reply()`
+ * after one a test set with `mockResolvedValue`, is refused too, where without it the mock runs it and warns. The next
+ * major version (5.0) computes these values, and refuses those answers, without the call.
  *
  * `invoke` also refuses a call that gives a handler fewer arguments than it declares where it builds none, such as a
  * reaction handler given its reaction without its `ReactionEvent`; without strict mocks, it warns once and calls it.
