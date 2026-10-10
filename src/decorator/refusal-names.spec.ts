@@ -49,6 +49,16 @@ describe('what a refused decorator names', () => {
     expect(isRefusal(error)).toBe(true)
   })
 
+  it.each([
+    ['card/{id}/{id}', 'Shop.buy: Invalid pattern "card/{id}/{id}": {id} appears twice; give each param its own name.'],
+    ['card/{1}', 'Shop.buy: Invalid pattern "card/{1}": {1} starts with a digit; start a param\'s name with a letter or _.'],
+  ])('names the param of %s, which the pattern can only name once and with a letter first', (pattern, message) => {
+    const error = refusalOf(Command(pattern, CommandType.BUTTON) as MethodDecorator)
+
+    expect(error.message).toBe(message)
+    expect(isRefusal(error)).toBe(true)
+  })
+
   it('refuses a composite that includes a refused decorator where it is applied, naming the handler', () => {
     // Built before it applies, as a module-scope composite is; nothing is refused until it applies
     const Limited = applyDecorators(Cooldown({ seconds: 0 }))

@@ -483,6 +483,14 @@ export function createRegexFromPattern(pattern: string): {
       ))
     }
 
+    // A regex group's name, which the engine would refuse with the compiled regex in place of the pattern
+    if (params.includes(param)) {
+      throw refuse(new Error(`Invalid pattern "${pattern}": {${param}} appears twice; give each param its own name.`))
+    }
+    if (/^\d/.test(param)) {
+      throw refuse(new Error(`Invalid pattern "${pattern}": {${param}} starts with a digit; start a param's name with a letter or _.`))
+    }
+
     if (type !== undefined) {
       if (!isSegmentType(type)) throw refuse(new Error(`Invalid pattern "${pattern}": ${segmentTypeProblem(param, type)}`))
       if (choicesOf(type)?.includes('')) {
