@@ -455,7 +455,7 @@ export class TestingModule {
       { primary },
       [],
       { resolveFailed: failed, hookFailed: failed },
-      { starting: this.readyPass.starting },
+      { runOnReady: this.readyPass.runOnReady },
     )
     throwFailures('onReady', failures)
   }
