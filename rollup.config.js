@@ -2,8 +2,8 @@ import swc from '@rollup/plugin-swc'
 import alias from '@rollup/plugin-alias'
 import resolve from '@rollup/plugin-node-resolve'
 import json from '@rollup/plugin-json'
-import copy from 'rollup-plugin-copy'
 import dts from 'rollup-plugin-dts'
+import { cpSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -30,6 +30,19 @@ const preEntryModules = {
 
 
 const allEntries = { ...libraryEntries, ...cliEntry, ...preEntryModules }
+
+/**
+ * Copies files the build ships as they are, each into `dest` under its own name, once the bundle is written: the
+ * templates the CLI renders, and the pre-entry, which an application's build bundles from source.
+ */
+function copyAsIs(targets) {
+  return {
+    name: 'meocord-copy-as-is',
+    writeBundle() {
+      for (const { src, dest } of targets) cpSync(src, path.join(dest, path.basename(src)), { recursive: true })
+    },
+  }
+}
 
 const aliasPlugin = alias({
   entries: [{ find: /^@src\/(.*)/, replacement: path.resolve(__dirname, 'src/$1') }],
@@ -112,22 +125,20 @@ const esmBuild = {
     swcPlugin,
     json(),
     resolvePlugin,
-    copy({
-      targets: [
-        {
-          src: 'src/bin/builder-template',
-          dest: 'dist/esm/bin',
-        },
-        {
-          src: 'src/bin/app-template',
-          dest: 'dist/esm/bin',
-        },
-        {
-          src: 'src/build/load-config.pre-entry.js',
-          dest: 'dist/esm/build',
-        },
-      ],
-    }),
+    copyAsIs([
+      {
+        src: 'src/bin/builder-template',
+        dest: 'dist/esm/bin',
+      },
+      {
+        src: 'src/bin/app-template',
+        dest: 'dist/esm/bin',
+      },
+      {
+        src: 'src/build/load-config.pre-entry.js',
+        dest: 'dist/esm/build',
+      },
+    ]),
   ],
   output: {
     dir: 'dist/esm',
