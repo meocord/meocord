@@ -444,7 +444,7 @@ describe('with both on, what is answered in the channel', () => {
       expect(message.author.send).not.toHaveBeenCalled()
       expect(message.reply).toHaveBeenCalledTimes(1)
     }
-    expect(refused.reply).toHaveBeenCalledWith({ content: 'You have no tickets.', allowedMentions: { repliedUser: false } })
+    expect(refused.reply).toHaveBeenCalledWith({ content: 'You have no tickets.', allowedMentions: { repliedUser: false, parse: [] } })
   })
 })
 

@@ -160,7 +160,7 @@ describe('messages.replyEmoji', () => {
 
     await module.dispatch(message)
 
-    expect(message.reply).toHaveBeenCalledWith({ content: '🎟️ Members only.', allowedMentions: { repliedUser: false } })
+    expect(message.reply).toHaveBeenCalledWith({ content: '🎟️ Members only.', allowedMentions: { repliedUser: false, parse: [] } })
   })
 
   it('refuses a replyEmoji that is not true or false', () => {
