@@ -202,9 +202,11 @@ export interface OnReady {
  * it injects. The whole sequence is limited by `shutdownTimeout` in `meocord.config.ts`; shutdown then goes on
  * whether or not it finished. A hook that throws is logged and the next one still runs.
  *
- * It runs only for a class whose `onReady` has finished, or that has none: a signal that arrives
- * while the ready hooks are running skips the class still starting and those not reached yet, and no
- * further `onReady` starts. An `onReady` that threw counts as finished, so its partial setup is cleaned up.
+ * It runs only for a class whose `onReady` has finished, or that has none. A stop while the ready hooks
+ * are running waits for the `onReady` in progress, within `shutdownTimeout`, then shuts that class down too;
+ * those not reached yet are skipped, and no further `onReady` starts. An `onReady` still running once only the
+ * hooks' share of the timeout is left is named in a warning and skipped. An `onReady` that threw counts as
+ * finished, so its partial setup is cleaned up.
  *
  * @example
  * ```ts

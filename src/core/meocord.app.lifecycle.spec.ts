@@ -589,7 +589,7 @@ describe('lifecycle hooks', () => {
       ])
     })
 
-    it('on a signal mid-ready, shuts down only classes whose onReady finished, and starts no more', async () => {
+    it('on a signal mid-ready, waits for the onReady in progress, shuts down the classes it reached, and starts no more', async () => {
       const loaded = await load()
       const stopped: string[] = []
       const slowBegan = Promise.withResolvers<void>()
@@ -635,11 +635,11 @@ describe('lifecycle hooks', () => {
       const ready = becomeReady(client)
       await slowBegan.promise
 
-      await loaded.shutdownAndExit(false)
+      const shutDown = loaded.shutdownAndExit(false)
       finishSlow.resolve()
-      await ready
+      await Promise.all([ready, shutDown])
 
-      expect(stopped).toEqual(['Metrics', 'Cache'])
+      expect(stopped).toEqual(['Scheduler', 'Metrics', 'Cache'])
       expect(client.destroy).toHaveBeenCalled()
       expect(exit).toHaveBeenCalledWith(0)
     })
@@ -1142,8 +1142,8 @@ describe('lifecycle hooks', () => {
       expect(events.slice(-2)).toEqual(['call done', 'store shutdown'])
     })
 
-    // A class still starting when shutdown begins is skipped, as for a stop mid-ready, even if it finishes during the wait
-    it('skips the onShutdown of a class whose onReady finishes while the calls under way are waited for', async () => {
+    // A class still starting when shutdown begins is waited for, as for a stop mid-ready, and shut down before the store
+    it('runs the onShutdown of a class whose onReady finishes while the calls under way are waited for', async () => {
       const loaded = await load()
       const events: string[] = []
       const finish = Promise.withResolvers<void>()
@@ -1178,7 +1178,8 @@ describe('lifecycle hooks', () => {
       finish.resolve()
       await Promise.all([handled, stopped])
 
-      expect(events).not.toContain('scheduler shutdown')
+      expect(events.indexOf('scheduler shutdown')).toBeGreaterThan(-1)
+      expect(events.indexOf('scheduler shutdown')).toBeLessThan(events.indexOf('store shutdown'))
       expect(events.at(-1)).toBe('store shutdown')
     })
 

@@ -37,7 +37,7 @@ import {
 } from '@src/core/event-requirements.js'
 import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
-import { type LifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import { type LifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { RunningCalls } from '@src/core/running-calls.js'
 import { type StartupControl } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
@@ -228,6 +228,9 @@ export class MeoCordApp implements MeoCordApplication {
   /** The calls under way, which shutdown waits for, less one that asked the app to stop. */
   private readonly calls = new RunningCalls()
 
+  /** The ready hooks' pass, whose `onReady` in progress shutdown waits for, less one that asked the app to stop. */
+  private readonly readyPass = new ReadyPass()
+
   /** Settles once the cooldown store's `onReady` has, which calls wait for before asking it. */
   private storeReady?: PromiseWithResolvers<void>
 
@@ -274,8 +277,9 @@ export class MeoCordApp implements MeoCordApplication {
    * unless a code is already set.
    */
   async stop(): Promise<void> {
-    // A handler awaiting stop() would otherwise hold up the shutdown that waits for it
+    // A handler or an onReady awaiting stop() would otherwise hold up the shutdown that waits for it
     this.calls.excuseCurrent()
+    this.readyPass.excuseCurrent()
     if (this.shard) await tellManager({ meocord: 'stop' })
     // As a signal's shutdown exits 1 for a client that failed to close, a code another failure set aside
     if (!(await this.close()) && !process.exitCode) process.exitCode = 1
@@ -617,7 +621,7 @@ export class MeoCordApp implements MeoCordApplication {
   private async runReadyHooks(client: Client<true>): Promise<void> {
     const entries: LifecycleEntry[] = []
     this.lifecycleEntries = entries
-    await runReadyHooks(
+    await this.readyPass.run(() => runReadyHooks(
       this.container,
       this.lifecycleUnits,
       client,
@@ -635,15 +639,17 @@ export class MeoCordApp implements MeoCordApplication {
         stopped: () => this.closing,
         slowAfterMs: SLOW_READY_HOOK_MS,
         settled: unit => unit.cooldownStore && this.storeReady?.resolve(),
+        starting: this.readyPass.starting,
       },
-    )
+    ))
     // Also when shutdown stopped the hooks before the store's, so no call waits on it
     this.storeReady?.resolve()
   }
 
   /** Runs the `onShutdown` hooks through the shutdown sequence, within the configured `shutdownTimeout`. */
-  private async runShutdownHooks(entries: LifecycleEntry[]): Promise<void> {
-    await runShutdownSequence(this.container, entries, {
+  private async runShutdownHooks(): Promise<void> {
+    // Read once the onReady in progress settled; a login that failed never ran onReady, so there is no onShutdown to undo
+    await runShutdownSequence(this.container, () => this.lifecycleEntries ?? [], {
       // No new call starts once the listeners are gone; an error the client emits meanwhile still has its listeners
       drainCalls: () => {
         const emitter: EventEmitter = this.bot
@@ -652,6 +658,7 @@ export class MeoCordApp implements MeoCordApplication {
       },
       drainAlways: true,
       runningCalls: () => this.calls.running(),
+      readyPass: this.readyPass,
       timeoutMs: this.shutdownTimeout,
       hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
       warn: message => this.logger.warn(message),
@@ -709,8 +716,8 @@ export class MeoCordApp implements MeoCordApplication {
 
     if (this.activityInterval) clearInterval(this.activityInterval)
 
-    // The calls drain on every shutdown; a login that failed never ran onReady, so there is no onShutdown to undo
-    await this.runShutdownHooks(this.lifecycleEntries ?? [])
+    // The calls drain on every shutdown, and the onReady in progress settles first
+    await this.runShutdownHooks()
 
     try {
       this.bot.removeAllListeners()

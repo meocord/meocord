@@ -71,7 +71,7 @@ import { assertStartupChecked, markStartupChecked } from '@src/core/startup-chec
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
-import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { createMockClient, noteReactionDispatch } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
@@ -316,6 +316,8 @@ export class TestingModule {
   private resolving?: Promise<void>
   private readying?: Promise<void>
   private closing?: Promise<void>
+  /** The `onReady` hooks' pass, which `close()` waits for, less one whose `onReady` called `close()`. */
+  private readonly readyPass = new ReadyPass()
 
   /**
    * Resolves the module's `useFactory` providers, awaiting those that return a promise, in dependency
@@ -355,7 +357,7 @@ export class TestingModule {
     await this.resolving
     if (options.ready) {
       const { client = createMockClient(), primary = true } = options.ready === true ? {} : options.ready
-      this.readying ??= this.runReady(client, primary)
+      this.readying ??= this.readyPass.run(() => this.runReady(client, primary))
       await this.readying
     }
     return this
@@ -381,6 +383,11 @@ export class TestingModule {
    * its `shutdownTimeout`, 10 seconds unless set, and logs that it did. Give a test whose fake store never answers, or
    * whose `onShutdown` never settles, a short `shutdownTimeout`.
    *
+   * A `close()` while `init({ ready: true })` runs the `onReady` hooks waits for them first, within the same
+   * `shutdownTimeout`. An `onReady` still running once only the hooks' share of it is left is named in a warning, and
+   * its class is shut down all the same, as everything the module constructed is. One that calls `close()` itself isn't
+   * waited for.
+   *
    * @returns Once every hook has run. Rejects with the error of a hook that failed, or an
    *   `AggregateError` naming each when several did.
    *
@@ -396,17 +403,21 @@ export class TestingModule {
    * ```
    */
   async close(): Promise<void> {
+    // An onReady awaiting close() would otherwise hold up the close that waits for it
+    this.readyPass.excuseCurrent()
     this.closing ??= (async () => {
-      // A close during init waits for the providers and hooks it started, so it shuts down whatever they constructed
+      // A close during init waits for the providers it started, and the sequence for its onReady hooks, so it shuts
+      // down whatever they constructed
       await this.resolving?.catch(() => undefined)
-      await this.readying?.catch(() => undefined)
-      const entries: LifecycleEntry[] = this.lifecycle
-        .filter(unit => this.constructed.has(unit.token))
-        // Already made, so this returns the instance; a provided value may be anything, null included
-        .map(unit => lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}))
+      const entries = (): LifecycleEntry[] =>
+        this.lifecycle
+          .filter(unit => this.constructed.has(unit.token))
+          // Already made, so this returns the instance; a provided value may be anything, null included
+          .map(unit => lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}))
       const failures: { name: string; error: unknown }[] = []
       await runShutdownSequence(this.container, entries, {
         drainCalls: () => callsSettled(this.calls),
+        readyPass: this.readyPass,
         timeoutMs: this.shutdownTimeout,
         hookFailed: (name, error) => failures.push({ name, error }),
         warn: message => new Logger('TestingModule').warn(message),
@@ -437,7 +448,15 @@ export class TestingModule {
     const failed = (unit: LifecycleUnit, error: unknown) => failures.push({ name: unit.name, error })
     // No warning for a hook whose dependency failed: the test sees the dependency's own error
     // What close() shuts down is what was constructed, so the entries the runner records are not kept
-    await runReadyHooks(this.container, this.lifecycle, client, { primary }, [], { resolveFailed: failed, hookFailed: failed })
+    await runReadyHooks(
+      this.container,
+      this.lifecycle,
+      client,
+      { primary },
+      [],
+      { resolveFailed: failed, hookFailed: failed },
+      { starting: this.readyPass.starting },
+    )
     throwFailures('onReady', failures)
   }
 
