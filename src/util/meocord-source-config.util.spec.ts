@@ -5,6 +5,9 @@ const { mockExistsSync, mockReadFileSync } = vi.hoisted(() => ({
   mockReadFileSync: vi.fn(),
 }))
 
+// Without typescript installed, paths are read from the project's tsconfig.json alone, which these cases mock
+vi.mock('@src/util/project-typescript.util.js', () => ({ projectTypeScript: () => undefined }))
+
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
   readFileSync: mockReadFileSync,
