@@ -8,6 +8,7 @@ import {
   ModalSubmitInteraction,
   StageChannel,
   TextChannel,
+  ThreadChannel,
   UserFlagsBitField,
   VoiceChannel,
 } from 'discord.js'
@@ -84,6 +85,24 @@ describe.each([
   })
 })
 
+describe.each([
+  ['default', () => {}],
+  ['strict', () => useStrictMocks()],
+])("a manager's lookups through discord.js's own cache, in %s mode", (_mode, setUp) => {
+  beforeEach(() => setUp())
+
+  it("resolves a member's presence, and a thread's member, by id or to null", () => {
+    const guild = createMockGuild()
+    const member = createMockMember({ guild })
+    const presence = { status: 'online' }
+    guild.presences.cache.set(member.id, presence as never)
+    const thread = createMockChannel(ThreadChannel)
+
+    expect([guild.presences.resolve(member.id), guild.presences.resolve('1400000000000000999')]).toEqual([presence, null])
+    expect(thread.members.resolve('1400000000000000999')).toBeNull()
+  })
+})
+
 describe('what discord.js gives empty, under useStrictMocks()', () => {
   beforeEach(() => useStrictMocks())
 
@@ -130,6 +149,16 @@ describe('what discord.js gives empty, in default mode', () => {
 
     expect(warned).toEqual([expect.stringMatching(new RegExp(`^${name.replace('.', '\\.')} reads a placeholder.*5\\.0.*${example.replace('.', '\\.')}.*useStrictMocks\\(\\)`, 's'))])
   })
+})
+
+it('warns on reading repliedUser after mentions.has() read it without a warning', () => {
+  const message = createMockMessage()
+  message.mentions.has(createMockUser())
+  expect(warned).toEqual([])
+
+  void message.mentions.repliedUser
+
+  expect(warned).toEqual([expect.stringMatching(/^MessageMentions\.repliedUser reads a placeholder/)])
 })
 
 describe("a voice channel's full", () => {

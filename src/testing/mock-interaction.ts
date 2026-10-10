@@ -189,6 +189,8 @@ type StubValue = Mock | object | string | number | boolean | null
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
   noteMockMade()
   const stubs = externalStubs ?? new Map<string, StubValue>()
+  // Placeholders read so far, by the value strict mocks give: a read of a kept one still warns, once
+  const placeholders = new Map<string, string>()
 
   const proxy: object = new Proxy(instance, {
     get(target, prop) {
@@ -213,7 +215,11 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
       }
 
       // Return cached stub
-      if (stubs.has(key)) return stubs.get(key)
+      if (stubs.has(key)) {
+        const kept = placeholders.get(key)
+        if (kept !== undefined) warnPlaceholderRead(target, key, kept)
+        return stubs.get(key)
+      }
 
       // A value discord.js always gives, in its shape, rather than a stub: kept once read, or its getter run live
       const known = discordDefault(target, key)
@@ -231,7 +237,10 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
 
       // A value strict mocks read as discord.js gives it, which is a placeholder otherwise
       const strictValue = strictMocks() ? undefined : placeholderValue(target, key)
-      if (strictValue !== undefined) warnPlaceholderRead(target, key, strictValue)
+      if (strictValue !== undefined) {
+        placeholders.set(key, strictValue)
+        warnPlaceholderRead(target, key, strictValue)
+      }
 
       // Walk the prototype chain to check if it's a function
       let proto: object | null = Object.getPrototypeOf(target)
@@ -1536,6 +1545,8 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
   const manager = Object.create(prototype) as Record<string, unknown>
   const cache = new Collection((items ?? []).map(item => [String(item.id ?? item.user?.id), item]))
   Object.defineProperty(manager, 'cache', { value: cache, writable: true })
+  // The same collection where discord.js's own methods read it past a subclass's `cache`, as `super.cache` does
+  Object.defineProperty(manager, '_cache', { value: cache, writable: true })
   const holds = HOLDS.find(([Manager]) => Manager === prototype || Object.prototype.isPrototypeOf.call(Manager, prototype))?.[1]
   if (holds) Object.defineProperty(manager, 'holds', { value: holds })
   let own: unknown
