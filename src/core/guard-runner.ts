@@ -451,6 +451,22 @@ export function consumeDispatchMark(first: unknown, instance: object, methodName
   return true
 }
 
+/** The container that made each instance, so a direct call runs in its own app or testing module. */
+const instanceContainers = new WeakMap<object, Container>()
+
+/**
+ * Records each instance `container` makes of `classes` as its own. Two testing modules made from one class each run a
+ * direct call on their own instance in themselves, where the class's metadata names only the last.
+ */
+export function recordInstanceContainers(container: Container, classes: Iterable<new (...args: any[]) => unknown>): void {
+  for (const cls of classes) {
+    container.onActivation(cls, (_context, instance) => {
+      if (typeof instance === 'object' && instance !== null) instanceContainers.set(instance, container)
+      return instance
+    })
+  }
+}
+
 /**
  * Runs a direct call to a guarded handler: the handler's guards, as dispatch resolves them, then the
  * call with a pass for each wrapper inside the one entered, so no guard runs twice.
@@ -463,8 +479,9 @@ export async function runDirectCall(
 ): Promise<unknown> {
   const prototype = Object.getPrototypeOf(instance) as object
   const controller = instance.constructor as new (...args: any[]) => unknown
-  // The app that made the class, or a class it extends: a subclass the app's code makes runs as its base does
-  const container = Reflect.getMetadata(META.container, controller) as Container | undefined
+  // The container that made the instance, or else the app that made the class or a class it extends: a subclass the
+  // app's code makes runs as its base does
+  const container = instanceContainers.get(instance) ?? (Reflect.getMetadata(META.container, controller) as Container | undefined)
   if (!container) {
     throw new Error(
       `${controller.name}.${methodName}: @UseGuard runs its guards through the app that made ${controller.name}, and this ` +
