@@ -66,6 +66,9 @@ export async function runReadyHooks(
   // For each unit, the failed units it depends on, directly or through another dependency
   const failedUpstream = new Map<unknown, Set<LifecycleUnit>>()
   const byToken = new Map(units.map(unit => [unit.token, unit]))
+  // The token each instance was first reached by: one instance two tokens reach, an alias or one value provided twice,
+  // runs its hooks once
+  const firstToken = new Map<object, unknown>()
 
   for (const unit of units) {
     if (stopped()) break
@@ -86,6 +89,14 @@ export async function runReadyHooks(
       settled?.(unit)
       continue
     }
+    const first = firstToken.get(instance)
+    if (first !== undefined) {
+      // Failed or not as the token that ran its hooks did, for what depends on this one
+      if (failed.has(first)) failed.add(unit.token)
+      settled?.(unit)
+      continue
+    }
+    firstToken.set(instance, unit.token)
     const entry = lifecycleEntry(unit, instance)
     // Only a unit whose onReady has settled, or that has none, is shut down: a stop mid-ready skips
     // the one still starting, and those not reached yet
@@ -113,11 +124,17 @@ export async function runReadyHooks(
 
 /**
  * Runs the entries' `onShutdown` hooks one at a time, in reverse, so a unit stops before those it
- * depends on. A failure is reported and the next hook still runs.
+ * depends on. A failure is reported and the next hook still runs. An instance already in `ran` is not shut down again,
+ * so one that two entries reach stops once.
  */
-export async function runShutdownHooks(entries: readonly LifecycleEntry[], hookFailed: (name: string, error: unknown) => void): Promise<void> {
+export async function runShutdownHooks(
+  entries: readonly LifecycleEntry[],
+  hookFailed: (name: string, error: unknown) => void,
+  ran = new Set<object>(),
+): Promise<void> {
   for (const { name, instance } of [...entries].reverse()) {
-    if (typeof instance.onShutdown !== 'function') continue
+    if (typeof instance.onShutdown !== 'function' || ran.has(instance)) continue
+    ran.add(instance)
     try {
       await instance.onShutdown()
     } catch (error) {
@@ -169,8 +186,9 @@ export async function runShutdownSequence(
       await storeOperationsSettled(container)
     }
     // Nothing on the store's side injects anything outside it, so running it last keeps the reverse dependency order
-    await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), hookFailed)
-    await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), hookFailed)
+    const ran = new Set<object>()
+    await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), hookFailed, ran)
+    await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), hookFailed, ran)
   })()
 
   let timer: ReturnType<typeof setTimeout> | undefined

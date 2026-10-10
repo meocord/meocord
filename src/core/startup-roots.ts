@@ -3,6 +3,8 @@ import { type GuardEntry, injectedTokens, isGuardWithParams } from '@src/core/gu
 import { classDecorators, type GlobalStages, handlerStageClasses } from '@src/core/handler-pipeline.js'
 import { assertTypedParameters, type ProviderMap, reachableClasses } from '@src/core/providers.js'
 import { themeResolverClass, type ThemeResolverClass } from '@src/core/theme-resolvers.js'
+import { isAppClassToken } from '@src/core/lifecycle-order.js'
+import { ExecutionContext } from '@src/common/execution-context.js'
 import { type ThemeResolvers } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
 import { startupError } from '@src/util/refusal.util.js'
@@ -68,6 +70,30 @@ export function startupClasses(roots: StartupRoots): StartupClasses {
     if (found.length === 0) return { classes, decorators }
     for (const [stage, decorator] of found) decorators.set(stage, decorator)
   }
+}
+
+/** Whether making `cls` reaches the per-call `ExecutionContext` through the classes it injects, which each call makes. */
+function reachesContext(cls: object, providers: ProviderMap, seen = new Set<object>()): boolean {
+  seen.add(cls)
+  return injectedTokens(cls).some(
+    token =>
+      token === ExecutionContext ||
+      (isAppClassToken(token) && !providers.has(token) && !seen.has(token) && reachesContext(token, providers, seen)),
+  )
+}
+
+/**
+ * The classes the app's stages and presenter inject, which they would make only at their first call. Made with the
+ * app's own classes, a service among them gets its lifecycle hooks. One that reaches the call's `ExecutionContext` is
+ * made for each call, so it is left out, and a stage a test replaces is not among the stages, so what it would inject
+ * is not made.
+ */
+export function stageDependencies({ decorators }: StartupClasses, providers: ProviderMap, presenter?: unknown): AnyClass[] {
+  const stages = [...decorators].filter(([, decorator]) => decorator !== '@Controller()').map(([stage]) => stage)
+  if (typeof presenter === 'function') stages.push(presenter)
+  return [...new Set(stages.flatMap(stage => injectedTokens(stage as object)))]
+    .filter(isAppClassToken)
+    .filter(cls => !reachesContext(cls, providers))
 }
 
 /** How a container checks a guard first met at a call: the guard and what it injects, as the startup checks would. */
