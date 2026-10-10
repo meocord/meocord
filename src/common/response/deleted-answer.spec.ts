@@ -117,7 +117,7 @@ describe('an answer deleted with delete()', () => {
 })
 
 describe('a private follow-up that replaced a public deferral', () => {
-  // Its privacy is the flags it was sent with: the message Discord returns may not say
+  // Its privacy is the flags it was sent with, not as read back from the message
   it('is deleted as the private answer it is, so the next one is private too', async () => {
     const interaction = command()
     await interaction.deferReply()
