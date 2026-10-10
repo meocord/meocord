@@ -1689,6 +1689,21 @@ describe('createMock', () => {
     expect(before).not.toContain('flush')
   })
 
+  it("isn't taken for a jasmine spy by jest's matchers, while a member named calls still nests", () => {
+    // jest's expect reads a received function as a jasmine spy when this holds, before it reads `mock.calls`
+    const isSpy = (received: any) =>
+      received != null && received.calls != null && typeof received.calls.all === 'function' && typeof received.calls.count === 'function'
+    const api = createMock<{ cache: { flush(): void }; calls: { foo(): number; all(): number[] } }>()
+
+    expect([isSpy(api.cache.flush), isSpy(api)]).toEqual([false, false])
+    api.calls.foo.mockReturnValue(1)
+    expect(api.calls.foo()).toBe(1)
+    // `all` and `count` directly under a `calls` member are left for a test to set
+    expect(api.calls.all).toBeUndefined()
+    api.calls.all = createMockFn(() => [2])
+    expect(api.calls.all()).toEqual([2])
+  })
+
   it('auto-stubs every method as a mock fn', () => {
     const service = createMock<NotificationService>()
 

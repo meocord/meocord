@@ -179,6 +179,72 @@ describe('createMockFn', () => {
       expect(vi.isMockFunction(mock)).toBe(true)
     })
   })
+
+  describe("Vitest's matchers on settled calls and call order", () => {
+    it('reads each call as it settles, a rejection apart from a resolution', async () => {
+      const load = createMockFn(async (id: string) => {
+        if (id === '') throw new Error('empty')
+        return id.length
+      })
+
+      await load('abc')
+      await load('de')
+      await expect(load('')).rejects.toThrow('empty')
+
+      expect(load).toHaveResolved()
+      expect(load).toHaveResolvedTimes(2)
+      expect(load).toHaveResolvedWith(3)
+      expect(load).toHaveNthResolvedWith(2, 2)
+      expect(load.mock.settledResults).toEqual([
+        { type: 'fulfilled', value: 3 },
+        { type: 'fulfilled', value: 2 },
+        { type: 'rejected', value: new Error('empty') },
+      ])
+    })
+
+    it('reads the last call as resolved once it settles, and a plain return as resolved at once', async () => {
+      const double = createMockFn((n: number) => n * 2)
+      double(2)
+      expect(double).toHaveLastResolvedWith(4)
+
+      let settle!: (value: string) => void
+      const pending = createMockFn(() => new Promise<string>(resolve => (settle = resolve)))
+      const call = pending()
+      expect(pending.mock.settledResults).toEqual([{ type: 'incomplete', value: undefined }])
+      settle('done')
+      await call
+      expect(pending).toHaveLastResolvedWith('done')
+    })
+
+    it('orders calls across mocks, as an interaction answered in steps shows', async () => {
+      const interaction = createMockInteraction(ButtonInteraction, { customId: 'refresh' })
+
+      await interaction.deferUpdate()
+      await interaction.editReply('Done.')
+
+      // vi.mocked only for the argument's type: Vitest types it as its own MockInstance
+      expect(interaction.deferUpdate).toHaveBeenCalledBefore(vi.mocked(interaction.editReply))
+      expect(interaction.editReply).toHaveBeenCalledAfter(vi.mocked(interaction.deferUpdate))
+      await interaction.followUp('More.')
+      expect(interaction.followUp).toHaveResolved()
+    })
+
+    it("records each call's this, and forgets the new records on mockClear and mockReset, out of the mock's keys", async () => {
+      const fn = createMockFn(async () => 1)
+      const receiver = { fn }
+
+      await receiver.fn()
+      expect(fn.mock.contexts).toEqual([receiver])
+      expect(fn.mock.invocationCallOrder).toHaveLength(1)
+
+      fn.mockClear()
+      expect([fn.mock.settledResults, fn.mock.invocationCallOrder, fn.mock.contexts]).toEqual([[], [], []])
+      await fn()
+      fn.mockReset()
+      expect([fn.mock.settledResults, fn.mock.invocationCallOrder, fn.mock.contexts]).toEqual([[], [], []])
+      expect(Object.keys(fn.mock)).toEqual(['calls', 'results', 'instances', 'lastCall'])
+    })
+  })
 })
 
 describe('clearAllMocks and resetAllMocks', () => {

@@ -31,6 +31,21 @@ export interface MockResult<T = unknown> {
 }
 
 /**
+ * One call's outcome once it has settled, as a mock function records it: what a returned promise resolved or rejected
+ * with, or what the call returned or threw. Vitest's `toHaveResolved` and the rest read it.
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link MockState}
+ */
+export interface MockSettledResult<T = unknown> {
+  /** `'fulfilled'` once the call resolved or returned, `'rejected'` once it rejected or threw, `'incomplete'` before. */
+  type: 'fulfilled' | 'rejected' | 'incomplete'
+  /** What the call resolved, returned, rejected or threw with; `undefined` while it is incomplete. */
+  value: T | undefined
+}
+
+/**
  * What a mock function has recorded: each call's arguments, outcome and `this`, in order.
  *
  * Read it as `fn.mock`. Jest's and Vitest's `toHaveBeenCalledWith` and the rest read it too.
@@ -48,6 +63,12 @@ export interface MockState<T extends (...args: any[]) => any = (...args: any[]) 
   readonly instances: any[]
   /** Arguments from the most recent call, or undefined if never called. */
   readonly lastCall?: CallArgs<T>
+  /** Each call's outcome once it has settled, in order. */
+  readonly settledResults: MockSettledResult<Awaited<CallResult<T>>>[]
+  /** When each call came, as a number that grows across meocord's own mocks. */
+  readonly invocationCallOrder: number[]
+  /** The `this` each call had, in order. */
+  readonly contexts: unknown[]
 }
 
 /**
@@ -145,6 +166,9 @@ export function isMockFunction(fn: unknown): fn is MockInstance {
   )
 }
 
+// When each call of meocord's own mocks came, across all of them, as Vitest numbers its own
+let invocationOrder = 0
+
 // Every mock createMockFn made, held weakly so the mocks of a finished test can still be collected
 const created = new Set<WeakRef<MockInstance>>()
 const collected = new FinalizationRegistry<WeakRef<MockInstance>>(ref => created.delete(ref))
@@ -224,17 +248,29 @@ export function useMockFn(factory: MockFnFactory): void {
         "would mix. Call it once, in the test runner's setup file.",
     )
   }
-  const probe = factory() as Partial<RunnerMock> | undefined
-  const api = ['mockImplementation', 'mockClear', 'mockReset'] as const
-  if (!isMockFunction(probe) || !Array.isArray(probe.mock?.calls) || api.some(name => typeof probe[name] !== 'function')) {
-    throw new Error(
+  const refusal = (cause?: unknown) =>
+    new Error(
       "useMockFn() takes a function that makes mocks with jest's and Vitest's API, such as vi.fn, jest.fn or bun's " +
         "mock. node:test's mock.fn records calls in its own shape, so under node:test leave meocord's own mock function " +
         'in place.',
+      cause === undefined ? undefined : { cause },
     )
+  let probe: Partial<RunnerMock> | undefined
+  try {
+    probe = factory() as Partial<RunnerMock> | undefined
+  } catch (error) {
+    // node:test's mock.fn, given on its own, throws for want of its tracker
+    throw refusal(error)
+  }
+  const api = ['mockImplementation', 'mockClear', 'mockReset'] as const
+  if (!isMockFunction(probe) || !Array.isArray(probe.mock?.calls) || api.some(name => typeof probe[name] !== 'function')) {
+    throw refusal()
   }
   runnerFactory = factory
 }
+
+/** Whether mocks are made with a runner's function, which {@link useMockFn} registered. */
+export const usesRunnerMockFn = (): boolean => runnerFactory !== undefined
 
 /** Goes back to meocord's own mock function and forgets every mock made, so a spec can register a factory afresh. */
 export function forgetMockFn(): void {
@@ -315,6 +351,10 @@ export function resetAllMocks(): void {
  * `mockReturnValue`, `mockResolvedValue`, `mockRejectedValue` and `mockImplementation` share one implementation, so
  * the last one set wins. The `*Once` variants queue, and run first, in the order they were set.
  *
+ * It records what Vitest's `toHaveResolved` and `toHaveBeenCalledBefore` read as well. Its call order is counted
+ * across meocord's own mocks, apart from the runner's, so compare the order of two of meocord's mocks, or of two of the
+ * runner's, not one of each.
+ *
  * @param impl - The implementation to run until another is set.
  *
  * @example
@@ -351,10 +391,18 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
   const calls: any[][] = []
   const results: MockResult<any>[] = []
   const instances: any[] = []
+  const settledResults: MockSettledResult[] = []
+  const invocationCallOrder: number[] = []
+  const contexts: unknown[] = []
 
   const mockFn = function (this: unknown, ...args: any[]): any {
     calls.push(args)
     instances.push(this)
+    contexts.push(this)
+    invocationCallOrder.push(++invocationOrder)
+    // Updated in place as the call settles, so a promise's outcome shows once it resolves or rejects
+    const settled: MockSettledResult = { type: 'incomplete', value: undefined }
+    settledResults.push(settled)
 
     let type: 'return' | 'throw' = 'return'
     let value: any
@@ -366,10 +414,27 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
       } else {
         value = undefined
       }
+      if (value instanceof Promise) {
+        // Returned in its place, so a rejection nobody awaits stays unhandled in the test, as it is on a bot: a handler
+        // on the implementation's own promise would mark it handled
+        value = value.then(
+          (resolved: unknown) => {
+            Object.assign(settled, { type: 'fulfilled', value: resolved })
+            return resolved
+          },
+          (rejected: unknown) => {
+            Object.assign(settled, { type: 'rejected', value: rejected })
+            throw rejected
+          },
+        )
+      } else {
+        Object.assign(settled, { type: 'fulfilled', value })
+      }
       return value
     } catch (err) {
       type = 'throw'
       value = err
+      Object.assign(settled, { type: 'rejected', value: err })
       throw err
     } finally {
       results.push({ type, value })
@@ -393,6 +458,12 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
       return calls.length > 0 ? calls[calls.length - 1] : undefined
     },
   } as MockState<T>
+  // Out of the mock's keys, so a test comparing `mock` as a whole sees the shape it always had
+  Object.defineProperties(mock, {
+    settledResults: { get: () => settledResults },
+    invocationCallOrder: { get: () => invocationCallOrder },
+    contexts: { get: () => contexts },
+  })
   Object.defineProperty(mockFn, 'mock', { value: mock, enumerable: false })
 
   mockFn.mockReturnValue = ((v: any) => {
@@ -427,16 +498,15 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
     onceQueue.push(fn)
     return mockFn
   }) as MockInstance<T>['mockImplementationOnce']
+  const forgetCalls = () => {
+    for (const record of [calls, results, instances, settledResults, invocationCallOrder, contexts]) record.length = 0
+  }
   mockFn.mockClear = (() => {
-    calls.length = 0
-    results.length = 0
-    instances.length = 0
+    forgetCalls()
     return mockFn
   }) as MockInstance<T>['mockClear']
   mockFn.mockReset = (() => {
-    calls.length = 0
-    results.length = 0
-    instances.length = 0
+    forgetCalls()
     onceQueue = []
     currentImpl = impl as ((...args: any[]) => any) | undefined
     return mockFn
