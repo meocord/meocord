@@ -32,6 +32,36 @@ describe("a message context menu's target", () => {
     expect([menu.targetId, menu.targetMessage]).toEqual([targetMessage.id, targetMessage])
   })
 
+  it('moves with the targetMessage set after creation, and re-makes the message for a targetId set after creation', () => {
+    const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })
+    const other = createMockMessage()
+    menu.targetMessage = other as never
+    expect([menu.targetId, menu.targetMessage]).toEqual([other.id, other])
+
+    menu.targetId = '1400000000000009999'
+    expect([menu.targetId, menu.targetMessage.id]).toEqual(['1400000000000009999', '1400000000000009999'])
+  })
+
+  it('gives a targetMessage with no id one, which targetId reads', () => {
+    const targetMessage = { content: 'x' }
+    const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report', targetMessage } as never)
+
+    expect(menu.targetId).toMatch(snowflake)
+    expect(menu.targetMessage.id).toBe(menu.targetId)
+  })
+
+  it("refuses a targetId other than its targetMessage's under useStrictMocks(), naming both, and keeps the message's with a warning otherwise", () => {
+    const targetMessage = createMockMessage()
+    const make = () => createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report', targetMessage, targetId: '1400000000000009999' })
+
+    expect(make().targetId).toBe(targetMessage.id)
+    expect(warned).toEqual([expect.stringMatching(new RegExp(`message ${targetMessage.id}.*1400000000000009999.*useStrictMocks\\(\\)`, 's'))])
+
+    forgetStrictMocks()
+    useStrictMocks()
+    expect(make).toThrow(new RegExp(`message ${targetMessage.id}.*1400000000000009999`))
+  })
+
   it('is a message made for a generated targetId when none is given', () => {
     const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })
 
@@ -48,6 +78,16 @@ describe('a user or attachment made with createMockInteraction', () => {
     expect([a.id, b.id, first.id, second.id]).toEqual([expect.stringMatching(snowflake), expect.stringMatching(snowflake), expect.stringMatching(snowflake), expect.stringMatching(snowflake)])
     expect(new Set([a.id, b.id, first.id, second.id]).size).toBe(4)
     expect(String(a)).toBe(`<@${a.id}>`)
+  })
+
+  it('takes its id from the count every mock takes one from, in the order they are made', () => {
+    const ids = [
+      createMockInteraction(User).id,
+      createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' }).targetId,
+      createMockInteraction(Attachment).id,
+    ].map(BigInt)
+
+    expect([ids[1] > ids[0], ids[2] > ids[1], ids[2] - ids[0] < 50n]).toEqual([true, true, true])
   })
 
   it('keys a modal upload by the attachment id', () => {
