@@ -106,6 +106,24 @@ export function emittedDigest(stats: Rspack.Stats | Rspack.MultiStats): string {
   return digest.digest('hex')
 }
 
+// Latin letters that do not decompose into a base letter and a mark
+const UNDECOMPOSED: Record<string, string> = { ß: 'ss', ẞ: 'SS', æ: 'ae', Æ: 'Ae', œ: 'oe', Œ: 'Oe', ø: 'o', Ø: 'O', ł: 'l', Ł: 'L', đ: 'd', Đ: 'D', þ: 'th', Þ: 'Th' }
+
+/**
+ * The folder `meocord create` writes an app named `appName` into, which is also its package name: kebab case, ASCII.
+ * Accents fold to their base letters first, so "CaféBot" splits as "CafeBot" does, into `cafe-bot`.
+ */
+export function appDirectoryName(appName: string): string {
+  return appName
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .replace(/[ßẞæÆœŒøØłŁđĐþÞ]/g, letter => UNDECOMPOSED[letter])
+    .replace(/([a-z])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 /** A Command Line Interface (CLI) for managing the MeoCord application. */
 export class MeoCordCLI {
   private readonly appName = 'MeoCord'
@@ -274,11 +292,7 @@ copies or substantial portions of the Software.
     appName: string,
     options: { useNpm?: boolean; useYarn?: boolean; usePnpm?: boolean; useBun?: boolean },
   ) {
-    const kebabCaseAppName = appName
-      .replace(/([a-z])([A-Z])/g, '$1-$2')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
+    const kebabCaseAppName = appDirectoryName(appName)
 
     const appPath = path.resolve(process.cwd(), kebabCaseAppName)
 
@@ -286,7 +300,7 @@ copies or substantial portions of the Software.
 
     // A name of only symbols would resolve to the current directory itself.
     if (!kebabCaseAppName) {
-      p.cancel(`"${appName}" needs a name with letters or digits, such as my-bot: it names the app's directory.`)
+      p.cancel(`"${appName}" needs a name with Latin letters or digits, such as my-bot: it names the app's directory.`)
       await wait(100)
       process.exit(1)
     }

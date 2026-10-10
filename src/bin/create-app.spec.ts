@@ -54,7 +54,7 @@ vi.mock('@src/util/package-manager.util.js', async importOriginal => ({
 const { makeInitialCommit } = vi.hoisted(() => ({ makeInitialCommit: vi.fn() }))
 vi.mock('@src/bin/helper/initial-commit.helper.js', () => ({ makeInitialCommit }))
 
-import { MeoCordCLI } from '@src/bin/meocord.js'
+import { appDirectoryName, MeoCordCLI } from '@src/bin/meocord.js'
 
 describe('meocord create', () => {
   const roots: string[] = []
@@ -127,4 +127,28 @@ describe('meocord create', () => {
     expect(prompts.log.warn).toHaveBeenCalledWith(expect.stringContaining('cd bot && git add -A && git commit -m "Initial commit"'))
     expect(prompts.outro).toHaveBeenCalled()
   })
+
+  // Accents fold before the camelCase split, so "CaféBot" is split as "CafeBot" is
+  it.each([
+    ['Café Bot', 'cafe-bot'],
+    ['CaféBot', 'cafe-bot'],
+    ['Ünïcödé', 'unicode'],
+    ['Straße', 'strasse'],
+    ['Smørrebrød', 'smorrebrod'],
+    ['Łódź Æther', 'lodz-aether'],
+    ['my_bot 2', 'my-bot-2'],
+  ])('names the folder for %j %j', (name, folder) => {
+    expect(appDirectoryName(name)).toBe(folder)
+  })
+
+  it('refuses a name with no Latin letters or digits, saying that is what it needs', async () => {
+    sandbox()
+
+    await expect(new MeoCordCLI().createApp('日本語ボット', { useBun: true })).rejects.toThrow('process.exit(1)')
+
+    expect(prompts.cancel).toHaveBeenCalledWith(
+      '"日本語ボット" needs a name with Latin letters or digits, such as my-bot: it names the app\'s directory.',
+    )
+  })
 })
+
