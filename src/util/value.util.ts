@@ -13,3 +13,11 @@ export function describeValue(value: unknown): string {
 
 /** A class's name after its article, such as `an AutocompleteInteraction`; a `U` name reads as "you", so takes `a`. */
 export const withArticle = (name: string): string => `${/^[AEIO]/i.test(name) ? 'an' : 'a'} ${name}`
+
+/**
+ * Sets `key` on `target` as an own, enumerable data property: unlike `target[key] = value`, a key named `__proto__`
+ * is a key like any other rather than the object's prototype.
+ */
+export function setOwn(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
+}
