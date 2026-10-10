@@ -36,8 +36,8 @@ const slots = globalThis as { [STOP]?: () => void; [LISTENING]?: boolean }
  * so a stop is heard however early it comes; until an app or shard manager says how it stops, the process exits at
  * once, as SIGTERM's default would.
  */
-export function listenForDevRunnerStop(): void {
-  if (!underDevRunner() || slots[LISTENING]) return
+export function listenForDevRunnerStop(shard = isShardProcess(process.env)): void {
+  if (!underDevRunner(shard) || slots[LISTENING]) return
   slots[LISTENING] = true
   process.on('message', message => {
     if (!isDevRunnerCommand(message)) return
@@ -49,15 +49,15 @@ export function listenForDevRunnerStop(): void {
   process.channel?.unref()
 }
 
-/** Has a stop from `meocord start --dev` run `stop`, as SIGINT and SIGTERM do. */
-export function onDevRunnerStop(stop: () => void): void {
-  listenForDevRunnerStop()
+/** Has a stop from `meocord start --dev` run `stop`, as SIGINT and SIGTERM do, in a process whose role is `shard`. */
+export function onDevRunnerStop(stop: () => void, shard: boolean): void {
+  listenForDevRunnerStop(shard)
   slots[STOP] = stop
 }
 
-/** Whether `meocord start --dev` runs this process and listens on its channel. */
-export function underDevRunner(): boolean {
-  return process.env[DEV_RUNNER_ENV] === '1' && !!process.send && !isShardProcess()
+/** Whether `meocord start --dev` runs this process, a shard or not as `shard` says, and listens on its channel. */
+export function underDevRunner(shard: boolean): boolean {
+  return process.env[DEV_RUNNER_ENV] === '1' && !!process.send && !shard
 }
 
 /**
@@ -65,6 +65,6 @@ export function underDevRunner(): boolean {
  * until the dev runner is taken to be gone. A caller sets the exit code before sending, so it holds however the send
  * ends. A shard tells its manager instead, which tells the dev runner in turn.
  */
-export async function tellDevRunner(message: DevRunnerMessage): Promise<void> {
-  if (underDevRunner()) await sendToParent(message)
+export async function tellDevRunner(message: DevRunnerMessage, shard: boolean): Promise<void> {
+  if (underDevRunner(shard)) await sendToParent(message)
 }

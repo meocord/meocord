@@ -43,7 +43,7 @@ import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToke
 import { markExplained } from '@src/common/explained-error.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
-import { isShardProcess, managerGone } from '@src/util/sharding-mode.util.js'
+import { managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
 import { claimAmbientAppTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
@@ -72,11 +72,11 @@ let shuttingDown: Promise<void> | undefined
  * it, and in a shard its manager's request or its going. A call within `REPEAT_SIGNAL_WINDOW_MS` of the first is the
  * same request; one after it forces exit 1, except in a shard, whose manager forces it.
  */
-export async function shutdownAndExit(): Promise<void> {
+export async function shutdownAndExit(shard: boolean): Promise<void> {
   const request = stopRequest()
   if (request !== 'first') {
     // A shard hears Ctrl+C both directly and from its manager, which owns forcing it; so it waits
-    if (request === 'duplicate' || isShardProcess()) return
+    if (request === 'duplicate' || shard) return
     process.exit(1)
     return
   }
@@ -100,28 +100,28 @@ function stoppedBeforeOnline(): Error {
   return error
 }
 
-/** One pair of signal listeners for the process, however many apps it starts. */
-function installSignalHandlers(): void {
+/** One pair of signal listeners for the process, however many apps it starts, for the role the first decided. */
+function installSignalHandlers(shard: boolean): void {
   if (signalHandlersInstalled) return
   signalHandlersInstalled = true
-  process.on('SIGINT', () => void shutdownAndExit())
-  process.on('SIGTERM', () => void shutdownAndExit())
+  process.on('SIGINT', () => void shutdownAndExit(shard))
+  process.on('SIGTERM', () => void shutdownAndExit(shard))
   // How `meocord start --dev` stops the application to restart it, a signal being no graceful stop on Windows. It is
   // not the user's stop request: their first Ctrl+C during it joins this shutdown, and only a repeat forces exit 1.
-  onDevRunnerStop(() => void shutDown())
+  onDevRunnerStop(() => void shutDown(), shard)
 
   // A shard stops when its manager asks, or when the manager is gone and cannot ask
-  if (isShardProcess()) {
+  if (shard) {
     process.on('message', message => {
-      if (isShardMessage(message) && message.meocord === 'shutdown') void shutdownAndExit()
+      if (isShardMessage(message) && message.meocord === 'shutdown') void shutdownAndExit(shard)
     })
-    process.on('disconnect', () => void shutdownAndExit())
+    process.on('disconnect', () => void shutdownAndExit(shard))
   }
 }
 
 /** Tells the manager a shard cannot log in, and why, and waits until the message is sent. */
-async function reportFatalLogin(code: FatalLoginCode, reason: string): Promise<void> {
-  if (isShardProcess()) await tellManager({ meocord: 'fatal', code, message: reason })
+async function reportFatalLogin(shard: boolean, code: FatalLoginCode, reason: string): Promise<void> {
+  if (shard) await tellManager({ meocord: 'fatal', code, message: reason })
 }
 
 export class MeoCordApp implements MeoCordApplication {
@@ -147,6 +147,8 @@ export class MeoCordApp implements MeoCordApplication {
     lifecycleUnits?: LifecycleUnit[],
     private readonly messageOptions: MessageCommandOptions = {},
     warnUnanswered = false,
+    /** Whether a manager spawned this process, as `MeoCordFactory.create` decided before anything could change it. */
+    private readonly shard = false,
   ) {
     // First, so nothing logged from here on, before login or after, prints it
     hideInLogs(discordToken)
@@ -252,7 +254,7 @@ export class MeoCordApp implements MeoCordApplication {
     this.starting ??= this.startOnce()
       .catch(error => {
         // A shard ends, for its manager to restart, or to stop all if told it is fatal; a stopped start is the stop's
-        if (isShardProcess() && !this.closing) endFailedShard(error)
+        if (this.shard && !this.closing) endFailedShard(error)
         throw error
       })
       .finally(() => (this.starting = undefined))
@@ -265,7 +267,7 @@ export class MeoCordApp implements MeoCordApplication {
    * unless a code is already set.
    */
   async stop(): Promise<void> {
-    if (isShardProcess()) await tellManager({ meocord: 'stop' })
+    if (this.shard) await tellManager({ meocord: 'stop' })
     // As a signal's shutdown exits 1 for a client that failed to close, a code another failure set aside
     if (!(await this.close()) && !process.exitCode) process.exitCode = 1
   }
@@ -283,9 +285,9 @@ export class MeoCordApp implements MeoCordApplication {
     this.logger.log('Starting bot...')
     // Before the providers are made, so a signal, or a shard's manager, can stop a start that is slow to come online
     runningApps.add(this.close)
-    installSignalHandlers()
+    installSignalHandlers(this.shard)
     // A shard whose manager is already gone has no one to answer to, and nothing would stop it later
-    if (isShardProcess() && managerGone()) void shutdownAndExit()
+    if (this.shard && managerGone()) void shutdownAndExit(this.shard)
     // A bot runs one app, whose theme code outside any call reads, its providers' factories included; claimed for
     // each start, as a failed one gives it up
     claimAmbientAppTheme(this.container)
@@ -337,7 +339,7 @@ export class MeoCordApp implements MeoCordApplication {
         // Started before registration and not waited on by it, so a slow or failed registration never holds them up
         const readyHooks = this.runReadyHooks((readyClient ?? this.bot) as Client<true>)
         // With process sharding, the manager registers once for every shard
-        if (!isShardProcess()) await this.registerCommands()
+        if (!this.shard) await this.registerCommands()
         await readyHooks
       }),
     )
@@ -393,16 +395,16 @@ export class MeoCordApp implements MeoCordApplication {
       const explanation = fatal && explainLoginFailure(fatal, this.bot.options?.intents, this.discordToken)
       if (explanation) {
         // The explanation is what to act on, and the stack only for debugging. A shard's manager logs it instead.
-        if (!isShardProcess()) this.logger.error(explanation)
+        if (!this.shard) this.logger.error(explanation)
         this.logger.debug('Login failed:', error)
         markExplained(error)
       }
-      if (fatal) await reportFatalLogin(fatal, explanation ?? (error instanceof Error ? error.message : String(error)))
+      if (fatal) await reportFatalLogin(this.shard, fatal, explanation ?? (error instanceof Error ? error.message : String(error)))
       if (process.exitCode === undefined || process.exitCode === 0) {
         process.exitCode = 1
         MeoCordApp.failedLoginSetExitCode = true
       }
-      await tellDevRunner({ meocord: 'login-failed' })
+      await tellDevRunner({ meocord: 'login-failed' }, this.shard)
       MeoCordApp.toldDevRunnerLoginFailed = true
       this.loginFailed = true
       throw error
@@ -418,7 +420,7 @@ export class MeoCordApp implements MeoCordApplication {
     }
     if (MeoCordApp.toldDevRunnerLoginFailed) {
       MeoCordApp.toldDevRunnerLoginFailed = false
-      await tellDevRunner({ meocord: 'online' })
+      await tellDevRunner({ meocord: 'online' }, this.shard)
     }
     this.online = true
     this.logger.log('Bot is online!')

@@ -1,8 +1,6 @@
 import { type ClientOptions } from 'discord.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
-import { isShardProcess } from '@src/util/shard-process.util.js'
-
 // Kept in a module of their own, so the dev runner, which the pre-entry loads, imports them without this module's imports
 export { isShardProcess, SHARDING_MANAGER_ENV } from '@src/util/shard-process.util.js'
 
@@ -21,11 +19,11 @@ export function processShardingEnabled(config: MeoCordConfig, env: NodeJS.Proces
 }
 
 /**
- * The role of this process: a shard when a manager spawned it, the manager when process sharding is on,
- * and otherwise a single process running every shard it has.
+ * The role of this process: a shard when a manager spawned it, as `shard` says, the manager when process sharding is
+ * on, and otherwise a single process running every shard it has.
  */
-export function shardingRole(config: MeoCordConfig, env: NodeJS.ProcessEnv = process.env): ShardingRole {
-  if (isShardProcess(env)) return 'shard'
+export function shardingRole(config: MeoCordConfig, shard: boolean, env: NodeJS.ProcessEnv = process.env): ShardingRole {
+  if (shard) return 'shard'
   return processShardingEnabled(config, env) ? 'manager' : 'single'
 }
 

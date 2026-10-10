@@ -31,7 +31,7 @@ export interface CooldownChannel {
 
 /** A shard's channel to its manager, or none outside process sharding. */
 function managerChannel(): CooldownChannel | undefined {
-  return isShardProcess() && typeof process.send === 'function' ? channelOver(process) : undefined
+  return isShardProcess(process.env) && typeof process.send === 'function' ? channelOver(process) : undefined
 }
 
 /**

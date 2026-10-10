@@ -682,6 +682,37 @@ describe('ShardManager', () => {
       expect(order).toEqual([{ meocord: 'login-failed' }, 1])
     })
 
+    // discord.js's ShardingManager writes the variable that marks a shard into the manager's own process
+    it('tells it when a shard cannot log in, with the real ShardingManager built', async () => {
+      for (const name of ['SHARDING_MANAGER', 'SHARDING_MANAGER_MODE', 'DISCORD_TOKEN']) vi.stubEnv(name, undefined)
+      onTestFinished(() => void vi.unstubAllEnvs())
+      const exit = vi.fn((code: number) => void order.push(code))
+      let shard!: Shard
+      const manager = new ShardManager({
+        controllerClasses: [],
+        token: 'token',
+        config: { discordToken: 'token', sharding: { mode: 'process', shards: 1 }, commands: { register: false } },
+        createManager: (_file, options) => {
+          const real = new ShardingManager(fileURLToPath(import.meta.url), options)
+          const createShard = real.createShard.bind(real)
+          real.createShard = (id: number) => {
+            shard = createShard(id)
+            shard.spawn = async () => ({}) as never
+            return shard
+          }
+          return real
+        },
+        exit,
+        sleep: async () => {},
+      })
+      await manager.start()
+
+      shard.emit('message', { meocord: 'fatal', code: 'TokenInvalid', message: 'An invalid token was provided.' })
+      await vi.waitFor(() => expect(exit).toHaveBeenCalled())
+
+      expect(order).toEqual([{ meocord: 'login-failed' }, 1])
+    })
+
     // A refusal is no failed login, so `meocord start --dev` is not told the bot could not log in
     it('tells it nothing when a shard reports a refusal, and exits 1', async () => {
       const { manager, shards, exit } = setup({ shards: 1 })
