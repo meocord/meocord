@@ -799,7 +799,8 @@ export function createMockInteraction<T extends object>(
 ): DeepMocked<T>
 /**
  * Creates a mock interaction from a server the bot isn't in: one given a {@link createMockRawMember | raw member} and
- * that server's `guildId`, as a user-installed command run there arrives.
+ * that server's `guildId`, with no `channel`, as discord.js caches none there, as a user-installed command run there
+ * arrives.
  *
  * It is typed as discord.js types an interaction from such a server, `'raw'`: its `guild` is `null` and its `member`
  * the raw member. Everything else is as {@link createMockInteraction} builds it.
