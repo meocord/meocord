@@ -699,8 +699,8 @@ export class TestingModule {
    * `@Once` handler handles only the first event, as it would on a client.
    *
    * The bot's event fallback doesn't run here. On a bot, a guard's `GuardDeniedError` is logged and the
-   * event skipped, and a handler's `UserError` is answered; here both reject `emit` as any error does,
-   * so a test checks them with `rejects`.
+   * event skipped, and a handler's `UserError` is logged and, when the event carries a message, answered
+   * as a reply to it; here both reject `emit` as any error does, so a test checks them with `rejects`.
    *
    * @param event - The client event, such as `'guildMemberAdd'`.
    * @param args - The event's arguments, typed from discord.js's `ClientEvents`.
