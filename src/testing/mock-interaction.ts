@@ -840,6 +840,9 @@ type WithCache<T, C extends CacheType> =
 // What makes an interaction one outside a server: no guild, no member, or a DM channel
 type OutsideServer = { guild: null } | { member: null } | { channel: DMChannel | PartialGroupDMChannel }
 
+// A raw member is taken only as from a server the bot isn't in, where discord.js caches no channel to give beside it
+type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>['member'], APIInteractionGuildMember> } : unknown
+
 /**
  * Creates a mock instance of a discord.js class, such as an interaction, keeping its prototype so `instanceof` holds.
  *
@@ -896,7 +899,7 @@ type OutsideServer = { guild: null } | { member: null } | { channel: DMChannel |
  */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
-  props?: MockProps<T>,
+  props?: MockProps<T> & NotRaw<T>,
 ): DeepMocked<T>
 /**
  * Creates a mock interaction from a server the bot isn't in: one given a {@link createMockRawMember | raw member} and
@@ -922,7 +925,12 @@ export function createMockInteraction<T extends object>(
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
   // Options from createChatInputOptions are typed for any server, so a raw interaction takes them as they are
-  props: Omit<MockProps<WithCache<T, 'raw'>>, 'options'> & { options?: object; guildId: string; member: APIInteractionGuildMember },
+  props: Omit<MockProps<WithCache<T, 'raw'>>, 'options' | 'channel'> & {
+    options?: object
+    guildId: string
+    member: APIInteractionGuildMember
+    channel?: never
+  },
 ): DeepMocked<WithCache<T, 'raw'>>
 /**
  * Creates a mock interaction from outside a server: one given `guild: null`, `member: null` or a DM channel, as from a
@@ -947,7 +955,7 @@ export function createMockInteraction<T extends object>(
  */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,
-  props: MockProps<WithCache<T, CacheType>> & OutsideServer,
+  props: MockProps<WithCache<T, CacheType>> & OutsideServer & NotRaw<WithCache<T, CacheType>>,
 ): DeepMocked<WithCache<T, CacheType>>
 export function createMockInteraction<T extends object>(Class: InteractionClass<T>, props?: MockProps<T>): DeepMocked<T> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
