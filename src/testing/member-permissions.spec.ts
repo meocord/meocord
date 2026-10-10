@@ -60,12 +60,21 @@ describe('memberPermissions, under useStrictMocks()', () => {
     expect([interaction.memberPermissions!.has(SendMessages), interaction.memberPermissions!.has(ManageMessages)]).toEqual([false, true])
   })
 
-  it('keeps every permission for an Administrator and for the server owner', () => {
+  it('gives every permission to an Administrator and to the server owner, as discord.js does', () => {
     const admin = deniedChannel([Administrator])
     const owner = deniedChannel()
     owner.guild.ownerId = owner.member.id
 
-    for (const { interaction } of [admin, owner]) expect(interaction.memberPermissions!.has(SendMessages)).toBe(true)
+    for (const { interaction } of [admin, owner]) expect(interaction.memberPermissions!.bitfield).toBe(PermissionsBitField.All)
+  })
+
+  it("lets a role's allow win over @everyone's deny of the same permission, then the member's over the role's", () => {
+    const { channel, interaction, member } = deniedChannel()
+    const [role] = [...member.roles.cache.values()].filter(each => each.id !== member.guild.id)
+    channel.permissionOverwrites.cache.set(role.id, { id: role.id, type: OverwriteType.Role, allow: bits(SendMessages), deny: bits(ViewChannel) } as never)
+    channel.permissionOverwrites.cache.set(member.id, { id: member.id, type: OverwriteType.Member, allow: bits(ViewChannel), deny: bits() } as never)
+
+    expect([interaction.memberPermissions!.has(SendMessages), interaction.memberPermissions!.has(ViewChannel)]).toEqual([true, true])
   })
 
   it("uses a thread's parent's overwrites", () => {
@@ -84,6 +93,49 @@ describe('memberPermissions, under useStrictMocks()', () => {
   })
 })
 
+describe("memberPermissions, beside discord.js's own permissionsIn", () => {
+  beforeEach(() => useStrictMocks())
+
+  // For a member whose permissions come from its roles alone, both compute the same: a drift in discord.js's turns red
+  it.each([
+    ['@everyone denied', () => deniedChannel()],
+    ['@everyone allowed', () => {
+      const place = deniedChannel([ViewChannel])
+      place.channel.permissionOverwrites.cache.set(place.guild.id, { id: place.guild.id, type: OverwriteType.Role, allow: bits(ManageMessages), deny: bits() } as never)
+      return place
+    }],
+    ['a role over @everyone', () => {
+      const place = deniedChannel()
+      const [role] = [...place.member.roles.cache.values()].filter(each => each.id !== place.guild.id)
+      place.channel.permissionOverwrites.cache.set(role.id, { id: role.id, type: OverwriteType.Role, allow: bits(SendMessages), deny: bits() } as never)
+      return place
+    }],
+    ['the member over a role', () => {
+      const place = deniedChannel()
+      const [role] = [...place.member.roles.cache.values()].filter(each => each.id !== place.guild.id)
+      place.channel.permissionOverwrites.cache.set(role.id, { id: role.id, type: OverwriteType.Role, allow: bits(), deny: bits(ViewChannel) } as never)
+      place.channel.permissionOverwrites.cache.set(place.member.id, { id: place.member.id, type: OverwriteType.Member, allow: bits(ViewChannel), deny: bits() } as never)
+      return place
+    }],
+    ['an Administrator', () => deniedChannel([Administrator])],
+    ['the owner', () => {
+      const place = deniedChannel()
+      place.guild.ownerId = place.member.id
+      return place
+    }],
+    ['a thread', () => {
+      const place = deniedChannel()
+      const thread = createMockChannel(ThreadChannel, { guild: place.guild, parentId: place.channel.id } as never)
+      const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guild: place.guild, channel: thread, member: place.member } as never)
+      return { ...place, channel: thread as never, interaction }
+    }],
+  ])('agrees for %s', (_case, make) => {
+    const { channel, interaction, member } = make()
+
+    expect(interaction.memberPermissions!.bitfield).toBe(member.permissionsIn(channel).bitfield)
+  })
+})
+
 describe('memberPermissions, in default mode', () => {
   it("reads the member's permissions as before, and warns once with what strict mocks read", () => {
     const { interaction } = deniedChannel()
@@ -92,11 +144,16 @@ describe('memberPermissions, in default mode', () => {
     expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions .*overwrites.*5\.0.*SendMessages.*useStrictMocks\(\)/s)])
   })
 
+  it('warns for an Administrator, whose every permission strict mocks read', () => {
+    void deniedChannel([Administrator]).interaction.memberPermissions
+
+    expect(warned).toEqual([expect.stringMatching(/memberPermissions .*Administrator.*5\.0.*with .*ManageGuild/s)])
+  })
+
   it("says nothing where the channel's overwrites change nothing", () => {
     const { channel, interaction, guild } = deniedChannel([ViewChannel])
     channel.permissionOverwrites.cache.delete(guild.id)
     void interaction.memberPermissions
-    void deniedChannel([Administrator]).interaction.memberPermissions
 
     expect(warned).toEqual([])
   })
