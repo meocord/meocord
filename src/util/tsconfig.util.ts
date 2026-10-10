@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSyn
 import { hostname, tmpdir } from 'os'
 import { createRequire } from 'module'
 import { parseJsonc } from '@src/util/json.util.js'
+import { projectPaths } from '@src/util/tsconfig-paths.util.js'
 
 /**
  * An `extends` made to work from another directory: a relative path made absolute, and a package
@@ -94,7 +95,7 @@ function copiesDirectory(): string {
 
 /**
  * Writes a copy of the project's tsconfig.json for the bundler and returns its path: comments and trailing commas
- * removed, paths made absolute (a `paths` target from `baseUrl` when set), `noEmit` dropped. One file per call in this
+ * removed, paths made absolute (`paths` as {@link projectPaths} reads them), `noEmit` dropped. One file per call in this
  * process's directory, removed at exit; the project's file is never written.
  * @throws When `tsconfig.json` is missing or cannot be parsed.
  */
@@ -122,8 +123,11 @@ export function prepareModifiedTsConfig(): string {
   // The copy lives in the temp directory, so every path in it is made absolute from the project
   const cwd = process.cwd()
   if (parsedConfig?.extends) parsedConfig.extends = resolveExtends(parsedConfig.extends, cwd)
+  // `${configDir}` is the project, which the copy's own directory would otherwise stand for
   for (const key of ['include', 'exclude', 'files']) {
-    if (Array.isArray(parsedConfig?.[key])) parsedConfig[key] = parsedConfig[key].map((p: string) => path.resolve(cwd, p))
+    if (Array.isArray(parsedConfig?.[key])) {
+      parsedConfig[key] = parsedConfig[key].map((p: string) => path.resolve(cwd, p.replaceAll('${configDir}', cwd)))
+    }
   }
 
   // Process compilerOptions
@@ -141,22 +145,15 @@ export function prepareModifiedTsConfig(): string {
       parsedConfig.compilerOptions.typeRoots = parsedConfig.compilerOptions.typeRoots.map((p: string) => path.resolve(cwd, p))
     }
 
-    // A `paths` target is relative to baseUrl when there is one, made absolute above, and else to the project. Only
-    // this file's own baseUrl counts: one inherited through `extends` isn't applied, so paths are the project's own.
-    if (parsedConfig.compilerOptions.paths) {
-      const base: string = parsedConfig.compilerOptions.baseUrl ?? cwd
-      Object.keys(parsedConfig.compilerOptions.paths).forEach(alias => {
-        parsedConfig.compilerOptions.paths[alias] = parsedConfig.compilerOptions.paths[alias].map((p: string) =>
-          path.resolve(base, p),
-        )
-      })
-    }
-
     // Remove `noEmit` option if it exists
     if ('noEmit' in parsedConfig.compilerOptions) {
       delete parsedConfig.compilerOptions.noEmit
     }
   }
+
+  // The paths as tsc reads them, inherited ones included, written absolute so the copy in the temp directory keeps them
+  const paths = projectPaths(cwd)
+  if (paths) (parsedConfig.compilerOptions ??= {}).paths = paths
 
   const tempTsConfigPath = path.join(copiesDirectory(), `modified-tsconfig-${++copies}.json`)
   writeFileSync(tempTsConfigPath, JSON.stringify(parsedConfig, null, 2))

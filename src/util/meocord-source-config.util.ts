@@ -1,9 +1,9 @@
 import path from 'path'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync } from 'fs'
 import { createJiti } from 'jiti'
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { parseJsonc } from '@src/util/json.util.js'
 import { comparablePath, framePath } from '@src/util/source-path.util.js'
+import { projectPaths } from '@src/util/tsconfig-paths.util.js'
 
 /**
  * Loads `meocord.config.ts` from source on every call, so a build always uses the current config
@@ -29,20 +29,10 @@ export function readMeoCordSourceConfig(): { config: MeoCordConfig | undefined }
   if (!existsSync(configPath)) return { config: undefined }
 
   try {
-    const tsConfigPath = path.resolve(process.cwd(), 'tsconfig.json')
-    const aliases: Record<string, string> = {}
-
-    if (existsSync(tsConfigPath)) {
-      const tsConfig = parseJsonc(readFileSync(tsConfigPath, 'utf-8'))
-      const paths = tsConfig?.compilerOptions?.paths
-
-      if (paths) {
-        for (const [key, values] of Object.entries(paths)) {
-          const aliasKey = key.replace('/*', '')
-          aliases[aliasKey] = path.resolve(process.cwd(), (values as string[])[0].replace('/*', ''))
-        }
-      }
-    }
+    // Each alias to its first target, as the build reads the same paths
+    const aliases = Object.fromEntries(
+      Object.entries(projectPaths() ?? {}).map(([alias, [target]]) => [alias.replace(/\/\*$/, ''), target.replace(/\/\*$/, '')]),
+    )
 
     // The module as written, so an ES module with no default export is told apart from a CommonJS one
     const jiti = createJiti(import.meta.url, {
