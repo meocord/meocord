@@ -27,14 +27,16 @@ export const findModulePackageDir = (moduleName: string, baseDir: string = proce
  * the warnings for options it does not know.
  *
  * @returns The config, or the report of why it cannot be used: missing, failing to load, or with options of the wrong
- *   type, each of them listed.
+ *   type, each of them listed. A config that fails to load also gives the reason alone, as `loadError`.
  */
-export function checkSourceConfig(): { config: MeoCordConfig | undefined } | { problem: string } {
+export function checkSourceConfig(): { config: MeoCordConfig | undefined } | { problem: string; loadError?: string } {
   const meocordConfigPath = path.resolve(process.cwd(), 'meocord.config.ts')
   if (!fs.existsSync(meocordConfigPath)) return { problem: 'Configuration file "meocord.config.ts" is missing!' }
 
   const loaded = readMeoCordSourceConfig()
-  if ('error' in loaded) return { problem: `meocord.config.ts could not be loaded, so nothing was built or started:\n  ${loaded.error}` }
+  if ('error' in loaded) {
+    return { problem: `meocord.config.ts could not be loaded, so nothing was built or started:\n  ${loaded.error}`, loadError: loaded.error }
+  }
 
   const problem = shapeProblem(loaded.config)
   return problem ? { problem } : { config: loaded.config }

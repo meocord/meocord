@@ -82,11 +82,12 @@ async function startWatching() {
   }))
   await cli.startDev()
   const running = vi.mocked(spawn).mock.results.at(-1)?.value as { kill: ReturnType<typeof vi.fn> }
+  const errors = vi.mocked((cli as unknown as { logger: { error: (text: string) => void } }).logger.error)
   const save = (source: string) => {
     writeFileSync(path.join(project, 'meocord.config.ts'), source)
     listener('change', 'meocord.config.ts')
   }
-  return { save, compileConfig, createBundler, running }
+  return { save, compileConfig, createBundler, running, errors }
 }
 
 describe('a meocord.config.ts saved while start --dev runs', () => {
@@ -104,14 +105,15 @@ describe('a meocord.config.ts saved while start --dev runs', () => {
     expect(dev.running.kill).not.toHaveBeenCalled()
   })
 
-  it("is reported with where it threw when it fails to load, and leaves the running bot alone", async () => {
+  // Reported as a failed compile is in watch mode, where the next save that loads reloads
+  it('is reported as a failed compile, with where it threw, when it fails to load, and leaves the running bot alone', async () => {
     const dev = await startWatching()
 
     dev.save(THROWS)
-    await vi.waitFor(() => expect(printed.join('\n')).toContain('FOO is required'))
+    await vi.waitFor(() => expect(dev.errors).toHaveBeenCalled())
 
-    expect(printed.join('\n')).toContain('could not be loaded')
-    expect(printed.join('\n')).toContain('at meocord.config.ts:3:')
+    expect(dev.errors).toHaveBeenCalledWith(expect.stringMatching(/^Failed to compile meocord\.config\.ts: FOO is required\n {4}at meocord\.config\.ts:3:\d+$/))
+    expect(printed).toEqual([])
     expect(dev.compileConfig).toHaveBeenCalledTimes(1)
     expect(dev.running.kill).not.toHaveBeenCalled()
   })
