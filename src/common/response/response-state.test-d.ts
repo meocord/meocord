@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest'
-import { type ButtonInteraction, type Message, MessageFlags } from 'discord.js'
+import { type APIMessageTopLevelComponent, type ButtonInteraction, type Message, MessageFlags } from 'discord.js'
 import { respond, type ResponseState } from '@src/common/index.js'
 
 /**
@@ -15,6 +15,16 @@ describe('respond()', () => {
     void respond(interaction).send({ content: 'Only you', flags: MessageFlags.Ephemeral })
     void respond(interaction).followUp({ content: 'Quiet', flags: [MessageFlags.SuppressNotifications, MessageFlags.Ephemeral] })
     void respond(interaction).send({ components: [], flags: MessageFlags.IsComponentsV2 })
+  })
+
+  it("hands the original message's components back to send and editReply, as it does its embeds", () => {
+    const state = respond(interaction)
+    const original = state.original
+    if (original) {
+      void state.send({ components: original.components, embeds: original.embeds })
+      void interaction.editReply({ components: original.components })
+      expectTypeOf(original.components).toEqualTypeOf<readonly APIMessageTopLevelComponent[]>()
+    }
   })
 
   it('refuses a flag Discord sets itself, and the withResponse option respond() manages', () => {
