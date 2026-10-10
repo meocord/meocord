@@ -139,6 +139,24 @@ describe("a message context menu's target", () => {
     expect(menu.channel).toBe(channel)
   })
 
+  it("warns once on a read of its place where strict mocks place the menu elsewhere, and is in the menu's guild under useStrictMocks()", () => {
+    const guild = createMockGuild()
+    const make = () => createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report', guild }).targetMessage
+
+    const target = make()
+    expect([target.guild, target.guild, target.guildId]).toEqual([null, null, null])
+    expect(warned).toEqual([
+      expect.stringMatching(/^MessageContextMenuCommandInteraction\.targetMessage\.guild reads a DM's value.*useStrictMocks\(\)/s),
+      expect.stringMatching(/^MessageContextMenuCommandInteraction\.targetMessage\.guildId reads a DM's value/),
+    ])
+
+    warned = []
+    forgetStrictMocks()
+    useStrictMocks()
+    expect(make().guild).toBe(guild)
+    expect(warned).toEqual([])
+  })
+
   it.each(modes)("is made in the user's DM channel for a menu used in a DM, in %s", (_mode, setUp) => {
     setUp()
     const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })
