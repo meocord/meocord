@@ -31,8 +31,10 @@ export interface MockResult<T = unknown> {
 }
 
 /**
- * One call's outcome once it has settled, as a mock function records it: what a returned promise resolved or rejected
- * with, or what the call returned or threw. Vitest's `toHaveResolved` and the rest read it.
+ * One call's outcome once it has settled, as a mock function records it.
+ *
+ * It holds what a returned promise resolved or rejected with, or what the call returned or threw. Vitest's
+ * `toHaveResolved` and the rest read it.
  *
  * @group Testing
  * @category Mocks
