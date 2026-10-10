@@ -859,6 +859,10 @@ export class TestingModuleBuilder {
   /**
    * Replaces a guard with a stub wherever it applies, globally or on a controller or handler.
    *
+   * It stands in for the guard wherever the guard is bound, a provider of the same token included, and wins over an
+   * `overrideProvider` of it. The stub needs a `canActivate`, its own or its prototype's: `compile()` refuses one without
+   * it under `useStrictMocks()`, and otherwise warns.
+   *
    * @param guard - The guard class to replace.
    * @example
    * ```ts
@@ -880,6 +884,10 @@ export class TestingModuleBuilder {
    * Replaces an interceptor with a stub wherever it applies, globally or on a controller or handler.
    * The stub's `intercept` receives the context and `next`; call `next.handle()` to run the handler.
    *
+   * It stands in for the interceptor wherever it is bound, a provider of the same token included, and wins over an
+   * `overrideProvider` of it. A stub without `intercept` is refused by `compile()` under `useStrictMocks()`, and
+   * otherwise warned about.
+   *
    * @param interceptor - The interceptor class to replace.
    * @example
    * ```ts
@@ -900,6 +908,10 @@ export class TestingModuleBuilder {
   /**
    * Replaces an exception filter with a stub wherever it applies. The filter's `@Catch` still decides
    * which errors reach the stub.
+   *
+   * It stands in for the filter wherever it is bound, a provider of the same token included, and wins over an
+   * `overrideProvider` of it. A stub without `catch` is refused by `compile()` under `useStrictMocks()`, and otherwise
+   * warned about.
    *
    * @param filter - The filter class to replace.
    * @example
@@ -1029,6 +1041,21 @@ export class TestingModuleBuilder {
         const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
         for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
         for (const [token, override] of this.overrides) providers.set(token, override)
+        // A stage override stands in for its class wherever the class is bound, a provider of the same token included,
+        // and wins over overrideProvider's: one binding per token. A stub that can't run is named here, where it is set
+        for (const [method, overrides, kind] of [
+          ['canActivate', this.guardOverrides, 'overrideGuard'],
+          ['intercept', this.interceptorOverrides, 'overrideInterceptor'],
+          ['catch', this.filterOverrides, 'overrideFilter'],
+        ] as const) {
+          for (const [stage, stub] of overrides as Map<new (...args: any[]) => unknown, object>) {
+            providers.set(stage, { provide: stage, useValue: stub })
+            if (typeof (stub as Record<string, unknown>)[method] === 'function') continue
+            const problem = `${kind}(${stage.name}).useValue(…) has no ${method} method.`
+            if (strictMocks()) startupError(new Error(problem))
+            else new Logger('TestingModule').warn(`${problem} A call that reaches ${stage.name} fails; useStrictMocks() refuses it here.`)
+          }
+        }
         // Each pass of checks ends before the next step that is no check, so a module with one error stops where it always did
         stopOnStartupErrors()
         const services = this.wiring?.services ?? []
@@ -1072,19 +1099,6 @@ export class TestingModuleBuilder {
                 '{ provide: Client, useValue: createMockClient() }.',
             )
           })
-        }
-
-        // Bind guard overrides — prevents inversify from auto-wiring guard dependencies
-        for (const [guardClass, stub] of this.guardOverrides) {
-          container.bind(guardClass).toConstantValue(stub as GuardInterface)
-        }
-
-        for (const [filterClass, stub] of this.filterOverrides) {
-          container.bind(filterClass).toConstantValue(stub as ExceptionFilter)
-        }
-
-        for (const [interceptorClass, stub] of this.interceptorOverrides) {
-          container.bind(interceptorClass).toConstantValue(stub as InterceptorInterface)
         }
 
         // The app's cooldown policy, so a test of a failing store sees what the bot would do

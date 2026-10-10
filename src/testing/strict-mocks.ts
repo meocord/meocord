@@ -37,6 +37,9 @@ export function noteMockMade(): void {
  * `invoke` also refuses a call that gives a handler fewer arguments than it declares where it builds none, such as a
  * reaction handler given its reaction without its `ReactionEvent`; without strict mocks, it warns once and calls it.
  *
+ * `compile()` also refuses an `overrideGuard`, `overrideInterceptor` or `overrideFilter` stub without the stage's
+ * method, `canActivate`, `intercept` or `catch`; without strict mocks, it warns and builds the module.
+ *
  * @throws Error when a mock already exists, which was made without it.
  *
  * @example
