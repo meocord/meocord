@@ -89,18 +89,24 @@ function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<
         'mock, or call useStrictMocks() to compute them now.',
     )
   }
-  // A member's permissions come from its roles, @everyone's included, which strict mocks give a new server's
-  const everyone = guild.roles.everyone as Role | undefined
-  const fromRoles = !Object.prototype.hasOwnProperty.call(member, 'permissions')
-  if (fromRoles && everyone && isUnsetEveryone(everyone) && !base.has(NEW_SERVER_EVERYONE_PERMISSIONS)) {
-    warnOnce(
-      mockLogger,
-      `${interaction.constructor.name}.memberPermissions reads the server's @everyone role here with no permissions; in the ` +
-        'next major version (5.0) it has the permissions Discord gives @everyone in a new server, as strict mocks read it. ' +
-        'Set guild.roles.everyone.permissions, or call useStrictMocks() to read it so now.',
-    )
-  }
+  // Unless the test set them, a member's permissions come from its roles, @everyone's included
+  if (!Object.prototype.hasOwnProperty.call(member, 'permissions')) warnOnUnsetEveryone(interaction, guild, 'memberPermissions', base)
   return base
+}
+
+/**
+ * Warns once, as `key`, where `permissions` read a server's @everyone role default mode made with none, and lack what
+ * strict mocks give @everyone in a new server.
+ */
+function warnOnUnsetEveryone(interaction: BaseInteraction, guild: Guild, key: string, permissions: Readonly<PermissionsBitField>): void {
+  const everyone = guild.roles.everyone as Role | undefined
+  if (!everyone || !isUnsetEveryone(everyone) || permissions.has(NEW_SERVER_EVERYONE_PERMISSIONS)) return
+  warnOnce(
+    mockLogger,
+    `${interaction.constructor.name}.${key} reads the server's @everyone role here with no permissions; in the next major ` +
+      'version (5.0) it has the permissions Discord gives @everyone in a new server, as strict mocks read it. Set ' +
+      'guild.roles.everyone.permissions, or call useStrictMocks() to read it so now.',
+  )
 }
 
 /**
@@ -297,7 +303,10 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
           // mock would make has no overwrites
           const at = overwritingChannel(interaction, guild!) ?? { guild, permissionOverwrites: { cache: new Collection() } }
           const channel = Object.create(at, { overwritesFor: { value: channelPermissions.overwritesFor } }) as GuildChannel
-          return channelPermissions.memberPermissions.call(channel, me, true)
+          const permissions = channelPermissions.memberPermissions.call(channel, me, true)
+          // The bot's member has @everyone's too
+          warnOnUnsetEveryone(interaction, guild!, 'appPermissions', permissions)
+          return permissions
         },
         // A server the bot isn't in has no guild in either mode, so no permissions in both
         place => !place.raw,

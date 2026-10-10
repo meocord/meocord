@@ -193,6 +193,20 @@ describe('memberPermissions, in default mode', () => {
   })
 })
 
+it("warns once on appPermissions where the server's @everyone role has no permissions set, as the bot's member has it too", () => {
+  const guild = createMockGuild()
+  const inGuild = () => createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guild, guildId: guild.id })
+
+  void [inGuild().appPermissions, inGuild().appPermissions]
+  expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.appPermissions reads the server's @everyone role here with no permissions.*5\.0/s)])
+
+  forgetDeprecationWarnings()
+  warned.length = 0
+  ;(guild.roles.everyone as { permissions: unknown }).permissions = bits()
+  void inGuild().appPermissions
+  expect(warned).toEqual([])
+})
+
 describe("appPermissions, beside discord.js's own permissionsFor", () => {
   /** A server and #general, where the bot's roles are `permissions` and @everyone is denied SendMessages. */
   function botIn(permissions: bigint[]) {
