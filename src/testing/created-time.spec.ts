@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { ButtonInteraction, SnowflakeUtil, TextChannel, ThreadChannel } from 'discord.js'
+import { ButtonInteraction, Role, SnowflakeUtil, TextChannel, ThreadChannel } from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
@@ -33,6 +33,7 @@ const generated = () =>
     thread: createMockChannel(ThreadChannel),
     'interaction user': createMockInteraction(ButtonInteraction).user,
     "message's guild": createMockMessage().guild!,
+    role: createMockInteraction(Role, {}),
   }) as Record<string, { id: string; createdTimestamp: number | null; createdAt: Date | null }>
 
 describe('a generated mock, under useStrictMocks()', () => {
@@ -71,7 +72,7 @@ describe('a generated mock, in default mode', () => {
     void createMockUser().createdAt
 
     expect(warned).toEqual(
-      ['User', 'Guild', 'TextChannel', 'ThreadChannel'].map(name =>
+      ['User', 'Guild', 'TextChannel', 'ThreadChannel', 'Role'].map(name =>
         expect.stringMatching(new RegExp(`^${name}\\.createdTimestamp reads .*generated id.*2025.*5\\.0.*time the mock was made.*useStrictMocks\\(\\)`, 's')),
       ),
     )

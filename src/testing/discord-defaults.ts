@@ -33,7 +33,6 @@ import {
   ReactionManager,
   ReactionUserManager,
   Role,
-  SnowflakeUtil,
   TextChannel,
   ThreadChannel,
   User,
@@ -55,6 +54,7 @@ import {
   ownedManager,
   readPlaceAs,
 } from './mock-interaction.js'
+import { nextSnowflake } from './snowflake.js'
 import { strictMocks } from './strict-mocks.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce } from '@src/common/deprecation.js'
@@ -160,8 +160,6 @@ type Default<T, K extends keyof T> = typeof REAL_GETTER | ((mock: T) => T[K])
 /** The defaults of one class's data properties, each checked against the type discord.js gives the property. */
 type Defaults<T> = { readonly [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]?: Default<T, K> }
 
-const snowflake = () => SnowflakeUtil.generate().toString()
-
 /** A class and its defaults, typed together so a default that stops fitting its property fails to compile. */
 const defaultsOf = <T>(Class: { prototype: T }, defaults: Defaults<T>) => [Class.prototype as object, defaults as Defaults<unknown>] as const
 
@@ -174,7 +172,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(Guild, {
     name: () => 'Guild',
     preferredLocale: () => Locale.EnglishUS,
-    ownerId: snowflake,
+    ownerId: nextSnowflake,
     memberCount: () => 1,
     available: () => true,
     large: () => false,
@@ -229,7 +227,6 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     permissions: REAL_GETTER,
   }),
   defaultsOf(Role, {
-    id: snowflake,
     name: () => 'role',
     // Above @everyone, which a server's role manager makes at position 0
     position: () => 1,
@@ -269,11 +266,11 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   }),
   // A command's name and a component's customId say which handler a call is for, so they stay the test's to give
   defaultsOf(ChatInputCommandInteraction, { options: () => createChatInputOptions() as never }),
-  defaultsOf(CommandInteraction, { commandId: snowflake, commandGuildId: () => null }),
-  defaultsOf(AutocompleteInteraction, { commandId: snowflake, commandGuildId: () => null, options: () => createChatInputOptions() as never }),
+  defaultsOf(CommandInteraction, { commandId: nextSnowflake, commandGuildId: () => null }),
+  defaultsOf(AutocompleteInteraction, { commandId: nextSnowflake, commandGuildId: () => null, options: () => createChatInputOptions() as never }),
   defaultsOf(MessageReaction, { users: reaction => ownedManager(ReactionUserManager.prototype, { reaction }) }),
   defaultsOf(BaseInteraction, {
-    applicationId: snowflake,
+    applicationId: nextSnowflake,
     token: () => 'mock-interaction-token',
     version: () => 1,
     context: () => null,
@@ -321,7 +318,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(DMChannel, { type: () => ChannelType.DM as const }),
   defaultsOf(GuildChannel, {
     name: () => 'channel',
-    guildId: channel => (typeof channel.guild?.id === 'string' ? channel.guild.id : snowflake()),
+    guildId: channel => (typeof channel.guild?.id === 'string' ? channel.guild.id : nextSnowflake()),
     position: () => 0,
     rawPosition: () => 0,
     parentId: () => null,
@@ -352,7 +349,7 @@ const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
       return parent.id
     },
     parent: REAL_GETTER,
-    ownerId: snowflake,
+    ownerId: nextSnowflake,
     archived: () => false,
     locked: () => false,
   }),
