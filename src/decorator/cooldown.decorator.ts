@@ -119,7 +119,7 @@ function cooldownWarnings({ seconds, bypass }: CooldownOptions<any>): string[] {
   if (bypass && typeof bypass !== 'function') {
     warnings.push(
       `@Cooldown takes bypass as a function of the call, returning whether the call skips the cooldown, not ${describeValue(bypass)}; ` +
-        'every call through this handler fails with it. In the next major version (5.0) it is refused.',
+        'every call it counts fails with it. In the next major version (5.0) it is refused.',
     )
   }
   if (typeof seconds !== 'number') {
