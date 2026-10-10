@@ -1,5 +1,8 @@
 import {
+  ActionRowBuilder,
   AutocompleteInteraction,
+  ButtonBuilder,
+  ButtonStyle,
   ButtonInteraction,
   ChatInputCommandInteraction,
   DiscordjsError,
@@ -209,5 +212,48 @@ describe('reply flags and errors as discord.js has them', () => {
     const autocomplete = createMockInteraction(AutocompleteInteraction)
     await autocomplete.respond([])
     await expect(autocomplete.respond([])).rejects.toMatchObject({ code: DiscordjsErrorCodes.InteractionAlreadyReplied, message: ALREADY })
+  })
+})
+
+describe('what an answer sends, held as sent', () => {
+  // Each answer that sends a message, and how to read back what it sent
+  const answers = [
+    ['reply', command, (i: any, body: object) => i.reply(body), (i: any) => i.fetchReply()],
+    ['update', button, (i: any, body: object) => i.update(body), (i: any) => i.fetchReply()],
+    ['followUp', command, async (i: any, body: object) => (await i.deferReply(), i.followUp(body)), (i: any, sent: any) => i.fetchReply(sent.id)],
+  ] as const
+  const labelless = () => new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('b').setStyle(ButtonStyle.Primary))
+
+  describe.each([
+    ['default', () => {}],
+    ['strict', () => useStrictMocks()],
+  ])('in %s mode', (_mode, setUp) => {
+    beforeEach(() => setUp())
+
+    it.each(answers)('%s keeps what was sent when the builder changes afterwards', async (_method, make, send, read) => {
+      const interaction = make()
+      const embed = new EmbedBuilder().setTitle('Sent')
+      const sent = await send(interaction, { embeds: [embed] })
+      embed.setTitle('Changed after sending')
+
+      expect((await read(interaction, sent)).embeds[0].toJSON().title).toBe('Sent')
+    })
+  })
+
+  it.each(answers)('%s rejects a component discord.js refuses to build, under useStrictMocks(), and changes nothing', async (method, make, send) => {
+    useStrictMocks()
+    const interaction = make()
+    const before = method === 'followUp' ? 'deferred' : 'unanswered'
+
+    await expect(send(interaction, { components: [labelless()] })).rejects.toThrow()
+    expect(getResponse(interaction).state).toBe(before)
+  })
+
+  it.each(answers)('%s sends a component discord.js refuses to build in default mode, with one warning', async (method, make, send) => {
+    const interaction = make()
+
+    await expect(send(interaction, { components: [labelless()] })).resolves.not.toThrow()
+    await send(make(), { components: [labelless()] })
+    expect(warned).toEqual([expect.stringMatching(new RegExp(`^${method}\\(\\) here sends what discord\\.js refuses to build.*5\\.0.*useStrictMocks\\(\\)`, 's'))])
   })
 })

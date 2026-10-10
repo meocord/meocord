@@ -100,6 +100,13 @@ describe('respond() in the theme of the call', () => {
     // Neither needs a colour, so neither is built into JSON here: discord.js builds each once, when it sends
     const built = [vi.spyOn(coloured, 'toJSON'), vi.spyOn(row, 'toJSON')]
     const interaction = press('same')
+    // Counted as the call reaches the mock, which builds what it sends as discord.js does
+    const update = interaction.update
+    let builtBeforeSend: number[] = []
+    interaction.update = ((...args: Parameters<typeof update>) => {
+      builtBeforeSend = built.map(toJSON => toJSON.mock.calls.length)
+      return update(...args)
+    }) as typeof update
 
     @Controller()
     class Same {
@@ -110,10 +117,10 @@ describe('respond() in the theme of the call', () => {
     }
     await MeoCordTestingModule.create({ controllers: [Same] }).compile().invoke(Same, 'same', interaction)
 
-    const body = interaction.update.mock.calls[0][0]
+    const body = update.mock.calls[0][0]
     expect(body.embeds[0]).toBe(coloured)
     expect(body.components[0]).toBe(row)
-    expect(built.map(toJSON => toJSON.mock.calls.length)).toEqual([0, 0])
+    expect(builtBeforeSend).toEqual([0, 0])
   })
 
   it('leaves what is sent around respond() as it is', async () => {
