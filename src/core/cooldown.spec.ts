@@ -834,4 +834,21 @@ describe('MemoryCooldownStore, sweeping', () => {
 
     expect(vi.getTimerCount()).toBe(before + 1)
   })
+
+  // An idle store holds no timer, so one that nothing references is collected once its calls have expired
+  it('stops sweeping once a sweep leaves it empty, and starts again on the next call, which it counts', async () => {
+    const store = new MemoryCooldownStore()
+    const before = vi.getTimerCount()
+    await store.consume('k', { uses: 1, windowMs: 1_000 })
+
+    vi.advanceTimersByTime(60_000)
+
+    expect(heldKeys(store)).toBe(0)
+    expect(vi.getTimerCount()).toBe(before)
+    expect(await store.consume('k', { uses: 1, windowMs: 1_000 })).toMatchObject({ allowed: true })
+    expect(await store.consume('k', { uses: 1, windowMs: 1_000 })).toMatchObject({ allowed: false })
+    expect(vi.getTimerCount()).toBe(before + 1)
+    vi.advanceTimersByTime(60_000)
+    expect(heldKeys(store)).toBe(0)
+  })
 })

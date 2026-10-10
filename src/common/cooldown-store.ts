@@ -339,10 +339,18 @@ export class MemoryCooldownStore extends CooldownStore {
     })
   }
 
-  /** Drops the keys whose calls have all left their window, once a minute from the store's first call. */
+  /**
+   * Drops the keys whose calls have all left their window, once a minute from a call, until a sweep leaves none: an
+   * idle store then holds no timer, so one nothing references is collected, and its next call starts the sweep again.
+   */
   private startSweeping(): void {
     if (this.sweeper) return
-    this.sweeper = setInterval(() => sweep(this.calls, Date.now()), SWEEP_INTERVAL_MS)
+    this.sweeper = setInterval(() => {
+      sweep(this.calls, Date.now())
+      if (this.calls.size > 0) return
+      clearInterval(this.sweeper)
+      this.sweeper = undefined
+    }, SWEEP_INTERVAL_MS)
     // A cooldown must never be what keeps a stopping bot alive.
     this.sweeper.unref?.()
   }
