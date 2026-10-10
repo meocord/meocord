@@ -1,8 +1,9 @@
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { type RsbuildConfig } from '@rsbuild/core'
+import { type RsbuildConfig, type Rspack } from '@rsbuild/core'
 import { OptionalProbesPlugin } from '@src/build/optional-probes.js'
 import { RunnableBundlePlugin } from '@src/build/runnable-bundle.js'
+import { typeExternals } from '@src/build/typed-externals.js'
 import { prepareModifiedTsConfig } from '@src/util/tsconfig.util.js'
 
 /**
@@ -14,8 +15,7 @@ export const CONFIG_PRE_ENTRY = path.join(path.dirname(fileURLToPath(import.meta
 /**
  * Native accelerators discord.js loads when present and works without. A bundler cannot tell
  * optional from missing, so they stay runtime imports. `node-commonjs` keeps each a `require` at its
- * call site, inside the library's try/catch, where a plain ESM external would hoist an import that
- * throws before the bot starts.
+ * call site, inside the library's try/catch, however the bundle asks for it.
  */
 export const DISCORD_OPTIONAL_NATIVES: readonly string[] = ['zlib-sync', 'bufferutil', 'utf-8-validate']
 
@@ -28,8 +28,8 @@ export function optionalExternalNames(optionalExternals: readonly string[] = [])
 }
 
 /**
- * The `optionalExternals` also listed in `externals`, where each becomes a hoisted import that throws
- * at startup when the package is missing, defeating the point of listing it as optional.
+ * The `optionalExternals` also listed in `externals`, where an ESM import of each runs as its importer loads and
+ * throws when the package is missing, defeating the point of listing it as optional; a require stays one either way.
  */
 export function optionalExternalConflicts(
   optionalExternals: readonly string[] = [],
@@ -71,6 +71,11 @@ export interface RsbuildConfigOptions {
   externals?: (string | RegExp)[]
   /** Packages a dependency tries to load and runs without; see {@link optionalExternalNames}. */
   optionalExternals?: string[]
+  /**
+   * Built to be loaded with `require()`, as the compiled config is: its externals stay static imports, since a dynamic
+   * import would make it an async module, which `require()` refuses.
+   */
+  requireable?: boolean
 }
 
 /**
@@ -128,6 +133,10 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
         chain.optimization.emitOnErrors(false)
         // Keeps the bundle starting under Node and Bun alike, whatever devtool or dependencies it has.
         chain.plugin('meocord-runnable-bundle').use(RunnableBundlePlugin)
+        // A package kept out of the bundle loads where its importer runs, after the pre-entry, rather than hoisted above
+        // it; typed here, after autoExternal and the externals are merged
+        const externals = chain.get('externals') as Rspack.ExternalItem | undefined
+        if (externals && !options.requireable) chain.externals(typeExternals(Array.isArray(externals) ? externals : [externals]))
         // Says a missing package a dependency only probes for is harmless, and how to silence it
         chain.plugin('meocord-optional-probes').use(OptionalProbesPlugin)
       },

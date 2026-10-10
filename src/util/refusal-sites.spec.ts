@@ -1,5 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { readdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { type ChatInputCommandInteraction, type Message } from 'discord.js'
 import { Command, Controller, Cooldown, Defer, MessageHandler, On, Validate } from '@src/decorator/index.js'
@@ -8,7 +7,6 @@ import { type StandardSchemaV1 } from '@src/interface/index.js'
 import { appStages } from '@src/core/handler-pipeline.js'
 import { buildComponentRoutes } from '@src/core/component-routes.js'
 import { MeoCordTestingModule } from '@src/testing/index.js'
-import { assertBuiltForThisPlatform, PLATFORM_MANIFEST } from '@src/util/platform.util.js'
 import { isRefusal } from '@src/util/refusal.util.js'
 import { clientOptionsWithSharding } from '@src/util/sharding-mode.util.js'
 
@@ -93,13 +91,6 @@ describe('an application MeoCord refuses as it loads', () => {
     return [Profile, Card]
   }
 
-  const dist = mkdtempSync(path.join(tmpdir(), 'meocord-refusal-'))
-  beforeAll(() => {
-    const elsewhere = process.platform === 'linux' ? 'darwin' : 'linux'
-    writeFileSync(path.join(dist, PLATFORM_MANIFEST), JSON.stringify({ platform: elsewhere, arch: process.arch }))
-  })
-  afterAll(() => rmSync(dist, { recursive: true, force: true }))
-
   const sharding = (sharding: object) => ({ discordToken: 't', sharding }) as never
 
   it.each([
@@ -113,7 +104,6 @@ describe('an application MeoCord refuses as it loads', () => {
     { site: '@Defer written below @MessageHandler', load: () => compile(deferredMessage())(), subject: 'Deferred.hi' },
     { site: 'two component patterns that match the same customIds', load: () => buildComponentRoutes(overlapping()), subject: 'Profile.show' },
     { site: 'an app class without @MeoCord', load: () => appStages(class PlainApp {}), subject: 'PlainApp' },
-    { site: 'a build for another platform', load: () => assertBuiltForThisPlatform(dist), subject: path.basename(dist) },
     {
       site: 'client shards with process sharding',
       load: () => clientOptionsWithSharding(sharding({ mode: 'process' }), { intents: [], shardCount: 2 }),

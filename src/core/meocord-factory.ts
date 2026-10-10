@@ -6,7 +6,6 @@ import { Logger } from '@src/common/index.js'
 import { MeoCordApp } from '@src/core/meocord.app.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
-import { assertBuiltForThisPlatform } from '@src/util/platform.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { missingTranslatorError, Translator } from '@src/common/translator.js'
@@ -238,10 +237,6 @@ export class MeoCordFactory {
     if (isRegisterOnly()) {
       return new MeoCordApp(options.controllers, new Container(), new Client(options.clientOptions), meocordConfig.discordToken)
     }
-
-    // Before anything is resolved: a controller or service is what first loads a native addon, and one built for another
-    // platform would otherwise fail there with a linker error. A manager checks too, before it registers or spawns.
-    assertBuiltForThisPlatform()
 
     // A process-sharding manager only spawns shards, so it binds, constructs and connects nothing itself.
     if (shardingRole(meocordConfig) === 'manager') {

@@ -8,11 +8,10 @@ import type * as ShardContextModule from '@src/core/shard-context.js'
 import { type MeoCordConfig, type OnReady, type ReadyInfo } from '@src/interface/index.js'
 import { CommandType } from '@src/enum/index.js'
 
-const { logged, config, platformChecked, channel } = vi.hoisted(() => ({
+const { logged, config, channel } = vi.hoisted(() => ({
   channel: { closed: false },
   logged: { info: [] as string[], error: [] as string[] },
   config: { current: { discordToken: 'token' } as MeoCordConfig },
-  platformChecked: { count: 0 },
 }))
 
 vi.mock('@src/common/index.js', async importOriginal => ({
@@ -31,11 +30,6 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: (
 vi.mock('@src/util/sharding-mode.util.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   managerGone: () => channel.closed,
-}))
-vi.mock('@src/util/platform.util.js', () => ({
-  assertBuiltForThisPlatform: () => {
-    platformChecked.count++
-  },
 }))
 
 /** Fresh modules per test, as shutdown state and signal listeners live at module level. */
@@ -89,7 +83,6 @@ describe('sharding', () => {
   beforeEach(() => {
     logged.info.length = 0
     logged.error.length = 0
-    platformChecked.count = 0
     channel.closed = false
     config.current = { discordToken: 'token' }
     exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
@@ -153,8 +146,7 @@ describe('sharding', () => {
   })
 
   describe('entry modes', () => {
-    // A build for another platform stops before the manager registers commands or spawns a shard that would fail
-    it('returns the shard manager for process sharding once the platform is checked, binding nothing', async () => {
+    it('returns the shard manager for process sharding, binding nothing', async () => {
       const loaded = await load()
       config.current = { discordToken: 'token', sharding: { mode: 'process' } }
       const constructed = vi.fn()
@@ -169,7 +161,6 @@ describe('sharding', () => {
       const app = loaded.MeoCordFactory.create(appClass(loaded, { services: [Eager] }))
 
       expect(app).toBeInstanceOf(loaded.ShardManager)
-      expect(platformChecked.count).toBe(1)
       expect(constructed).not.toHaveBeenCalled()
     })
 

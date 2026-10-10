@@ -3,11 +3,11 @@ import { tmpdir } from 'os'
 import { BUNDLE_ENTRY_KEY } from '@src/util/bundle-entry.util.js'
 import path from 'path'
 import {
-  assertBuiltForThisPlatform,
   currentPlatform,
   describePlatform,
   isSamePlatform,
   PLATFORM_MANIFEST,
+  platformMismatch,
   writePlatformManifest,
 } from '@src/util/platform.util.js'
 
@@ -58,24 +58,24 @@ describe('writePlatformManifest', () => {
   })
 })
 
-describe('assertBuiltForThisPlatform', () => {
+describe('platformMismatch', () => {
   it('lets a build without native addons start anywhere', () => {
     expect(existsSync(path.join(dir, PLATFORM_MANIFEST))).toBe(false)
-    expect(() => assertBuiltForThisPlatform(dir)).not.toThrow()
+    expect(platformMismatch(dir)).toBeUndefined()
   })
 
   it('lets a build made on this platform start', () => {
     writePlatformManifest(dir)
 
-    expect(() => assertBuiltForThisPlatform(dir)).not.toThrow()
+    expect(platformMismatch(dir)).toBeUndefined()
   })
 
   it('stops a build made for another platform, naming both and the fix', () => {
     const elsewhere = process.platform === 'linux' ? 'darwin' : 'linux'
     writeFileSync(path.join(dir, PLATFORM_MANIFEST), JSON.stringify({ platform: elsewhere, arch: process.arch }))
 
-    expect(() => assertBuiltForThisPlatform(dir)).toThrow(new RegExp(`compiled for ${elsewhere}-${process.arch}`))
-    expect(() => assertBuiltForThisPlatform(dir)).toThrow(/run `meocord build` inside the image/)
+    expect(platformMismatch(dir)).toMatch(new RegExp(`compiled for ${elsewhere}-${process.arch}`))
+    expect(platformMismatch(dir)).toMatch(/run `meocord build` inside the image/)
   })
 
   // A process manager's wrapper can be argv[1]; the manifest is beside the bundle the pre-entry recorded
@@ -84,7 +84,7 @@ describe('assertBuiltForThisPlatform', () => {
     writeFileSync(path.join(dir, PLATFORM_MANIFEST), JSON.stringify({ platform: elsewhere, arch: process.arch }))
     Reflect.set(globalThis, BUNDLE_ENTRY_KEY, path.join(dir, 'main.js'))
     try {
-      expect(() => assertBuiltForThisPlatform()).toThrow(new RegExp(`compiled for ${elsewhere}-${process.arch}`))
+      expect(platformMismatch()).toMatch(new RegExp(`compiled for ${elsewhere}-${process.arch}`))
     } finally {
       Reflect.deleteProperty(globalThis, BUNDLE_ENTRY_KEY)
     }
@@ -93,6 +93,6 @@ describe('assertBuiltForThisPlatform', () => {
   it('does not stop the bot over a manifest it cannot read', () => {
     writeFileSync(path.join(dir, PLATFORM_MANIFEST), 'not json')
 
-    expect(() => assertBuiltForThisPlatform(dir)).not.toThrow()
+    expect(platformMismatch(dir)).toBeUndefined()
   })
 })
