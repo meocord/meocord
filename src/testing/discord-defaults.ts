@@ -1,4 +1,5 @@
 import {
+  Attachment,
   AutocompleteInteraction,
   BaseGuild,
   BaseGuildVoiceChannel,
@@ -152,6 +153,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(ClientUser, {
     username: () => 'bot',
   }),
+  defaultsOf(Attachment, { id: snowflake }),
   defaultsOf(User, {
     username: () => 'user',
     bot: () => false,

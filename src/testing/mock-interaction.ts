@@ -96,7 +96,7 @@ import {
   type CommandInteraction,
   type ContextMenuCommandInteraction,
   type MessageComponentInteraction,
-  type MessageContextMenuCommandInteraction,
+  MessageContextMenuCommandInteraction,
   type ModalSubmitInteraction,
   type OmitPartialGroupDMChannel,
   type PartialGroupDMChannel,
@@ -1392,6 +1392,25 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         live('targetMember', () => (own('guildId') ? memberFor(own('guild'), targetUser(), true, own('guildId') as string) : null))
       }
     }
+    // A message context menu's target: the message given, by its id, or one made for its targetId, read live as above
+    if (MessageContextMenuCommandInteraction.prototype.isPrototypeOf(instance)) {
+      if (unset('targetId')) instance.targetId = (own('targetMessage') as { id?: string } | undefined)?.id ?? nextSnowflake()
+      if (unset('targetMessage')) {
+        let made: { id: string } | undefined
+        Object.defineProperty(instance, 'targetMessage', {
+          get: () => (made?.id === own('targetId') ? made : (made = createMockMessage({ id: own('targetId') as string }))),
+          set: (value: unknown) => Object.defineProperty(instance, 'targetMessage', { value, writable: true, enumerable: true, configurable: true }),
+          enumerable: true,
+          configurable: true,
+        })
+      }
+    }
+  }
+
+  // A user has an id of its own, as Discord sends one, and was created when the mock was made under strict mocks
+  if (User.prototype.isPrototypeOf(instance) && !Object.prototype.hasOwnProperty.call(instance, 'id')) {
+    const generatedId = (instance.id = nextSnowflake())
+    defineMadeTime(instance, generatedId)
   }
 
   // Discord sends the user's locale with every interaction, and the server's preferred one with one made in a server
@@ -1553,10 +1572,7 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
  * @see {@link createMockInteraction}
  */
 export function createMockUser(props: MockProps<User> = {}): DeepMocked<User> {
-  const generatedId = props.id === undefined ? nextSnowflake() : undefined
-  const user = createMockInteraction(User, { id: generatedId, bot: false, ...props })
-  defineMadeTime(user, generatedId)
-  return user
+  return createMockInteraction(User, { bot: false, ...props })
 }
 
 /**
