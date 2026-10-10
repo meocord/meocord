@@ -23,30 +23,43 @@ export const findModulePackageDir = (moduleName: string, baseDir: string = proce
 }
 
 /**
+ * Loads `meocord.config.ts` and checks its shape, as a command that builds and a watch-mode reload both do, printing
+ * the warnings for options it does not know.
+ *
+ * @returns The config, or the report of why it cannot be used: missing, failing to load, or with options of the wrong
+ *   type, each of them listed.
+ */
+export function checkSourceConfig(): { config: MeoCordConfig | undefined } | { problem: string } {
+  const meocordConfigPath = path.resolve(process.cwd(), 'meocord.config.ts')
+  if (!fs.existsSync(meocordConfigPath)) return { problem: 'Configuration file "meocord.config.ts" is missing!' }
+
+  const loaded = readMeoCordSourceConfig()
+  if ('error' in loaded) return { problem: `meocord.config.ts could not be loaded, so nothing was built or started:\n  ${loaded.error}` }
+
+  const problem = shapeProblem(loaded.config)
+  return problem ? { problem } : { config: loaded.config }
+}
+
+/** Prints why a config cannot be used, as {@link checkSourceConfig} reports it. */
+export function reportConfigProblem(problem: string): void {
+  console.error(chalk.red(problem))
+}
+
+/**
  * Loads `meocord.config.ts` and checks its shape, exiting when it is missing, fails to load, or has
  * options of the wrong type; options it does not know are reported and left alone.
  *
  * @returns The config, which a build compiles and the bot then runs with.
  */
 export async function compileAndValidateConfig(): Promise<MeoCordConfig | undefined> {
-  const meocordConfigPath = path.resolve(process.cwd(), 'meocord.config.ts')
-  if (!fs.existsSync(meocordConfigPath)) {
-    console.error(chalk.red('Configuration file "meocord.config.ts" is missing!'))
+  const checked = checkSourceConfig()
+  if ('problem' in checked) {
+    reportConfigProblem(checked.problem)
     await wait(100)
     process.exit(1)
     return
   }
-
-  const loaded = readMeoCordSourceConfig()
-  if ('error' in loaded) {
-    console.error(chalk.red(`meocord.config.ts could not be loaded, so nothing was built or started:\n  ${loaded.error}`))
-    await wait(100)
-    process.exit(1)
-    return
-  }
-
-  await assertConfigShape(loaded.config)
-  return loaded.config
+  return checked.config
 }
 
 /**
@@ -73,13 +86,19 @@ export async function validateRunConfig(): Promise<MeoCordConfig | undefined> {
 
 /** Exits with every problem when a configuration has options of the wrong type, and warns about unknown ones. */
 export async function assertConfigShape(config: unknown) {
-  const { errors, warnings } = configProblems(config)
-  for (const warning of warnings) console.warn(chalk.yellow(`meocord.config.ts: ${warning}`))
-  if (errors.length === 0) return
-
-  console.error(chalk.red(`meocord.config.ts has ${errors.length} problem(s):\n${errors.map(error => `  - ${error}`).join('\n')}`))
+  const problem = shapeProblem(config)
+  if (!problem) return
+  console.error(chalk.red(problem))
   await wait(100)
   process.exit(1)
+}
+
+/** Every option of the wrong type in a configuration, as one report, or undefined; options it does not know are warned about. */
+function shapeProblem(config: unknown): string | undefined {
+  const { errors, warnings } = configProblems(config)
+  for (const warning of warnings) console.warn(chalk.yellow(`meocord.config.ts: ${warning}`))
+  if (errors.length === 0) return undefined
+  return `meocord.config.ts has ${errors.length} problem(s):\n${errors.map(error => `  - ${error}`).join('\n')}`
 }
 
 /**

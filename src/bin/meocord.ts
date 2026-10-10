@@ -11,7 +11,7 @@ import { GeneratorCLI } from '@src/bin/generator.js'
 import { AppGeneratorHelper, runtimePrefixFor } from '@src/bin/helper/app-generator.helper.js'
 import { makeInitialCommit } from '@src/bin/helper/initial-commit.helper.js'
 import * as fs from 'node:fs'
-import { compileAndValidateConfig, setEnvironment, validateDiscordToken, validateRunConfig } from '@src/util/common.util.js'
+import { checkSourceConfig, compileAndValidateConfig, reportConfigProblem, setEnvironment, validateDiscordToken, validateRunConfig } from '@src/util/common.util.js'
 import { Command } from 'commander'
 import { execSync } from 'child_process'
 import * as p from '@clack/prompts'
@@ -833,8 +833,13 @@ copies or substantial portions of the Software.
           changed = new Set()
           for (const file of files) this.logger.log(reloads[file])
           if (!rebuilds(files)) return this.restartApp()
-          // A config that doesn't compile, say mid-edit, leaves the running bot and its build as they are
-          if (files.has('meocord.config.ts') && !(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
+          // A config that is refused, as at startup, or doesn't compile, say mid-edit, leaves the running bot and its build
+          // as they are
+          if (files.has('meocord.config.ts')) {
+            const checked = checkSourceConfig()
+            if ('problem' in checked) return reportConfigProblem(checked.problem)
+            if (!(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
+          }
           isRunning = false
           // The new build restarts the bot, whatever its output: the config it was launched with has changed
           this.launchedFrom = undefined

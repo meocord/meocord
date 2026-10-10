@@ -43,14 +43,49 @@ export function readMeoCordSourceConfig(): { config: MeoCordConfig | undefined }
       }
     }
 
+    // The module as written, so an ES module with no default export is told apart from a CommonJS one
     const jiti = createJiti(import.meta.url, {
-      interopDefault: true,
+      interopDefault: false,
       alias: aliases,
       moduleCache: false,
     })
 
-    return { config: jiti(configPath) as MeoCordConfig }
+    return configOf(jiti(configPath))
   } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) }
+    return { error: loadError(error, process.cwd()) }
   }
+}
+
+/**
+ * The config a loaded module gives: an ES module's default export, or what a CommonJS module assigns to
+ * `module.exports`. An ES module with no default export has none.
+ */
+function configOf(loaded: unknown): { config: MeoCordConfig } | { error: string } {
+  const module = loaded as Record<string, unknown> | null
+  if (module?.__esModule !== true) return { config: loaded as MeoCordConfig }
+  if ('default' in module) return { config: module.default as MeoCordConfig }
+  const names = Object.keys(module)
+  return { error: `it must export an object as its default export${names.length > 0 ? `, and exports only ${names.join(', ')}` : ''}` }
+}
+
+/**
+ * Why the config failed to load, with the first place in the project it failed at when the message does not name one,
+ * as for an error the config throws: jiti's message names the file, line and column of a syntax error.
+ */
+function loadError(error: unknown, root: string): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const frame = error instanceof Error ? projectFrame(error.stack, root) : undefined
+  return frame && !message.includes(frame) ? `${message}\n    at ${frame}` : message
+}
+
+/** The first stack frame in a file of the project's own, as `file:line:column` from the project. */
+function projectFrame(stack: string | undefined, root: string): string | undefined {
+  for (const line of stack?.split('\n').slice(1) ?? []) {
+    const file = /\(?((?:[A-Za-z]:)?[\\/][^()]+?):(\d+):(\d+)\)?$/.exec(line.trim())
+    if (!file) continue
+    const [, location, row, column] = file
+    if (!location.startsWith(root) || location.split(/[\\/]/).includes('node_modules')) continue
+    return `${path.relative(root, location).split(path.sep).join('/')}:${row}:${column}`
+  }
+  return undefined
 }
