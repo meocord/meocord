@@ -371,6 +371,9 @@ export class TestingModule {
    * It first gives up the theme read outside calls, if `init({ ready: true })` made it this module's;
    * reads outside calls then return MeoCord's defaults until another module or app is ready.
    *
+   * A stopped bot runs nothing more. A closed module still runs what `dispatch`, `invoke` and `emit` are given,
+   * against services already shut down, and warns once that it is closed, so a `close()` in the wrong place shows.
+   *
    * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
    * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
    * they started, so the store's last writes still reach it. The module stops waiting for the whole sequence after
@@ -412,6 +415,18 @@ export class TestingModule {
       throwFailures('onShutdown', failures)
     })()
     await this.closing
+  }
+
+  private warnedClosed = false
+
+  /** Warns once, after `close()`, that a call runs against services already shut down. */
+  private warnIfClosed(): void {
+    if (this.closing === undefined || this.warnedClosed) return
+    this.warnedClosed = true
+    new Logger('TestingModule').warn(
+      'This testing module is closed, and its services have shut down, so dispatch, invoke and emit run against shut-down ' +
+        'state. Close it after the last call, in afterEach.',
+    )
   }
 
   private async runReady(client: Client<true>, primary: boolean): Promise<void> {
@@ -530,6 +545,7 @@ export class TestingModule {
     methodName: M,
     ...args: HandlerArgs<C, M>
   ): Promise<InvocationResult> {
+    this.warnIfClosed()
     await this.init()
     if (!this.controllers.includes(controller)) {
       throw new Error(`${controller.name} is not a controller of this testing module. Add it to \`controllers\`.`)
@@ -687,6 +703,7 @@ export class TestingModule {
     input: Interaction | Message | MessageReaction | PartialMessageReaction,
     options?: { user: User | PartialUser; action?: ReactionHandlerAction },
   ): Promise<DispatchedCall> {
+    this.warnIfClosed()
     await this.init()
     this.registerClient(input)
     const dispatcher = this.dispatcherOf()
@@ -747,6 +764,7 @@ export class TestingModule {
    * ```
    */
   async emit<E extends keyof ClientEvents>(event: E, ...args: ClientEvents[E]): Promise<EmitResult> {
+    this.warnIfClosed()
     await this.init()
     const calls: Promise<boolean>[] = []
     for (const cls of this.eventClasses) {
