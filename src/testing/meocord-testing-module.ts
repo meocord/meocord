@@ -251,7 +251,11 @@ export interface DispatchedCall extends InvocationResult {
  * @category Module
  */
 export interface EmitResult {
-  /** How many `@On` and `@Once` handlers ran; a handler a guard denied is not counted. */
+  /**
+   * How many `@On` and `@Once` handlers ran; a handler a guard denied by returning `false` is not counted. A guard
+   * that throws `GuardDeniedError` rejects `emit` instead, as the bot's event fallback, which skips the event, doesn't
+   * run in a testing module.
+   */
   ran: number
 }
 
@@ -689,15 +693,20 @@ export class TestingModule {
   }
 
   /**
-   * Emits a client event to the module's `@On` and `@Once` handlers, through the same pipeline the app
-   * runs them in: the global guards of the module's `app`, then each handler's own. Handlers on the
-   * module's controllers, class providers and their dependencies all receive it. A `@Once` handler
-   * handles only the first event, as it would on a client.
+   * Emits a client event to the module's `@On` and `@Once` handlers, through the pipeline the app runs
+   * them in up to its event fallback: the global guards of the module's `app`, then each handler's own.
+   * Handlers on the module's controllers, class providers and their dependencies all receive it. A
+   * `@Once` handler handles only the first event, as it would on a client.
+   *
+   * The bot's event fallback doesn't run here. On a bot, a guard's `GuardDeniedError` is logged and the
+   * event skipped, and a handler's `UserError` is answered; here both reject `emit` as any error does,
+   * so a test checks them with `rejects`.
    *
    * @param event - The client event, such as `'guildMemberAdd'`.
    * @param args - The event's arguments, typed from discord.js's `ClientEvents`.
-   * @returns How many handlers ran. Rejects once every handler has settled if any threw: with that
-   *   error when one handler failed, or an `AggregateError` of them when several did.
+   * @returns How many handlers ran. Rejects once every handler has settled if any threw, a guard's
+   *   `GuardDeniedError` and a handler's `UserError` included: with that error when one handler failed,
+   *   or an `AggregateError` of them when several did.
    *
    * @example
    * ```ts

@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 import { Controller, Guard, MeoCord, On, Once, Service, UseGuard } from '@src/decorator/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { createMock, MeoCordTestingModule } from '@src/testing/index.js'
+import { GuardDeniedError, UserError } from '@src/common/index.js'
 
 describe('TestingModule.emit', () => {
   it('runs the handlers on controllers, class providers and their dependencies', async () => {
@@ -149,6 +150,33 @@ describe('TestingModule.emit', () => {
 
     expect(error).toBeInstanceOf(AggregateError)
     expect((error as AggregateError).errors.map(e => (e as Error).message)).toEqual(['one', 'two'])
+  })
+
+  // The bot's event fallback, which skips a refused event and answers a UserError, isn't run by emit
+  it.each([
+    ["a guard's GuardDeniedError", new GuardDeniedError('no events for you')],
+    ["a handler's UserError", new UserError('slow down')],
+  ])('rejects with %s, as with any error', async (_, error) => {
+    @Guard()
+    class Refuse implements GuardInterface {
+      canActivate() {
+        if (error instanceof GuardDeniedError) throw error
+        return true
+      }
+    }
+
+    @Controller()
+    class Members {
+      @On('guildMemberAdd')
+      @UseGuard(Refuse)
+      greet() {
+        throw error
+      }
+    }
+
+    const module = MeoCordTestingModule.create({ controllers: [Members] }).compile()
+
+    await expect(module.emit('guildMemberAdd', createMock<GuildMember>())).rejects.toBe(error)
   })
 
   it('runs no handler for an event nothing handles', async () => {
