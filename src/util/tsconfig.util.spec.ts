@@ -23,8 +23,8 @@ const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mo
   }
 })
 
-// Without typescript installed, paths are read from the project's tsconfig.json alone, which these cases mock
-vi.mock('@src/util/project-typescript.util.js', () => ({ projectTypeScript: () => undefined }))
+// get-tsconfig reads the real files, which these cases mock; its own cases are in tsconfig-paths.util.spec
+vi.mock('@src/util/tsconfig-paths.util.js', () => ({ projectPaths: () => undefined }))
 
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
@@ -97,36 +97,6 @@ describe('prepareModifiedTsConfig', () => {
 
     const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
     expect(path.isAbsolute(written.compilerOptions.rootDir)).toBe(true)
-  })
-
-  it('resolves path aliases to absolute paths', () => {
-    mockTsConfig({ compilerOptions: { paths: { '@src/*': ['./src/*'] } } })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(path.isAbsolute(written.compilerOptions.paths['@src/*'][0])).toBe(true)
-  })
-
-  // TypeScript reads a paths target from baseUrl when one is set, so the bundler must too
-  it('resolves path aliases from baseUrl when one is set', () => {
-    mockTsConfig({ compilerOptions: { baseUrl: './src', paths: { '@lib/*': ['lib/*'] } } })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.compilerOptions.paths['@lib/*']).toEqual([path.resolve(process.cwd(), 'src', 'lib/*')])
-  })
-
-  // As documented: a baseUrl only an extended file sets isn't read, so this file's own paths stay on the project
-  it('resolves path aliases from the project when baseUrl comes only through extends', () => {
-    mockTsConfig({ extends: './tsconfig.base.json', compilerOptions: { paths: { '@lib/*': ['lib/*'] } } })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.compilerOptions.paths['@lib/*']).toEqual([path.resolve(process.cwd(), 'lib/*')])
-    expect(mockReadFileSync).not.toHaveBeenCalledWith(path.resolve(process.cwd(), 'tsconfig.base.json'), expect.anything())
   })
 
   // The copy lives in the temp directory, where a relative extends would name a file that is not there

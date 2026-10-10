@@ -12,19 +12,20 @@ instead of installed; it is listed last.
 
 Installed with MeoCord.
 
-| Package                                                                              | License    | Source                                       |
-| ------------------------------------------------------------------------------------ | ---------- | -------------------------------------------- |
-| [@clack/prompts](https://www.npmjs.com/package/@clack/prompts)                       | MIT        | https://github.com/bombshell-dev/clack       |
-| [@jridgewell/trace-mapping](https://www.npmjs.com/package/@jridgewell/trace-mapping) | MIT        | https://github.com/jridgewell/sourcemaps     |
-| [@rsbuild/core](https://www.npmjs.com/package/@rsbuild/core)                         | MIT        | https://github.com/web-infra-dev/rsbuild     |
-| [chalk](https://www.npmjs.com/package/chalk)                                         | MIT        | https://github.com/chalk/chalk               |
-| [cli-table3](https://www.npmjs.com/package/cli-table3)                               | MIT        | https://github.com/cli-table/cli-table3      |
-| [commander](https://www.npmjs.com/package/commander)                                 | MIT        | https://github.com/tj/commander.js           |
-| [dayjs](https://www.npmjs.com/package/dayjs)                                         | MIT        | https://github.com/iamkun/dayjs              |
-| [inversify](https://www.npmjs.com/package/inversify)                                 | MIT        | https://github.com/inversify/monorepo        |
-| [jiti](https://www.npmjs.com/package/jiti)                                           | MIT        | https://github.com/unjs/jiti                 |
-| [lodash-es](https://www.npmjs.com/package/lodash-es)                                 | MIT        | https://github.com/lodash/lodash             |
-| [reflect-metadata](https://www.npmjs.com/package/reflect-metadata)                   | Apache-2.0 | https://github.com/rbuckton/reflect-metadata |
+| Package                                                                              | License    | Source                                        |
+| ------------------------------------------------------------------------------------ | ---------- | --------------------------------------------- |
+| [@clack/prompts](https://www.npmjs.com/package/@clack/prompts)                       | MIT        | https://github.com/bombshell-dev/clack        |
+| [@jridgewell/trace-mapping](https://www.npmjs.com/package/@jridgewell/trace-mapping) | MIT        | https://github.com/jridgewell/sourcemaps      |
+| [@rsbuild/core](https://www.npmjs.com/package/@rsbuild/core)                         | MIT        | https://github.com/web-infra-dev/rsbuild      |
+| [chalk](https://www.npmjs.com/package/chalk)                                         | MIT        | https://github.com/chalk/chalk                |
+| [cli-table3](https://www.npmjs.com/package/cli-table3)                               | MIT        | https://github.com/cli-table/cli-table3       |
+| [commander](https://www.npmjs.com/package/commander)                                 | MIT        | https://github.com/tj/commander.js            |
+| [dayjs](https://www.npmjs.com/package/dayjs)                                         | MIT        | https://github.com/iamkun/dayjs               |
+| [get-tsconfig](https://www.npmjs.com/package/get-tsconfig)                           | MIT        | https://github.com/privatenumber/get-tsconfig |
+| [inversify](https://www.npmjs.com/package/inversify)                                 | MIT        | https://github.com/inversify/monorepo         |
+| [jiti](https://www.npmjs.com/package/jiti)                                           | MIT        | https://github.com/unjs/jiti                  |
+| [lodash-es](https://www.npmjs.com/package/lodash-es)                                 | MIT        | https://github.com/lodash/lodash              |
+| [reflect-metadata](https://www.npmjs.com/package/reflect-metadata)                   | Apache-2.0 | https://github.com/rbuckton/reflect-metadata  |
 
 ## Peer dependencies
 

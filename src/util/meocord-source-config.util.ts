@@ -29,10 +29,7 @@ export function readMeoCordSourceConfig(): { config: MeoCordConfig | undefined }
   if (!existsSync(configPath)) return { config: undefined }
 
   try {
-    // Each alias to its first target, as the build reads the same paths
-    const aliases = Object.fromEntries(
-      Object.entries(projectPaths() ?? {}).map(([alias, [target]]) => [alias.replace(/\/\*$/, ''), target.replace(/\/\*$/, '')]),
-    )
+    const aliases = jitiAliases(projectPaths() ?? {})
 
     // The module as written, so an ES module with no default export is told apart from a CommonJS one
     const jiti = createJiti(import.meta.url, {
@@ -90,4 +87,13 @@ export function projectFrame(stack: string | undefined, root: string, windows = 
     return `${paths.relative(root, file).split(paths.sep).join('/')}:${row}:${column}`
   }
   return undefined
+}
+
+/**
+ * jiti's aliases for tsconfig `paths`: each alias, and its first target, without a trailing `/*`, or `\*` in a Windows
+ * path, as the build reads the same paths.
+ */
+export function jitiAliases(paths: Record<string, string[]>): Record<string, string> {
+  const unstarred = (text: string) => text.replace(/[\\/]\*$/, '')
+  return Object.fromEntries(Object.entries(paths).map(([alias, [target]]) => [unstarred(alias), unstarred(target)]))
 }
