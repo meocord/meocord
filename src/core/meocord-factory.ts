@@ -191,15 +191,17 @@ export class MeoCordFactory {
   }
 
   private static createApplication(target: ServiceIdentifier, shard: boolean): MeoCordApplication {
-    const options = Reflect.getMetadata(META.appOptions, target)
+    const appOptions = Reflect.getMetadata(META.appOptions, target)
 
     // With startupErrors: 'all', what the decorators kept: a built bot's every one, else the app's and its controllers'
-    const declared = isBuiltApplication() ? allDeclaredErrors() : declaredErrorsOf([target, ...(options?.controllers ?? [])])
-    if (!options) {
+    const declared = isBuiltApplication() ? allDeclaredErrors() : declaredErrorsOf([target, ...(appOptions?.controllers ?? [])])
+    if (!appOptions) {
       // A refused @MeoCord stores no options, so its own errors say why
       collectStartupErrors(() => declared.forEach(startupError))
       throw refuse(new Error(`${typeof target === 'function' ? target.name : String(target)}: not decorated with @MeoCord(), so there is no app to create.`))
     }
+    // A controller listed twice is one controller, as the command checks and fromApp already take it
+    const options = { ...appOptions, controllers: [...new Set(appOptions.controllers)] }
 
     const meocordConfig = loadMeoCordConfig()
     if (!meocordConfig) {
