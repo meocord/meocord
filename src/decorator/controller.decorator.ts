@@ -441,6 +441,23 @@ export function getMessageHandlers(controller: any): MessageHandlerMetadata[] {
 // `{name}`, or `{name:type}` with the type read as far as the brace, so a type no segment can hold is named
 const PLACEHOLDER_PATTERN = /\{(\w+)(?::([^}/]*))?}/g
 
+// The whole of a brace pair that is a param, as PLACEHOLDER_PATTERN reads one
+const WHOLE_PLACEHOLDER = new RegExp(`^${PLACEHOLDER_PATTERN.source}$`)
+
+/**
+ * Why a pattern's brace pairs that aren't params are matched as literal text, or undefined when it has none: a
+ * param's name is ASCII letters, digits and _, so `{café}` is text.
+ */
+export function literalBraces(pattern: string): string | undefined {
+  const braces = (pattern.match(/\{[^{}]*}/g) ?? []).filter(brace => !WHOLE_PLACEHOLDER.test(brace))
+  if (braces.length === 0) return undefined
+  const one = braces.length === 1
+  return (
+    `${braces.join(', ')} ${one ? "isn't a param" : "aren't params"}, since a param's name is ASCII letters, digits and _; ` +
+    `${one ? 'it is' : 'they are'} matched as literal text.`
+  )
+}
+
 /** The character a parameter will not cross, so one pattern segment maps to one value. */
 export const PARAM_SEPARATOR = '/'
 
@@ -808,6 +825,9 @@ export function Command<
     }
 
     if (isCustomIdRouted(commandType)) {
+      // A route warned as it was made
+      const braces = typeof name === 'string' ? literalBraces(commandName) : undefined
+      if (braces) logger.warn(`${target.constructor.name}.${propertyKey}: in the pattern "${commandName}", ${braces}`)
       let pattern: ReturnType<typeof createRegexFromPattern>
       try {
         pattern = createRegexFromPattern(commandName)
