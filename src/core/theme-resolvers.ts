@@ -166,7 +166,8 @@ class ResolverCache {
   private accept(id: string, result: unknown, report: boolean): ThemeOverride | undefined {
     if (result === undefined || result === null) return undefined
     const layer = copyLayer(result) as ThemeOverride
-    const problems = themeProblems(layer, `themeFor.${this.kind} for ${this.kind} ${id}`)
+    // A value from the app's data, such as a user's saved choice, shown as a log line shows outside text
+    const problems = themeProblems(layer, `themeFor.${this.kind} for ${this.kind} ${id}`, { forLog: true })
     if (problems.length === 0) {
       if (report) this.warned.delete(id)
       return layer
