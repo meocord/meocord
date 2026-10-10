@@ -49,7 +49,9 @@ import {
   createMockUser,
   heldChannelOf,
   isRawMember,
+  isUnsetEveryone,
   memberRoles,
+  NEW_SERVER_EVERYONE_PERMISSIONS,
   ownedManager,
   readPlaceAs,
 } from './mock-interaction.js'
@@ -85,6 +87,17 @@ function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<
         "channel's overwrites or every permission an Administrator or the owner has; in the next major version (5.0) " +
         `it reads them as Discord computes them in the channel, ${change.join(' and ')}. Set memberPermissions on the ` +
         'mock, or call useStrictMocks() to compute them now.',
+    )
+  }
+  // A member's permissions come from its roles, @everyone's included, which strict mocks give a new server's
+  const everyone = guild.roles.everyone as Role | undefined
+  const fromRoles = !Object.prototype.hasOwnProperty.call(member, 'permissions')
+  if (fromRoles && everyone && isUnsetEveryone(everyone) && !base.has(NEW_SERVER_EVERYONE_PERMISSIONS)) {
+    warnOnce(
+      mockLogger,
+      `${interaction.constructor.name}.memberPermissions reads the server's @everyone role here with no permissions; in the ` +
+        'next major version (5.0) it has the permissions Discord gives @everyone in a new server, as strict mocks read it. ' +
+        'Set guild.roles.everyone.permissions, or call useStrictMocks() to read it so now.',
     )
   }
   return base
@@ -273,16 +286,22 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     // The bot's permissions where the interaction was made: its member's in the channel, or in a thread its parent, as
     // discord.js computes them; none outside a server
     appPermissions: interaction =>
-      readPlaceAs(interaction, 'appPermissions', () => {
-        const { guild } = interaction
-        const me = guild instanceof Guild ? botMemberOf(guild) : null
-        if (!(me instanceof GuildMember) || heldChannelOf(interaction, guild!) === null) return noPermissions()
-        // discord.js's own computation, given its own overwritesFor over a test's stub on the channel; a channel the
-        // mock would make has no overwrites
-        const at = overwritingChannel(interaction, guild!) ?? { guild, permissionOverwrites: { cache: new Collection() } }
-        const channel = Object.create(at, { overwritesFor: { value: channelPermissions.overwritesFor } }) as GuildChannel
-        return channelPermissions.memberPermissions.call(channel, me, true)
-      }),
+      readPlaceAs(
+        interaction,
+        'appPermissions',
+        () => {
+          const { guild } = interaction
+          const me = guild instanceof Guild ? botMemberOf(guild) : null
+          if (!(me instanceof GuildMember) || heldChannelOf(interaction, guild!) === null) return noPermissions()
+          // discord.js's own computation, given its own overwritesFor over a test's stub on the channel; a channel the
+          // mock would make has no overwrites
+          const at = overwritingChannel(interaction, guild!) ?? { guild, permissionOverwrites: { cache: new Collection() } }
+          const channel = Object.create(at, { overwritesFor: { value: channelPermissions.overwritesFor } }) as GuildChannel
+          return channelPermissions.memberPermissions.call(channel, me, true)
+        },
+        // A server the bot isn't in has no guild in either mode, so no permissions in both
+        place => !place.raw,
+      ),
   }),
   defaultsOf(TextChannel, { type: () => ChannelType.GuildText as const, nsfw: () => false, topic: () => null, rateLimitPerUser: () => 0 }),
   defaultsOf(NewsChannel, { type: () => ChannelType.GuildAnnouncement as const, nsfw: () => false, topic: () => null }),

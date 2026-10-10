@@ -32,6 +32,8 @@ const bits = (...flags: bigint[]) => new PermissionsBitField(flags).freeze()
 /** A server where `@everyone` is denied SendMessages in #general, and a command run there by a member with `roles`. */
 function deniedChannel(permissions: bigint[] = [SendMessages, ViewChannel]) {
   const guild = createMockGuild()
+  // @everyone has none of its own, so the member's permissions are its role's alone, in both modes
+  ;(guild.roles.everyone as { permissions: unknown }).permissions = bits()
   const channel = createMockChannel(TextChannel, { guild } as never)
   guild.channels.cache.set(channel.id, channel as never)
   channel.permissionOverwrites.cache.set(guild.id, { id: guild.id, type: OverwriteType.Role, allow: bits(), deny: bits(SendMessages) } as never)
@@ -101,6 +103,16 @@ describe('memberPermissions, under useStrictMocks()', () => {
   })
 })
 
+it("reads @everyone with a new server's permissions under useStrictMocks(), without a warning", () => {
+  useStrictMocks()
+  const guild = createMockGuild()
+  const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guild, guildId: guild.id })
+
+  expect(interaction.memberPermissions!.bitfield).toBe(new PermissionsBitField(guild.roles.everyone.permissions).bitfield)
+  expect(guild.roles.everyone.permissions.has(SendMessages)).toBe(true)
+  expect(warned).toEqual([])
+})
+
 describe("memberPermissions, beside discord.js's own permissionsIn", () => {
   beforeEach(() => useStrictMocks())
 
@@ -156,6 +168,20 @@ describe('memberPermissions, in default mode', () => {
     void deniedChannel([Administrator]).interaction.memberPermissions
 
     expect(warned).toEqual([expect.stringMatching(/memberPermissions .*Administrator.*5\.0.*with .*ManageGuild/s)])
+  })
+
+  it("warns once where the server's @everyone role has no permissions set, which strict mocks give a new server's", () => {
+    const guild = createMockGuild()
+    const inGuild = () => createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guild, guildId: guild.id })
+
+    void [inGuild().memberPermissions, inGuild().memberPermissions]
+    expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions reads the server's @everyone role here with no permissions.*5\.0.*guild\.roles\.everyone\.permissions.*useStrictMocks\(\)/s)])
+
+    forgetDeprecationWarnings()
+    warned.length = 0
+    ;(guild.roles.everyone as { permissions: unknown }).permissions = bits()
+    void inGuild().memberPermissions
+    expect(warned).toEqual([])
   })
 
   it("says nothing where the channel's overwrites change nothing", () => {
