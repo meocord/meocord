@@ -3,6 +3,7 @@ import { Catch, Command, Controller, Guard, Interceptor, MeoCord, UseFilter, Use
 import { CommandType } from '@src/enum/index.js'
 import { type CallHandler, type ExceptionFilter, type GuardInterface, type InterceptorInterface } from '@src/interface/index.js'
 import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
 import { createMockInteraction, MeoCordTestingModule } from './index.js'
 
@@ -53,6 +54,7 @@ const stubs = {
 let warned: string[]
 beforeEach(() => {
   forgetStrictMocks()
+  forgetDeprecationWarnings()
   ran.length = 0
   warned = []
   vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
@@ -97,6 +99,33 @@ describe('a stage that is also a provider', () => {
   })
 })
 
+describe('a stage stub’s lifecycle hooks', () => {
+  const hooked = () => ({ canActivate: () => true, onReady: vi.fn(), onShutdown: vi.fn() })
+  const lifecycle = async (module: ReturnType<ReturnType<typeof MeoCordTestingModule.create>['compile']>) => {
+    await module.init({ ready: true })
+    await module.dispatch(ping())
+    await module.close()
+  }
+
+  it('run where a provider of the stage would run them, as the bot runs a provider’s', async () => {
+    const stub = hooked()
+    const module = MeoCordTestingModule.create({ controllers: [Ping], providers: [{ provide: Gate, useClass: Gate }] }).overrideGuard(Gate).useValue(stub).compile()
+
+    await lifecycle(module)
+
+    expect([stub.onReady.mock.calls.length, stub.onShutdown.mock.calls.length]).toEqual([1, 1])
+  })
+
+  it('stay unrun for a stage only applied with @UseGuard, which the bot makes no lifecycle unit of', async () => {
+    const stub = hooked()
+    const module = MeoCordTestingModule.create({ controllers: [Ping] }).overrideGuard(Gate).useValue(stub).compile()
+
+    await lifecycle(module)
+
+    expect([stub.onReady.mock.calls.length, stub.onShutdown.mock.calls.length]).toEqual([0, 0])
+  })
+})
+
 describe('a stub without its stage’s method', () => {
   const NO_METHOD = ['overrideGuard(Gate).useValue(…) has no canActivate method.', 'overrideInterceptor(Timing).useValue(…) has no intercept method.', 'overrideFilter(Report).useValue(…) has no catch method.']
   const empty = () =>
@@ -108,8 +137,8 @@ describe('a stub without its stage’s method', () => {
     expect(() => empty().compile()).toThrow(NO_METHOD[0])
   })
 
-  it('warns once each at compile() by default, and builds the module', () => {
-    expect(() => empty().compile()).not.toThrow()
+  it('warns once each by default, however many modules compile it, and builds the module', () => {
+    expect(() => [empty().compile(), empty().compile()]).not.toThrow()
 
     expect(warned).toEqual(NO_METHOD.map(text => expect.stringContaining(text)))
   })

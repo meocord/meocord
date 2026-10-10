@@ -95,6 +95,7 @@ import { type Provider, type ProviderToken } from '@src/interface/provider.inter
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { strictMocks } from './strict-mocks.js'
+import { warnOnce } from '@src/common/deprecation.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -1040,19 +1041,22 @@ export class TestingModuleBuilder {
         const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
         for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
         for (const [token, override] of this.overrides) providers.set(token, override)
-        // A stage override stands in for its class wherever the class is bound, a provider of the same token included,
-        // and wins over overrideProvider's: one binding per token. A stub that can't run is named here, where it is set
+        // A stage override stands in for its class wherever the class is bound. A stage also provided takes the stub in
+        // place of its provider, one binding per token, and runs lifecycle hooks as that provider would; any other is
+        // bound on its own below, as the bot never makes a lifecycle unit of it. A stub that can't run is named here
+        const stageStubs = new Map<new (...args: any[]) => unknown, object>()
         for (const [method, overrides, kind] of [
           ['canActivate', this.guardOverrides, 'overrideGuard'],
           ['intercept', this.interceptorOverrides, 'overrideInterceptor'],
           ['catch', this.filterOverrides, 'overrideFilter'],
         ] as const) {
           for (const [stage, stub] of overrides as Map<new (...args: any[]) => unknown, object>) {
-            providers.set(stage, { provide: stage, useValue: stub })
+            if (providers.has(stage)) providers.set(stage, { provide: stage, useValue: stub })
+            else stageStubs.set(stage, stub)
             if (typeof (stub as Record<string, unknown>)[method] === 'function') continue
             const problem = `${kind}(${stage.name}).useValue(…) has no ${method} method.`
             if (strictMocks()) startupError(new Error(problem))
-            else new Logger('TestingModule').warn(`${problem} A call that reaches ${stage.name} fails; useStrictMocks() refuses it here.`)
+            else warnOnce(new Logger('TestingModule'), `${problem} A call that reaches ${stage.name} fails; useStrictMocks() refuses it here.`)
           }
         }
         // Each pass of checks ends before the next step that is no check, so a module with one error stops where it always did
@@ -1099,6 +1103,9 @@ export class TestingModuleBuilder {
             )
           })
         }
+
+        // A stage override nothing provides, bound before the classes so none of them binds the stage itself
+        for (const [stage, stub] of stageStubs) container.bind(stage).toConstantValue(stub)
 
         // The app's cooldown policy, so a test of a failing store sees what the bot would do
         if (appOptions && !container.isBound(COOLDOWN_POLICY)) container.bind(COOLDOWN_POLICY).toConstantValue(cooldownPolicyFrom(appOptions))
