@@ -332,13 +332,17 @@ describe('apps in one process', () => {
     expect(primary()).toBe(DEFAULT_THEME.colors.primary)
   })
 
+  /** The theme scopes `run` entered: MeoCord runs other work in an AsyncLocalStorage too, such as tracking a call. */
+  const themeScopes = (run: { mock: { calls: unknown[][] } }) =>
+    run.mock.calls.filter(([store]) => typeof store === 'object' && store !== null && 'theme' in store)
+
   it('enters no scope for an app with no @UseTheme and no theme of its own', async () => {
     const run = vi.spyOn(AsyncLocalStorage.prototype, 'run')
 
     await MeoCordTestingModule.create({ controllers: [Plain] }).compile().invoke(Plain, 'plain', press('plain'))
 
     expect(seen).toEqual([DEFAULT_THEME.colors.primary])
-    expect(run).not.toHaveBeenCalled()
+    expect(themeScopes(run)).toEqual([])
   })
 
   it('enters no scope for an app theme that sets nothing', async () => {
@@ -349,7 +353,7 @@ describe('apps in one process', () => {
       await MeoCordTestingModule.create({ app: Empty, controllers: [Plain] }).compile().invoke(Plain, 'plain', press('plain'))
     }
 
-    expect(run).not.toHaveBeenCalled()
+    expect(themeScopes(run)).toEqual([])
     expect(seen).toEqual([DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.primary])
   })
 
@@ -368,7 +372,7 @@ describe('apps in one process', () => {
 
     expect(seen).toEqual(['#0000F3'])
     expect(primary()).toBe('#0000F3')
-    expect(run).not.toHaveBeenCalled()
+    expect(themeScopes(run)).toEqual([])
   })
 })
 

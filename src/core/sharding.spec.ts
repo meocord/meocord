@@ -641,13 +641,14 @@ describe('sharding', () => {
       class App {}
 
       const started = loaded.MeoCordFactory.create(App).start()
+      const rejected = expect(started).rejects.toThrow('The bot was stopped before it came online.')
       await vi.waitFor(() => expect(connect).toBeTypeOf('function'))
       process.emit('message', { meocord: 'shutdown' }, undefined)
       // The shutdown waits for the provider being made, and the startup makes nothing more after it
       connect()
       await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
 
-      await expect(started).rejects.toThrow('The bot was stopped before it came online.')
+      await rejected
       expect(login).not.toHaveBeenCalled()
     })
 
