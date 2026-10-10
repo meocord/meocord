@@ -41,8 +41,10 @@ type IsPlural<T> = T extends object
   : false
 
 /**
- * Every message key of a catalog: the dotted path to each message or plural. A key with a `.` in its own name is left
- * out, as a lookup reads it as a path and never finds it; `createTranslator` warns about one. Nest it as a group.
+ * Every message key of a catalog: the dotted path to each message or plural.
+ *
+ * A key with a `.` in its own name is left out, as a lookup reads it as a path and never finds it; `createTranslator`
+ * warns about one. Nest it as a group.
  *
  * @group Types
  */
