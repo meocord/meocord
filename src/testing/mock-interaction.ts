@@ -1051,7 +1051,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       name,
       createMockFn(() => {
         const answer = readPlaceQuietly(check)
-        if (strictPlace && !strictMocks() && (strictPlace.refused || strictChecks(strictPlace)[name] !== answer)) placeWarners.get(instance)?.(`${name}()`)
+        if (strictPlace && !strictMocks() && (strictPlace.refused || strictChecks(strictPlace)[name] !== answer)) placeWarners.get(instance)?.warn(`${name}()`)
         return answer
       }),
     )
@@ -2016,17 +2016,27 @@ export function memberRoles(member: object, roles: readonly Role[]): GuildMember
 }
 
 /** The permissions Discord gives a server's @everyone role in a server made today. */
-const NEW_SERVER_EVERYONE_PERMISSIONS = 2248473465835073n
+export const NEW_SERVER_EVERYONE_PERMISSIONS = 2248473465835073n
+
+// The @everyone roles default mode made with no permissions, where strict mocks give a new server's
+const madeEveryones = new WeakSet<object>()
+
+/** Whether `role` is an @everyone role default mode made, whose permissions the test hasn't set. */
+export const isUnsetEveryone = (role: object): boolean => madeEveryones.has(role) && !Object.prototype.hasOwnProperty.call(role, 'permissions')
 
 // A server's @everyone role, which has the server's id and ranks lowest, at position 0; with strict mocks, the
 // permissions Discord gives it in a new server
-const everyoneRole = (guildId: string): Role =>
-  createMockInteraction(Role, {
+function everyoneRole(guildId: string): Role {
+  const strict = strictMocks()
+  const role = createMockInteraction(Role, {
     id: guildId,
     name: '@everyone',
     position: 0,
-    ...(strictMocks() ? { permissions: new PermissionsBitField(NEW_SERVER_EVERYONE_PERMISSIONS).freeze() } : {}),
+    ...(strict ? { permissions: new PermissionsBitField(NEW_SERVER_EVERYONE_PERMISSIONS).freeze() } : {}),
   }) as Role
+  if (!strict) madeEveryones.add(role)
+  return role
+}
 
 /**
  * A guild's role manager with `roles` in its cache, and the guild's @everyone role: the one given with the guild's id,
@@ -2208,7 +2218,7 @@ interface ChannelPlace {
 const placeName = (guildId: string | null) => (guildId === null ? 'a DM' : `server ${guildId}`)
 
 /** Where strict mocks place an interaction beyond a channel given, and why; `refused` when what was given disagrees. */
-interface StrictPlace {
+export interface StrictPlace {
   given: 'message' | 'guild' | 'member' | 'guildId'
   channel?: object
   guildId?: string | null
@@ -2317,24 +2327,26 @@ function readPlaceQuietly<T>(read: () => T): T {
   }
 }
 
-// Each interaction's placement warning, by the read it names, for the mock's own reads that warn as the test's read
-const placeWarners = new WeakMap<object, (read: string) => void>()
+// Each interaction's strict place and its warning, by the read it names, for the mock's own reads that warn as the test's
+const placeWarners = new WeakMap<object, { place: StrictPlace; warn: (read: string) => void }>()
 
 // The place keys a read of the mock's own read while it runs, so it warns by its own name where one would warn
 let placeReadsSeen: Set<string> | undefined
 
 /**
  * Runs `read`, a value of `mock`'s own that reads where the mock is, quietly; in default mode it warns once, as `key`,
- * where one of those reads would warn, since strict mocks place the mock otherwise.
+ * where one of those reads would warn, since strict mocks place the mock otherwise, unless `differs` says the value is
+ * the same in that place.
  */
-export function readPlaceAs<T>(mock: object, key: string, read: () => T): T {
+export function readPlaceAs<T>(mock: object, key: string, read: () => T, differs: (place: StrictPlace) => boolean = () => true): T {
   const outer = placeReadsSeen
   const seen = (placeReadsSeen = new Set())
   try {
     return readPlaceQuietly(read)
   } finally {
     placeReadsSeen = outer
-    if (seen.size > 0) placeWarners.get(mockTargets.get(mock) ?? mock)?.(key)
+    const warner = placeWarners.get(mockTargets.get(mock) ?? mock)
+    if (seen.size > 0 && warner && differs(warner.place)) warner.warn(key)
   }
 }
 
@@ -2383,7 +2395,7 @@ function warnOnPlaceReads(instance: Record<string, unknown>, place: StrictPlace,
           ? ['channelId', 'channel']
           : []
   const name = (Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name
-  placeWarners.set(instance, read => warnOnce(mockLogger, placeWarning(name, read, place)))
+  placeWarners.set(instance, { place, warn: read => warnOnce(mockLogger, placeWarning(name, read, place)) })
   for (const key of keys.filter(each => !given.has(each))) {
     // A read the mock makes stays quiet, noted for a read of the mock's own to warn by its name
     const warn = () => (readingPlace > 0 ? void placeReadsSeen?.add(key) : warnOnce(mockLogger, placeWarning(name, key, place)))

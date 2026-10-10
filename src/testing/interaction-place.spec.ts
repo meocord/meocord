@@ -176,15 +176,18 @@ describe('where a mock interaction is, in default mode', () => {
     ])
   })
 
-  it("warns by memberPermissions and appPermissions, not by what they read, where strict mocks place it otherwise", () => {
+  it('warns by memberPermissions, not by what it reads, where strict mocks place it otherwise; appPermissions is none in both', () => {
     const interaction = slash({ guildId: ELSEWHERE })
 
     void [interaction.memberPermissions, interaction.appPermissions]
 
-    expect(warned).toEqual([
-      expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions reads a server the bot is in, though the mock was given only a guildId/),
-      expect.stringMatching(/^ChatInputCommandInteraction\.appPermissions reads a server the bot is in/),
-    ])
+    expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions reads a server the bot is in, though the mock was given only a guildId/)])
+  })
+
+  it('warns by appPermissions, not by what it reads, for a guild alone, which strict mocks place in that guild', () => {
+    void slash({ guild: createMockGuild() }).appPermissions
+
+    expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.appPermissions reads a DM's value, though the mock was given a guild/)])
   })
 
   it("warns only that a message the bot sent in a DM reads as a DM's, where strict mocks refuse it beside a guild", async () => {
