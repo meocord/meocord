@@ -68,7 +68,7 @@ const describe = (value: unknown, quote: Quote = asWritten): string =>
           ? 'an object'
           : String(value)
 
-const describeGroup = (value: unknown): string => (Array.isArray(value) ? 'an array' : describe(value))
+const describeGroup = (value: unknown, quote: Quote = asWritten): string => (Array.isArray(value) ? 'an array' : describe(value, quote))
 
 /** Whether a value is a plain object, as an object literal or `JSON.parse` makes: one a theme merges key by key. */
 const isPlainObject = (value: unknown): boolean => {
@@ -104,7 +104,7 @@ export function themeProblems(theme: unknown, where?: string, { forLog = false }
   const quote: Quote = forLog ? quoteForLog : asWritten
   const name = forLog ? escapeForLog : (role: string) => role
   if (typeof theme !== 'object' || theme === null || Array.isArray(theme)) {
-    return [`${at}theme must be an object of groups (got ${describeGroup(theme)})`]
+    return [`${at}theme must be an object of groups (got ${describeGroup(theme, quote)})`]
   }
   if (!isPlainObject(theme)) return [`${at}theme must be a plain object of groups (got ${describeInstance(theme)}): ${PLAIN} theme`]
 
@@ -114,7 +114,7 @@ export function themeProblems(theme: unknown, where?: string, { forLog = false }
     const roles = (theme as Record<string, unknown>)[group]
     if (roles === undefined) continue
     if (typeof roles !== 'object' || roles === null || Array.isArray(roles)) {
-      problems.push(`${at}theme.${group} must be an object of roles (got ${describeGroup(roles)})`)
+      problems.push(`${at}theme.${group} must be an object of roles (got ${describeGroup(roles, quote)})`)
       continue
     }
     if (!isPlainObject(roles)) {

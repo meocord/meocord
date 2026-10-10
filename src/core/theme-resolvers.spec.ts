@@ -643,6 +643,19 @@ describe('a result whose value cannot be used', () => {
     ])
   })
 
+  it('is quoted on one line when the result, or a group of it, is a string', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const module = moduleWith({ guild: () => 'x\nsecond line' as never, user: () => ({ emojis: 'y\nthird line' }) as never })
+
+    await module.invoke(Panel, 'panel', press('panel'))
+
+    expect(warn.mock.calls.map(([text]) => String(text).split('\n')[0])).toEqual([
+      `themeFor.guild for guild ${GUILD}: theme must be an object of groups (got "x\\nsecond line")`,
+      `themeFor.user for user ${USER}: theme.emojis must be an object of roles (got "y\\nthird line")`,
+    ])
+    expect(warn.mock.calls.map(([text]) => String(text).split('\n').length)).toEqual([2, 2])
+  })
+
   it('keeps the startup refusal of a theme written in code as it reads', () => {
     expect(() => {
       @MeoCord({ controllers: [], clientOptions: { intents: [] }, theme: { emojis: { success: 'x' } } })
