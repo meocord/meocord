@@ -20,5 +20,8 @@ export function projectPaths(cwd = process.cwd()): Paths | undefined {
   // The matcher resolves each target from the file that declares it, or from baseUrl, as tsc does
   const match = createPathsMatcher(tsconfig)
   if (!paths || !match) return undefined
-  return Object.fromEntries(Object.keys(paths).map(alias => [alias, match(alias.replace('*', STAR)).map(target => target.replace(STAR, '*'))]))
+  // Resolved, so each is the platform's own absolute path: get-tsconfig writes Windows paths with forward slashes
+  return Object.fromEntries(
+    Object.keys(paths).map(alias => [alias, match(alias.replace('*', STAR)).map(target => path.resolve(target).replace(STAR, '*'))]),
+  )
 }
