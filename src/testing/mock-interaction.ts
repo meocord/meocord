@@ -854,7 +854,8 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * `user` of its own unless given, and its `locale` is `'en-US'`; without a `guildId` it is a DM, and with one its
  * `member` is its user: for a `user` given, when the test gives the `guild`, the guild's cached member for that user,
  * so a message and an interaction from one user in that server share it, and `memberPermissions` are that member's
- * permissions (`null` in a DM). A user is a person, `bot: false`, and a member has the server's @everyone role and the
+ * permissions, with its channel's overwrites applied under `useStrictMocks()` (`null` in a DM). A user is a person,
+ * `bot: false`, and a member has the server's @everyone role and the
  * roles {@link createMockMember} gave it; with a `guildId` but no `guild`, a server the bot isn't in, that @everyone role
  * has the `guildId`. A DM sent to a member goes through its user's `send()` and the user's one DM channel. Its
  * `channel` is a text channel of its server, the one its guild caches under `channelId`, or the user's DM channel. A
@@ -1975,8 +1976,9 @@ export interface MockMemberOverrides {
  * highest, by position, then the lower id. `permissions` are computed as discord.js computes them: every permission for
  * the server's owner, and otherwise its roles' permissions combined, @everyone's included, so a member with no roles has
  * @everyone's alone. The member is put in its guild's member cache, so an interaction or a message from its user in that
- * server has it as its `member`, and `memberPermissions` are its permissions. A DM sent to the member goes through its
- * user's `send()` and the user's one DM channel.
+ * server has it as its `member`, and `memberPermissions` are its permissions, with the interaction's channel's
+ * overwrites applied under `useStrictMocks()`. A DM sent to the member goes through its user's `send()` and the user's
+ * one DM channel.
  *
  * @param overrides - The member's user, server, roles and nickname; see {@link MockMemberOverrides}.
  * @returns The mock member.

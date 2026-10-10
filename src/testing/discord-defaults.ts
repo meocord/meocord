@@ -27,6 +27,7 @@ import {
   ModalSubmitInteraction,
   MessageType,
   NewsChannel,
+  PermissionFlagsBits,
   PermissionsBitField,
   PresenceManager,
   ReactionManager,
@@ -50,6 +51,52 @@ import {
   ownedManager,
 } from './mock-interaction.js'
 import { strictMocks } from './strict-mocks.js'
+import { Logger } from '@src/common/logger.js'
+import { warnOnce } from '@src/common/deprecation.js'
+
+const mockLogger = new Logger('Mocks')
+
+/**
+ * A member's permissions where an interaction was made, as Discord computes them: under strict mocks, the channel's
+ * overwrites on top of `member.permissions`, so a test that sets those keeps the base; otherwise `member.permissions`,
+ * with a warning once where the overwrites would change them.
+ */
+function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<PermissionsBitField> {
+  const base = member.permissions
+  const channel: unknown = interaction.channel
+  // A thread takes its parent's overwrites
+  const at = channel instanceof ThreadChannel ? channel.parent : channel
+  // Only a server the mock caches has the overwrites to apply
+  const { guild } = interaction
+  if (!(guild instanceof Guild) || !(at instanceof GuildChannel) || base.has(PermissionFlagsBits.Administrator) || member.id === guild.ownerId) {
+    return base
+  }
+  // Private in discord.js's typings, though it is the method its own permissionsFor uses
+  interface Overwrite { allow: PermissionsBitField; deny: PermissionsBitField }
+  const overwrites = (at as unknown as { overwritesFor(member: GuildMember): { everyone?: Overwrite; roles: Overwrite[]; member?: Overwrite } }).overwritesFor(member)
+  const computed = new PermissionsBitField(base)
+    .remove(overwrites.everyone?.deny ?? 0n)
+    .add(overwrites.everyone?.allow ?? 0n)
+    .remove(overwrites.roles.length > 0 ? overwrites.roles.map(role => role.deny) : 0n)
+    .add(overwrites.roles.length > 0 ? overwrites.roles.map(role => role.allow) : 0n)
+    .remove(overwrites.member?.deny ?? 0n)
+    .add(overwrites.member?.allow ?? 0n)
+    .freeze()
+  if (strictMocks()) return computed
+  if (!computed.equals(base)) {
+    const lost = new PermissionsBitField(base).remove(computed).toArray()
+    const gained = new PermissionsBitField(computed).remove(base).toArray()
+    const change = lost.length > 0 ? [`without ${lost.join(', ')}`] : []
+    if (gained.length > 0) change.push(`with ${gained.join(', ')}`)
+    warnOnce(
+      mockLogger,
+      `${interaction.constructor.name}.memberPermissions reads the member's permissions without the channel's ` +
+        `overwrites here; in the next major version (5.0) it applies them, as Discord does, and reads ` +
+        `${change.join(' and ')}. Set memberPermissions on the mock, or call useStrictMocks() to apply them now.`,
+    )
+  }
+  return base
+}
 
 /** A permission set with none, frozen as discord.js freezes the ones it gives. */
 const noPermissions = () => new PermissionsBitField().freeze()
@@ -186,7 +233,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
       const { guildId } = interaction
       const member: unknown = interaction.member
       if (!guildId) return null as never
-      if (member instanceof GuildMember) return member.permissions as never
+      if (member instanceof GuildMember) return inChannel(interaction, member) as never
       // A raw member's permissions are the string Discord sends, read as discord.js reads them
       return (isRawMember(member) && !interaction.guild ? new PermissionsBitField(BigInt(member.permissions)).freeze() : null) as never
     },
