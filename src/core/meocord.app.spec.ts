@@ -1307,7 +1307,7 @@ describe('MeoCordApp', () => {
     })
   })
 
-  describe('shutdownAndExit()', () => {
+  describe('shutdownAndExit(false)', () => {
     it('destroys the client, removes its listeners and exits 0', async () => {
       const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token', [{ name: 'Playing' }])
       await app.start()
@@ -1317,7 +1317,7 @@ describe('MeoCordApp', () => {
 
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
 
-      await shutdownAndExit()
+      await shutdownAndExit(false)
 
       expect(mockClient.destroy).toHaveBeenCalled()
       expect(mockClient.removeAllListeners).toHaveBeenCalled()

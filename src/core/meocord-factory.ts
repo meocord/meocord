@@ -141,8 +141,8 @@ export class MeoCordFactory {
    * process sharding falls back to running every shard in this process, so the watcher restarts one
    * process and leaves no shards behind.
    */
-  private static effectiveConfig(config: MeoCordConfig): MeoCordConfig {
-    if (config.sharding?.mode !== 'process' || isShardProcess() || processShardingEnabled(config)) return config
+  private static effectiveConfig(config: MeoCordConfig, shard: boolean): MeoCordConfig {
+    if (config.sharding?.mode !== 'process' || shard || processShardingEnabled(config)) return config
     this.logger.info(
       "sharding.mode 'process' is off in development, so every shard runs in this process; set " +
         'sharding.development: true to run them in separate processes.',
@@ -169,11 +169,14 @@ export class MeoCordFactory {
    *   decorators kept are among them.
    */
   static create(target: ServiceIdentifier): MeoCordApplication {
+    // Decided first, once, and handed to all that asks: a ShardingManager this app builds writes the variable into its
+    // own process too, which would make the manager read as a shard
+    const shard = isShardProcess(process.env)
     try {
-      return this.createApplication(target)
+      return this.createApplication(target, shard)
     } catch (error) {
       // A shard ends, so its manager restarts it, or stops every shard for a refusal, which it logs
-      if (isShardProcess()) endFailedShard(error)
+      if (shard) endFailedShard(error)
       // Reported here in a built application, so it reads the same whether main.ts catches it or not; main.ts, or the
       // report of an uncaught refusal, exits 1. A test or script gets the error as it is.
       else if (isRefusal(error) && !isExplainedError(error)) {
@@ -188,7 +191,7 @@ export class MeoCordFactory {
     }
   }
 
-  private static createApplication(target: ServiceIdentifier): MeoCordApplication {
+  private static createApplication(target: ServiceIdentifier, shard: boolean): MeoCordApplication {
     const options = Reflect.getMetadata(META.appOptions, target)
 
     // With startupErrors: 'all', what the decorators kept: a built bot's every one, else the app's and its controllers'
@@ -222,7 +225,7 @@ export class MeoCordFactory {
       ...appObservers(target as object),
     ]
     // A shard's manager runs the same checks, so a sharded bot warns once
-    if (!isShardProcess()) {
+    if (!shard) {
       warnUnregisteredCommands(options.controllers)
       warnInheritedRoutes(options.controllers)
       warnOverlappingPatterns(options.controllers)
@@ -244,7 +247,7 @@ export class MeoCordFactory {
     assertBuiltForThisPlatform()
 
     // A process-sharding manager only spawns shards, so it binds, constructs and connects nothing itself.
-    if (shardingRole(meocordConfig) === 'manager') {
+    if (shardingRole(meocordConfig, shard) === 'manager') {
       return new ShardManager({
         controllerClasses: options.controllers,
         token: meocordConfig.discordToken,
@@ -279,7 +282,7 @@ export class MeoCordFactory {
     bindGlobalStages(container, stages)
 
     // Bound now, so no provider stands in for it; made once the checks pass, the one Client the app logs in with
-    const clientOptions = clientOptionsWithSharding(this.effectiveConfig(meocordConfig), options.clientOptions)
+    const clientOptions = clientOptionsWithSharding(this.effectiveConfig(meocordConfig, shard), options.clientOptions)
     container.bind(Client).toDynamicValue(() => new Client(clientOptions)).inSingletonScope()
     if (options.i18n) {
       container.bind(Translator).toConstantValue(options.i18n)
@@ -404,7 +407,7 @@ export class MeoCordFactory {
       for (const svc of (options.services ?? []) as any[]) {
         container.get(svc)
       }
-      if (shardingRole(meocordConfig) === 'shard' && container.get(CooldownStore) instanceof MemoryCooldownStore) {
+      if (shard && container.get(CooldownStore) instanceof MemoryCooldownStore) {
         warnPerShardCooldowns(options.controllers, logger)
       }
       bindAppPresenter(container, target as object, discordClient)
@@ -425,6 +428,7 @@ export class MeoCordFactory {
       options.messages,
       // In development only, unless the app says otherwise
       options.warnUnanswered ?? process.env.NODE_ENV === 'development',
+      shard,
     )
     })
   }

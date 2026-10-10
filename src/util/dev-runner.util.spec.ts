@@ -21,7 +21,7 @@ describe('tellDevRunner', () => {
     })
     process.send = send as unknown as typeof process.send
 
-    await tellDevRunner({ meocord: 'login-failed' })
+    await tellDevRunner({ meocord: 'login-failed' }, false)
 
     expect(send).toHaveBeenCalledWith({ meocord: 'login-failed' }, undefined, {}, expect.any(Function))
   })
@@ -32,7 +32,7 @@ describe('tellDevRunner', () => {
     process.send = vi.fn(() => true) as unknown as typeof process.send
     let settled = false
 
-    const told = tellDevRunner({ meocord: 'login-failed' }).then(() => (settled = true))
+    const told = tellDevRunner({ meocord: 'login-failed' }, false).then(() => (settled = true))
     await vi.advanceTimersByTimeAsync(PARENT_SEND_TIMEOUT_MS)
     await told
 

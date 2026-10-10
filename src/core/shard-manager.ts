@@ -66,6 +66,11 @@ export class ShardManager implements MeoCordApplication {
   private readonly stopRequest: ReturnType<typeof stopRequests>
   /** How long each shard has to shut down, before the manager's margin: read, and warned about, once. */
   private readonly shutdownTimeout: number
+  /**
+   * Whether `meocord start --dev` runs the manager, decided before discord.js's ShardingManager, which writes the
+   * variable that marks a shard into this process too.
+   */
+  private readonly devRunner = underDevRunner(false)
 
   constructor(private readonly options: ShardManagerOptions) {
     // The manager holds the credential for its shards and logs their failures, without an app of its own to register it
@@ -108,7 +113,7 @@ export class ShardManager implements MeoCordApplication {
     process.on('SIGINT', () => void this.stopAndExit())
     process.on('SIGTERM', () => void this.stopAndExit())
     // How `meocord start --dev` stops the bot to restart it; no stop request of the user's, whose first Ctrl+C joins it
-    onDevRunnerStop(() => void this.exitAfterShutdown())
+    onDevRunnerStop(() => void this.exitAfterShutdown(), false)
 
     let total: number
     try {
@@ -240,10 +245,10 @@ export class ShardManager implements MeoCordApplication {
 
   /** Exits 1 for a bot that could not log in, telling `meocord start --dev` first, which then waits for a change. */
   private exitForLogin(): void | Promise<void> {
-    if (!underDevRunner()) return this.exit(1)
+    if (!this.devRunner) return this.exit(1)
     // Set first, so the process exits 1 even if it ends while the message is still on its way
     process.exitCode = 1
-    return tellDevRunner({ meocord: 'login-failed' }).then(() => this.exit(1))
+    return tellDevRunner({ meocord: 'login-failed' }, false).then(() => this.exit(1))
   }
 
   /**

@@ -5,23 +5,23 @@ const config = (sharding?: MeoCordConfig['sharding']): MeoCordConfig => ({ disco
 
 describe('shardingRole', () => {
   it('is a shard whenever a sharding manager spawned the process, whatever the config says', () => {
-    expect(shardingRole(config({ mode: 'process' }), { SHARDING_MANAGER: 'true' })).toBe('shard')
-    expect(shardingRole(config(), { SHARDING_MANAGER: 'true' })).toBe('shard')
+    expect(shardingRole(config({ mode: 'process' }), true)).toBe('shard')
+    expect(shardingRole(config(), true)).toBe('shard')
   })
 
   it('is the manager for process sharding outside development', () => {
-    expect(shardingRole(config({ mode: 'process' }), { NODE_ENV: 'production' })).toBe('manager')
-    expect(shardingRole(config({ mode: 'process' }), {})).toBe('manager')
+    expect(shardingRole(config({ mode: 'process' }), false, { NODE_ENV: 'production' })).toBe('manager')
+    expect(shardingRole(config({ mode: 'process' }), false, {})).toBe('manager')
   })
 
   it('runs every shard in one process in development unless development is on', () => {
-    expect(shardingRole(config({ mode: 'process' }), { NODE_ENV: 'development' })).toBe('single')
-    expect(shardingRole(config({ mode: 'process', development: true }), { NODE_ENV: 'development' })).toBe('manager')
+    expect(shardingRole(config({ mode: 'process' }), false, { NODE_ENV: 'development' })).toBe('single')
+    expect(shardingRole(config({ mode: 'process', development: true }), false, { NODE_ENV: 'development' })).toBe('manager')
   })
 
   it('is a single process for internal sharding or none', () => {
-    expect(shardingRole(config({ shards: 4 }), {})).toBe('single')
-    expect(shardingRole(config(), {})).toBe('single')
+    expect(shardingRole(config({ shards: 4 }), false, {})).toBe('single')
+    expect(shardingRole(config(), false, {})).toBe('single')
   })
 })
 

@@ -402,7 +402,7 @@ describe('lifecycle hooks', () => {
       })
       await becomeReady(client)
 
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(order).toEqual(['controller', 'service', 'destroy'])
       expect(exit).toHaveBeenCalledWith(0)
@@ -497,7 +497,7 @@ describe('lifecycle hooks', () => {
       const { client } = await startApp(loaded, { controllers: [], services: [Broken] })
       await becomeReady(client)
 
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(logged.error).toContainEqual(['onShutdown failed in Broken:', new Error('flush failed')])
       expect(client.destroy).toHaveBeenCalled()
@@ -518,7 +518,7 @@ describe('lifecycle hooks', () => {
       await becomeReady(client)
       vi.useFakeTimers()
 
-      const done = loaded.shutdownAndExit()
+      const done = loaded.shutdownAndExit(false)
       await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS)
       await done
 
@@ -553,7 +553,7 @@ describe('lifecycle hooks', () => {
       await becomeReady(client)
       vi.useFakeTimers()
 
-      const done = loaded.shutdownAndExit()
+      const done = loaded.shutdownAndExit(false)
       await vi.advanceTimersByTimeAsync(500)
       await done
 
@@ -579,7 +579,7 @@ describe('lifecycle hooks', () => {
       const { client } = await startApp(loaded, { controllers: [], services: [Stuck] })
       await becomeReady(client)
       vi.useFakeTimers()
-      const done = loaded.shutdownAndExit()
+      const done = loaded.shutdownAndExit(false)
       await vi.advanceTimersByTimeAsync(DEFAULT_SHUTDOWN_TIMEOUT_MS)
       await done
 
@@ -635,7 +635,7 @@ describe('lifecycle hooks', () => {
       const ready = becomeReady(client)
       await slowBegan.promise
 
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
       finishSlow.resolve()
       await ready
 
@@ -657,7 +657,7 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [], services: [Scheduler] })
 
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(stopped).toBe(false)
       expect(client.destroy).toHaveBeenCalled()
@@ -675,7 +675,7 @@ describe('lifecycle hooks', () => {
 
       try {
         await expect(loaded.MeoCordFactory.create(App).start()).rejects.toThrow('invalid token')
-        await loaded.shutdownAndExit()
+        await loaded.shutdownAndExit(false)
       } finally {
         process.exitCode = exitCode
       }
@@ -690,7 +690,7 @@ describe('lifecycle hooks', () => {
       const { client } = await startApp(loaded, { controllers: [] })
       vi.mocked(client.destroy).mockRejectedValue(new Error('socket stuck'))
 
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(exit).toHaveBeenCalledWith(1)
     })
@@ -715,9 +715,9 @@ describe('lifecycle hooks', () => {
         const loaded = await hangingApp()
         const now = vi.spyOn(Date, 'now').mockReturnValue(0)
 
-        void loaded.shutdownAndExit()
+        void loaded.shutdownAndExit(false)
         now.mockReturnValue(REPEAT_SIGNAL_WINDOW_MS)
-        await loaded.shutdownAndExit()
+        await loaded.shutdownAndExit(false)
 
         expect(exit).toHaveBeenCalledWith(1)
       })
@@ -735,12 +735,12 @@ describe('lifecycle hooks', () => {
 
           devRunnerStop?.()
           now.mockReturnValue(REPEAT_SIGNAL_WINDOW_MS)
-          void loaded.shutdownAndExit()
+          void loaded.shutdownAndExit(false)
           await new Promise(resolve => setTimeout(resolve, 10))
           expect(exit).not.toHaveBeenCalled()
 
           now.mockReturnValue(2 * REPEAT_SIGNAL_WINDOW_MS)
-          await loaded.shutdownAndExit()
+          await loaded.shutdownAndExit(false)
           expect(exit).toHaveBeenCalledWith(1)
         } finally {
           vi.doUnmock('@src/util/dev-runner.util.js')
@@ -752,9 +752,9 @@ describe('lifecycle hooks', () => {
         const loaded = await hangingApp()
         const now = vi.spyOn(Date, 'now').mockReturnValue(0)
 
-        void loaded.shutdownAndExit()
+        void loaded.shutdownAndExit(false)
         now.mockReturnValue(REPEAT_SIGNAL_WINDOW_MS - 1)
-        await loaded.shutdownAndExit()
+        await loaded.shutdownAndExit(false)
 
         expect(exit).not.toHaveBeenCalled()
       })
@@ -799,7 +799,7 @@ describe('lifecycle hooks', () => {
           (error: Error) => error.message,
         )
       await fake.waitFor('identified')
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
       return { outcome, client: login.mock.contexts[0], destroy, readyHooks }
     }
 
@@ -888,7 +888,7 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [First, Second] })
       await becomeReady(client)
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(calls).toEqual(['ready', 'shutdown'])
     })
@@ -906,7 +906,7 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [], services: [Flusher] })
       await becomeReady(client)
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(stopped).toBe(true)
       expect(exit).toHaveBeenCalledWith(0)
@@ -926,7 +926,7 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [], services: [Hanging] })
       await becomeReady(client)
-      const done = loaded.shutdownAndExit()
+      const done = loaded.shutdownAndExit(false)
       await vi.advanceTimersByTimeAsync(0)
       await done
 
@@ -938,7 +938,7 @@ describe('lifecycle hooks', () => {
     it('exits 0 on a signal when no app was started', async () => {
       const loaded = await load()
 
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(exit).toHaveBeenCalledWith(0)
     })
@@ -1001,7 +1001,7 @@ describe('lifecycle hooks', () => {
       await becomeReady(client)
       const interaction = loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'daily' })
       await Promise.all(client.listeners('interactionCreate').map(listener => listener(interaction)))
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(events).toEqual(['prefs ready', 'themes ready', 'themes asked for #0000D1', 'call runs', 'themes shutdown', 'prefs shutdown'])
     })
@@ -1063,7 +1063,7 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [], services: [Rewards], cooldownStore: storeWith(loaded, events) })
       await becomeReady(client)
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(events).toEqual(['store ready begins', 'store ready', 'service ready', 'service shutdown', 'store shutdown'])
     })
@@ -1131,7 +1131,7 @@ describe('lifecycle hooks', () => {
       const handled = call(client, slash(loaded))
       await running.promise
 
-      const stopped = loaded.shutdownAndExit()
+      const stopped = loaded.shutdownAndExit(false)
       await new Promise(resolve => setTimeout(resolve, 20))
       expect(events).not.toContain('store shutdown')
       expect(client.listenerCount('interactionCreate')).toBe(0)
@@ -1172,7 +1172,7 @@ describe('lifecycle hooks', () => {
       const handled = call(client, slash(loaded))
       await running.promise
 
-      const stopped = loaded.shutdownAndExit()
+      const stopped = loaded.shutdownAndExit(false)
       finishSlow.resolve()
       await ready
       finish.resolve()
@@ -1212,7 +1212,7 @@ describe('lifecycle hooks', () => {
       const handled = call(client, slash(loaded))
       await running.promise
 
-      const stopped = loaded.shutdownAndExit()
+      const stopped = loaded.shutdownAndExit(false)
       await new Promise(resolve => setTimeout(resolve, 20))
       expect(events).toEqual(['call runs'])
 
@@ -1274,7 +1274,7 @@ describe('lifecycle hooks', () => {
 
       const { client } = await startApp(loaded, { controllers: [], services: shape === 'chain' ? [Other] : [S], cooldownStore: SideStore })
       await becomeReady(client)
-      await loaded.shutdownAndExit()
+      await loaded.shutdownAndExit(false)
 
       expect(events).toEqual(expected)
     })
@@ -1296,7 +1296,7 @@ describe('lifecycle hooks', () => {
       const handled = call(client, slash(loaded))
       await running.promise
 
-      const stopped = loaded.shutdownAndExit().then(() => 'stopped')
+      const stopped = loaded.shutdownAndExit(false).then(() => 'stopped')
       const first = await Promise.race([stopped, new Promise(resolve => setTimeout(resolve, 200, 'still waiting'))])
 
       expect(first).toBe('stopped')
@@ -1333,7 +1333,7 @@ describe('lifecycle hooks', () => {
       await becomeReady(client)
       const handled = call(client, slash(loaded))
       await running.promise
-      const stopped = loaded.shutdownAndExit()
+      const stopped = loaded.shutdownAndExit(false)
       await new Promise(resolve => setTimeout(resolve, 20))
       finish.resolve()
       await Promise.all([handled, stopped])
@@ -1376,7 +1376,7 @@ describe('lifecycle hooks', () => {
       await becomeReady(client)
       await call(client, slash(loaded))
 
-      const stopped = loaded.shutdownAndExit()
+      const stopped = loaded.shutdownAndExit(false)
       await new Promise(resolve => setTimeout(resolve, 20))
       expect(events).not.toContain('store shutdown')
 
@@ -1418,7 +1418,7 @@ describe('lifecycle hooks', () => {
       await becomeReady(client)
       await call(client, slash(loaded))
 
-      const stopped = loaded.shutdownAndExit()
+      const stopped = loaded.shutdownAndExit(false)
       await new Promise(resolve => setTimeout(resolve, 20))
       answer.resolve()
       await stopped
