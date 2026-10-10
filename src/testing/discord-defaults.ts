@@ -94,7 +94,12 @@ function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<
 function withOverwrites(base: Readonly<PermissionsBitField>, channel: GuildChannel, member: GuildMember): Readonly<PermissionsBitField> {
   // Private in discord.js's typings, though it is the method its own permissionsFor uses
   interface Overwrite { allow: PermissionsBitField; deny: PermissionsBitField }
-  const overwrites = (channel as unknown as { overwritesFor(member: GuildMember): { everyone?: Overwrite; roles: Overwrite[]; member?: Overwrite } }).overwritesFor(member)
+  // Given the member and its roles as verified, as discord.js's own memberPermissions does, so it resolves nothing again
+  const overwrites = (
+    channel as unknown as {
+      overwritesFor(member: GuildMember, verified: boolean, roles: unknown): { everyone?: Overwrite; roles: Overwrite[]; member?: Overwrite }
+    }
+  ).overwritesFor(member, true, member.roles.cache)
   return new PermissionsBitField(base)
     .remove(overwrites.everyone?.deny ?? 0n)
     .add(overwrites.everyone?.allow ?? 0n)
