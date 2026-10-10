@@ -16,6 +16,9 @@ function leaves(catalog: CatalogShape, prefix = ''): Leaf[] {
   })
 }
 
+/** A translation's text, which an empty string isn't: the translator reads `''` as missing, as tools export one untranslated. */
+const isText = (value: unknown): boolean => typeof value === 'string' && value !== ''
+
 function at(catalog: CatalogShape, key: string): unknown {
   return key.split('.').reduce<unknown>((current, part) => (current as Record<string, unknown> | undefined)?.[part], catalog)
 }
@@ -44,7 +47,8 @@ function strayParams(translation: unknown, original: unknown): string[] {
  *
  * Use it in a test for a team that wants no fallback in production. It reports the messages a locale lacks, the
  * messages the default catalog doesn't have, the plural forms a language needs but a plural lacks, such as `few` for
- * Russian, and each `{param}` a translation uses that the message it translates doesn't take. It reads the catalogs'
+ * Russian, and each `{param}` a translation uses that the message it translates doesn't take. An empty translation,
+ * `''`, counts as lacking, as the translator reads it as missing. It reads the catalogs'
  * own strings, so it checks the params of a catalog from a plain variable or a JSON file too, which the compiler
  * can't.
  *
@@ -97,12 +101,12 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
 
     for (const { key, plural } of reference) {
       const message = at(catalog, key)
-      if (message === undefined) {
+      if (message === undefined || message === '') {
         problems.push(`missing ${key}`)
         continue
       }
       if (plural && isPlural(message)) {
-        const missing = categories.filter(category => typeof (message as Record<string, unknown>)[category] !== 'string')
+        const missing = categories.filter(category => !isText((message as Record<string, unknown>)[category]))
         if (missing.length > 0) problems.push(`${key} lacks ${missing.join(', ')}`)
       }
       const original = at(defaultCatalog, key)
@@ -110,7 +114,7 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
       for (const name of stray) problems.push(`${key} takes no {${name}}; the default is "${shown(original)}"`)
     }
     if (options.meocord && !locale.startsWith('en-')) {
-      for (const key of MEOCORD_KEYS) if (at(catalog, key) === undefined) problems.push(`missing ${key}`)
+      for (const key of MEOCORD_KEYS) if (at(catalog, key) === undefined || at(catalog, key) === '') problems.push(`missing ${key}`)
     }
     for (const { key } of leaves(catalog)) {
       if (isMeoCordKey(key)) {

@@ -40,6 +40,17 @@ describe('expectCompleteCatalog', () => {
     )
   })
 
+  it('names an empty translation as missing, in the default catalog too', () => {
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { ...enUS, ban: { description: '', done: 'Banned {user}.' } }, id: { ban: { description: 'Blokir', done: '' }, warnings: { other: '' } } },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(
+      'The catalogs are incomplete:\n  en-US: missing ban.description\n  id: missing ban.done; warnings lacks other',
+    )
+  })
+
   it("leaves MeoCord's own texts to their English fallback, reporting only a key MeoCord lacks", () => {
     const id = { ...{ ban: { description: 'Blokir anggota', done: '{user} diblokir.' }, warnings: { other: '{count} peringatan' } } }
     const t = createTranslator({
