@@ -1033,8 +1033,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     inCachedGuild: () => Boolean(own('guildId') && own('guild') && hasMember()),
     inRawGuild: () => Boolean(own('guildId') && !own('guild') && hasMember()),
   }
+  // Each reads where the mock is as its own, so a placement warning stays for the test's reads
   for (const [name, check] of Object.entries(guildChecks)) {
-    if (findPrototypeMethod(instance, name) !== null) stubs.set(name, createMockFn(check))
+    if (findPrototypeMethod(instance, name) !== null) stubs.set(name, createMockFn(() => readPlaceQuietly(check)))
   }
 
   // Set up reply state machine for repliable interactions
@@ -1182,14 +1183,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
     const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
     // Where its answers are sent, read as the mock's own, so a placement warning stays the test's
-    const answeredIn = (): [unknown, unknown] => {
-      readingPlace++
-      try {
-        return [instance.channel, instance.client]
-      } finally {
-        readingPlace--
-      }
-    }
+    const answeredIn = (): [unknown, unknown] => readPlaceQuietly(() => [instance.channel, instance.client])
     // Each call's message, read by its behaviour right after the gate made it
     let made: HeldMessage | undefined
     let followUpMade: string | undefined
@@ -1326,12 +1320,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     defineCreatedTime(instance, generatedId)
     // Strict mocks place it where its message, guild or member is, and a guildId alone in a server the bot isn't in
     // Read as the mock's own, so a message's placement warning stays the test's
-    readingPlace++
-    try {
-      strictPlace = strictPlaceOf(own)
-    } finally {
-      readingPlace--
-    }
+    strictPlace = readPlaceQuietly(() => strictPlaceOf(own))
     if (strictPlace && strictMocks()) {
       if (strictPlace.refused) throw new Error(strictPlace.refused)
       const set = (key: string, value: unknown) => Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true })
@@ -2257,6 +2246,9 @@ function warnOnMadePlaceReads(message: object): void {
   }
 }
 
+// The DM channel each message the bot sent in a DM in default mode was sent in, where strict mocks place it
+const sentInDm = new WeakMap<object, { id: string }>()
+
 /** Whether a message is one whose channel and server the mock made, which a test placing an interaction overrides. */
 const placeWasMade = (message: object): boolean => placesMade.has(mockTargets.get(message) ?? message)
 
@@ -2269,16 +2261,19 @@ function strictPlaceOf(own: (key: string) => unknown): StrictPlace | undefined {
   // A message whose place the mock made has none a test meant, so where the test placed the interaction wins
   const placed = channel !== undefined || guild !== undefined || guildId !== undefined
   if (typeof message === 'object' && message !== null && typeof message.channelId === 'string' && !(placed && placeWasMade(message))) {
-    const at = message.guildId ?? null
+    // One the bot sent in a DM is in that DM, as strict mocks place it, though default mode reads a server for it
+    const dm = sentInDm.get(mockTargets.get(message) ?? message)
+    const channelId = dm ? dm.id : message.channelId
+    const at = dm ? null : (message.guildId ?? null)
     const refused =
-      channel && channel.id !== message.channelId
-        ? `The message given is in channel ${message.channelId}, but the mock's channel is ${channel.id}: give the message's channel, or leave one of them out.`
+      channel && channel.id !== channelId
+        ? `The message given is in channel ${channelId}, but the mock's channel is ${channel.id}: give the message's channel, or leave one of them out.`
         : guild !== undefined && (guild?.id ?? null) !== at
           ? `The message given is in ${placeName(at)}, but the mock's guild is ${placeName(guild?.id ?? null)}: give the message's guild, or leave one of them out.`
           : guildId !== undefined && guildId !== at
             ? `The message given is in ${placeName(at)}, but the mock's guildId is ${placeName(guildId)}: give the message's guildId, or leave one of them out.`
             : undefined
-    return { given: 'message', channel: message.channel, guildId: at, guild: message.guild ?? null, refused }
+    return { given: 'message', channel: dm ?? message.channel, guildId: at, guild: dm ? null : (message.guild ?? null), refused }
   }
   if (guild instanceof Guild && guildId === undefined) return { given: 'guild', guildId: guild.id }
   if (member instanceof GuildMember && member.guild instanceof Guild && guild === undefined && guildId === undefined) {
@@ -2292,6 +2287,16 @@ function strictPlaceOf(own: (key: string) => unknown): StrictPlace | undefined {
 
 // Set while one of the reads below runs, so what it reads in turn doesn't warn again
 let readingPlace = 0
+
+/** Runs `read` as the mock's own read of where a mock is, which warns about no placement. */
+function readPlaceQuietly<T>(read: () => T): T {
+  readingPlace++
+  try {
+    return read()
+  } finally {
+    readingPlace--
+  }
+}
 
 /**
  * Has each of an interaction's `guildId`, `guild`, `channelId`, `channel` and `member` that strict mocks read otherwise
@@ -2425,15 +2430,12 @@ export function botMemberOf(guild: Guild): unknown {
  */
 export function heldChannelOf(interaction: object, guild: Guild): unknown {
   const target = mockTargets.get(interaction) ?? interaction
-  readingPlace++
-  try {
+  return readPlaceQuietly(() => {
     const set = Object.getOwnPropertyDescriptor(target, 'channel')
     if (set && 'value' in set) return set.value
     const { guildId, channelId } = target as { guildId?: string | null; channelId: string }
     return guildId ? cacheOf(guild.channels)?.get(channelId) : null
-  } finally {
-    readingPlace--
-  }
+  })
 }
 
 /** Gives a guild's managers the guild, as discord.js's do, so what they fetch or make is in it. */
@@ -2717,7 +2719,8 @@ type MockMessage = DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { 
 function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaultMode): MockMessage {
   const instance = Object.create(Message.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
-  if (overrides.channel === undefined && overrides.guild === undefined) placesMade.add(instance)
+  // A message the bot sent is placed where it was sent, even where default mode reads a server of its own for a DM
+  if (overrides.channel === undefined && overrides.guild === undefined && !sentBy) placesMade.add(instance)
 
   instance.deleted = false
 
@@ -2914,7 +2917,7 @@ function sentMessage(held: HeldMessage, channel: unknown, client?: unknown, fiel
   const inChannel = channel instanceof BaseChannel
   const dm = inChannel && channel.isDMBased()
   const strict = strictMocks()
-  return messageMock(
+  const message = messageMock(
     {
       ...(held.content !== undefined && { content: held.content }),
       components: held.components as APIMessageTopLevelComponent[],
@@ -2927,6 +2930,8 @@ function sentMessage(held: HeldMessage, channel: unknown, client?: unknown, fiel
     },
     strict ? undefined : { bot: Boolean(by?.user), dm },
   )
+  if (dm && !strict) sentInDm.set(mockTargets.get(message) ?? message, channel as { id: string })
+  return message
 }
 
 // ---------------------------------------------------------------------------

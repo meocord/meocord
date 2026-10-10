@@ -157,6 +157,38 @@ describe('where a mock interaction is, in default mode', () => {
     ])
   })
 
+  it("says nothing when its guild checks read where it is, as they answer alike in both modes", () => {
+    const interaction = slash({ guildId: ELSEWHERE })
+
+    expect([interaction.inGuild(), interaction.inRawGuild(), interaction.inCachedGuild()]).toEqual([true, true, false])
+    expect(warned).toEqual([])
+  })
+
+  it("warns only that a message the bot sent in a DM reads as a DM's, where strict mocks refuse it beside a guild", async () => {
+    const dm = slash({})
+    await dm.reply('hi')
+    const sent = await dm.fetchReply()
+    const guild = createMockGuild()
+    const click = createMockInteraction(ButtonInteraction, { customId: 'b', message: sent, guild, guildId: guild.id } as never)
+    expect(warned).toEqual([])
+
+    void [sent.guild, sent.guild, click.message.guildId, click.channel]
+
+    expect(warned).toEqual([
+      expect.stringMatching(/^Message\.guild reads a server here, though this message was sent in a DM/),
+      expect.stringMatching(/^Message\.guildId reads a server here/),
+      expect.stringMatching(/^ButtonInteraction\.channel .*refused: The message given is in a DM, but the mock's guild is server/s),
+    ])
+    forgetStrictMocks()
+    useStrictMocks()
+    const strictDm = slash({})
+    await strictDm.reply('hi')
+    const strictSent = await strictDm.fetchReply()
+    expect(() => createMockInteraction(ButtonInteraction, { customId: 'b', message: strictSent, guild, guildId: guild.id } as never)).toThrow(
+      /The message given is in a DM, but the mock's guild is server/,
+    )
+  })
+
   it('says nothing where it is placed as strict mocks place it', () => {
     const message = createMockMessage()
     const guild = createMockGuild()
