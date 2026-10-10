@@ -2,7 +2,7 @@ import { ChatInputCommandInteraction, type GuildMember } from 'discord.js'
 import { Command, Controller, On } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { Logger } from '@src/common/logger.js'
-import { createMock, createMockInteraction, MeoCordTestingModule } from './index.js'
+import { createMock, createMockInteraction, MeoCordTestingModule, type TestingModule } from './index.js'
 
 @Controller()
 class Ping {
@@ -16,8 +16,8 @@ class Ping {
 }
 
 const CLOSED =
-  'This testing module is closed, and its services have shut down, so dispatch, invoke and emit run against shut-down ' +
-  'state. Close it after the last call, in afterEach.'
+  'This testing module is closed, and its services are shut down, or shutting down, so dispatch, invoke and emit run ' +
+  'against that state. Close it after the last call, in afterEach.'
 
 let warned: string[]
 beforeEach(() => {
@@ -43,6 +43,29 @@ describe('a closed testing module', () => {
 
     expect(results.map(result => ('ran' in result ? result.ran : undefined))).toEqual([true, true, 1])
     expect(dispatched.reply).toHaveBeenCalledWith('pong')
+    expect(warned).toEqual([CLOSED])
+  })
+
+  it.each([
+    ['dispatch', (module: TestingModule) => module.dispatch(ping())],
+    ['invoke', (module: TestingModule) => module.invoke(Ping, 'ping', ping())],
+    ['emit', (module: TestingModule) => module.emit('guildMemberAdd', createMock<GuildMember>())],
+  ])('warns from %s on its own', async (_, call) => {
+    const module = MeoCordTestingModule.create({ controllers: [Ping] }).compile()
+    await module.close()
+
+    await call(module)
+
+    expect(warned).toEqual([CLOSED])
+  })
+
+  it('warns for a call made while close() is still running', async () => {
+    const module = MeoCordTestingModule.create({ controllers: [Ping] }).compile()
+    const closing = module.close()
+
+    await module.dispatch(ping())
+    await closing
+
     expect(warned).toEqual([CLOSED])
   })
 

@@ -371,8 +371,9 @@ export class TestingModule {
    * It first gives up the theme read outside calls, if `init({ ready: true })` made it this module's;
    * reads outside calls then return MeoCord's defaults until another module or app is ready.
    *
-   * A stopped bot runs nothing more. A closed module still runs what `dispatch`, `invoke` and `emit` are given,
-   * against services already shut down, and warns once that it is closed, so a `close()` in the wrong place shows.
+   * A stopped bot runs nothing more. Once `close()` is called, a module still runs what `dispatch`, `invoke` and `emit`
+   * are given, against services shut down, or shutting down, and warns once that it is closed, so a `close()` in the
+   * wrong place shows.
    *
    * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
    * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
@@ -423,8 +424,8 @@ export class TestingModule {
     if (this.closing === undefined || this.warnedClosed) return
     this.warnedClosed = true
     new Logger('TestingModule').warn(
-      'This testing module is closed, and its services have shut down, so dispatch, invoke and emit run against shut-down ' +
-        'state. Close it after the last call, in afterEach.',
+      'This testing module is closed, and its services are shut down, or shutting down, so dispatch, invoke and emit run ' +
+        'against that state. Close it after the last call, in afterEach.',
     )
   }
 
