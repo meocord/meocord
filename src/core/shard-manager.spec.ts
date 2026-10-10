@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events'
+import { fileURLToPath } from 'node:url'
 import { vi } from 'vitest'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
-import { type Shard, type ShardingManager, type ShardingManagerOptions } from 'discord.js'
+import { type Shard, ShardingManager, type ShardingManagerOptions } from 'discord.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { log: [] as string[], warn: [] as string[], error: [] as string[] } }))
 
@@ -400,6 +401,37 @@ describe('ShardManager', () => {
 
     expect(shards).toHaveLength(2)
     expect(puts).toHaveLength(1)
+  })
+
+  // discord.js refuses a call to every shard unless the manager's shardList counts the shards it holds
+  it("gives discord.js's ShardingManager its shard list, so a call to every shard reaches each one", async () => {
+    // ShardingManager's constructor writes these into process.env, which later tests read
+    for (const name of ['SHARDING_MANAGER', 'SHARDING_MANAGER_MODE', 'DISCORD_TOKEN']) vi.stubEnv(name, undefined)
+    onTestFinished(() => void vi.unstubAllEnvs())
+    let real!: ShardingManager
+    const manager = new ShardManager({
+      controllerClasses: [],
+      token: 'token',
+      config: { discordToken: 'token', sharding: { mode: 'process', shards: 2 }, commands: { register: false } },
+      // The real manager, with each shard's process stood in for: it is ready at once and answers an eval
+      createManager: (_file, options) => {
+        real = new ShardingManager(fileURLToPath(import.meta.url), options)
+        const createShard = real.createShard.bind(real)
+        real.createShard = (id: number) => {
+          const shard = createShard(id)
+          shard.spawn = async () => ({}) as never
+          shard.eval = async () => `shard ${shard.id}`
+          return shard
+        }
+        return real
+      },
+      exit: vi.fn(),
+      sleep: async () => {},
+    })
+
+    await manager.start()
+
+    await expect(real.broadcastEval(() => 'unused')).resolves.toEqual(['shard 0', 'shard 1'])
   })
 
   it('ignores messages that are not its own', async () => {
