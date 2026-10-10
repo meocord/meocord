@@ -32,11 +32,12 @@ const BUTTON = 'ButtonStyle.Primary, Secondary, Success or Danger'
 const CUSTOM_EMOJI = /^<a?:\w{2,32}:\d{17,20}>$/
 
 /**
- * One unicode emoji: a flag of two regional indicators, a keycap, or a pictograph with an optional presentation
- * selector or skin tone, joined to others by zero-width joiners into one sequence.
+ * One unicode emoji: a flag of two regional indicators, a subdivision flag (a black flag, tag characters and a cancel
+ * tag, as England's), a keycap, or a pictograph with an optional presentation selector or skin tone, joined to others by
+ * zero-width joiners into one sequence.
  */
 const UNICODE_EMOJI =
-  /^(?:\p{Regional_Indicator}{2}|[#*0-9]️?⃣|\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier})?(?:‍\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier})?)*)$/u
+  /^(?:\p{Regional_Indicator}{2}|\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}|[#*0-9]️?⃣|\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier})?(?:‍\p{Extended_Pictographic}(?:️|\p{Emoji_Modifier})?)*)$/u
 
 const byte = (value: unknown) => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 255
 

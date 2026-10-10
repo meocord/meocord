@@ -16,6 +16,10 @@ describe('themeProblems', () => {
           keycap: '1️⃣',
           family: '👨‍👩‍👧',
           skin: '👍🏽',
+          // England, Scotland and Wales: a black flag, tag characters, and a cancel tag
+          england: '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+          scotland: '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}',
+          wales: '\u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}',
         },
         buttons: { primary: ButtonStyle.Primary, neutral: ButtonStyle.Secondary, success: ButtonStyle.Success, danger: ButtonStyle.Danger },
       }),
@@ -81,6 +85,10 @@ describe('themeProblems', () => {
       'theme.buttons.success: 0 is not a button style a theme can map to: give ButtonStyle.Primary, Secondary, Success or Danger',
       "theme.buttons.danger: 'Danger' is not a button style a theme can map to: give ButtonStyle.Primary, Secondary, Success or Danger",
     ])
+  })
+
+  it('refuses a black flag with tag characters but no cancel tag', () => {
+    expect(themeProblems({ emojis: { flag: '\u{1F3F4}\u{E0067}\u{E0062}' } })).toHaveLength(1)
   })
 
   it('shows a tuple of the wrong kind as written', () => {
