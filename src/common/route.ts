@@ -1,6 +1,7 @@
 import { createRegexFromPattern, literalBraces, MAX_CUSTOM_ID_LENGTH } from '@src/decorator/controller.decorator.js'
 import { parseSegment } from '@src/core/scalar-types.js'
 import { Logger } from '@src/common/logger.js'
+import { warnOnce } from '@src/common/deprecation.js'
 
 const logger = new Logger('Route')
 
@@ -139,7 +140,8 @@ const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
 export function route<const T extends string>(pattern: T): Route<T> {
   const { params, types } = createRegexFromPattern(pattern)
   const braces = literalBraces(pattern)
-  if (braces) logger.warn(`Pattern "${pattern}": ${braces}`)
+  // Once per pattern, as a route made inside a handler is made on every call
+  if (braces) warnOnce(logger, `Pattern "${pattern}": ${braces}`)
   const names = new Set(params)
 
   const build = (values: Record<string, RouteValue> = {}): string => {
