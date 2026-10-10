@@ -273,28 +273,35 @@ const hashOf = (commands: CollectedCommand[]) =>
     .update(JSON.stringify(commands.map(({ body }) => body)))
     .digest('hex')
 
-function readHash(file: string | undefined, logger: RegistrationLogger): string | undefined {
+/** What development last sent to a scope: the commands' hash, and each command's `id:version` as Discord answered. */
+interface SentRecord {
+  hash: string
+  /** Absent in a record written before versions were kept, which then sends once more. */
+  versions?: string[]
+}
+
+function readRecord(file: string | undefined, logger: RegistrationLogger): SentRecord | undefined {
   if (!file || !existsSync(file)) return undefined
   try {
-    return (JSON.parse(readFileSync(file, 'utf8')) as { hash?: string }).hash
+    return JSON.parse(readFileSync(file, 'utf8')) as SentRecord
   } catch (error) {
     logger.debug(`Could not read the registered commands, so they are sent again: ${String(error)}`)
     return undefined
   }
 }
 
-function writeHash(file: string | undefined, hash: string, logger: RegistrationLogger): void {
+function writeRecord(file: string | undefined, record: SentRecord, logger: RegistrationLogger): void {
   if (!file) return
   try {
     mkdirSync(path.dirname(file), { recursive: true })
-    writeFileSync(file, `${JSON.stringify({ hash })}\n`)
+    writeFileSync(file, `${JSON.stringify(record)}\n`)
   } catch (error) {
     logger.debug(`Could not record the registered commands: ${String(error)}`)
   }
 }
 
 /** Forgets what development last sent to a scope, once that scope is written some other way. */
-function forgetHash(file: string | undefined, logger: RegistrationLogger): void {
+function forgetRecord(file: string | undefined, logger: RegistrationLogger): void {
   if (!file || !existsSync(file)) return
   try {
     rmSync(file)
@@ -304,21 +311,30 @@ function forgetHash(file: string | undefined, logger: RegistrationLogger): void 
 }
 
 /**
- * Whether the commands Discord holds in a scope, by type and name, are the ones a target sends. A scope cleared or
- * changed elsewhere, by production on another machine or another tool, differs; a listing that fails counts as
- * differing, so the commands are sent.
+ * Each command's `id:version`, sorted, from what Discord lists or answers a bulk update with; `undefined` for anything
+ * else. Discord gives a command a new version whenever it is updated, so the set changes with any edit, removal or
+ * re-registration, from this checkout or any other.
  */
-async function registeredAsSent(rest: RegistrationRest, route: `/${string}`, target: RegistrationTarget, logger: RegistrationLogger): Promise<boolean> {
+function versionsOf(commands: unknown): string[] | undefined {
+  if (!Array.isArray(commands)) return undefined
+  const versions = commands.map(command => {
+    const { id, version } = (command ?? {}) as { id?: unknown; version?: unknown }
+    return typeof id === 'string' && typeof version === 'string' ? `${id}:${version}` : undefined
+  })
+  return versions.every(version => version !== undefined) ? (versions as string[]).sort() : undefined
+}
+
+/** Whether Discord still holds a scope as development last sent it, by each command's version; a failed listing doesn't. */
+async function stillAsSent(rest: RegistrationRest, route: `/${string}`, record: SentRecord, scope: RegistrationScope, logger: RegistrationLogger): Promise<boolean> {
+  if (!record.versions) return false
   let registered: unknown
   try {
     registered = await rest.get(route)
   } catch (error) {
-    logger.debug(`Could not list the commands registered ${describeScope(target.scope)}, so they are sent again: ${String(error)}`)
+    logger.debug(`Could not list the commands registered ${describeScope(scope)}, so they are sent again: ${String(error)}`)
     return false
   }
-  if (!Array.isArray(registered)) return false
-  const keys = (bodies: CollectedCommand['body'][]) => bodies.map(body => registrationKey(body, '')).sort().join('\n')
-  return keys(registered as CollectedCommand['body'][]) === keys(target.commands.map(({ body }) => body))
+  return versionsOf(registered)?.join('\n') === record.versions.join('\n')
 }
 
 function logRegistered(target: RegistrationTarget, logger: RegistrationLogger): void {
@@ -347,7 +363,7 @@ export interface RegisterCommandsOptions extends TargetOptions {
 
 /**
  * Registers the commands, one bulk update per scope; development skips a scope unchanged since its last send and still
- * registered as sent, which one listing per skipped scope checks, unless `force`. A blank `onlyGuild` registers nothing. Once one is sent, and not to `onlyGuild`, the other scopes the configuration names are checked for
+ * registered as sent, which one listing per skipped scope checks by each command's version, unless `force`. A blank `onlyGuild` registers nothing. Once one is sent, and not to `onlyGuild`, the other scopes the configuration names are checked for
  * leftovers, which `clearOther` removes; a development-guild run or a `commands.guilds` with no id only warns. Never
  * throws.
  * @returns Whether every scope was sent or unchanged, and `commands.guilds`, if set, lists a guild id.
@@ -375,17 +391,18 @@ export async function registerCommands(options: RegisterCommandsOptions): Promis
     const route = routeFor(applicationId, target.scope)
 
     // Unchanged since development last sent it, and still what Discord holds there
-    if (development && !force && readHash(file, logger) === hash && (await registeredAsSent(rest, route, target, logger))) {
+    const record = development && !force ? readRecord(file, logger) : undefined
+    if (record?.hash === hash && (await stillAsSent(rest, route, record, target.scope, logger))) {
       logger.log(`Commands ${describeScope(target.scope)} are unchanged; not registering them again.`)
       continue
     }
 
     try {
-      await rest.put(route, { body: target.commands.map(({ body }) => body) })
+      const answered = await rest.put(route, { body: target.commands.map(({ body }) => body) })
       sent = true
       // Outside development the record would be stale, so the next development start sends again
-      if (development) writeHash(file, hash, logger)
-      else forgetHash(file, logger)
+      if (development) writeRecord(file, { hash, versions: versionsOf(answered) }, logger)
+      else forgetRecord(file, logger)
       logRegistered(target, logger)
     } catch (error) {
       succeeded = false
@@ -444,7 +461,7 @@ async function reportOtherScopes(
     try {
       await rest.put(routeFor(applicationId, scope), { body: [] })
       // What development last sent there is gone, so its next start sends again
-      forgetHash(cacheFile(applicationId, scope), logger)
+      forgetRecord(cacheFile(applicationId, scope), logger)
       logger.log(`Removed ${existing.length} command(s) left registered ${describeScope(scope)}: ${names}`)
     } catch (error) {
       logger.error(`Error removing the commands left registered ${describeScope(scope)}:`, error)
