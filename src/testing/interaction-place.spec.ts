@@ -63,13 +63,25 @@ describe('where a mock interaction is, under useStrictMocks()', () => {
     expect((interaction.member as { user: { id: string } }).user.id).toBe(interaction.user.id)
   })
 
-  it("is refused a channel, a guild or a guildId other than its message's, naming both", () => {
-    const message = createMockMessage()
+  it("is refused a channel, a guild or a guildId other than the one a test gave its message, naming both", () => {
+    const message = createMockMessage({ guild: createMockGuild() })
     const guild = createMockGuild()
 
     expect(() => click({ message, channel: createMockChannel(TextChannel, { guild } as never) })).toThrow(new RegExp(`message.*${message.channelId}.*channel`, 's'))
     expect(() => click({ message, guild })).toThrow(new RegExp(`message.*${message.guildId}.*${guild.id}`, 's'))
     expect(() => click({ message, guildId: ELSEWHERE })).toThrow(new RegExp(`message.*${message.guildId}.*${ELSEWHERE}`, 's'))
+  })
+
+  it('moves a message whose place the mock made into the guild, guildId or channel the test gave the interaction', () => {
+    const guild = createMockGuild()
+    const channel = createMockChannel(TextChannel, { guild } as never)
+
+    const inGuild = click({ message: createMockMessage(), guild, guildId: guild.id })
+    expect([inGuild.guild, inGuild.guildId, inGuild.message.guild, inGuild.message.guildId]).toEqual([guild, guild.id, guild, guild.id])
+    expect(inGuild.message.channel).toBe(inGuild.channel)
+
+    const inChannel = click({ message: createMockMessage(), channel })
+    expect([inChannel.channel, inChannel.message.channel, inChannel.message.guild]).toEqual([channel, channel, guild])
   })
 
   it("takes a channel, guild and guildId that are its message's", () => {
@@ -110,6 +122,13 @@ describe('where a mock interaction is, in default mode', () => {
 
     expect(interaction.guild).toBeTruthy()
     expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.guild .*guildId.*isn't in.*null.*useStrictMocks\(\)/s)])
+  })
+
+  it('names no conflict for a message whose place the mock made, beside a guild the test gave', () => {
+    const guild = createMockGuild()
+    void click({ message: createMockMessage(), guild, guildId: guild.id }).channel
+
+    expect(warned.filter(text => text.includes('refused'))).toEqual([])
   })
 
   it('says nothing where it is placed as strict mocks place it', () => {
