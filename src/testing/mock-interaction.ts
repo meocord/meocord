@@ -39,6 +39,7 @@ import {
   type ChannelType,
   Collection,
   DiscordjsErrorCodes,
+  DiscordjsError,
   DiscordjsTypeError,
   CommandInteractionOptionResolver,
   ComponentType,
@@ -56,6 +57,7 @@ import {
   Locale,
   MentionableSelectMenuInteraction,
   Message,
+  MessageFlags,
   MessageFlagsBitField,
   MessageMentions,
   MessageReaction,
@@ -604,13 +606,20 @@ export const RESPONSE_LOG: unique symbol = Symbol('response log')
 type Behaviour = (...args: any[]) => any
 
 /**
+ * What an answer does to the interaction's reply state, before its behaviour runs: it throws to refuse the answer, or
+ * makes the change, and returns how to undo it should the behaviour fail. `byTest` says a test set the behaviour.
+ */
+type AnswerGate = (args: unknown[], byTest: boolean) => () => void
+
+/**
  * A mock of an answer method, `impl` its behaviour, that records each call in `log` as it is made, with what it sent
  * and, once it settles, what it rejected with. The record wraps every behaviour the mock is given, its own and any a
- * test sets, so the mock stays the plain mock function a runner's matchers read, bun's included. `withResponse` is how
- * a call asks discord.js for the message back, not part of what it sends, so it is left out.
+ * test sets, so the mock stays the plain mock function a runner's matchers read, bun's included, and `gate` keeps the
+ * reply state whichever behaviour runs. `withResponse` is how a call asks discord.js for the message back, not part of
+ * what it sends, so it is left out.
  */
-function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: ResponseCall[]): Mock {
-  const record = (behaviour: Behaviour): Behaviour =>
+function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: ResponseCall[], gate?: AnswerGate): Mock {
+  const record = (behaviour: Behaviour, byTest = true): Behaviour =>
     function (this: unknown, ...args: unknown[]) {
       const [payload] = args
       const sent =
@@ -620,22 +629,29 @@ function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: Resp
       const call: ResponseCall = { method, payload: sent }
       stampCall(call)
       log.push(call)
+      let undo: (() => void) | undefined
       try {
-        const result: unknown = Reflect.apply(behaviour, this, args)
-        // Recorded and passed on, so a rejection nobody awaits is unhandled in the test, as it is on a bot
-        if (result instanceof Promise) {
-          return result.then(undefined, (error: unknown) => {
-            call.error = error
-            throw error
-          })
-        }
-        return result
+        // Before the behaviour, as discord.js changes the state at once: a second answer made without awaiting is refused
+        if (gate) undo = gate(args, byTest)
       } catch (error) {
+        call.error = error
+        return Promise.reject(error)
+      }
+      const failed = (error: unknown) => {
+        undo?.()
         call.error = error
         throw error
       }
+      try {
+        const result: unknown = Reflect.apply(behaviour, this, args)
+        // Recorded and passed on, so a rejection nobody awaits is unhandled in the test, as it is on a bot
+        if (result instanceof Promise) return result.then(undefined, failed)
+        return result
+      } catch (error) {
+        return failed(error)
+      }
     }
-  const mock = createMockFn(record(impl)) as Mock & Record<string, unknown>
+  const mock = createMockFn(record(impl, false)) as Mock & Record<string, unknown>
   const always = mock.mockImplementation.bind(mock) as (fn: Behaviour) => unknown
   const once = mock.mockImplementationOnce.bind(mock) as (fn: Behaviour) => unknown
   // Each way a test sets a behaviour goes through the record, a runner's own extras included where it has them
@@ -669,6 +685,13 @@ function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: Resp
 
 /** The interaction a mock options resolver was given to, for the server a user option's member is in. */
 const optionOwners = new WeakMap<object, { guildId?: unknown; guild?: unknown }>()
+
+/** An error as discord.js throws it, with its code, and with `message` in place of discord.js's own text when given. */
+function discordjsError(code: DiscordjsErrorCodes, message?: string): DiscordjsError {
+  const error = new (DiscordjsError as unknown as new (code: DiscordjsErrorCodes) => DiscordjsError)(code)
+  if (message !== undefined) error.message = message
+  return error
+}
 
 /** An error as discord.js's options resolver throws it: a `TypeError` with discord.js's code and message. */
 const optionError = (code: DiscordjsErrorCodes, ...args: unknown[]): DiscordjsTypeError =>
@@ -737,6 +760,12 @@ type OutsideServer = { guild: null } | { member: null } | { channel: DMChannel |
  * or `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and
  * {@link getResponse} reports every answer the interaction got. Every method is a mock function, and one that returns a
  * promise in discord.js resolves.
+ *
+ * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
+ * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
+ * `update()` sent; after `deleteReply()`, or before any answer, fetching, editing or deleting the original response
+ * rejects with 10008 (Unknown Message), while follow-ups stay reachable by their id. Flags are read as discord.js
+ * reads them, and its errors carry its codes, such as `InteractionAlreadyReplied`.
  *
  * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
  * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
@@ -856,112 +885,196 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     instance.deferred = false
     instance.ephemeral = false
 
-    const alreadyReplied = () => new Error('The reply to this interaction has already been sent or deferred.')
-    const notYetReplied = (method: string) => new Error(`Cannot call ${method}() before replying or deferring.`)
+    // discord.js's errors, with their codes; a call before any answer keeps the message the mock has always given
+    const alreadyReplied = () => discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
+    const notYetReplied = (method: string) =>
+      discordjsError(DiscordjsErrorCodes.InteractionNotReplied, `Cannot call ${method}() before replying or deferring.`)
 
     // Only `flags` is read: discord.js deprecates the `ephemeral: true` reply option, and honouring it here would let
-    // a test pass against a deprecated call.
-    const hasEphemeralFlag = (options?: Record<string, unknown>): boolean => {
-      if (!options) return false
-      const { flags } = options
-      if (typeof flags === 'number') return (flags & 64) !== 0
-      if (typeof flags === 'bigint') return (flags & 64n) !== 0n
-      return false
+    // a test pass against a deprecated call. Read as discord.js reads them, so a flag it refuses throws here too.
+    const hasEphemeralFlag = (options: unknown): boolean => {
+      const flags = (options as { flags?: MessageFlagsResolvable | null } | undefined)?.flags
+      if (typeof options !== 'object' || flags === null || flags === undefined) return false
+      return new MessageFlagsBitField(flags).has(MessageFlags.Ephemeral)
     }
+
+    // A message the interaction holds: its original response, or a follow-up, by id. One an answer sent is built from
+    // its payload when first read, so sending builds nothing into JSON that discord.js would build itself
+    type Held = HeldMessage | (() => HeldMessage)
+    const built = (held: Held): HeldMessage => (typeof held === 'function' ? held() : held)
+    let original: Held | undefined
+    let originalGone = false
+    const followUps = new Map<string, Held>()
+    // Whether the last answer ran a behaviour a test set, after which a second answer runs with a warning by default
+    let answeredByTest = false
+    // A command answered with a modal has no original response, and Discord refuses one asked for
+    let modalAnswered = false
+
+    const isComponent = instance.type === InteractionType.MessageComponent
+    // The original response of a component, or of a modal submitted from one, is the message it's on
+    const componentMessage = () => heldFrom(instance.message)
+
+    const snapshot = () => {
+      const saved = {
+        replied: instance.replied,
+        deferred: instance.deferred,
+        ephemeral: instance.ephemeral,
+        original,
+        originalGone,
+        followUps: new Map(followUps),
+        answeredByTest,
+        modalAnswered,
+      }
+      return () => {
+        Object.assign(instance, { replied: saved.replied, deferred: saved.deferred, ephemeral: saved.ephemeral })
+        ;({ original, originalGone, answeredByTest, modalAnswered } = saved)
+        followUps.clear()
+        for (const [id, held] of saved.followUps) followUps.set(id, held)
+      }
+    }
+
+    /**
+     * Refuses an answer as discord.js does. Where the refusal turns on a behaviour a test set, this answer's or the
+     * one before it, which ran without one, default mode warns and lets it run; strict mocks refuse it.
+     */
+    const refuse = (method: string, error: Error, byTest: boolean): void => {
+      if (!(byTest || answeredByTest) || strictMocks()) throw error
+      warnOnce(
+        mockLogger,
+        `${method}() here is refused by discord.js with "${error.message}", but the mock runs it, as a test set this ` +
+          'answer or the one before it. In the next major version (5.0) the mock refuses it; call useStrictMocks() to ' +
+          'have it refused now.',
+      )
+    }
+    const answered = () => instance.deferred || instance.replied
+
+    /** A first answer: refused once the interaction has one, else it replies or defers. */
+    const first = (method: string, kind: 'replied' | 'deferred', then: (args: unknown[]) => void): AnswerGate =>
+      (args, byTest) => {
+        if (answered()) refuse(method, alreadyReplied(), byTest)
+        // Read first: flags discord.js refuses throw before anything changes
+        const ephemeral = method === 'reply' || method === 'deferReply' ? hasEphemeralFlag(args[0]) : undefined
+        const undo = snapshot()
+        instance[kind] = true
+        if (ephemeral) instance.ephemeral = true
+        answeredByTest = byTest
+        then(args)
+        return undo
+      }
+
+    /** A later answer: refused before the interaction has one. */
+    const later = (method: string, then: (args: unknown[]) => void): AnswerGate =>
+      (args, byTest) => {
+        if (!answered()) refuse(method, notYetReplied(method), byTest)
+        const undo = snapshot()
+        then(args)
+        return undo
+      }
+
+    /** The id an edit, fetch or delete names, `undefined` for the original response. */
+    const targetId = (message: unknown): string | undefined => {
+      if (message === undefined || message === '@original') return undefined
+      return typeof message === 'string' ? message : ((message as { id?: string }).id ?? undefined)
+    }
+    /** The message an edit, fetch or delete reaches, or why Discord refuses it: it is gone or never was. */
+    const target = (id: string | undefined): HeldMessage | undefined => {
+      if (id !== undefined) {
+        const held = followUps.get(id)
+        if (held) followUps.set(id, built(held))
+        return held && built(held)
+      }
+      if (originalGone || modalAnswered) return undefined
+      // Answered without one of the mock's calls, as after a 40060 or a test setting `replied`: the original is there
+      if (!original && answered()) original = componentMessage()
+      if (original) original = built(original)
+      return original
+    }
+    const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
+    // Each call's message, read by its behaviour right after the gate made it
+    let made: HeldMessage | undefined
+    let followUpMade: string | undefined
 
     // Every answer the interaction gets, through respond() or discord.js directly, in order, for getResponse
     const log: ResponseCall[] = []
     Object.defineProperty(instance, RESPONSE_LOG, { value: log })
-    const answer = (method: ResponseCall['method'], impl: Behaviour) => stubs.set(method, recordedMock(method, impl, log))
+    const answer = (method: ResponseCall['method'], impl: Behaviour, gate: AnswerGate) =>
+      stubs.set(method, recordedMock(method, impl, log, gate))
 
-    answer(
-      'reply',
-      async (...args: unknown[]) => {
-        if (instance.deferred || instance.replied) throw alreadyReplied()
-        instance.replied = true
-        if (hasEphemeralFlag(args[0] as Record<string, unknown> | undefined)) instance.ephemeral = true
-      },
-    )
-    answer(
-      'deferReply',
-      async (...args: unknown[]) => {
-        if (instance.deferred || instance.replied) throw alreadyReplied()
-        instance.deferred = true
-        if (hasEphemeralFlag(args[0] as Record<string, unknown> | undefined)) instance.ephemeral = true
-      },
-    )
+    answer('reply', async () => undefined, first('reply', 'replied', ([options]) => (original = () => sent(options))))
+    answer('deferReply', async () => undefined, first('deferReply', 'deferred', () => (original = sent(undefined))))
     answer(
       'followUp',
-      async () => {
-        if (!instance.deferred && !instance.replied) throw notYetReplied('followUp')
+      // Its id, which an edit, fetch or delete reaches it by
+      async () => createMockMessage({ id: followUpMade }),
+      later('followUp', ([options]) => {
         instance.replied = true
-        return createMockMessage()
-      },
+        // Its id now, for the message followUp() resolves to; the rest when first read
+        const id = nextSnowflake()
+        made = undefined
+        const held = () => ({ ...sent(options), id })
+        followUps.set(id, held)
+        followUpMade = id
+      }),
     )
-    // The interaction's own message as Discord holds it: the message a component is on, or the original response.
-    // An edit replaces it in the shape Discord stores, with ids and resolved media, stamped with when it was edited,
-    // and fetchReply() reads that back, so code comparing the two sees what it would against Discord.
-    let held: HeldMessage | undefined
-    const current = (): HeldMessage => (held ??= heldFrom(instance.message))
-    // A command answered with a modal has no original response, and Discord refuses one asked for
-    let modalAnswered = false
-    const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
+    // An edit replaces the message in the shape Discord stores, with ids and resolved media, stamped with when it was
+    // edited, and fetchReply() reads that back, so code comparing the two sees what it would against Discord
     answer(
       'editReply',
-      async (options?: unknown) => {
-        if (!instance.deferred && !instance.replied) throw notYetReplied('editReply')
-        if (modalAnswered) throw unknownMessage()
-        instance.replied = true
-        held = edited(current(), options)
+      async () => {
+        if (!made) throw unknownMessage()
         // The response has the message as Discord answers the edit, before its uploaded files have loaded again
-        return messageFrom({ ...held, components: held.returned ?? held.components })
+        return messageFrom({ ...made, components: made.returned ?? made.components })
       },
+      later('editReply', ([options]) => {
+        const id = targetId((options as { message?: unknown } | undefined)?.message)
+        const held = target(id)
+        made = held && edited(held, options)
+        if (!made) return
+        if (id === undefined) {
+          original = made
+          instance.replied = true
+        } else followUps.set(id, made)
+      }),
     )
     stubs.set(
       'fetchReply',
-      createMockFn(async () => {
-        if (modalAnswered) throw unknownMessage()
-        return messageFrom(current())
+      createMockFn(async (message?: unknown) => {
+        const held = target(targetId(message))
+        if (!held) throw unknownMessage()
+        return messageFrom(held)
       }),
     )
     answer(
       'deleteReply',
       async () => {
-        if (!instance.deferred && !instance.replied) throw notYetReplied('deleteReply')
-        if (modalAnswered) throw unknownMessage()
+        if (!made) throw unknownMessage()
       },
+      later('deleteReply', ([message]) => {
+        const id = targetId(message)
+        made = target(id)
+        if (!made) return
+        if (id === undefined) originalGone = true
+        else followUps.delete(id)
+      }),
     )
 
     // showModal — the first response of a command or a component, like reply()
-    if (instance.type === InteractionType.ApplicationCommand || instance.type === InteractionType.MessageComponent) {
+    if (instance.type === InteractionType.ApplicationCommand || isComponent) {
       answer(
         'showModal',
-        async () => {
-          if (instance.deferred || instance.replied) throw alreadyReplied()
-          instance.replied = true
+        async () => undefined,
+        first('showModal', 'replied', () => {
           modalAnswered = instance.type === InteractionType.ApplicationCommand
-        },
+          if (isComponent) original = componentMessage()
+        }),
       )
     }
 
     // deferUpdate / update — components, and modals submitted from a message's component
-    if (instance.type === InteractionType.MessageComponent || instance.type === InteractionType.ModalSubmit) {
-      answer(
-        'update',
-        async () => {
-          if (instance.deferred || instance.replied) throw alreadyReplied()
-          instance.replied = true
-        },
-      )
-      answer(
-        'deferUpdate',
-        async () => {
-          if (instance.deferred || instance.replied) throw alreadyReplied()
-          instance.deferred = true
-        },
-      )
+    if (isComponent || instance.type === InteractionType.ModalSubmit) {
+      answer('update', async () => undefined, first('update', 'replied', ([options]) => (original = () => edited(componentMessage(), options))))
+      answer('deferUpdate', async () => undefined, first('deferUpdate', 'deferred', () => (original = componentMessage())))
     }
-
   }
 
   // Autocomplete is not repliable, but it has a response of its own: Discord accepts
@@ -973,7 +1086,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     stubs.set(
       'respond',
       createMockFn(async (choices?: unknown) => {
-        if (instance.responded) throw new Error('The reply to this interaction has already been sent or deferred.')
+        if (instance.responded) throw discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
         // Discord refuses a list longer than its limit, and the menu shows nothing
         if (Array.isArray(choices) && choices.length > MAX_AUTOCOMPLETE_CHOICES) {
           throw createDiscordError(50035, `Invalid Form Body\ndata.choices[BASE_TYPE_MAX_LENGTH]: Must be ${MAX_AUTOCOMPLETE_CHOICES} or fewer in length.`)
@@ -1993,6 +2106,9 @@ function heldFrom(message: unknown): HeldMessage {
     editedTimestamp: typeof from.editedTimestamp === 'number' ? from.editedTimestamp : null,
   }
 }
+
+/** A message as an answer sends it: a new one, with what the answer gave, never edited. */
+const sent = (options: unknown): HeldMessage => ({ ...edited(heldFrom(undefined), options), editedTimestamp: null })
 
 /** A held message after an edit: what the edit sets replaced in Discord's shape, and a later edit stamp. */
 function edited(held: HeldMessage, options: unknown): HeldMessage {
