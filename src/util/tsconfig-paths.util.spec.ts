@@ -67,8 +67,7 @@ describe('tsconfig paths, read as tsc reads them', () => {
   ])('loads a meocord.config.ts that imports through paths %s', (_, make) => {
     const dir = make()
 
-    // The module as jiti gives it, its default export the config, or why it could not be loaded
-    expect(inProject(dir, () => readMeoCordSourceConfig())).toMatchObject({ config: { default: { discordToken: 'from @src' } } })
+    expect(inProject(dir, () => readMeoCordSourceConfig())).toEqual({ config: { discordToken: 'from @src' } })
   })
 
   it.each([
