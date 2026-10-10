@@ -52,12 +52,13 @@ describe('UserError', () => {
       expect(description(interaction.followUp.mock.calls[0][0])).toBe('You need 10 coins.')
     })
 
-    it('replies to a message with it, without pinging, and logs it only at debug level', async () => {
-      const message = createMockMessage({ content: '!buy sword' })
+    it('replies to a message with it, pinging no one it mentions, and logs it only at debug level', async () => {
+      const message = createMockMessage({ content: '!give <@200000000000000001>' })
+      const text = '<@200000000000000001>, <@&300000000000000001> and @everyone already have one.'
 
-      const logger = await fail(message, notEnough())
+      const logger = await fail(message, new UserError(text))
 
-      expect(message.reply).toHaveBeenCalledWith({ content: 'You need 10 coins.', allowedMentions: { repliedUser: false } })
+      expect(message.reply).toHaveBeenCalledWith({ content: text, allowedMentions: { repliedUser: false, parse: [] } })
       expect(logger.error).not.toHaveBeenCalled()
     })
 

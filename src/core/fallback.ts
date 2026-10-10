@@ -214,7 +214,7 @@ async function replyToMessage(message: Message, error: UserError, logger: Logger
   const reply = await answering.draw('the reply', call, () => presentedReply(message, error, error.message, withEmoji, logger))
   if (reply === undefined) return
   try {
-    await sendReply(reply, body => message.reply({ ...body, allowedMentions: { repliedUser: false } }))
+    await sendReply(reply, body => message.reply({ ...body, allowedMentions: { repliedUser: false, parse: [] } }))
   } catch (replyError) {
     logFailedSend(logger, 'reply to the message', replyError)
   }

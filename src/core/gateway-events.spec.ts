@@ -222,8 +222,8 @@ describe('gateway event handlers', () => {
     await emit(client, 'messageUpdate', before, after)
     await emit(client, 'guildMemberAdd', member)
 
-    expect(sent.reply).toHaveBeenCalledWith({ content: 'Link your account first.', allowedMentions: { repliedUser: false } })
-    expect(after.reply).toHaveBeenCalledWith({ content: 'Edits are not checked again.', allowedMentions: { repliedUser: false } })
+    expect(sent.reply).toHaveBeenCalledWith({ content: 'Link your account first.', allowedMentions: { repliedUser: false, parse: [] } })
+    expect(after.reply).toHaveBeenCalledWith({ content: 'Edits are not checked again.', allowedMentions: { repliedUser: false, parse: [] } })
     expect(before.reply).not.toHaveBeenCalled()
     expect(logged.error).toEqual([])
   })
