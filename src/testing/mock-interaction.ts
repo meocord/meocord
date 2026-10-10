@@ -898,7 +898,7 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * `bot: false`, and a member has the server's @everyone role and the roles {@link createMockMember} gave it; with a
  * `guildId` but no `guild`, a server the bot isn't in, that @everyone role has the `guildId`. A DM sent to a member
  * goes through its user's `send()` and the user's one DM channel. Its `channel` is a text channel of its server, the
- * one its guild caches under `channelId`, or the user's DM channel. A `channel` given sets what the test leaves out of
+ * one its guild caches under `channelId` when it is read, or the user's DM channel. A `channel` given sets what the test leaves out of
  * `channelId`, `guildId` and `guild`, as discord.js reads them from it: a DM channel is no server, and a server's
  * channel its server; one in another server than the `guildId` given is refused, naming both. Under `useStrictMocks()`
  * a `message` given places it in the message's channel and server, a `guild` or a member's guild in that server, and a
@@ -911,7 +911,8 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName` or `customId`, is
  * the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports
  * every answer the interaction got. Every method is a mock function, and one that returns a promise in discord.js
- * resolves.
+ * resolves. What the mock computes for itself, such as `memberPermissions` and `appPermissions`, calls none of them and
+ * caches nothing, so a stub a test sets stays for its own code.
  *
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
@@ -1397,12 +1398,13 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       instance.guildId = null
       if (unset('guild')) Object.defineProperty(instance, 'guild', { value: null, writable: true, configurable: true })
     }
-    // The channel it came from, as the gateway caches it for an interaction: one of its server's, or the user's DM
+    // The channel it came from, as the gateway caches it for an interaction: its server's cached one, looked up on each
+    // read so a channel the test caches later is the one read, or the user's DM
     let channel: unknown
     if (unset('channel')) {
       Object.defineProperty(instance, 'channel', {
         get: () => {
-          if (channel === undefined) {
+          if (channel === undefined || (own('guildId') && own('guild') instanceof Guild)) {
             channel = channelFor(own('guild'), own('guildId') as string | null, own('channelId') as string, own('user') as object)
             cacheChannel(channel as object, own('guild'), own('client'))
           }
@@ -2409,6 +2411,25 @@ function createMockGuildForMessage(id?: string): object {
   return proxy
 }
 
+// Each settled guild's bot member as `members.me` reads it, without caching one made for the read
+const botMembers = new WeakMap<object, () => object>()
+
+/** The bot's member in `guild` for the mock's own reads: the one `members.me` reads, made without caching it there. */
+export function botMemberOf(guild: Guild): unknown {
+  return botMembers.get(guild)?.() ?? guild.members.me
+}
+
+/**
+ * The channel an interaction's `channel` reads, for the mock's own reads: one set on it, or its server's cached one,
+ * without making or caching one. Undefined where `channel` would make one, which has no overwrites.
+ */
+export function heldChannelOf(interaction: object, guild: Guild): unknown {
+  const target = mockTargets.get(interaction) ?? interaction
+  const set = Object.getOwnPropertyDescriptor(target, 'channel')
+  if (set && 'value' in set) return set.value
+  return cacheOf(guild.channels)?.get((target as { channelId: string }).channelId)
+}
+
 /** Gives a guild's managers the guild, as discord.js's do, so what they fetch or make is in it. */
 function homeManagers(instance: Record<string, unknown>, guild: object): void {
   for (const key of ['members', 'channels', 'roles', 'bans']) (instance[key] as Record<string, unknown>).guild = guild
@@ -2424,13 +2445,12 @@ function settleGuild(instance: Record<string, unknown>, guild: object): void {
   let client: unknown
   Object.defineProperty(instance, 'client', { get: () => (client ??= createMockClient()), set: value => (client = value), configurable: true })
   const members = instance.members as object
-  Object.defineProperty(members, 'me', {
-    get: () => {
-      const { user } = (guild as Guild).client
-      return cached(cacheOf(members), user.id, () => memberIn(guild, user.id, user))
-    },
-    configurable: true,
-  })
+  const botMember = (keep: boolean) => {
+    const { user } = (guild as Guild).client
+    return keep ? cached(cacheOf(members), user.id, () => memberIn(guild, user.id, user)) : (cacheOf(members)?.get(user.id) ?? memberIn(guild, user.id, user))
+  }
+  botMembers.set(guild, () => botMember(false))
+  Object.defineProperty(members, 'me', { get: () => botMember(true), configurable: true })
   for (const key of ['roles', 'channels']) {
     for (const item of cacheOf(instance[key])?.values() ?? []) {
       if (!Object.prototype.hasOwnProperty.call(item, 'guild')) (item as Record<string, unknown>).guild = guild
@@ -2720,10 +2740,11 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
   Object.defineProperty(instance, 'guild', { value: guild, writable: true, configurable: true })
   // The author as a member of the message's server; a direct message has none. A given author's member is the one
   // the server caches, as the gateway resolves it, so every message from that author has the same member
-  // The author's member, cached as the gateway caches it with the message; `member` reads the cache, as discord.js does
+  // The author's member, cached as the gateway caches it with the message; `member` reads the cache, as discord.js
+  // does, without calling the manager's resolve a test may stub
   if (guild) memberFor(guild, instance.author as { id: string }, true)
   Object.defineProperty(instance, 'member', {
-    get: () => (instance.guild ? (instance.guild as Guild).members.resolve(instance.author as User) : null),
+    get: () => (instance.guild ? (cacheOf((instance.guild as Guild).members)?.get((instance.author as User).id) ?? null) : null),
     set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
     enumerable: true,
     configurable: true,
