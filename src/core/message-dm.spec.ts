@@ -61,6 +61,18 @@ class Commands {
   @Cooldown({ uses: 3, seconds: 60 })
   draw() {}
 
+  @MessageHandler('raid')
+  @Cooldown({ uses: 1, seconds: 60, per: 'guild' })
+  raid() {}
+
+  @MessageHandler('shout')
+  @Cooldown({ uses: 1, seconds: 60, per: 'channel' })
+  shout() {}
+
+  @MessageHandler('event')
+  @Cooldown({ uses: 1, seconds: 60, per: 'global' })
+  event() {}
+
   @MessageHandler('secret')
   @UseGuard(Nobody)
   secret() {}
@@ -426,6 +438,29 @@ describe('dmOnCooldown', () => {
 
     expect(first.author.send).toHaveBeenCalledTimes(1)
     expect(second.author.send).toHaveBeenCalledTimes(1)
+  })
+})
+
+// A server, channel or global cooldown refuses everyone in a wait, so each refused author is told once of it
+describe.each([
+  ['guild', '!raid'],
+  ['channel', '!shout'],
+  ['global', '!event'],
+])("dmOnCooldown with per: '%s'", (_, command) => {
+  it('DMs each author it refuses once per wait', async () => {
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.fromApp(TellingApp).compile()
+    const first = messageOf(command)
+    const by = async (id: string) => {
+      const message = createMockMessage({ content: command, guild: first.guild as never, channel: first.channel as never })
+      Object.assign(message.author, { bot: false, id })
+      await module.dispatch(message)
+      return message.author.send.mock.calls.length
+    }
+
+    await module.dispatch(first)
+
+    expect([await by('bob'), await by('carol'), await by('bob'), await by('dave')]).toEqual([1, 1, 0, 1])
   })
 })
 

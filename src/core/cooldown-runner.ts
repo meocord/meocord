@@ -309,7 +309,14 @@ interface Peeked {
 /** Keyed by the call's context, which the peek and the consume of one call share. */
 const peeked = new WeakMap<HandlerExecutionContext, Peeked>()
 
-interface Counted { key: string; windowMs: number; uses: number; per: CooldownScope }
+interface Counted {
+  key: string
+  windowMs: number
+  uses: number
+  per: CooldownScope
+  /** The caller, when the key counts more than one: a server's, a channel's or everyone's. */
+  user?: string
+}
 
 /**
  * The cooldowns a call counts against, keyed. With `peek`, those with `by` are left out, since their key
@@ -343,17 +350,37 @@ async function keyed(
     const value = by ? await by(context, params) : undefined
     // Encoded, so a value holding a colon cannot count under another value's key. Without a value, `:by` alone keeps
     // the call apart from a cooldown with no `by` over the same window.
-    const suffix = !by ? '' : value === undefined ? ':by' : `:by:${encodeURIComponent(String(value))}`
-    counted.push({ key: `${controller.name}.${methodName}#${id}:${per}:${scopeId(per, first)}${suffix}`, windowMs, uses, per })
+    const suffix = !by ? '' : value === undefined ? ':by' : `:by:${encodeKeyPart(String(value))}`
+    const scope = scopeId(per, first)
+    // The caller, for a notice of a refusal under a scope that counts more than one caller
+    const user = scope.startsWith('user:') ? undefined : caller(first).user
+    counted.push({ key: `${controller.name}.${methodName}#${id}:${per}:${scope}${suffix}`, windowMs, uses, per, user })
   }
   return counted
 }
 
+// A surrogate with no partner beside it, which encodeURIComponent refuses
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
 /**
- * The store key and window of the cooldown each refusal came from, and when its wait ends by the store's clock if
- * the store said, for {@link claimCooldownNotice}.
+ * A value as part of a store key: each well-formed run as `encodeURIComponent` writes it, and each lone surrogate as `%u`
+ * and its four hex digits, which no other value encodes to, since `encodeURIComponent` writes `%` only before two.
  */
-const refusalKeys = new WeakMap<CooldownError, { key: string; windowMs: number; endsAt?: number }>()
+function encodeKeyPart(value: string): string {
+  let encoded = ''
+  let from = 0
+  for (const { 0: surrogate, index } of value.matchAll(LONE_SURROGATE)) {
+    encoded += `${encodeURIComponent(value.slice(from, index))}%u${surrogate.charCodeAt(0).toString(16).toUpperCase()}`
+    from = index + 1
+  }
+  return encoded + encodeURIComponent(value.slice(from))
+}
+
+/**
+ * The store key and window of the cooldown each refusal came from, when its wait ends by the store's clock if the
+ * store said, and the refused caller when the key counts more than one, for {@link claimCooldownNotice}.
+ */
+const refusalKeys = new WeakMap<CooldownError, { key: string; windowMs: number; endsAt?: number; user?: string }>()
 
 /** Asks the store about the call under the app's policy, and throws what the answer means for it. */
 async function ask(container: Container, counted: Counted[], peek: boolean, call: Peeked | undefined): Promise<void> {
@@ -382,7 +409,7 @@ async function ask(container: Container, counted: Counted[], peek: boolean, call
   if (verdict.allowed) return
   const blocking = counted[verdict.blocked ?? 0] ?? counted[0]
   const refusal = new CooldownError(verdict.retryAfterMs, blocking.per, { uses: blocking.uses, windowMs: blocking.windowMs })
-  refusalKeys.set(refusal, { key: blocking.key, windowMs: blocking.windowMs, endsAt: verdict.retryTimestamp })
+  refusalKeys.set(refusal, { key: blocking.key, windowMs: blocking.windowMs, endsAt: verdict.retryTimestamp, user: blocking.user })
   throw refusal
 }
 
@@ -405,10 +432,12 @@ export async function claimCooldownNotice(container: Container, refusal: Cooldow
   // retry landing a moment late is refused on the earlier, which its wait holds, before taking the later, which a wait
   // ending then needs for its own notice.
   const bucket = Math.floor(refusal.retryAt.getTime() / NOTICE_BUCKET_MS)
+  // A key counting a server, a channel or everyone is shared by every caller it refuses, each told once
+  const key = refused.user === undefined ? refused.key : `${refused.key}:user:${refused.user}`
   const notices =
     refused.endsAt !== undefined
-      ? [{ key: `${refused.key}:notice:at:${refused.endsAt}`, limit }]
-      : [bucket - 1, bucket].map(at => ({ key: `${refused.key}:notice:${at}`, limit }))
+      ? [{ key: `${key}:notice:at:${refused.endsAt}`, limit }]
+      : [bucket - 1, bucket].map(at => ({ key: `${key}:notice:${at}`, limit }))
   try {
     return (await askWithin(container, cooldownStoreOf(container), notices, cooldownPolicyOf(container).timeoutMs, false)).allowed
   } catch (error) {
