@@ -40,9 +40,9 @@ import { warnOnce } from '@src/common/deprecation.js'
 const mockLogger = new Logger('Mocks')
 
 /**
- * A member's permissions where an interaction was made, as Discord computes them: under strict mocks, the channel's
- * overwrites on top of `member.permissions`, so a test that sets those keeps the base; otherwise `member.permissions`,
- * with a warning once where the overwrites would change them.
+ * A member's permissions where an interaction was made, as Discord computes them: under strict mocks, every permission
+ * for an Administrator or the owner, else the channel's overwrites on top of `member.permissions`, so a test that sets
+ * those keeps the base; otherwise `member.permissions`, with a warning once where strict mocks would read otherwise.
  */
 function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<PermissionsBitField> {
   const base = member.permissions
@@ -51,20 +51,11 @@ function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<
   const at = channel instanceof ThreadChannel ? channel.parent : channel
   // Only a server the mock caches has the overwrites to apply
   const { guild } = interaction
-  if (!(guild instanceof Guild) || !(at instanceof GuildChannel) || base.has(PermissionFlagsBits.Administrator) || member.id === guild.ownerId) {
-    return base
-  }
-  // Private in discord.js's typings, though it is the method its own permissionsFor uses
-  interface Overwrite { allow: PermissionsBitField; deny: PermissionsBitField }
-  const overwrites = (at as unknown as { overwritesFor(member: GuildMember): { everyone?: Overwrite; roles: Overwrite[]; member?: Overwrite } }).overwritesFor(member)
-  const computed = new PermissionsBitField(base)
-    .remove(overwrites.everyone?.deny ?? 0n)
-    .add(overwrites.everyone?.allow ?? 0n)
-    .remove(overwrites.roles.length > 0 ? overwrites.roles.map(role => role.deny) : 0n)
-    .add(overwrites.roles.length > 0 ? overwrites.roles.map(role => role.allow) : 0n)
-    .remove(overwrites.member?.deny ?? 0n)
-    .add(overwrites.member?.allow ?? 0n)
-    .freeze()
+  if (!(guild instanceof Guild) || !(at instanceof GuildChannel)) return base
+  const computed =
+    base.has(PermissionFlagsBits.Administrator) || member.id === guild.ownerId
+      ? new PermissionsBitField(PermissionsBitField.All).freeze()
+      : withOverwrites(base, at, member)
   if (strictMocks()) return computed
   if (!computed.equals(base)) {
     const lost = new PermissionsBitField(base).remove(computed).toArray()
@@ -73,12 +64,28 @@ function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<
     if (gained.length > 0) change.push(`with ${gained.join(', ')}`)
     warnOnce(
       mockLogger,
-      `${interaction.constructor.name}.memberPermissions reads the member's permissions without the channel's ` +
-        `overwrites here; in the next major version (5.0) it applies them, as Discord does, and reads ` +
-        `${change.join(' and ')}. Set memberPermissions on the mock, or call useStrictMocks() to apply them now.`,
+      `${interaction.constructor.name}.memberPermissions reads the member's own permissions here, without the ` +
+        "channel's overwrites or every permission an Administrator or the owner has; in the next major version (5.0) " +
+        `it reads them as Discord computes them in the channel, ${change.join(' and ')}. Set memberPermissions on the ` +
+        'mock, or call useStrictMocks() to compute them now.',
     )
   }
   return base
+}
+
+/** `base` with `channel`'s overwrites for `member` applied, in discord.js's order: @everyone's, the roles', the member's. */
+function withOverwrites(base: Readonly<PermissionsBitField>, channel: GuildChannel, member: GuildMember): Readonly<PermissionsBitField> {
+  // Private in discord.js's typings, though it is the method its own permissionsFor uses
+  interface Overwrite { allow: PermissionsBitField; deny: PermissionsBitField }
+  const overwrites = (channel as unknown as { overwritesFor(member: GuildMember): { everyone?: Overwrite; roles: Overwrite[]; member?: Overwrite } }).overwritesFor(member)
+  return new PermissionsBitField(base)
+    .remove(overwrites.everyone?.deny ?? 0n)
+    .add(overwrites.everyone?.allow ?? 0n)
+    .remove(overwrites.roles.length > 0 ? overwrites.roles.map(role => role.deny) : 0n)
+    .add(overwrites.roles.length > 0 ? overwrites.roles.map(role => role.allow) : 0n)
+    .remove(overwrites.member?.deny ?? 0n)
+    .add(overwrites.member?.allow ?? 0n)
+    .freeze()
 }
 
 /** A permission set with none, frozen as discord.js freezes the ones it gives. */
