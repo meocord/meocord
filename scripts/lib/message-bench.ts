@@ -6,7 +6,7 @@
  */
 import 'reflect-metadata'
 import { MessageHandler } from '../../src/decorator/controller.decorator.js'
-import { buildMessageRoutes, matchMessageCommand, matchMessageRoute } from '../../src/core/message-routes.js'
+import { buildMessageRoutes, matchMessageCommand, matchMessageRoute, type MessageRoute } from '../../src/core/message-routes.js'
 
 export const ROUTE_COUNTS = [10, 100, 1000] as const
 export const CASES = ['chatter', 'unknown', 'matching'] as const
@@ -49,24 +49,7 @@ function routesFor(count: number) {
   return buildMessageRoutes(controllers)
 }
 
-/**
- * Nanoseconds per call, after warming up, over enough calls for the timer's resolution: the fastest of a few
- * rounds, since a busy machine only ever slows a round down.
- */
-function time(match: (content: string) => unknown, inputs: readonly string[], iterations: number): number {
-  for (let i = 0; i < 5_000; i++) match(inputs[i % inputs.length])
-  let fastest = Infinity
-  for (let round = 0; round < 3; round++) {
-    const started = process.hrtime.bigint()
-    for (let i = 0; i < iterations; i++) match(inputs[i % inputs.length])
-    fastest = Math.min(fastest, Number(process.hrtime.bigint() - started) / iterations)
-  }
-  return fastest
-}
-
 const KNOWN_WORDS = new Map(['help', 'ping', 'roll', 'ban', 'kick', 'mute', 'play', 'skip'].map((word, i) => [word, i]))
-/** Written by the reference workload and exported, so the runtime cannot drop the work as unused. */
-export let referenceSink = 0
 
 /**
  * The reference workload: the kind of work matching does, splitting a message into words and looking each up,
@@ -82,31 +65,77 @@ function reference(content: string): number {
     while (i < content.length && content.charCodeAt(i) !== 32) i++
     if (i > start) found += KNOWN_WORDS.get(content.slice(start, i).toLowerCase()) ?? i - start
   }
-  return (referenceSink = found)
+  return found
 }
+
+const STARTS = { prefixes: ['!'] }
+/** As dispatch does: the route a message matches, or else the command it names, for its usage. */
+function match(routes: readonly MessageRoute[], content: string) {
+  return matchMessageRoute(routes, content, STARTS) ?? matchMessageCommand(routes, content, STARTS)
+}
+
+/** Written from every timed call's result and exported, so the runtime cannot drop the work as unused. */
+export let sink = 0
+
+/** Nanoseconds per call of the reference workload over `calls` calls. */
+function timeReference(inputs: readonly string[], calls: number): number {
+  let found = 0
+  const started = process.hrtime.bigint()
+  for (let i = 0; i < calls; i++) found += reference(inputs[i % inputs.length])
+  const ns = Number(process.hrtime.bigint() - started) / calls
+  sink += found
+  return ns
+}
+
+/** Nanoseconds per message matched against `routes` over `calls` calls. */
+function timeMatch(routes: readonly MessageRoute[], inputs: readonly string[], calls: number): number {
+  let found = 0
+  const started = process.hrtime.bigint()
+  for (let i = 0; i < calls; i++) if (match(routes, inputs[i % inputs.length]) !== undefined) found++
+  const ns = Number(process.hrtime.bigint() - started) / calls
+  sink += found
+  return ns
+}
+
+/**
+ * Rounds run first to warm everything up, then rounds that are counted. Every round times every route count
+ * and case once, in a rotating order, through the same code, so the engine's compiling and the machine's load
+ * reach each figure alike. Each figure is the median of its counted rounds.
+ */
+const WARM_ROUNDS = 3
+const ROUNDS = 15
+
+const median = (samples: number[]) => samples.toSorted((a, b) => a - b)[samples.length >> 1]
 
 export function run(): Measured {
   const chatter = ['hey what is up everyone lol', 'did anyone see the game last night?', 'ok', 'brb getting food 🍕']
   const unknown = ['!unknowncmd foo bar', '!help me please']
-  const referenceNs = time(reference, [...chatter, ...unknown, '!roll 20 for luck', '!ban someone for spam'], 400_000)
-  const results = {} as Results
-  for (const count of ROUTE_COUNTS) {
+  const references = [...chatter, ...unknown, '!roll 20 for luck', '!ban someone for spam']
+  // Each route count and case with its messages and calls per round; chatter, the cheapest, takes the most calls
+  const cells = ROUTE_COUNTS.flatMap(count => {
     const routes = routesFor(count)
-    const starts = { prefixes: ['!'] }
-    // As dispatch does: the route a message matches, or else the command it names, for its usage
-    const match = (content: string) => matchMessageRoute(routes, content, starts) ?? matchMessageCommand(routes, content, starts)
     const hit = Math.floor(count / 2) + 1
     const matching = [`!cmd${hit} alpha beta gamma`, `!CMD${hit} "two words" beta gamma`, '!cmd4 alpha --all beta --limit=5 gamma']
     for (const message of matching) {
-      if (!matchMessageRoute(routes, message, starts)) throw new Error(`The benchmark's message ${message} reaches no route at ${count} routes.`)
+      if (!matchMessageRoute(routes, message, STARTS)) throw new Error(`The benchmark's message ${message} reaches no route at ${count} routes.`)
     }
-    results[count] = {
-      chatter: time(match, chatter, 400_000),
-      unknown: time(match, unknown, 200_000),
-      matching: time(match, matching, 200_000),
+    const inputs = { chatter, unknown, matching }
+    return CASES.map(c => ({ count, c, routes, inputs: inputs[c], calls: c === 'chatter' ? 80_000 : 40_000, samples: [] as number[] }))
+  })
+  const referenceSamples: number[] = []
+  for (let round = 0; round < WARM_ROUNDS + ROUNDS; round++) {
+    const counted = round >= WARM_ROUNDS
+    const ns = timeReference(references, 80_000)
+    if (counted) referenceSamples.push(ns)
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[(i + round) % cells.length]
+      const ns = timeMatch(cell.routes, cell.inputs, cell.calls)
+      if (counted) cell.samples.push(ns)
     }
   }
-  return { referenceNs, results }
+  const results = Object.fromEntries(ROUTE_COUNTS.map(count => [count, {}])) as Results
+  for (const { count, c, samples } of cells) results[count][c] = median(samples)
+  return { referenceNs: median(referenceSamples), results }
 }
 
 if (import.meta.main ?? process.argv[1]?.endsWith('message-bench.mjs')) console.log(JSON.stringify(run()))
