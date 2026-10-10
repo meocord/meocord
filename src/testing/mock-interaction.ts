@@ -1480,22 +1480,19 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       // In the channel the menu was used in, and its server, as the message a menu is used on is: its channel is the
       // menu's, read live, so making the message makes and caches no channel. Read as the mock's own, so a placement
       // warning stays the test's
-      const quietly = <V>(read: () => V): V => {
-        readingPlace++
-        try {
-          return read()
-        } finally {
-          readingPlace--
-        }
-      }
       const makeTarget = () =>
-        quietly(() => {
+        readPlaceQuietly(() => {
           const [guild, guildId] = [own('guild'), (own('guildId') as string | null | undefined) ?? null]
-          return messageMock({ id: targetId(), guild: guildId && guild instanceof Guild ? guild : null, client: instance.client as Client }, undefined, {}, {
+          const message = messageMock({ id: targetId(), guild: guildId && guild instanceof Guild ? guild : null, client: instance.client as Client }, undefined, {}, {
             channelId: own('channelId') as string,
             guildId,
-            channel: () => quietly(() => instance.channel),
+            channel: () => readPlaceQuietly(() => instance.channel),
           })
+          // Where strict mocks place the menu elsewhere, its target's place warns as the menu's does, by the target's name
+          const warner = placeWarners.get(instance)
+          const target = (mockTargets.get(message) ?? message) as Record<string, unknown>
+          for (const key of warner?.keys ?? []) warnOnRead(target, key, () => (readingPlace > 0 ? void placeReadsSeen?.add(key) : warner!.warn(`targetMessage.${key}`)))
+          return message
         })
       accessor(
         'targetMessage',
@@ -2356,7 +2353,7 @@ function readPlaceQuietly<T>(read: () => T): T {
 }
 
 // Each interaction's strict place and its warning, by the read it names, for the mock's own reads that warn as the test's
-const placeWarners = new WeakMap<object, { place: StrictPlace; warn: (read: string) => void }>()
+const placeWarners = new WeakMap<object, { place: StrictPlace; keys: readonly string[]; warn: (read: string) => void }>()
 
 // The place keys a read of the mock's own read while it runs, so it warns by its own name where one would warn
 let placeReadsSeen: Set<string> | undefined
@@ -2404,6 +2401,32 @@ function placeWarning(name: string, key: string, place: StrictPlace): string {
   return `${name}.${key} reads ${why[0]} here; in the next major version (5.0) ${why[1]}. ${why[2]}`
 }
 
+/** Has a read of `instance`'s `key` call `warn` first, and what that read reads in turn stay quiet. */
+function warnOnRead(instance: Record<string, unknown>, key: string, warn: () => void): void {
+  const descriptor = Object.getOwnPropertyDescriptor(instance, key)
+  // One the mock answers with a stub stays unset, as the mock's own checks read it, and warns as the stub is read
+  if (!descriptor) {
+    if (!stubReadWarnings.has(instance)) stubReadWarnings.set(instance, new Map())
+    stubReadWarnings.get(instance)!.set(key, warn)
+    return
+  }
+  const read = () => (descriptor.get ? descriptor.get.call(instance) : descriptor.value)
+  Object.defineProperty(instance, key, {
+    get: () => {
+      warn()
+      readingPlace++
+      try {
+        return read()
+      } finally {
+        readingPlace--
+      }
+    },
+    set: (next: unknown) => Object.defineProperty(instance, key, { value: next, writable: true, enumerable: true, configurable: true }),
+    enumerable: true,
+    configurable: true,
+  })
+}
+
 /**
  * Has each of an interaction's `guildId`, `guild`, `channelId`, `channel` and `member` that strict mocks read otherwise
  * warn once when read, unless the test gave it.
@@ -2423,32 +2446,10 @@ function warnOnPlaceReads(instance: Record<string, unknown>, place: StrictPlace,
           ? ['channelId', 'channel']
           : []
   const name = (Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name
-  placeWarners.set(instance, { place, warn: read => warnOnce(mockLogger, placeWarning(name, read, place)) })
+  placeWarners.set(instance, { place, keys, warn: read => warnOnce(mockLogger, placeWarning(name, read, place)) })
   for (const key of keys.filter(each => !given.has(each))) {
     // A read the mock makes stays quiet, noted for a read of the mock's own to warn by its name
-    const warn = () => (readingPlace > 0 ? void placeReadsSeen?.add(key) : warnOnce(mockLogger, placeWarning(name, key, place)))
-    const descriptor = Object.getOwnPropertyDescriptor(instance, key)
-    // One the mock answers with a stub stays unset, as the mock's own checks read it, and warns as the stub is read
-    if (!descriptor) {
-      if (!stubReadWarnings.has(instance)) stubReadWarnings.set(instance, new Map())
-      stubReadWarnings.get(instance)!.set(key, warn)
-      continue
-    }
-    const read = () => (descriptor.get ? descriptor.get.call(instance) : descriptor.value)
-    Object.defineProperty(instance, key, {
-      get: () => {
-        warn()
-        readingPlace++
-        try {
-          return read()
-        } finally {
-          readingPlace--
-        }
-      },
-      set: (next: unknown) => Object.defineProperty(instance, key, { value: next, writable: true, enumerable: true, configurable: true }),
-      enumerable: true,
-      configurable: true,
-    })
+    warnOnRead(instance, key, () => (readingPlace > 0 ? void placeReadsSeen?.add(key) : warnOnce(mockLogger, placeWarning(name, key, place))))
   }
 }
 
