@@ -12,6 +12,7 @@
         "cli-table3": "^0.6.5",
         "commander": "^15.0.0",
         "dayjs": "^1.11.23",
+        "get-tsconfig": "^4.14.3",
         "inversify": "^8.2.3",
         "jiti": "^2.7.0",
         "lodash-es": "^4.18.1",
