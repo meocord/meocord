@@ -25,7 +25,9 @@ export function noteMockMade(): void {
  * channel or thread made without a server has one of its own, a thread with a text channel as its parent. A message
  * has empty `content`, a thread is neither archived nor locked, and a reaction's `count` is 1. Give the bot's member
  * a role to let it do more, such as kick a member its role ranks above. A value the test sets on a mock wins over the
- * computed one. The next major version (5.0) computes these values without the call.
+ * computed one. An interaction's answer that discord.js would refuse, such as a second `reply()` after one a test set
+ * with `mockResolvedValue`, is refused too, where without it the mock runs it and warns. The next major version (5.0)
+ * computes these values, and refuses those answers, without the call.
  *
  * @throws Error when a mock already exists, which was made without it.
  *
