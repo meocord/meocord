@@ -342,3 +342,46 @@ describe('class-level @UseGuard on autocomplete handlers', () => {
     expect(log).toEqual(['type:autocomplete', 'complete', 'type:autocomplete', 'complete'])
   })
 })
+
+describe('a direct call on a controller two testing modules made', () => {
+  const Gate = logGuard('gate')
+
+  @Controller()
+  class Pinged {
+    @Command('ping', CommandType.SLASH)
+    @UseGuard(Gate)
+    async ping(interaction: ChatInputCommandInteraction) {
+      await interaction.reply('pong')
+    }
+  }
+
+  const moduleWith = (name: string, allow: boolean) =>
+    MeoCordTestingModule.create({ controllers: [Pinged] })
+      .overrideGuard(Gate)
+      .useValue({ canActivate: () => (log.push(name), allow) })
+      .compile()
+
+  beforeEach(() => (log.length = 0))
+
+  it("runs the guards of the module that made the instance, whichever was compiled last", async () => {
+    const allowing = moduleWith('allowing stub', true)
+    const denying = moduleWith('denying stub', false)
+    const allowed = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
+    const denied = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
+
+    await allowing.get(Pinged).ping(allowed)
+    await denying.get(Pinged).ping(denied)
+
+    expect(log).toEqual(['allowing stub', 'denying stub'])
+    expect([allowed.reply, denied.reply].map(reply => vi.mocked(reply).mock.calls.length)).toEqual([1, 0])
+  })
+
+  it('runs its guards once per call, however often one module is asked for the instance', async () => {
+    const allowing = moduleWith('allowing stub', true)
+    moduleWith('denying stub', false)
+
+    for (let call = 0; call < 2; call += 1) await allowing.get(Pinged).ping(createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' }))
+
+    expect(log).toEqual(['allowing stub', 'allowing stub'])
+  })
+})

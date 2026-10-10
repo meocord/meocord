@@ -13,7 +13,7 @@ import { missingTranslatorError, Translator } from '@src/common/translator.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
-import { injectedTokens, singletonContextError } from '@src/core/guard-runner.js'
+import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
 import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
 import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
@@ -386,6 +386,7 @@ export class MeoCordFactory {
     for (const cls of runs.classes) {
       Reflect.defineMetadata(META.container, container, cls)
     }
+    recordInstanceContainers(container, runs.classes)
     prepareThemes(container, appClasses)
 
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory
