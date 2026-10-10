@@ -98,5 +98,7 @@ describe('route', () => {
 
   it('refuses a pattern @Command would refuse, where it is made', () => {
     expect(() => route('ticket-{id}')).toThrow('must occupy a whole segment')
+    expect(() => route('card/{id}/{id}')).toThrow('Invalid pattern "card/{id}/{id}": {id} appears twice; give each param its own name.')
+    expect(() => route('card/{1}')).toThrow('Invalid pattern "card/{1}": {1} starts with a digit; start a param\'s name with a letter or _.')
   })
 })
