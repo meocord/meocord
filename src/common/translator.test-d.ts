@@ -1,6 +1,15 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
-import { createTranslator, defineCatalog, type LocalizationKey, translateError, type Translator } from '@src/common/index.js'
+import {
+  createTranslator,
+  defineCatalog,
+  type LocaleCatalog,
+  type LocalizationKey,
+  type MessageKey,
+  type StringMessageKey,
+  translateError,
+  type Translator,
+} from '@src/common/index.js'
 import { type CatalogIssues, type LocaleIssues, type Placeholders } from '@src/common/translator.js'
 import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
 
@@ -25,6 +34,23 @@ describe('keys', () => {
     t.default('ban.reason')
     // @ts-expect-error a group, not a message
     t.default('ban')
+  })
+
+  it('leaves out a key with a dot in it, which no lookup reaches', () => {
+    interface Dotted { readonly 'ban.done': 'Banned.'; readonly kick: { readonly 'x.y': 'Kicked.'; readonly done: 'Kicked {user}.' }; readonly ping: 'Pong!' }
+    expectTypeOf<MessageKey<Dotted>>().toEqualTypeOf<'kick.done' | 'ping'>()
+    expectTypeOf<StringMessageKey<Dotted>>().toEqualTypeOf<'kick.done' | 'ping'>()
+    expectTypeOf<LocalizationKey<Dotted>>().toEqualTypeOf<'ping'>()
+  })
+})
+
+describe('LocaleCatalog', () => {
+  it("takes MeoCord's own texts in a locale's meocord group, as createTranslator does", () => {
+    const id: LocaleCatalog<typeof enUS> = { ping: 'Pong!', meocord: { help: { aliases: 'Juga: {aliases}' } } }
+    void id
+    // @ts-expect-error not one of MeoCord's groups
+    const wrong: LocaleCatalog<typeof enUS> = { meocord: { nope: 'x' } }
+    void wrong
   })
 })
 

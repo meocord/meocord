@@ -531,6 +531,27 @@ describe('a builder that throws', () => {
       void BanController
     }).toThrow('BanBuilder could not build "ban": Invalid string length')
   })
+
+  it("gives Discord's rule for a name, not only the lengths, when a localised name is refused", () => {
+    @CommandBuilder(CommandType.SLASH)
+    class BanBuilder {
+      build(commandName: string) {
+        return new SlashCommandBuilder().setName(commandName).setDescription('Ban').setNameLocalizations({ id: 'Larang Member' })
+      }
+    }
+
+    expect(() => {
+      @Controller()
+      class BanController {
+        @Command('ban', BanBuilder)
+        async ban(_interaction: ChatInputCommandInteraction) {}
+      }
+      void BanController
+    }).toThrow(
+      'Check its names, descriptions and localizations, which Discord limits to 32 characters for a name and 100 for a description. ' +
+        'A name is letters, numbers, `-` and `_`, lowercase where the script has case, and without spaces, in every locale.',
+    )
+  })
 })
 
 // A subcommand is described by its command's builder: one on the path either fails to build from the path or,

@@ -259,6 +259,26 @@ describe('a key with no message, in development', () => {
   })
 })
 
+describe('a key with a dot in it', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('is warned about once, by locale and key, as no lookup can reach it', () => {
+    const warned: string[] = []
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((...args: unknown[]) => void warned.push(args.join(' ')))
+    const dotted = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { 'ban.done': 'Banned.', ban: { 'kick.done': 'Kicked.' } }, id: { 'ban.done': 'Diblokir.' } } as never,
+    }) as unknown as { default: (key: string) => string }
+
+    expect(warned).toEqual([
+      'The en-US catalog\'s key "ban.done" has a ".", which a lookup reads as a path, so its message is never found. Nest it as a group instead.',
+      'The en-US catalog\'s key "kick.done" in ban has a ".", which a lookup reads as a path, so its message is never found. Nest it as a group instead.',
+      'The id catalog\'s key "ban.done" has a ".", which a lookup reads as a path, so its message is never found. Nest it as a group instead.',
+    ])
+    expect(dotted.default('ban.done')).toBe('ban.done')
+  })
+})
+
 describe('at the edges', () => {
   it("returns the key for one that names an object's built-in members", () => {
     const t = createTranslator({ default: 'en-US', locales: { 'en-US': { greeting: 'Hello' } } })
