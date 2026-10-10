@@ -51,6 +51,32 @@ describe('expectCompleteCatalog', () => {
     )
   })
 
+  it('reads a group with an `other` key as a group, as the translator types it', () => {
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { reasons: { spam: 'Spam', offTopic: 'Off topic', other: 'Other' } }, ru: { reasons: { spam: 'Спам', other: 'Другое' } } },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow('The catalogs are incomplete:\n  ru: missing reasons.offTopic')
+  })
+
+  it("names a key named like an object's built-in member that a locale lacks", () => {
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { constructor: 'Build', toString: 'Text' }, fr: {} } as never })
+
+    expect(() => expectCompleteCatalog(t)).toThrow('The catalogs are incomplete:\n  fr: missing constructor; missing toString')
+  })
+
+  it('names a translation of another shape than the default: a text for a plural, or a plural for a text', () => {
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { n: { one: '{count} item', other: '{count} items' }, d: 'Plain' }, fr: { n: 'plain', d: { one: 'un', other: 'des' } } } as never,
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(
+      'The catalogs are incomplete:\n  fr: n should be a plural, as the default is; d should be a text, as the default is',
+    )
+  })
+
   it("leaves MeoCord's own texts to their English fallback, reporting only a key MeoCord lacks", () => {
     const id = { ...{ ban: { description: 'Blokir anggota', done: '{user} diblokir.' }, warnings: { other: '{count} peringatan' } } }
     const t = createTranslator({

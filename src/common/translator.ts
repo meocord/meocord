@@ -41,12 +41,15 @@ type IsPlural<T> = T extends object
   : false
 
 /**
- * Every message key of a catalog: the dotted path to each message or plural.
+ * Every message key of a catalog: the dotted path to each message or plural. A key with a `.` in its own name is left
+ * out, as a lookup reads it as a path and never finds it; `createTranslator` warns about one. Nest it as a group.
  *
  * @group Types
  */
 export type MessageKey<C> = {
-  [K in keyof C & string]: C[K] extends string
+  [K in keyof C & string]: K extends `${string}.${string}`
+    ? never
+    : C[K] extends string
     ? K
     : IsPlural<C[K]> extends true
       ? K
@@ -60,7 +63,13 @@ export type MessageKey<C> = {
  * @see {@link LocalizationKey}
  */
 export type StringMessageKey<C> = {
-  [K in keyof C & string]: C[K] extends string ? K : IsPlural<C[K]> extends true ? never : `${K}.${StringMessageKey<C[K]>}`
+  [K in keyof C & string]: K extends `${string}.${string}`
+    ? never
+    : C[K] extends string
+      ? K
+      : IsPlural<C[K]> extends true
+        ? never
+        : `${K}.${StringMessageKey<C[K]>}`
 }[keyof C & string]
 
 /**
@@ -154,12 +163,16 @@ export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: ParamsAr
  * Its messages may use only the `{params}` the default's take: `createTranslator` checks that for a catalog that keeps
  * its text, and `expectCompleteCatalog` for any.
  *
- * A message it leaves out falls back to a related locale, then to the default.
+ * A message it leaves out falls back to a related locale, then to the default. Its `meocord` group translates MeoCord's
+ * own texts.
  *
  * @group Types
  */
-export type LocaleCatalog<C> = {
-  readonly [K in keyof C]?: C[K] extends string ? string : IsPlural<C[K]> extends true ? PluralMessage : LocaleCatalog<C[K]>
+export type LocaleCatalog<C> = LocaleMessages<C> & { readonly meocord?: LocaleMessages<MeoCordMessages> }
+
+/** Any part of a catalog, in a locale's own wording. */
+type LocaleMessages<C> = {
+  readonly [K in keyof C]?: C[K] extends string ? string : IsPlural<C[K]> extends true ? PluralMessage : LocaleMessages<C[K]>
 }
 
 /**
@@ -487,6 +500,14 @@ const FALLBACK_PARTNERS: Partial<Record<Locale, Locale>> = {
   [Locale.SpanishLATAM]: Locale.SpanishES,
 }
 
+/** Each key with a `.` in it, which `lookup` splits as a path and so never reaches, with the group it sits in. */
+function dottedKeys(catalog: CatalogShape, group = ''): { name: string; group: string }[] {
+  return Object.entries(catalog).flatMap(([name, value]) => [
+    ...(name.includes('.') ? [{ name, group }] : []),
+    ...(typeof value === 'object' && value !== null ? dottedKeys(value as CatalogShape, group ? `${group}.${name}` : name) : []),
+  ])
+}
+
 class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   readonly locales: readonly Locale[]
   private readonly logger = new Logger('Translator')
@@ -650,6 +671,15 @@ export function createTranslator<
     }
   }
   if (!locales[defaultLocale]) throw refuse(new Error(`The default locale "${defaultLocale}" has no catalog in locales.`))
+  const logger = new Logger('Translator')
+  for (const [locale, catalog] of Object.entries(locales)) {
+    for (const { name, group } of dottedKeys(catalog)) {
+      logger.warn(
+        `The ${locale} catalog's key "${name}"${group ? ` in ${group}` : ''} has a ".", which a lookup reads as a path, so its ` +
+          'message is never found. Nest it as a group instead.',
+      )
+    }
+  }
 
   // Typed by the default catalog; at runtime every catalog is read the same way.
   return new CatalogTranslator(defaultLocale as Locale, locales as Partial<Record<Locale, CatalogShape>>) as unknown as Translator<

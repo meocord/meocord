@@ -778,7 +778,8 @@ export function Command<
         // discord.js builders validate as they are set, and their errors name neither the command nor the field.
         throw refuse(new Error(
           `${where}: ${builderOrType.name} could not build "${commandName}": ${detail}. Check its names, descriptions and ` +
-            `localizations, which Discord limits to 32 and 100 characters.`,
+            'localizations, which Discord limits to 32 characters for a name and 100 for a description. A name is letters, ' +
+            'numbers, `-` and `_`, lowercase where the script has case, and without spaces, in every locale.',
           { cause: error },
         ))
       }

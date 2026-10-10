@@ -3,8 +3,11 @@ import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 interface Leaf { key: string; plural: boolean }
 
+const PLURAL_CATEGORIES = new Set(['zero', 'one', 'two', 'few', 'many', 'other'])
+
+/** A plural: an object whose every key is a plural category, as the translator's types read one; any other is a group. */
 const isPlural = (value: unknown): boolean =>
-  typeof value === 'object' && value !== null && typeof (value as { other?: unknown }).other === 'string'
+  typeof value === 'object' && value !== null && Object.keys(value).length > 0 && Object.keys(value).every(key => PLURAL_CATEGORIES.has(key))
 
 /** Every message key of a catalog, and whether it is a plural. */
 function leaves(catalog: CatalogShape, prefix = ''): Leaf[] {
@@ -19,8 +22,14 @@ function leaves(catalog: CatalogShape, prefix = ''): Leaf[] {
 /** A translation's text, which an empty string isn't: the translator reads `''` as missing, as tools export one untranslated. */
 const isText = (value: unknown): boolean => typeof value === 'string' && value !== ''
 
+/** The value at a key's path, through own properties only, so `constructor` or `toString` is not read off a prototype. */
 function at(catalog: CatalogShape, key: string): unknown {
-  return key.split('.').reduce<unknown>((current, part) => (current as Record<string, unknown> | undefined)?.[part], catalog)
+  return key
+    .split('.')
+    .reduce<unknown>(
+      (current, part) => (typeof current === 'object' && current !== null && Object.hasOwn(current, part) ? (current as Record<string, unknown>)[part] : undefined),
+      catalog,
+    )
 }
 
 const MEOCORD_KEYS = new Set(leaves(MEOCORD_MESSAGES).map(({ key }) => key))
@@ -47,10 +56,11 @@ function strayParams(translation: unknown, original: unknown): string[] {
  *
  * Use it in a test for a team that wants no fallback in production. It reports the messages a locale lacks, the
  * messages the default catalog doesn't have, the plural forms a language needs but a plural lacks, such as `few` for
- * Russian, and each `{param}` a translation uses that the message it translates doesn't take. An empty translation,
- * `''`, counts as lacking, as the translator reads it as missing. It reads the catalogs'
- * own strings, so it checks the params of a catalog from a plain variable or a JSON file too, which the compiler
- * can't.
+ * Russian, a translation of another shape than the default's, a text for a plural or a plural for a text, and each
+ * `{param}` a translation uses that the message it translates doesn't take. An empty translation, `''`, counts as
+ * lacking, as the translator reads it as missing. It reads the catalogs' own strings, so it checks the params of a
+ * catalog from a plain variable or a JSON file too, which the compiler can't. An object counts as a plural only when
+ * its every key is a plural category, so a group with an `other` key is a group.
  *
  * @remarks
  * MeoCord's own texts, a catalog's `meocord` group, fall back to English by design, so only a key MeoCord lacks, and
@@ -105,7 +115,12 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
         problems.push(`missing ${key}`)
         continue
       }
-      if (plural && isPlural(message)) {
+      // A translation of another shape than the default's can't be read as it: a text for a plural, or the reverse
+      if (plural !== isPlural(message) || (!plural && typeof message !== 'string')) {
+        problems.push(`${key} should be a ${plural ? 'plural' : 'text'}, as the default is`)
+        continue
+      }
+      if (plural) {
         const missing = categories.filter(category => !isText((message as Record<string, unknown>)[category]))
         if (missing.length > 0) problems.push(`${key} lacks ${missing.join(', ')}`)
       }
