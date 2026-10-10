@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'fs'
 import { createJiti } from 'jiti'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { parseJsonc } from '@src/util/json.util.js'
+import { comparablePath, framePath } from '@src/util/source-path.util.js'
 
 /**
  * Loads `meocord.config.ts` from source on every call, so a build always uses the current config
@@ -64,8 +65,10 @@ function configOf(loaded: unknown): { config: MeoCordConfig } | { error: string 
   const module = loaded as Record<string, unknown> | null
   if (module?.__esModule !== true) return { config: loaded as MeoCordConfig }
   if ('default' in module) return { config: module.default as MeoCordConfig }
+  // A module that exports nothing, as an empty file, is an empty config, whose values come from the environment
   const names = Object.keys(module)
-  return { error: `it must export an object as its default export${names.length > 0 ? `, and exports only ${names.join(', ')}` : ''}` }
+  if (names.length === 0) return { config: {} as MeoCordConfig }
+  return { error: `it must export an object as its default export, and exports only ${names.join(', ')}` }
 }
 
 /**
@@ -78,14 +81,23 @@ function loadError(error: unknown, root: string): string {
   return frame && !message.includes(frame) ? `${message}\n    at ${frame}` : message
 }
 
-/** The first stack frame in a file of the project's own, as `file:line:column` from the project. */
-function projectFrame(stack: string | undefined, root: string): string | undefined {
+// A stack frame's location, `file:line:column`, alone or in parentheses after the function: a path or a file:// URL
+const FRAME_LOCATION = /\(?((?:file:\/\/)?(?:\/?[A-Za-z]:)?[\\/][^()]+?):(\d+):(\d+)\)?$/
+
+/**
+ * The first stack frame in a file of the project's own, as `file:line:column` from the project. On Windows a frame's
+ * file can be a file:// URL, or written with forward slashes or a lower-case drive, so each is compared as a path.
+ */
+export function projectFrame(stack: string | undefined, root: string, windows = process.platform === 'win32'): string | undefined {
+  const paths = windows ? path.win32 : path.posix
+  const base = comparablePath(paths.join(paths.resolve(root), paths.sep), windows)
   for (const line of stack?.split('\n').slice(1) ?? []) {
-    const file = /\(?((?:[A-Za-z]:)?[\\/][^()]+?):(\d+):(\d+)\)?$/.exec(line.trim())
-    if (!file) continue
-    const [, location, row, column] = file
-    if (!location.startsWith(root) || location.split(/[\\/]/).includes('node_modules')) continue
-    return `${path.relative(root, location).split(path.sep).join('/')}:${row}:${column}`
+    const frame = FRAME_LOCATION.exec(line.trim())
+    if (!frame) continue
+    const [, location, row, column] = frame
+    const file = paths.resolve(framePath(location, windows))
+    if (!comparablePath(file, windows).startsWith(base) || file.split(paths.sep).includes('node_modules')) continue
+    return `${paths.relative(root, file).split(paths.sep).join('/')}:${row}:${column}`
   }
   return undefined
 }

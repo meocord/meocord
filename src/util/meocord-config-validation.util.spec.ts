@@ -81,9 +81,9 @@ describe('configProblems', () => {
     })
   })
 
-  // jiti hands the CLI an interop proxy whose own keys are only `default`.
-  it('reads through a module namespace with a default export', () => {
-    expect(configProblems({ default: { discordToken: 7 } }).errors).toEqual(['discordToken must be a string (got 7)'])
+  // The loaders hand it the default export itself, so a config's own `default` key is one more option it doesn't know
+  it('reads a config as given, a key named default included', () => {
+    expect(configProblems({ default: { discordToken: 7 } })).toEqual({ errors: [], warnings: ['default is not a MeoCord option, so it has no effect.'] })
   })
 
   it('refuses a default export that is not an object', () => {
