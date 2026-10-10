@@ -1033,9 +1033,28 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     inCachedGuild: () => Boolean(own('guildId') && own('guild') && hasMember()),
     inRawGuild: () => Boolean(own('guildId') && !own('guild') && hasMember()),
   }
-  // Each reads where the mock is as its own, so a placement warning stays for the test's reads
-  for (const [name, check] of Object.entries(guildChecks)) {
-    if (findPrototypeMethod(instance, name) !== null) stubs.set(name, createMockFn(() => readPlaceQuietly(check)))
+  // What each answers where strict mocks place the mock: the place's guildId and guild for those the test left out, and
+  // a member wherever there is a guildId, unless the test gave one
+  const given = new Set(Object.keys(props ?? {}))
+  const strictChecks = (place: StrictPlace): Record<keyof typeof guildChecks, boolean> => {
+    const pick = (key: string, placed: unknown) => (given.has(key) || placed === undefined ? own(key) : placed)
+    const guildId = pick('guildId', place.guildId)
+    const guild = place.raw ? null : pick('guild', place.guild)
+    const member = given.has('member') ? Boolean(own('member')) : Boolean(guildId)
+    return { inGuild: Boolean(guildId && member), inCachedGuild: Boolean(guildId && guild && member), inRawGuild: Boolean(guildId && !guild && member) }
+  }
+  // Each reads where the mock is as its own, and in default mode warns once, by its own name, where strict mocks answer
+  // otherwise or refuse the mock
+  for (const [name, check] of Object.entries(guildChecks) as [keyof typeof guildChecks, () => boolean][]) {
+    if (findPrototypeMethod(instance, name) === null) continue
+    stubs.set(
+      name,
+      createMockFn(() => {
+        const answer = readPlaceQuietly(check)
+        if (strictPlace && !strictMocks() && (strictPlace.refused || strictChecks(strictPlace)[name] !== answer)) placeWarners.get(instance)?.(`${name}()`)
+        return answer
+      }),
+    )
   }
 
   // Set up reply state machine for repliable interactions
@@ -2298,6 +2317,53 @@ function readPlaceQuietly<T>(read: () => T): T {
   }
 }
 
+// Each interaction's placement warning, by the read it names, for the mock's own reads that warn as the test's read
+const placeWarners = new WeakMap<object, (read: string) => void>()
+
+// The place keys a read of the mock's own read while it runs, so it warns by its own name where one would warn
+let placeReadsSeen: Set<string> | undefined
+
+/**
+ * Runs `read`, a value of `mock`'s own that reads where the mock is, quietly; in default mode it warns once, as `key`,
+ * where one of those reads would warn, since strict mocks place the mock otherwise.
+ */
+export function readPlaceAs<T>(mock: object, key: string, read: () => T): T {
+  const outer = placeReadsSeen
+  const seen = (placeReadsSeen = new Set())
+  try {
+    return readPlaceQuietly(read)
+  } finally {
+    placeReadsSeen = outer
+    if (seen.size > 0) placeWarners.get(mockTargets.get(mock) ?? mock)?.(key)
+  }
+}
+
+/** What reading `key`, where strict mocks place an interaction otherwise, warns: what it reads now, and in 5.0. */
+function placeWarning(name: string, key: string, place: StrictPlace): string {
+  if (place.refused) {
+    return `${name}.${key} reads where the mock's channel, guild or guildId put it, not where its message is; under useStrictMocks(), as in the next major version (5.0), the mock is refused: ${place.refused}`
+  }
+  const why = {
+    message: [
+      'a place other than its message\'s',
+      "the mock is in its message's channel and server",
+      "Give it the message's channel, or call useStrictMocks() to place it there now.",
+    ],
+    guild: ["a DM's value, though the mock was given a guild", 'the mock is in that guild', 'Give its guildId or one of its channels too, or call useStrictMocks() to place it there now.'],
+    member: [
+      "a DM's value, though the mock was given a member of a server",
+      "the mock is in the member's server",
+      "Give the member's guild too, or call useStrictMocks() to place it there now.",
+    ],
+    guildId: [
+      'a server the bot is in, though the mock was given only a guildId',
+      "a guildId alone is a server the bot isn't in: guild and channel are null, and the member is a raw one",
+      'Give a guild too, or call useStrictMocks() to read it so now.',
+    ],
+  }[place.given]
+  return `${name}.${key} reads ${why[0]} here; in the next major version (5.0) ${why[1]}. ${why[2]}`
+}
+
 /**
  * Has each of an interaction's `guildId`, `guild`, `channelId`, `channel` and `member` that strict mocks read otherwise
  * warn once when read, unless the test gave it.
@@ -2317,34 +2383,10 @@ function warnOnPlaceReads(instance: Record<string, unknown>, place: StrictPlace,
           ? ['channelId', 'channel']
           : []
   const name = (Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name
-  const why = {
-    message: [
-      'a place other than its message\'s',
-      "the mock is in its message's channel and server",
-      "Give it the message's channel, or call useStrictMocks() to place it there now.",
-    ],
-    guild: ["a DM's value, though the mock was given a guild", 'the mock is in that guild', 'Give its guildId or one of its channels too, or call useStrictMocks() to place it there now.'],
-    member: [
-      "a DM's value, though the mock was given a member of a server",
-      "the mock is in the member's server",
-      "Give the member's guild too, or call useStrictMocks() to place it there now.",
-    ],
-    guildId: [
-      'a server the bot is in, though the mock was given only a guildId',
-      "a guildId alone is a server the bot isn't in: guild and channel are null, and the member is a raw one",
-      'Give a guild too, or call useStrictMocks() to read it so now.',
-    ],
-  }[place.given]
+  placeWarners.set(instance, read => warnOnce(mockLogger, placeWarning(name, read, place)))
   for (const key of keys.filter(each => !given.has(each))) {
-    const warn = () => {
-      if (readingPlace > 0) return
-      warnOnce(
-        mockLogger,
-        place.refused
-          ? `${name}.${key} reads where the mock's channel, guild or guildId put it, not where its message is; under useStrictMocks(), as in the next major version (5.0), the mock is refused: ${place.refused}`
-          : `${name}.${key} reads ${why[0]} here; in the next major version (5.0) ${why[1]}. ${why[2]}`,
-      )
-    }
+    // A read the mock makes stays quiet, noted for a read of the mock's own to warn by its name
+    const warn = () => (readingPlace > 0 ? void placeReadsSeen?.add(key) : warnOnce(mockLogger, placeWarning(name, key, place)))
     const descriptor = Object.getOwnPropertyDescriptor(instance, key)
     // One the mock answers with a stub stays unset, as the mock's own checks read it, and warns as the stub is read
     if (!descriptor) {
