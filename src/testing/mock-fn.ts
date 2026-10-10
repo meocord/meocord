@@ -1,6 +1,8 @@
 // Framework-agnostic mock function, so `meocord/testing` depends on neither jest nor vitest.
 // Both detect it through `_isMockFunction` and read `fn.mock.calls` in their assertions.
 
+import { shared } from '@src/util/shared-state.util.js'
+
 // Each call signature of `T`, up to four, as a union: `Parameters` and `ReturnType` read only an overloaded function's
 // last signature, such as the list form of a manager's `fetch`
 type Overloads<T> = T extends {
@@ -168,12 +170,21 @@ export function isMockFunction(fn: unknown): fn is MockInstance {
   )
 }
 
-// When each call of meocord's own mocks came, across all of them, as Vitest numbers its own
-let invocationOrder = 0
-
-// Every mock createMockFn made, held weakly so the mocks of a finished test can still be collected
-const created = new Set<WeakRef<MockInstance>>()
-const collected = new FinalizationRegistry<WeakRef<MockInstance>>(ref => created.delete(ref))
+/**
+ * What `useMockFn` set and the mocks made, kept for both builds of this meocord version, so a setup file in one module
+ * format sets them for specs in the other:
+ * - `invocationOrder`: when each call of meocord's own mocks came, across all of them, as Vitest numbers its own;
+ * - `created`: every mock createMockFn made, held weakly so the mocks of a finished test can still be collected;
+ * - `runnerFactory` and `restoreImpl`: the runner's factory useMockFn registered, and for each of its mocks how to
+ *   give back the implementation it was created with, through the runner's own setter, which a mock's behaviour may wrap.
+ */
+const mocks = shared('mocks', () => ({
+  invocationOrder: 0,
+  created: new Set<WeakRef<MockInstance>>(),
+  runnerFactory: undefined as MockFnFactory | undefined,
+  restoreImpl: new WeakMap<object, () => void>(),
+}))
+const collected = new FinalizationRegistry<WeakRef<MockInstance>>(ref => mocks.created.delete(ref))
 
 /**
  * A mock function a test runner makes, as {@link useMockFn} takes it.
@@ -207,11 +218,6 @@ export interface RunnerMock {
  */
 export type MockFnFactory = (impl?: (...args: any[]) => any) => RunnerMock
 
-// The runner's factory useMockFn registered, and for each of its mocks how to give back the implementation it was
-// created with, through the runner's own setter, which a mock's behaviour may wrap
-let runnerFactory: MockFnFactory | undefined
-const restoreImpl = new WeakMap<object, () => void>()
-
 /**
  * Makes every mock `meocord/testing` creates with the test runner's own mock function, such as Vitest's `vi.fn`.
  *
@@ -243,8 +249,8 @@ const restoreImpl = new WeakMap<object, () => void>()
  * @see {@link createMockFn}
  */
 export function useMockFn(factory: MockFnFactory): void {
-  if (factory === runnerFactory) return
-  if ([...created].some(ref => ref.deref() !== undefined)) {
+  if (factory === mocks.runnerFactory) return
+  if ([...mocks.created].some(ref => ref.deref() !== undefined)) {
     throw new Error(
       "useMockFn() goes before any mock is made: a mock made before it keeps meocord's own function, and the two kinds " +
         "would mix. Call it once, in the test runner's setup file.",
@@ -268,22 +274,22 @@ export function useMockFn(factory: MockFnFactory): void {
   if (!isMockFunction(probe) || !Array.isArray(probe.mock?.calls) || api.some(name => typeof probe[name] !== 'function')) {
     throw refusal()
   }
-  runnerFactory = factory
+  mocks.runnerFactory = factory
 }
 
 /** Whether mocks are made with a runner's function, which {@link useMockFn} registered. */
-export const usesRunnerMockFn = (): boolean => runnerFactory !== undefined
+export const usesRunnerMockFn = (): boolean => mocks.runnerFactory !== undefined
 
 /** Goes back to meocord's own mock function and forgets every mock made, so a spec can register a factory afresh. */
 export function forgetMockFn(): void {
-  runnerFactory = undefined
-  created.clear()
+  mocks.runnerFactory = undefined
+  mocks.created.clear()
 }
 
 /** Tracks a mock for clearAllMocks and resetAllMocks. */
 function track<M extends MockInstance>(mockFn: M): M {
   const ref = new WeakRef<MockInstance>(mockFn)
-  created.add(ref)
+  mocks.created.add(ref)
   collected.register(mockFn, ref)
   return mockFn
 }
@@ -308,7 +314,7 @@ function track<M extends MockInstance>(mockFn: M): M {
  * @see {@link resetAllMocks}
  */
 export function clearAllMocks(): void {
-  for (const ref of created) ref.deref()?.mockClear()
+  for (const ref of mocks.created) ref.deref()?.mockClear()
 }
 
 /**
@@ -333,12 +339,12 @@ export function clearAllMocks(): void {
  * @see {@link clearAllMocks}
  */
 export function resetAllMocks(): void {
-  for (const ref of created) {
+  for (const ref of mocks.created) {
     const mockFn = ref.deref()
     if (!mockFn) continue
     mockFn.mockReset()
     // A runner whose reset drops the implementation the mock was created with, as jest's and bun's do, gets it back
-    restoreImpl.get(mockFn)?.()
+    mocks.restoreImpl.get(mockFn)?.()
   }
 }
 
@@ -379,11 +385,12 @@ export function resetAllMocks(): void {
  * @see {@link MockInstance}
  */
 export function createMockFn<T extends (...args: any[]) => any = (...args: any[]) => any>(impl?: T): MockedFunction<T> {
+  const { runnerFactory } = mocks
   if (runnerFactory) {
     const runnerMock = runnerFactory(impl) as unknown as MockedFunction<T>
     if (impl) {
       const setImpl = runnerMock.mockImplementation.bind(runnerMock)
-      restoreImpl.set(runnerMock, () => setImpl(impl))
+      mocks.restoreImpl.set(runnerMock, () => setImpl(impl))
     }
     return track(runnerMock)
   }
@@ -405,7 +412,7 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
     calls.push(args)
     instances.push(this)
     contexts.push(this)
-    invocationCallOrder.push(++invocationOrder)
+    invocationCallOrder.push(++mocks.invocationOrder)
     // Updated in place as the call settles, so a promise's outcome shows once it resolves or rejects
     const settled: MockSettledResult = { type: 'incomplete', value: undefined }
     settledResults.push(settled)

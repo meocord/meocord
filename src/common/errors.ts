@@ -1,6 +1,7 @@
 import { type StandardSchemaV1Issue } from '@src/interface/standard-schema.interface.js'
 import { type MeoCordText, renderText } from '@src/common/meocord-text.js'
 import { type CooldownLimit } from '@src/common/cooldown-store.js'
+import { sharedKey } from '@src/util/shared-state.util.js'
 
 /**
  * Thrown by a guard to deny a call and tell the user why.
@@ -419,3 +420,28 @@ export class CooldownStoreError extends Error {
     this.name = 'CooldownStoreError'
   }
 }
+
+/**
+ * Makes `instanceof` hold for an error from either build of this meocord version, ES module or CommonJS: the class's
+ * prototype carries a brand both builds share, which `instanceof` on the class itself checks. A subclass, such as an
+ * app's own `UserError`, keeps the usual check, so it still matches only its own instances.
+ */
+function brand(error: abstract new (...args: never[]) => Error, name: string): void {
+  const key = sharedKey(`error:${name}`)
+  Object.defineProperty(error.prototype, key, { value: true })
+  Object.defineProperty(error, Symbol.hasInstance, {
+    value(this: unknown, value: unknown): boolean {
+      if (this !== error) return Function.prototype[Symbol.hasInstance].call(this, value)
+      return (typeof value === 'object' || typeof value === 'function') && value !== null && key in value
+    },
+  })
+}
+
+// Named as written, since a minifier may rename the classes themselves
+brand(GuardDeniedError, 'GuardDeniedError')
+brand(UserError, 'UserError')
+brand(CommandNotFoundError, 'CommandNotFoundError')
+brand(ValidationError, 'ValidationError')
+brand(MessageUsageError, 'MessageUsageError')
+brand(CooldownError, 'CooldownError')
+brand(CooldownStoreError, 'CooldownStoreError')
