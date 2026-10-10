@@ -1,7 +1,9 @@
 import 'reflect-metadata'
 import { type CooldownOptions, type StoredCooldown } from '@src/core/cooldown-runner.js'
 import { type Handler, type NoInput, type ParamsOf } from '@src/decorator/validation.decorator.js'
+import { Logger } from '@src/common/logger.js'
 import { decoratedName, refuse, declaring } from '@src/util/refusal.util.js'
+import { describeValue } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -42,6 +44,7 @@ export interface CooldownByDecorator<P> {
  * @param options - The limit, whose calls count together, and how to exempt or tell calls apart.
  * @throws Error when `seconds` is not from `0.001` to `4320000000000`, `uses` is not a whole number of at least 1,
  * `per` is not a scope or `by` is not a function, as the decorator applies; `CooldownError` to a call over the limit.
+ * A `bypass` given but not a function, and a `seconds` that is not a number, are warned about as the decorator applies.
  *
  * @example
  * ```ts
@@ -87,6 +90,7 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
     // Checked where it applies, so the refusal names the handler or controller
     const problem = cooldownProblem(seconds, uses, per, by)
     if (problem) throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${problem}`))
+    for (const warning of cooldownWarnings(options)) logger.warn(`${decoratedName(target, propertyKey)}: ${warning}`)
     // Decorators apply bottom-up; prepending keeps them in the order they read.
     if (propertyKey === undefined) {
       const existing = (Reflect.getOwnMetadata(META.classCooldowns, target) as StoredCooldown[]) ?? []
@@ -103,6 +107,29 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
  * plus the window, is a real date for a refusal's `retryAt` and the time it shows.
  */
 const MAX_SECONDS = 4_320_000_000_000
+
+const logger = new Logger('Cooldown')
+
+/**
+ * What a cooldown's options get wrong that the types refuse, yet still counts: a `bypass` that is not a function, which
+ * fails every call, and a `seconds` that is not a number, read as one. A falsy `bypass` means none.
+ */
+function cooldownWarnings({ seconds, bypass }: CooldownOptions<any>): string[] {
+  const warnings: string[] = []
+  if (bypass && typeof bypass !== 'function') {
+    warnings.push(
+      `@Cooldown takes bypass as a function of the call, returning whether the call skips the cooldown, not ${describeValue(bypass)}; ` +
+        'every call through this handler fails with it. In the next major version (5.0) it is refused.',
+    )
+  }
+  if (typeof seconds !== 'number') {
+    warnings.push(
+      `@Cooldown takes seconds as a number, not ${describeValue(seconds)}, which it counts as a window of ` +
+        `${Math.round(seconds * 1000)} ms. In the next major version (5.0) it is refused.`,
+    )
+  }
+  return warnings
+}
 
 /** Why a cooldown's options cannot be counted, or undefined when they can. */
 function cooldownProblem(seconds: number, uses: number, per: string, by: unknown): string | undefined {
