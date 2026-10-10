@@ -856,7 +856,7 @@ export class InteractionResponse implements ResponseState {
   /** Sends a follow-up that becomes the answer, which later edits and `delete()` act on by its id. */
   private async answerWith(body: Body): Promise<Message> {
     const { message, flags } = await this.sendFollowUp(body)
-    // Its privacy as sent, which the message Discord returns may not carry
+    // Its privacy as sent, not as read back from the message
     this.answer = { kind: 'followUp', id: message.id, ephemeral: hasEphemeral(flags) }
     this.lastMessage = message
     return message
