@@ -283,7 +283,10 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
     // and a plain write against one of those throws. Defining an own
     // data property shadows the accessor, which is what test setup means.
     set(target, prop, value) {
-      Object.defineProperty(target, prop, { value, writable: true, enumerable: true, configurable: true })
+      // An own accessor with a setter, such as a context menu's target, takes the value itself
+      const setter = Object.getOwnPropertyDescriptor(target, prop)?.set
+      if (setter) setter.call(target, value)
+      else Object.defineProperty(target, prop, { value, writable: true, enumerable: true, configurable: true })
       onSet?.(prop, value)
       return true
     },
@@ -1392,18 +1395,36 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         live('targetMember', () => (own('guildId') ? memberFor(own('guild'), targetUser(), true, own('guildId') as string) : null))
       }
     }
-    // A message context menu's target: the message given, by its id, or one made for its targetId, read live as above
+    // A message context menu's target: the message given, else one made for its targetId. The message is the one
+    // source: targetId reads its id, and setting either one moves the other with it
     if (MessageContextMenuCommandInteraction.prototype.isPrototypeOf(instance)) {
-      if (unset('targetId')) instance.targetId = (own('targetMessage') as { id?: string } | undefined)?.id ?? nextSnowflake()
-      if (unset('targetMessage')) {
-        let made: { id: string } | undefined
-        Object.defineProperty(instance, 'targetMessage', {
-          get: () => (made?.id === own('targetId') ? made : (made = createMockMessage({ id: own('targetId') as string }))),
-          set: (value: unknown) => Object.defineProperty(instance, 'targetMessage', { value, writable: true, enumerable: true, configurable: true }),
-          enumerable: true,
-          configurable: true,
-        })
+      let given = own('targetMessage') as { id?: string } | undefined
+      let explicitId = own('targetId') as string | undefined
+      if (given && given.id === undefined) given.id = nextSnowflake()
+      if (given && explicitId !== undefined && explicitId !== given.id) {
+        const conflict = `The targetMessage given is message ${given.id}, but the mock's targetId is ${explicitId}: give the same id, or leave one of them out.`
+        if (strictMocks()) throw new Error(conflict)
+        warnOnce(mockLogger, `${conflict} The mock reads targetMessage's id; under useStrictMocks(), as in the next major version (5.0), it refuses the pair.`)
+        explicitId = undefined
       }
+      const generated = given || explicitId !== undefined ? undefined : nextSnowflake()
+      let made: { id: string } | undefined
+      const accessor = (key: string, get: () => unknown, set: (value: unknown) => void) =>
+        Object.defineProperty(instance, key, { get, set, enumerable: true, configurable: true })
+      const targetId = () => explicitId ?? given?.id ?? (generated as string)
+      accessor('targetId', targetId, value => {
+        explicitId = value as string
+        given = undefined
+      })
+      accessor(
+        'targetMessage',
+        () => given ?? (made?.id === targetId() ? made : (made = createMockMessage({ id: targetId() }))),
+        value => {
+          given = value as { id?: string }
+          if (given && given.id === undefined) given.id = nextSnowflake()
+          explicitId = undefined
+        },
+      )
     }
   }
 
@@ -1412,6 +1433,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const generatedId = (instance.id = nextSnowflake())
     defineMadeTime(instance, generatedId)
   }
+  // An attachment too, from the same count as every mock's
+  if (Attachment.prototype.isPrototypeOf(instance) && !Object.prototype.hasOwnProperty.call(instance, 'id')) instance.id = nextSnowflake()
 
   // Discord sends the user's locale with every interaction, and the server's preferred one with one made in a server
   if (BaseInteraction.prototype.isPrototypeOf(instance)) {
