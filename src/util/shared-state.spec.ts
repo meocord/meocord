@@ -14,6 +14,7 @@ import { forgetMockFn, useMockFn } from '@src/testing/mock-fn.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import { nextSnowflake } from '@src/testing/snowflake.js'
 import { sharedKey } from '@src/util/shared-state.util.js'
+import { respond } from '@src/common/response/response-state.js'
 
 // The other build of this version, as a CommonJS file beside ES module ones loads it: the same source, made again
 async function otherBuild() {
@@ -27,6 +28,8 @@ async function otherBuild() {
     mockFn: await import('@src/testing/mock-fn.js'),
     strict: await import('@src/testing/strict-mocks.js'),
     snowflake: await import('@src/testing/snowflake.js'),
+    testing: await import('@src/testing/index.js'),
+    response: await import('@src/common/response/response-state.js'),
   }
 }
 
@@ -116,6 +119,25 @@ describe('state the two builds of one meocord version share', () => {
       forgetMockFn()
     }
     expect(vi.isMockFunction(createMockFn())).toBe(true)
+  })
+
+  it("reads a mock's answers, and an interaction's answer state, from either build", async () => {
+    const interaction = other.testing.createMockInteraction(ChatInputCommandInteraction, { commandName: 'buy' })
+    const theirs = other.response.respond(interaction)
+    await theirs.send('one')
+
+    expect(respond(interaction)).toBe(theirs)
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+  })
+
+  it('follows a delete() in one build with a send() in the other as a follow-up, not an edit of the deleted reply', async () => {
+    const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'buy' })
+    await respond(interaction).send('one')
+    await other.response.respond(interaction).delete()
+
+    await respond(interaction).send('two')
+
+    expect(getResponse(interaction).calls.map(call => (call.error ? `${call.method}!` : call.method))).toEqual(['reply', 'deleteReply', 'followUp'])
   })
 
   it('keeps its keys to this version, apart from any other installed one', () => {

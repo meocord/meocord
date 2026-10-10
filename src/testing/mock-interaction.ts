@@ -111,6 +111,7 @@ import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
 import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
 import { noteMockMade, strictMocks } from './strict-mocks.js'
+import { sharedName } from '@src/util/shared-state.util.js'
 
 // ---------------------------------------------------------------------------
 // DeepMocked<T>
@@ -735,8 +736,11 @@ function defineMadeTime(mock: object, generatedId: string | undefined): void {
   }
 }
 
-/** Where a mock interaction keeps every answer it got, through respond() or discord.js directly, in order. */
-export const RESPONSE_LOG: unique symbol = Symbol('response log')
+/**
+ * Where a mock interaction keeps every answer it got, through respond() or discord.js directly, in order, under a key
+ * both builds of this meocord version read.
+ */
+export const RESPONSE_LOG: unique symbol = Symbol.for(sharedName('responseLog'))
 
 type Behaviour = (...args: any[]) => any
 

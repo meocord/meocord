@@ -59,6 +59,7 @@ import { type ResponseContext, type ResponsePresenter, type ResponseView } from 
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { type ResolvedTheme, themeForInteraction } from '@src/core/theme-scope.js'
 import { LOADING_DRAW_TIMEOUT_MS } from '@src/core/theme-resolvers.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /**
  * The flags a message sent through `respond()` can ask for.
@@ -258,7 +259,8 @@ interface MessageLock {
   forget?: ReturnType<typeof setTimeout>
 }
 
-const messageLocks = new Map<unknown, MessageLock>()
+// Both builds of this meocord version keep one, so a message one locks, the other sees locked
+const messageLocks = shared('messageLocks', () => new Map<unknown, MessageLock>())
 
 /** How long a locked message is remembered once no call holds it. */
 export const LOCK_MEMORY_MS = 60_000
@@ -1325,7 +1327,8 @@ export class InteractionResponse implements ResponseState {
   }
 }
 
-const states = new WeakMap<object, InteractionResponse>()
+// One state per interaction for both builds of this version, so either sees where the other left its answer
+const states = shared('responseStates', () => new WeakMap<object, InteractionResponse>())
 
 /** The response state of a repliable interaction, created on first use. */
 export function responseOf(interaction: RepliableInteraction): InteractionResponse {
