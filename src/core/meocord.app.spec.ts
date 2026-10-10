@@ -63,6 +63,7 @@ function createMockClient() {
     login: vi.fn<() => Promise<string>>().mockResolvedValue('token'),
     destroy: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     removeAllListeners: vi.fn(),
+    eventNames: vi.fn(() => [...listeners.keys()]),
     user: { setActivity: vi.fn() },
     application: null,
     emit(event: string, ...args: any[]) {

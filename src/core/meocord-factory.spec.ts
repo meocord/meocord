@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { type StartupControl } from '@src/core/providers.js'
 
 // Logger is constructed with `new`, so the implementation has to be a class or
 // function — vitest 4 refuses to construct an arrow.
@@ -37,7 +38,8 @@ const { presenterFor } = await import('@src/common/response/presenter.js')
 const { isExplainedError } = await import('@src/common/explained-error.js')
 
 /** What start() runs before login: providers resolved, listed services made, the presenter bound. */
-const runStartup = (app: unknown) => (Reflect.get(app as object, 'startup') as () => Promise<void>)()
+const runStartup = (app: unknown) =>
+  (Reflect.get(app as object, 'startup') as (control: StartupControl) => Promise<void>)({ stopped: () => false, pending: () => undefined })
 
 describe('MeoCordFactory.create()', () => {
   afterEach(() => {

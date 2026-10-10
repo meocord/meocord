@@ -1,11 +1,13 @@
 import {
   type ActivityOptions,
   Client,
+  type Interaction,
   Message,
   REST,
   Routes,
 } from 'discord.js'
 import { type Container } from 'inversify'
+import { type EventEmitter } from 'node:events'
 import { Logger } from '@src/common/index.js'
 import { hideInLogs } from '@src/common/logger.js'
 import {
@@ -35,7 +37,9 @@ import {
 } from '@src/core/event-requirements.js'
 import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
-import { callsSettled, type LifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import { type LifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import { RunningCalls } from '@src/core/running-calls.js'
+import { type StartupControl } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
 import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
@@ -124,6 +128,13 @@ async function reportFatalLogin(shard: boolean, code: FatalLoginCode, reason: st
   if (shard) await tellManager({ meocord: 'fatal', code, message: reason })
 }
 
+/** How a shutdown warning names an interaction still being handled: by its command, or a component's customId. */
+function interactionLabel(interaction: Interaction): string {
+  if ('commandName' in interaction) return `interaction "/${escapeForLog(interaction.commandName)}"`
+  if ('customId' in interaction) return `interaction "${escapeForLog(interaction.customId)}"`
+  return '"interactionCreate"'
+}
+
 export class MeoCordApp implements MeoCordApplication {
   private readonly logger = new Logger(MeoCordApp.name)
   private readonly fallback: Fallback = createFallback(this.logger, () => this.messageOptions, {
@@ -143,7 +154,7 @@ export class MeoCordApp implements MeoCordApplication {
     private activities?: ActivityOptions[],
     private readonly lifecycleClasses: LifecycleClass[] = [],
     shutdownTimeout?: number,
-    private readonly startup?: () => Promise<void>,
+    private readonly startup?: (control: StartupControl) => Promise<void>,
     lifecycleUnits?: LifecycleUnit[],
     private readonly messageOptions: MessageCommandOptions = {},
     warnUnanswered = false,
@@ -202,24 +213,20 @@ export class MeoCordApp implements MeoCordApplication {
    * Runs an event handler so its failure is logged against the event instead of surfacing as an
    * unhandled rejection, which would terminate the whole bot.
    */
-  private async runListener(event: string, run: () => Promise<void>): Promise<void> {
-    const handled = (async () => {
+  private async runListener(event: string, run: () => Promise<void>, label = `"${event}"`): Promise<void> {
+    const handle = async () => {
       try {
         await run()
       } catch (error) {
         this.logger.error(`Unhandled error while handling "${event}":`, error)
       }
-    })()
-    // A call, which the cooldown store outlasts at shutdown; the ready listener's work is not one
-    if (event !== 'clientReady') {
-      this.calls.add(handled)
-      void handled.then(() => this.calls.delete(handled))
     }
-    await handled
+    // A call, which shutdown waits for before the onShutdown hooks; the ready listener's work is not one
+    await (event === 'clientReady' ? handle() : this.calls.run(label, handle))
   }
 
-  /** The calls under way, each settling once its handling has. */
-  private readonly calls = new Set<Promise<void>>()
+  /** The calls under way, which shutdown waits for, less one that asked the app to stop. */
+  private readonly calls = new RunningCalls()
 
   /** Settles once the cooldown store's `onReady` has, which calls wait for before asking it. */
   private storeReady?: PromiseWithResolvers<void>
@@ -267,6 +274,8 @@ export class MeoCordApp implements MeoCordApplication {
    * unless a code is already set.
    */
   async stop(): Promise<void> {
+    // A handler awaiting stop() would otherwise hold up the shutdown that waits for it
+    this.calls.excuseCurrent()
     if (this.shard) await tellManager({ meocord: 'stop' })
     // As a signal's shutdown exits 1 for a client that failed to close, a code another failure set aside
     if (!(await this.close()) && !process.exitCode) process.exitCode = 1
@@ -292,7 +301,13 @@ export class MeoCordApp implements MeoCordApplication {
     // each start, as a failed one gives it up
     claimAmbientAppTheme(this.container)
     if (!this.prepared) {
-      await this.prepare()
+      // Kept while it runs, so a stop meanwhile waits for it
+      this.preparing = this.prepare()
+      try {
+        await this.preparing
+      } finally {
+        this.preparing = undefined
+      }
       this.prepared = true
     }
     if (this.loginFailed) {
@@ -305,12 +320,18 @@ export class MeoCordApp implements MeoCordApplication {
   /** Whether a login of this app failed, so a retry restores the client discord.js destroyed. */
   private loginFailed = false
 
+  /** The providers and services being made, which a stop waits for; unset outside it. */
+  private preparing?: Promise<void>
+
+  /** The provider factory the startup awaits, by its token's name, for a stop that outlasts it to name. */
+  private pendingProvider?: string
+
   /** Makes the provided values and listed services, and attaches the Discord event handlers. */
   private async prepare(): Promise<void> {
     // Every provided value is made before anything that injects it is resolved, and before login
     if (this.startup) {
       try {
-        await this.startup()
+        await this.startup({ stopped: () => this.closing, pending: name => (this.pendingProvider = name) })
       } catch (error) {
         releaseAmbientAppTheme(this.container)
         if (process.exitCode === undefined || process.exitCode === 0) {
@@ -320,7 +341,8 @@ export class MeoCordApp implements MeoCordApplication {
         throw error
       }
     }
-    // A stop that came while the providers were being made has nothing to close: nothing is attached or logged in
+    // A stop that came while the providers were being made has waited for them, and the startup made no more after it;
+    // nothing is attached or logged in
     if (this.closing) throw stoppedBeforeOnline()
 
     // Calls wait for the store's onReady, which may connect it, before asking it
@@ -346,7 +368,9 @@ export class MeoCordApp implements MeoCordApplication {
 
     this.bot.on(
       'interactionCreate',
-      ownInteractionListener(interaction => this.runListener('interactionCreate', () => this.dispatcher.interaction(interaction))),
+      ownInteractionListener(interaction =>
+        this.runListener('interactionCreate', () => this.dispatcher.interaction(interaction), interactionLabel(interaction)),
+      ),
     )
 
     this.bot.on('messageCreate', message => this.runListener('messageCreate', () => this.dispatcher.message(message)))
@@ -512,15 +536,18 @@ export class MeoCordApp implements MeoCordApplication {
           } else logError(error)
           return undefined
         }
-        const listener = async (...args: unknown[]) => {
-          try {
-            const instance = this.container.get(lifecycleClass)
-            await runHandler(this.container, instance, method, args, { fallback, type: 'event' })
-          } catch (error) {
-            // Only resolving the instance can fail here; the pipeline hands every other error to the fallback
-            logError(error)
-          }
-        }
+        const label = `@${once ? 'Once' : 'On'}('${event}') in ${lifecycleClass.name}.${method}`
+        // A call, as a dispatched one is, which shutdown waits for
+        const listener = (...args: unknown[]) =>
+          this.calls.run(label, async () => {
+            try {
+              const instance = this.container.get(lifecycleClass)
+              await runHandler(this.container, instance, method, args, { fallback, type: 'event' })
+            } catch (error) {
+              // Only resolving the instance can fail here; the pipeline hands every other error to the fallback
+              logError(error)
+            }
+          })
         if (once) this.bot.once(event, listener)
         else this.bot.on(event, listener)
       }
@@ -617,11 +644,14 @@ export class MeoCordApp implements MeoCordApplication {
   /** Runs the `onShutdown` hooks through the shutdown sequence, within the configured `shutdownTimeout`. */
   private async runShutdownHooks(entries: LifecycleEntry[]): Promise<void> {
     await runShutdownSequence(this.container, entries, {
-      // No new call starts once the listeners are gone
+      // No new call starts once the listeners are gone; an error the client emits meanwhile still has its listeners
       drainCalls: () => {
-        this.bot.removeAllListeners()
-        return callsSettled(this.calls)
+        const emitter: EventEmitter = this.bot
+        for (const event of emitter.eventNames()) if (event !== 'error') emitter.removeAllListeners(event)
+        return this.calls.settled()
       },
+      drainAlways: true,
+      runningCalls: () => this.calls.running(),
       timeoutMs: this.shutdownTimeout,
       hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
       warn: message => this.logger.warn(message),
@@ -643,8 +673,30 @@ export class MeoCordApp implements MeoCordApplication {
     }
   }
 
+  /**
+   * Waits for the startup under way to stop making providers and services, at most `shutdownTimeout`; past it, warns
+   * with the factory it still awaits, which then makes nothing more.
+   */
+  private async waitForStartup(preparing: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const outlasted = new Promise<boolean>(resolve => {
+      timer = setTimeout(() => resolve(true), this.shutdownTimeout)
+    })
+    const settled = preparing.then(
+      () => false,
+      () => false,
+    )
+    if (await Promise.race([settled, outlasted])) {
+      const what = this.pendingProvider ? `the factory providing ${this.pendingProvider}` : 'its providers'
+      this.logger.warn(`The startup still waits for ${what} after ${this.shutdownTimeout} ms; shutting down without it.`)
+    }
+    clearTimeout(timer)
+  }
+
   private async shutDownClient(): Promise<boolean> {
     this.logger.log('Shutting down bot...')
+    // So nothing is made after the bot has shut down
+    if (this.preparing) await this.waitForStartup(this.preparing)
 
     // Nothing came online, so there are no hooks to undo; the listeners go first, so none of them runs
     if (this.abortLogin) {
@@ -657,8 +709,8 @@ export class MeoCordApp implements MeoCordApplication {
 
     if (this.activityInterval) clearInterval(this.activityInterval)
 
-    // A login that failed never ran onReady, so there is nothing for onShutdown to undo
-    if (this.lifecycleEntries) await this.runShutdownHooks(this.lifecycleEntries)
+    // The calls drain on every shutdown; a login that failed never ran onReady, so there is no onShutdown to undo
+    await this.runShutdownHooks(this.lifecycleEntries ?? [])
 
     try {
       this.bot.removeAllListeners()

@@ -111,10 +111,14 @@ export interface MeoCordApplication {
   start(): Promise<void>
 
   /**
-   * Stops the bot: runs the `onShutdown` hooks under the configured `shutdownTimeout` and closes the client, or with
-   * process sharding, asks every shard to shut down and waits for it. It ends no process of its own accord, except that
-   * called in a shard, it asks the manager to stop every shard, which then shuts that shard's process down too. A stop
-   * while the bot starts ends that start, a call after the first waits for it, and a stopped app does not start again.
+   * Stops the bot: stops taking events, waits for the calls under way, runs the `onShutdown` hooks under the configured
+   * `shutdownTimeout` and closes the client, or with process sharding, asks every shard to shut down and waits for it.
+   * It ends no process of its own accord, except that called in a shard, it asks the manager to stop every shard, which
+   * then shuts that shard's process down too. A call that awaits `stop()`, as an owner-only shutdown command does, is
+   * not waited for.
+   *
+   * A stop while the bot starts ends that start: it waits for the providers being made, at most `shutdownTimeout`, and
+   * nothing more is made after it. A call after the first waits for it, and a stopped app does not start again.
    *
    * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged, and sets
    *   `process.exitCode` to 1 unless another code is already set.
@@ -1240,9 +1244,13 @@ export interface MeoCordConfig {
    */
   startupErrors?: 'first' | 'all'
   /**
-   * How long, in milliseconds, shutdown waits for the `onShutdown` hooks before destroying the client
-   * anyway: from 0 to 2147478647, the longest a timer keeps less the margin the shard manager waits on top. The limit covers the whole sequence, not each hook,
-   * including the calls under way that the cooldown store's shutdown waits for.
+   * How long, in milliseconds, shutdown waits for the calls under way and the `onShutdown` hooks before destroying the
+   * client anyway: from 0 to 2147478647, the longest a timer keeps less the margin the shard manager waits on top. The
+   * limit covers the whole sequence, not each hook.
+   *
+   * The calls are waited for first, but no longer than the timeout less a reserve kept for the hooks: a quarter of it,
+   * at least 1 second and never more than half. A call still running then is named in a warning, and the hooks run in
+   * the time left.
    *
    * @defaultValue `10_000`
    */

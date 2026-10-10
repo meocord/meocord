@@ -147,25 +147,45 @@ export async function runShutdownHooks(
 export interface ShutdownSequence {
   /** Lets no new call start, and settles once the calls under way have. */
   drainCalls(): Promise<void>
-  /** How long the whole sequence is waited for. */
+  /** Whether the calls drain before every shutdown, not only one whose cooldown store side has an `onShutdown`. */
+  drainAlways?: boolean
+  /** The calls still running, which the warning names when the drain stops before they settle. */
+  runningCalls?(): readonly string[]
+  /** How long the whole sequence is waited for, the drain included. */
   timeoutMs: number
   /** A unit's `onShutdown` threw or rejected. */
   hookFailed(name: string, error: unknown): void
-  /** The sequence is still running after `timeoutMs`; shutdown goes on without it. */
+  /** The drain or the hooks outlasted their time; shutdown goes on without them. */
   warn(message: string): void
 }
 
+/** The part of `timeoutMs` the drain leaves for the hooks: a quarter, at least 1 s, and never more than half. */
+export function hooksReserveMs(timeoutMs: number): number {
+  return Math.min(Math.max(timeoutMs / 4, 1_000), timeoutMs / 2)
+}
+
+/** A timer whose promise resolves with `value` after `ms`, and `cancel` to clear it. */
+function after<T>(ms: number, value: T): { promise: Promise<T>; cancel(): void } {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const promise = new Promise<T>(resolve => {
+    timer = setTimeout(() => resolve(value), ms)
+  })
+  return { promise, cancel: () => clearTimeout(timer) }
+}
+
 /**
- * Shuts down the entries there are when it begins, as a bot and a testing module both do. When the cooldown store, or
- * anything it injects directly or through another, has an `onShutdown`, the calls under way finish first, then the
- * store operations they started, so the store's last writes and releases still reach it. The other hooks then run in
- * reverse dependency order, and the store and what it injects last. The whole sequence is waited for at most
- * `timeoutMs`.
+ * Shuts down the entries there are when it begins, as a bot and a testing module both do. The calls under way finish
+ * first, on every shutdown with `drainAlways`, and otherwise when the cooldown store, or anything it injects directly or
+ * through another, has an `onShutdown`; then the store operations they started, so the store's last writes and releases
+ * still reach it. The other hooks then run in reverse dependency order, and the store and what it injects last.
+ *
+ * The whole sequence is waited for at most `timeoutMs`. The drain stops early enough to leave the hooks
+ * {@link hooksReserveMs}, with a warning naming the calls still running, and the hooks run in the time left.
  */
 export async function runShutdownSequence(
   container: Container,
   entries: readonly LifecycleEntry[],
-  { drainCalls, timeoutMs, hookFailed, warn }: ShutdownSequence,
+  { drainCalls, drainAlways = false, runningCalls, timeoutMs, hookFailed, warn }: ShutdownSequence,
 ): Promise<void> {
   // A unit whose onReady settles while the calls drain was still starting when shutdown began, so it is not shut down
   entries = [...entries]
@@ -180,27 +200,36 @@ export async function runShutdownSequence(
   for (const entry of entries) if (entry.cooldownStore) reach(entry)
   const needsStore = [...storeSide].some(entry => typeof entry.instance.onShutdown === 'function')
 
-  const sequence = (async () => {
-    if (needsStore) {
-      await drainCalls()
-      await storeOperationsSettled(container)
-    }
-    // Nothing on the store's side injects anything outside it, so running it last keeps the reverse dependency order
-    const ran = new Set<object>()
-    await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), hookFailed, ran)
-    await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), hookFailed, ran)
-  })()
-
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timedOut = new Promise<'timeout'>(resolve => {
-    timer = setTimeout(() => resolve('timeout'), timeoutMs)
-  })
+  const whole = after(timeoutMs, 'timeout' as const)
   try {
-    if ((await Promise.race([sequence, timedOut])) === 'timeout') {
+    let drained = true
+    if (drainAlways || needsStore) {
+      const reserve = hooksReserveMs(timeoutMs)
+      const drainEnds = after(timeoutMs - reserve, false)
+      drained = await Promise.race([drainCalls().then(() => true), drainEnds.promise])
+      drainEnds.cancel()
+      if (!drained) {
+        const running = runningCalls?.() ?? []
+        warn(
+          `Calls still running after ${timeoutMs - reserve} ms${running.length > 0 ? `: ${running.join(', ')}` : ''}; ` +
+            `running the onShutdown hooks in the ${reserve} ms left.`,
+        )
+      }
+    }
+
+    const sequence = (async () => {
+      // Only after the calls settled: a call still running may never let its store operations settle
+      if (needsStore && drained) await storeOperationsSettled(container)
+      // Nothing on the store's side injects anything outside it, so running it last keeps the reverse dependency order
+      const ran = new Set<object>()
+      await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), hookFailed, ran)
+      await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), hookFailed, ran)
+    })()
+    if ((await Promise.race([sequence, whole.promise])) === 'timeout') {
       warn(`onShutdown hooks did not finish within ${timeoutMs} ms; shutting down anyway.`)
     }
   } finally {
-    clearTimeout(timer)
+    whole.cancel()
   }
 }
 

@@ -158,6 +158,20 @@ describe('TestingModule lifecycle', () => {
     expect(constructed).not.toHaveBeenCalled()
   })
 
+  it('closes, from a close() during init(), the factory value init() is still making', async () => {
+    const made = Promise.withResolvers<Pool>()
+    const module = MeoCordTestingModule.create({ providers: [{ provide: POOL, useFactory: () => made.promise }] }).compile()
+    const settled: string[] = []
+
+    const initing = module.init().then(() => void settled.push('init resolved'))
+    const closing = module.close().then(() => void settled.push('close resolved'))
+    made.resolve(createPool())
+    await Promise.all([initing, closing])
+
+    expect(settled).toEqual(['init resolved', 'close resolved'])
+    expect(module.get(POOL).ended).toBe(true)
+  })
+
   it('shuts down, in reverse dependency order, what a test resolved with get()', async () => {
     const module = compile()
     module.get(Scheduler)
