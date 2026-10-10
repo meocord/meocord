@@ -2423,6 +2423,32 @@ function toOptionData(name: string, value: ChatInputOptions[string], memberOf?: 
 }
 
 /**
+ * The option an autocomplete's user is typing, as Discord sends it: its value a string, `''` before anything is typed.
+ * A number given for it is its digits under strict mocks; otherwise it stays a number, with a warning when read.
+ */
+function focusedOptionData(name: string, value: ChatInputOptions[string]): CommandInteractionOption {
+  const option = toOptionData(name, value ?? '') as unknown as Record<string, unknown>
+  option.focused = true
+  if (typeof value === 'number') {
+    if (strictMocks()) option.value = String(value)
+    else {
+      Object.defineProperty(option, 'value', {
+        get: () => {
+          warnOnce(
+            mockLogger,
+            `The focused option "${name}" reads the number ${value} here, where Discord sends a string; in the next major version (5.0) ` +
+              `the mock gives it as one. Give it as a string, such as '${value}', or call useStrictMocks() to have the mock give it now.`,
+          )
+          return value
+        },
+        enumerable: true,
+      })
+    }
+  }
+  return option as unknown as CommandInteractionOption
+}
+
+/**
  * Nests the supplied options under the subcommand path they were invoked through,
  * matching the shape Discord sends rather than a flat list.
  */
@@ -2431,8 +2457,12 @@ function buildOptionData(
   subcommand: string | null,
   values: Record<string, ChatInputOptions[string]>,
   memberOf: MemberOf,
+  focused: string | null,
 ): CommandInteractionOption[] {
-  const leaves = Object.entries(values).map(([name, value]) => toOptionData(name, value, memberOf))
+  const leaves = Object.entries(values).map(([name, value]) =>
+    name === focused ? focusedOptionData(name, value) : toOptionData(name, value, memberOf),
+  )
+  if (focused !== null && !Object.hasOwn(values, focused)) leaves.push(focusedOptionData(focused, null))
 
   if (subcommand === null) return leaves
 
@@ -2467,6 +2497,10 @@ function buildOptionData(
  * is `null`, or that error when required, as the option may be a mentionable one; a plain `{ id }` reads as any entity.
  * A whole number is an Integer option and a fraction a Number one, so
  * `getInteger()` reads only a whole number, and `getNumber()` reads either.
+ *
+ * The `focused` option reads as Discord sends it, through `getFocused()`, `getFocused(true)` and `data` alike: a
+ * string, `''` when no value is given, and marked `focused` in `data`. A number given for it is its digits under
+ * `useStrictMocks()`; otherwise it stays the number, with a warning when read.
  *
  * @typeParam Cached - `any` by default, to match `createMockInteraction(ChatInputCommandInteraction)`; pass it when the
  *   interaction under test is cache-pinned.
@@ -2598,13 +2632,18 @@ export function createChatInputOptions<Cached extends CacheType = any>(
 
   base.getFocused = createMockFn((getFull?: boolean) => {
     if (focused === null) throw optionError(DiscordjsErrorCodes.AutocompleteInteractionOptionNoFocusedOption)
-    const option = toOptionData(focused, values[focused] ?? null, memberOf)
-    return getFull === true ? { ...option, focused: true } : option.value
+    // The one options.data holds, so the two agree
+    let options = base.data as readonly CommandInteractionOption[]
+    while (options[0]?.type === ApplicationCommandOptionType.SubcommandGroup || options[0]?.type === ApplicationCommandOptionType.Subcommand) {
+      options = options[0].options ?? []
+    }
+    const option = options.find(each => each.focused)!
+    return getFull === true ? { ...option } : option.value
   })
 
   // `data` is what the framework reads to build a handler's params, so it is materialised here rather than
   // auto-stubbed, or every params assertion would see an empty record.
-  base.data = buildOptionData(subcommandGroup, subcommand, values, memberOf)
+  base.data = buildOptionData(subcommandGroup, subcommand, values, memberOf, focused)
 
   const resolver = stubDeep(base)
   return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
