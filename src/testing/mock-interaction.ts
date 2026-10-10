@@ -62,6 +62,10 @@ import {
   MessageFlagsBitField,
   MessageMentions,
   MessageReaction,
+  Presence,
+  PresenceManager,
+  ReactionManager,
+  ReactionUserManager,
   Role,
   RoleManager,
   RoleSelectMenuInteraction,
@@ -101,7 +105,7 @@ import {
 import { createDiscordError } from './response.js'
 import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
-import { discordDefault, REAL_GETTER } from './discord-defaults.js'
+import { discordDefault, placeholderValue, REAL_GETTER } from './discord-defaults.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
@@ -178,6 +182,9 @@ export type MockProps<T> = {
 
 const SKIP = new Set(['constructor', 'toString', 'valueOf', 'toJSON', 'then'])
 
+// Each mock's own instance, which the proxy's traps receive as their target
+const mockTargets = new WeakMap<object, object>()
+
 type StubValue = Mock | object | string | number | boolean | null
 
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
@@ -223,6 +230,10 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
         return value
       }
 
+      // A value strict mocks read as discord.js gives it, which is a placeholder otherwise
+      const strictValue = strictMocks() ? undefined : placeholderValue(target, key)
+      if (strictValue !== undefined) warnPlaceholderRead(target, key, strictValue)
+
       // Walk the prototype chain to check if it's a function
       let proto: object | null = Object.getPrototypeOf(target)
       let protoValue: unknown
@@ -233,7 +244,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
           if (desc.get && isPlaceholder(proto, key)) {
             // Strict mocks run discord.js's getter, read live; otherwise the placeholder, with a warning once
             if (strictMocks()) return Reflect.get(target, prop, proxy) as StubValue
-            warnBooleanPlaceholder(target, key)
+            warnPlaceholderRead(target, key, 'false')
           }
           break
         }
@@ -246,7 +257,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
       const stub: StubValue =
         typeof protoValue === 'function'
           ? isRealMethod(target, key)
-            ? createMockFn((...args: unknown[]) => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args))
+            ? createMockFn((...args: unknown[]) => quietly(target, key, () => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args)))
             : methodStub(target, key, protoValue as (...args: unknown[]) => unknown, () => proxy)
           : stubDeep({})
       stubs.set(key, stub)
@@ -263,6 +274,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
       return true
     },
   })
+  mockTargets.set(proxy, instance)
   return proxy
 }
 
@@ -297,7 +309,7 @@ const PLACEHOLDER_BOOLEANS = new Map<object, ReadonlySet<string>>([
   [Role.prototype, new Set(['editable'])],
   [GuildChannel.prototype, new Set(['viewable', 'manageable', 'deletable'])],
   [ThreadChannel.prototype, new Set(['joinable', 'joined', 'sendable', 'unarchivable', 'editable', 'manageable', 'viewable'])],
-  [BaseGuildVoiceChannel.prototype, new Set(['joinable'])],
+  [BaseGuildVoiceChannel.prototype, new Set(['joinable', 'full'])],
   [VoiceChannel.prototype, new Set(['speakable'])],
   [User.prototype, new Set(['partial'])],
   [BaseChannel.prototype, new Set(['partial'])],
@@ -314,15 +326,57 @@ function isPlaceholder(proto: object | null, key: string): boolean {
 
 const mockLogger = new Logger('Mocks')
 
-function warnBooleanPlaceholder(target: object, key: string): void {
+// Mock reactions, and their messages, that MeoCord's dispatcher reads `partial` on
+const dispatchedReactions = new WeakSet<object>()
+let quiet = 0
+
+/**
+ * Runs a real method, keeping quiet about the placeholders `mentions.has()` reads: a placeholder `repliedUser` matches
+ * no user, so its answer is discord.js's either way.
+ */
+function quietly<T>(target: object, key: string, run: () => T): T {
+  if (!(target instanceof MessageMentions && key === 'has')) return run()
+  quiet++
+  try {
+    return run()
+  } finally {
+    quiet--
+  }
+}
+
+/**
+ * Marks a mock reaction and its message as read by MeoCord's dispatcher, so a placeholder `partial` it reads warns
+ * that MeoCord read it, and fetched for it.
+ */
+export function noteReactionDispatch(reaction: object): void {
+  const target = mockTargets.get(reaction)
+  if (!target) return
+  dispatchedReactions.add(target)
+  const message = mockTargets.get((reaction as { message?: object }).message ?? {})
+  if (message) dispatchedReactions.add(message)
+}
+
+function warnPlaceholderRead(target: object, key: string, strictValue: string): void {
+  if (quiet > 0) return
   const name = (Object.getPrototypeOf(target) as { constructor: { name: string } }).constructor.name
+  if (key === 'partial' && dispatchedReactions.has(target)) {
+    const fetched = target instanceof MessageReaction ? 'the reaction' : "the reaction's message"
+    warnPlaceholder(
+      mockLogger,
+      `${name}.${key}`,
+      'the mock computes it as discord.js does',
+      `MeoCord's dispatcher read it while dispatching the reaction, and fetched ${fetched} since the placeholder is truthy. ` +
+        'Set reaction.partial = false and reaction.message.partial = false on the mock, or call useStrictMocks() to have the mock compute them now.',
+    )
+    return
+  }
   // The class name in camel case, a leading acronym included: dmChannel, guildMember
   const variable = name.replace(/^[A-Z]+(?=[A-Z][a-z])|^[A-Z]/, start => start.toLowerCase())
   warnPlaceholder(
     mockLogger,
     `${name}.${key}`,
     'the mock computes it as discord.js does',
-    `Set it on the mock, such as ${variable}.${key} = false, to test either way, or call useStrictMocks() to have the mock compute it now.`,
+    `Set it on the mock, such as ${variable}.${key} = ${strictValue}, to test either way, or call useStrictMocks() to have the mock compute it now.`,
   )
 }
 
@@ -418,6 +472,7 @@ const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: o
   [GuildTextThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [GuildForumThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [ThreadMemberManager, () => createMockInteraction(ThreadMember)],
+  [ReactionUserManager, id => createMockUser(id ? { id } : {})],
   [ApplicationCommandManager, id => createMockInteraction(ApplicationCommand, id ? { id } : {})],
   [ChannelManager, id => createMockChannel(TextChannel, id ? { id } : {})],
   [GuildChannelManager, (id, manager) => createMockChannel(TextChannel, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
@@ -1512,6 +1567,9 @@ const HOLDS: readonly (readonly [object, object])[] = [
   [GuildTextThreadManager.prototype, ThreadChannel],
   [GuildForumThreadManager.prototype, ThreadChannel],
   [PermissionOverwriteManager.prototype, PermissionOverwrites],
+  [ReactionManager.prototype, MessageReaction],
+  [ReactionUserManager.prototype, User],
+  [PresenceManager.prototype, Presence],
 ]
 
 /**
@@ -1527,13 +1585,20 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
   let own: unknown
   Object.defineProperty(manager, 'client', {
     get: () => {
-      const owner = manager.guild ?? manager.channel ?? manager.thread
+      const owner = manager.guild ?? manager.channel ?? manager.thread ?? manager.message
       return owner instanceof Base ? owner.client : (own ??= createMockClient())
     },
     set: (value: unknown) => (own = value),
     configurable: true,
   })
   return stubDeep(manager)
+}
+
+/** An empty manager of `prototype` that `owner` names its own, such as `{ message }` for a message's reactions. */
+export function ownedManager(prototype: object, owner: Record<string, object>): never {
+  const manager = managerWith(prototype, undefined)
+  Object.assign(manager, owner)
+  return manager as never
 }
 
 /**
@@ -2126,7 +2191,8 @@ function mentionsOf(content: string | undefined, client: unknown, guild: unknown
   }
   // Own values, so the prototype's getters, which read the raw mention data, are not reached
   const instance = Object.create(MessageMentions.prototype) as object
-  for (const [key, value] of Object.entries({ ...mentioned, everyone: false, client, guild: guild ?? null })) {
+  const parsedUsers = new Collection(mentioned.users)
+  for (const [key, value] of Object.entries({ ...mentioned, parsedUsers, crosspostedChannels: new Collection(), everyone: false, client, guild: guild ?? null })) {
     Object.defineProperty(instance, key, { value, writable: true })
   }
   return stubDeep(instance)
@@ -2687,17 +2753,17 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getFocused = createMockFn((getFull?: boolean) => {
     if (focused === null) throw optionError(DiscordjsErrorCodes.AutocompleteInteractionOptionNoFocusedOption)
     // The one options.data holds, so the two agree
-    let options = base.data as readonly CommandInteractionOption[]
-    while (options[0]?.type === ApplicationCommandOptionType.SubcommandGroup || options[0]?.type === ApplicationCommandOptionType.Subcommand) {
-      options = options[0].options ?? []
-    }
-    const option = options.find(each => each.focused)!
+    const option = (base._hoistedOptions as CommandInteractionOption[]).find(each => each.focused)!
     return getFull === true ? { ...option } : option.value
   })
 
   // `data` is what the framework reads to build a handler's params, so it is materialised here rather than
   // auto-stubbed, or every params assertion would see an empty record.
   base.data = buildOptionData(subcommandGroup, subcommand, values, memberOf, focused)
+  // The fields discord.js's constructor sets from it, which its toString() reads
+  base._group = subcommandGroup
+  base._subcommand = subcommand
+  base._hoistedOptions = (subcommand === null ? base.data : (subcommandGroup === null ? base.data[0] : base.data[0].options[0]).options) as CommandInteractionOption[]
 
   const resolver = stubDeep(base)
   return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>

@@ -4,6 +4,7 @@ import {
   BaseGuildVoiceChannel,
   BaseChannel,
   BaseInteraction,
+  ChatInputCommandInteraction,
   ChannelType,
   Client,
   ClientUser,
@@ -14,24 +15,40 @@ import {
   Guild,
   GuildChannel,
   GuildMember,
+  GuildMemberFlagsBitField,
   GuildNSFWLevel,
   GuildPremiumTier,
   GuildVerificationLevel,
   Locale,
   MediaChannel,
   Message,
+  MessageMentions,
   MessageReaction,
+  ModalSubmitInteraction,
   MessageType,
   NewsChannel,
   PermissionsBitField,
+  PresenceManager,
+  ReactionManager,
+  ReactionUserManager,
   Role,
   SnowflakeUtil,
   TextChannel,
   ThreadChannel,
   User,
+  UserFlagsBitField,
   VoiceChannel,
 } from 'discord.js'
-import { createMockChannel, createMockGuild, createMockUser, isRawMember, memberRoles } from './mock-interaction.js'
+import {
+  createChatInputOptions,
+  createMockChannel,
+  createMockGuild,
+  createMockMessage,
+  createMockUser,
+  isRawMember,
+  memberRoles,
+  ownedManager,
+} from './mock-interaction.js'
 import { strictMocks } from './strict-mocks.js'
 
 /** A permission set with none, frozen as discord.js freezes the ones it gives. */
@@ -73,6 +90,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     shardId: () => 0,
     nsfwLevel: () => GuildNSFWLevel.Default,
     verificationLevel: () => GuildVerificationLevel.None,
+    presences: guild => ownedManager(PresenceManager.prototype, { guild }),
     premiumTier: () => GuildPremiumTier.None,
     createdTimestamp: REAL_GETTER,
     createdAt: REAL_GETTER,
@@ -87,6 +105,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     discriminator: () => '0',
     avatar: () => null,
     system: () => false,
+    flags: () => new UserFlagsBitField(),
     tag: REAL_GETTER,
     displayName: REAL_GETTER,
     defaultAvatarURL: REAL_GETTER,
@@ -107,6 +126,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     premiumSinceTimestamp: () => null,
     communicationDisabledUntilTimestamp: () => null,
     pending: () => false,
+    flags: () => new GuildMemberFlagsBitField().freeze(),
     displayName: REAL_GETTER,
     roles: member => memberRoles(member, []),
     permissions: REAL_GETTER,
@@ -146,16 +166,21 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     poll: () => null,
     interactionMetadata: () => null,
     stickers: () => new Collection(),
+    messageSnapshots: () => new Collection(),
+    reactions: message => ownedManager(ReactionManager.prototype, { message }),
     url: REAL_GETTER,
   }),
   // A command's name and a component's customId say which handler a call is for, so they stay the test's to give
+  defaultsOf(ChatInputCommandInteraction, { options: () => createChatInputOptions() as never }),
   defaultsOf(CommandInteraction, { commandId: snowflake, commandGuildId: () => null }),
-  defaultsOf(AutocompleteInteraction, { commandId: snowflake, commandGuildId: () => null }),
+  defaultsOf(AutocompleteInteraction, { commandId: snowflake, commandGuildId: () => null, options: () => createChatInputOptions() as never }),
+  defaultsOf(MessageReaction, { users: reaction => ownedManager(ReactionUserManager.prototype, { reaction }) }),
   defaultsOf(BaseInteraction, {
     applicationId: snowflake,
     token: () => 'mock-interaction-token',
     version: () => 1,
     context: () => null,
+    entitlements: () => new Collection(),
     // What Discord sends with an interaction in a server, the member's permissions there; typed for a cached one
     memberPermissions: interaction => {
       const { guildId } = interaction
@@ -196,8 +221,12 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
  * thread made without one, a thread's parent text channel in it, and data that is otherwise a placeholder.
  */
 const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
-  defaultsOf(Message, { content: () => '' }),
-  defaultsOf(Guild, { rulesChannelId: () => null, publicUpdatesChannelId: () => null }),
+  defaultsOf(Message, { content: () => '', editedTimestamp: () => null, editedAt: REAL_GETTER }),
+  defaultsOf(MessageMentions, { repliedUser: () => null }),
+  defaultsOf(Guild, { rulesChannelId: () => null, publicUpdatesChannelId: () => null, systemChannel: REAL_GETTER }),
+  defaultsOf(BaseGuild, { verified: REAL_GETTER }),
+  defaultsOf(GuildMember, { presence: REAL_GETTER }),
+  defaultsOf(ModalSubmitInteraction, { message: () => null }),
   defaultsOf(ThreadChannel, {
     guild: () => createMockGuild(),
     guildId: thread => thread.guild.id,
@@ -211,11 +240,36 @@ const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
     archived: () => false,
     locked: () => false,
   }),
-  defaultsOf(GuildChannel, { guild: () => createMockGuild() }),
+  defaultsOf(GuildChannel, { guild: () => createMockGuild(), parent: REAL_GETTER }),
   // Full once its members reach a user limit, which a voice channel has none of unless given one
   defaultsOf(BaseGuildVoiceChannel, { userLimit: () => 0, full: REAL_GETTER }),
-  defaultsOf(MessageReaction, { count: () => 1 }),
+  // A reaction's message, as discord.js always has one, is a whole one
+  defaultsOf(MessageReaction, { count: () => 1, me: () => false, message: () => createMockMessage() }),
 ])
+
+/**
+ * What a mock reads as a placeholder unless strict mocks read it as discord.js gives it, by the value a test sets for
+ * that, which the warning on reading one names.
+ */
+const PLACEHOLDER_VALUES = new Map<object, Readonly<Record<string, string>>>([
+  [MessageReaction.prototype, { me: 'false' }],
+  [MessageMentions.prototype, { repliedUser: 'null' }],
+  [Message.prototype, { editedAt: 'null' }],
+  [GuildMember.prototype, { presence: 'null' }],
+  [BaseGuild.prototype, { verified: 'false' }],
+  [Guild.prototype, { systemChannel: 'null' }],
+  [GuildChannel.prototype, { parent: 'null' }],
+  [ModalSubmitInteraction.prototype, { message: 'null' }],
+])
+
+/** The value a test sets for `key` on a mock of `target`'s class, when a mock reads it as a placeholder. */
+export function placeholderValue(target: object, key: string): string | undefined {
+  for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
+    const value = PLACEHOLDER_VALUES.get(proto)?.[key]
+    if (value !== undefined) return value
+  }
+  return undefined
+}
 
 /** The default a mock of `target`'s class has for `key`, read from the nearest class that has one, strict ones first. */
 export function discordDefault(target: object, key: string): Default<unknown, never> | undefined {
