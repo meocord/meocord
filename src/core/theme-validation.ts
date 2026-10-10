@@ -1,6 +1,7 @@
 import { ButtonStyle, Colors } from 'discord.js'
 import { type ReservedThemeRole } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
+import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
 
 /**
  * The role names MeoCord keeps for roles it may add to `colors`, `emojis` and `buttons`: the runtime copy of
@@ -52,11 +53,15 @@ const isEmoji = (value: unknown) => typeof value === 'string' && (CUSTOM_EMOJI.t
 const THEMED_BUTTON_STYLES: readonly unknown[] = [ButtonStyle.Primary, ButtonStyle.Secondary, ButtonStyle.Success, ButtonStyle.Danger]
 const isButtonStyle = (value: unknown) => THEMED_BUTTON_STYLES.includes(value)
 
-const describe = (value: unknown): string =>
+/** A string as a problem shows it: in single quotes for a theme in the app's code, or as a log line quotes outside text. */
+type Quote = (text: string) => string
+const asWritten: Quote = text => `'${text}'`
+
+const describe = (value: unknown, quote: Quote = asWritten): string =>
   typeof value === 'string'
-    ? `'${value}'`
+    ? quote(value)
     : Array.isArray(value)
-      ? `[${value.map(item => (typeof item === 'string' ? `'${item}'` : String(item))).join(', ')}]`
+      ? `[${value.map(item => (typeof item === 'string' ? quote(item) : String(item))).join(', ')}]`
       : value === null
         ? 'null'
         : typeof value === 'object'
@@ -91,9 +96,13 @@ const GROUPS: Record<'colors' | 'emojis' | 'buttons', { check: (value: unknown) 
  * roles an app added, a colour discord.js cannot resolve, an emoji Discord would refuse, a button style other than
  * Discord's four coloured ones, or a reserved role name. A group of the app's own is its to check.
  * @param where - Where it was set, such as `themeFor.guild for guild 123`, to begin each line with.
+ * @param options.forLog - Shows values and role names as a log line shows text from outside the code, for a theme a
+ *   `themeFor` resolver returned: escaped, and a value quoted and cut short.
  */
-export function themeProblems(theme: unknown, where?: string): string[] {
+export function themeProblems(theme: unknown, where?: string, { forLog = false }: { forLog?: boolean } = {}): string[] {
   const at = where ? `${where}: ` : ''
+  const quote: Quote = forLog ? quoteForLog : asWritten
+  const name = forLog ? escapeForLog : (role: string) => role
   if (typeof theme !== 'object' || theme === null || Array.isArray(theme)) {
     return [`${at}theme must be an object of groups (got ${describeGroup(theme)})`]
   }
@@ -113,8 +122,8 @@ export function themeProblems(theme: unknown, where?: string): string[] {
       continue
     }
     for (const [role, value] of Object.entries(roles)) {
-      if (reserved.has(role)) problems.push(`${at}theme.${group}.${role}: MeoCord reserves the role name ${role} for a role it may add; rename yours`)
-      else if (value !== undefined && !check(value)) problems.push(`${at}theme.${group}.${role}: ${describe(value)} is not ${what}: give ${instead}`)
+      if (reserved.has(role)) problems.push(`${at}theme.${group}.${name(role)}: MeoCord reserves the role name ${name(role)} for a role it may add; rename yours`)
+      else if (value !== undefined && !check(value)) problems.push(`${at}theme.${group}.${name(role)}: ${describe(value, quote)} is not ${what}: give ${instead}`)
     }
   }
   return problems

@@ -627,6 +627,31 @@ describe('a resolver that fails', () => {
   })
 })
 
+describe('a result whose value cannot be used', () => {
+  // A malformed value saved per user: a line break and an escape sequence would break or restyle the log line
+  it('is quoted in the warning as other log lines quote outside values, its role name escaped', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const module = moduleWith({ user: () => ({ emojis: { success: 'x\nsecond line', 'odd\u001b[31m': '\u001b[2Jno' } }) as never })
+
+    await module.invoke(Panel, 'panel', press('panel'))
+
+    const [warning] = warn.mock.calls.map(([text]) => String(text))
+    expect(warning.split('\n')).toEqual([
+      `themeFor.user for user ${USER}: theme.emojis.success: "x\\nsecond line" is not an emoji: give a unicode emoji, or a custom one written <:name:id> or <a:name:id>`,
+      `themeFor.user for user ${USER}: theme.emojis.odd\\u001b[31m: "\\u001b[2Jno" is not an emoji: give a unicode emoji, or a custom one written <:name:id> or <a:name:id>`,
+      'Calls from this user use the theme without it until the result changes.',
+    ])
+  })
+
+  it('keeps the startup refusal of a theme written in code as it reads', () => {
+    expect(() => {
+      @MeoCord({ controllers: [], clientOptions: { intents: [] }, theme: { emojis: { success: 'x' } } })
+      class InCode {}
+      return InCode
+    }).toThrow("theme.emojis.success: 'x' is not an emoji")
+  })
+})
+
 describe('a resolver', () => {
   it('runs outside the theme of any call, even one the lookup starts inside', async () => {
     const module = moduleWith({
