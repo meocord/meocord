@@ -104,6 +104,24 @@ describe("a user's outcome too long or empty for Discord", () => {
     expect(description(sent(interaction.reply)).startsWith('⚠️ y')).toBe(true)
   })
 
+  it('answers a whitespace-only message as an empty one, in an embed', async () => {
+    const interaction = command()
+
+    await respond(interaction).error(new UserError(' \n '))
+
+    expect(description(sent(interaction.reply))).toBe(GENERIC)
+  })
+
+  it('gives a Components V2 presenter a whitespace-only message as the generic text', async () => {
+    const { presenter, given } = passingThrough()
+    const interaction = v2Button(presenter)
+
+    await respond(interaction).error(new UserError('\n'))
+
+    expect(given.map(({ message }) => message)).toEqual([GENERIC])
+    expect(display(sent(interaction.reply))).toBe(GENERIC)
+  })
+
   it("gives an app's presenter an empty message as the generic text", async () => {
     const { presenter, given } = passingThrough()
     const interaction = command(presenter)
@@ -158,6 +176,11 @@ describe("a message command's reply too long or empty for Discord", () => {
     empty() {
       throw new UserError('')
     }
+
+    @MessageHandler('blank')
+    blank() {
+      throw new UserError('  ')
+    }
   }
 
   async function replyTo(content: string, presenter?: new () => ResponsePresenter, replyEmoji = false) {
@@ -178,8 +201,9 @@ describe("a message command's reply too long or empty for Discord", () => {
     expect(withEmoji.endsWith('v…')).toBe(true)
   })
 
-  it('replies to an empty message with the generic text', async () => {
+  it('replies to an empty or whitespace-only message with the generic text', async () => {
     expect((await replyTo('!empty')).content).toBe(GENERIC)
+    expect((await replyTo('!blank')).content).toBe(GENERIC)
   })
 
   it("gives an app's messageError the message fitted to an embed", async () => {

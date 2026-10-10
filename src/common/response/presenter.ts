@@ -71,11 +71,11 @@ export function fitText(text: string, limit: number): string {
 }
 
 /**
- * An error's message as a presenter is given it: fitted to `limit`, and, when empty, MeoCord's generic error text, so a
- * presenter that writes it as its text always renders.
+ * An error's message as a presenter is given it: fitted to `limit`, and, when empty or only whitespace, which Discord
+ * refuses as a text, MeoCord's generic error text, so a presenter that writes it as its text always renders.
  */
 export function presentedMessage(message: string, limit: number, generic: () => string): string {
-  return fitText(message === '' ? generic() : message, limit)
+  return fitText(message.trim() === '' ? generic() : message, limit)
 }
 
 /**
