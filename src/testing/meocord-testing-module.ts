@@ -1263,7 +1263,8 @@ export class MeoCordTestingModule {
    * @returns The builder, to override what the test replaces before `compile()`.
    */
   static create(options: TestingModuleOptions): TestingModuleBuilder {
-    return new TestingModuleBuilder(options)
+    // A controller listed twice is one controller, as the bot and fromApp take it
+    return new TestingModuleBuilder({ ...options, ...(options.controllers && { controllers: [...new Set(options.controllers)] }) })
   }
 
   /**
