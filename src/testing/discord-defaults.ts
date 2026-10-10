@@ -41,11 +41,13 @@ import {
   VoiceChannel,
 } from 'discord.js'
 import {
+  botMemberOf,
   createChatInputOptions,
   createMockChannel,
   createMockGuild,
   createMockMessage,
   createMockUser,
+  heldChannelOf,
   isRawMember,
   memberRoles,
   ownedManager,
@@ -63,16 +65,13 @@ const mockLogger = new Logger('Mocks')
  */
 function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<PermissionsBitField> {
   const base = member.permissions
-  const channel: unknown = interaction.channel
-  // A thread takes its parent's overwrites
-  const at = channel instanceof ThreadChannel ? channel.parent : channel
   // Only a server the mock caches has the overwrites to apply
   const { guild } = interaction
-  if (!(guild instanceof Guild) || !(at instanceof GuildChannel)) return base
+  if (!(guild instanceof Guild)) return base
   const computed =
     base.has(PermissionFlagsBits.Administrator) || member.id === guild.ownerId
       ? new PermissionsBitField(PermissionsBitField.All).freeze()
-      : withOverwrites(base, at, member)
+      : withOverwrites(base, overwritingChannel(interaction, guild), member)
   if (strictMocks()) return computed
   if (!computed.equals(base)) {
     const lost = new PermissionsBitField(base).remove(computed).toArray()
@@ -90,16 +89,29 @@ function inChannel(interaction: BaseInteraction, member: GuildMember): Readonly<
   return base
 }
 
+/**
+ * The channel whose overwrites apply where an interaction was made, read without making or caching one: a thread's
+ * parent, or undefined where the channel is the one the mock makes, which has none.
+ */
+function overwritingChannel(interaction: BaseInteraction, guild: Guild): GuildChannel | undefined {
+  const channel = heldChannelOf(interaction, guild)
+  const at = channel instanceof ThreadChannel ? guild.channels.cache.get(channel.parentId ?? '') : channel
+  return at instanceof GuildChannel ? at : undefined
+}
+
 /** `base` with `channel`'s overwrites for `member` applied, in discord.js's order: @everyone's, the roles', the member's. */
-function withOverwrites(base: Readonly<PermissionsBitField>, channel: GuildChannel, member: GuildMember): Readonly<PermissionsBitField> {
+function withOverwrites(base: Readonly<PermissionsBitField>, channel: GuildChannel | undefined, member: GuildMember): Readonly<PermissionsBitField> {
+  if (!channel) return base
   // Private in discord.js's typings, though it is the method its own permissionsFor uses
   interface Overwrite { allow: PermissionsBitField; deny: PermissionsBitField }
-  // Given the member and its roles as verified, as discord.js's own memberPermissions does, so it resolves nothing again
-  const overwrites = (
-    channel as unknown as {
+  // discord.js's own, called on the prototype so a test's stub on the channel stays for its caller; given the member
+  // and its roles as verified, as discord.js's memberPermissions does, so it resolves nothing again
+  const overwritesFor = (
+    GuildChannel.prototype as unknown as {
       overwritesFor(member: GuildMember, verified: boolean, roles: unknown): { everyone?: Overwrite; roles: Overwrite[]; member?: Overwrite }
     }
-  ).overwritesFor(member, true, member.roles.cache)
+  ).overwritesFor
+  const overwrites = overwritesFor.call(channel, member, true, member.roles.cache)
   return new PermissionsBitField(base)
     .remove(overwrites.everyone?.deny ?? 0n)
     .add(overwrites.everyone?.allow ?? 0n)
@@ -249,11 +261,18 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
       // A raw member's permissions are the string Discord sends, read as discord.js reads them
       return (isRawMember(member) && !interaction.guild ? new PermissionsBitField(BigInt(member.permissions)).freeze() : null) as never
     },
-    // The bot's permissions where the interaction was made: its member's in the channel, or none outside a server
+    // The bot's permissions where the interaction was made: its member's in the channel, as discord.js's permissionsFor
+    // computes them, or none outside a server or a server's channel
     appPermissions: interaction => {
-      const { guild, channel } = interaction
-      const me = guild instanceof Guild ? guild.members.me : null
-      return (me && channel instanceof GuildChannel ? channel.permissionsFor(me) : null) ?? noPermissions()
+      const { guild } = interaction
+      if (!(guild instanceof Guild)) return noPermissions()
+      const me = botMemberOf(guild)
+      const channel = heldChannelOf(interaction, guild)
+      if (!(me instanceof GuildMember) || (channel !== undefined && !(channel instanceof GuildChannel))) return noPermissions()
+      const roles = new PermissionsBitField(me.roles.cache.map(role => role.permissions)).freeze()
+      return me.id === guild.ownerId || roles.has(PermissionFlagsBits.Administrator)
+        ? new PermissionsBitField(PermissionsBitField.All).freeze()
+        : withOverwrites(roles, channel, me)
     },
   }),
   defaultsOf(TextChannel, { type: () => ChannelType.GuildText as const, nsfw: () => false, topic: () => null, rateLimitPerUser: () => 0 }),
