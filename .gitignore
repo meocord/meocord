@@ -25,6 +25,9 @@ dist/
 # Scratch application built by src/build/optional-externals.spec.ts
 .rsbuild-optional-spec/
 
+# Scratch applications built by src/bin/meocord.build-dist.spec.ts
+.rsbuild-dist-spec/
+
 # Cache and temporary files
 .prettier_cache/
 .eslintcache

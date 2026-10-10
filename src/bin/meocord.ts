@@ -39,6 +39,7 @@ import {
   findBundledNativeAddons,
   installedPackages,
   type NativePackage,
+  packageNameOfRequest,
 } from '@src/build/native-addons.js'
 import { PLATFORM_MANIFEST, writePlatformManifest } from '@src/util/platform.util.js'
 import { loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
@@ -416,8 +417,8 @@ copies or substantial portions of the Software.
     })
     for (const name of optionalExternalConflicts(meocordConfig?.optionalExternals, meocordConfig?.externals)) {
       this.logger.warn(
-        `"${name}" is in both optionalExternals and externals. In externals it becomes an import that runs ` +
-          `before the bot's code and fails when the package is missing; remove it from externals.`,
+        `"${name}" is in both optionalExternals and externals. In externals, an ESM import of it runs as its importer ` +
+          `loads and fails when the package is missing, where a require stays optional; remove it from externals.`,
       )
     }
     const config = meocordConfig?.rsbuild?.(base) ?? base
@@ -450,8 +451,9 @@ copies or substantial portions of the Software.
     const packages = new Map<string, string>([...natives].map(([name, { dir }]) => [name, dir]))
     const nativeNames = new Set(natives.keys())
 
-    const listed = (meocordConfig.externals ?? []).filter((item): item is string => typeof item === 'string')
-    const wanted = [...listed, ...optionalExternalNames(meocordConfig.optionalExternals)].filter(name => !packages.has(name))
+    // The package a string external is in, so one naming a file inside a package, such as 'lodash/fp.js', packs it
+    const listed = (meocordConfig.externals ?? []).flatMap(item => (typeof item === 'string' ? (packageNameOfRequest(item) ?? []) : []))
+    const wanted = [...new Set([...listed, ...optionalExternalNames(meocordConfig.optionalExternals)])].filter(name => !packages.has(name))
     for (const { name, dir, native } of installedPackages(wanted, this.projectRoot)) {
       packages.set(name, dir)
       if (native) nativeNames.add(name)
@@ -471,6 +473,17 @@ copies or substantial portions of the Software.
     if (copied.length > 0) {
       const count = copied.length === 1 ? '1 package' : `${copied.length} packages`
       this.logger.info(`dist/node_modules holds ${count}; nothing else to install.`)
+    }
+  }
+
+  /**
+   * Removes what {@link packDependencies} wrote, after a build without `bundleDependencies`, so its bundle resolves
+   * packages from the project rather than from a previous self-contained build's copy. Nothing else in dist is touched.
+   */
+  private removePackedOutputs() {
+    const dist = path.join(this.projectRoot, 'dist')
+    for (const output of ['node_modules', 'package.json', PLATFORM_MANIFEST]) {
+      fs.rmSync(path.join(dist, output), { recursive: true, force: true })
     }
   }
 
@@ -494,6 +507,8 @@ copies or substantial portions of the Software.
         // bundle would run on this machine -- through its node_modules -- and fail in production.
         assertNoBundledNativeAddons(findBundledNativeAddons(bundledFiles, this.projectRoot))
         this.packDependencies(meocordConfig, natives.found)
+      } else if (!meocordConfig?.bundleDependencies) {
+        this.removePackedOutputs()
       }
 
       this.logger.info(`${capitalize(mode)} build completed successfully.`)
@@ -532,6 +547,7 @@ copies or substantial portions of the Software.
         entry: configPath,
         bundleDependencies,
         externals: meocordConfig?.externals,
+        requireable: true,
       })
       fs.mkdirSync(dist, { recursive: true })
       staging = fs.mkdtempSync(path.join(dist, '.meocord-config-'))
@@ -761,7 +777,7 @@ copies or substantial portions of the Software.
       // The new bundler is made, its plugins set up and its config resolved, before the running build is closed: a
       // config whose rsbuild hook or plugin throws leaves that build watching the sources, and the bot it started running
       const watch = async () => {
-        const { rsbuild } = await this.createBundler('development')
+        const { rsbuild, meocordConfig } = await this.createBundler('development')
         await rsbuild.initConfigs({ action: 'build' })
 
         // Runs after every rebuild, which is where the application is restarted. A rebuild that fails reports its own
@@ -769,6 +785,7 @@ copies or substantial portions of the Software.
         rsbuild.onAfterBuild(({ stats }) => {
           isRunning = true
           if (stats?.hasErrors()) return
+          if (!meocordConfig?.bundleDependencies) this.removePackedOutputs()
           this.latestBuild = stats ? emittedDigest(stats) : undefined
           this.restartApp(this.latestBuild)
         })

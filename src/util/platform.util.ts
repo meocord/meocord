@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
-import { refuse } from '@src/util/refusal.util.js'
-import { bundleEntry, isBuiltApplication } from '@src/util/bundle-entry.util.js'
+// Relative imports only: the pre-entry, which a build bundles from this package's files, imports this module
+import { bundleEntry, isBuiltApplication } from './bundle-entry.util.js'
 
 /**
  * File written beside a bundle that carries native addons, naming the platform it was built for.
@@ -56,31 +56,32 @@ export function writePlatformManifest(distDir: string): void {
 }
 
 /**
- * Stops a bundle from starting on a platform its native addons were not built for, with one clear
- * message instead of a linker error on the first command that loads an addon.
+ * Why a bundle cannot start on this platform, naming both, or `undefined` when it can: its manifest names the platform
+ * its native addons were built for. The pre-entry checks it before any package loads, where a native addon built for
+ * another platform would otherwise fail with an error of its own.
  * @param distDir - Directory holding the manifest. Defaults to the built bundle's directory, which a process manager's
  *   wrapper in `argv[1]` would hide, and else to the entry script's.
  */
-export function assertBuiltForThisPlatform(distDir = defaultDistDir()): void {
-  if (!distDir) return
+export function platformMismatch(distDir = defaultDistDir()): string | undefined {
+  if (!distDir) return undefined
   const manifest = path.join(distDir, PLATFORM_MANIFEST)
-  if (!existsSync(manifest)) return
+  if (!existsSync(manifest)) return undefined
 
   let built: BuildPlatform
   try {
     built = JSON.parse(readFileSync(manifest, 'utf8'))
   } catch {
-    return
+    return undefined
   }
 
   const running = currentPlatform()
-  if (isSamePlatform(built, running)) return
+  if (isSamePlatform(built, running)) return undefined
 
-  throw refuse(new Error(
+  return (
     `${path.basename(distDir)}: this build carries native addons compiled for ${describePlatform(built)}, but is ` +
-      `running on ${describePlatform(running)}. Compiled binaries only load on the platform they were built for. ` +
-      'Build on the same platform you deploy to -- for a container, run `meocord build` inside the image.',
-  ))
+    `running on ${describePlatform(running)}. Compiled binaries only load on the platform they were built for. ` +
+    'Build on the same platform you deploy to -- for a container, run `meocord build` inside the image.'
+  )
 }
 
 /** The built bundle's directory, or the entry script's outside a built bot. */

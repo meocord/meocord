@@ -25,6 +25,7 @@ const cliEntry = {
 // Imported by the pre-entry, which is copied rather than compiled, so nothing else pulls it into the build
 const preEntryModules = {
   'build/stack-remap': 'src/build/stack-remap.ts',
+  'util/platform.util': 'src/util/platform.util.ts',
 }
 
 

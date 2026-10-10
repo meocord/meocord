@@ -25,13 +25,13 @@ console.log('started')
 /** The messages of the warnings the last build reported, without the colours a CI terminal adds. */
 let warnings: string[] = []
 
-async function build(externals: { optionalExternals?: string[]; externals?: string[] }): Promise<string> {
+async function build(externals: { optionalExternals?: string[]; externals?: string[] }, entry = 'main.ts'): Promise<string> {
   const cwd = vi.spyOn(process, 'cwd').mockReturnValue(fixture)
   try {
     const rsbuild = await createRsbuild({
       cwd: fixture,
       config: {
-        ...createRsbuildConfig({ mode: 'production', bundleDependencies: true, entry: path.join(fixture, 'src', 'main.ts'), ...externals }),
+        ...createRsbuildConfig({ mode: 'production', bundleDependencies: true, entry: path.join(fixture, 'src', entry), ...externals }),
         performance: { printFileSize: false },
       },
     })
@@ -66,6 +66,7 @@ beforeAll(() => {
   )
   writeFileSync(path.join(fixture, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'es2022' } }))
   writeFileSync(path.join(fixture, 'src', 'main.ts'), MAIN)
+  writeFileSync(path.join(fixture, 'src', 'esm-main.ts'), "import 'supports-color'\nconsole.log('started')\n")
   // The spec relies on it: a bundle that imported supports-color would find it here otherwise
   expect(() => execFileSync('node', ['-e', "require.resolve('supports-color')"], { cwd: fixture, stdio: 'pipe' })).toThrow()
 })
@@ -98,14 +99,24 @@ describe('optionalExternals, built and run with node', () => {
     expect(warnings).toEqual([])
   })
 
-  // The case optionalExternals exists for: externals hoists an import that fails before the bot runs
-  it('is what keeps the bot starting: listed in externals instead, it fails at startup', async () => {
+  // Listed in externals instead, a CommonJS require stays a require where debug calls it, inside its try
+  it('starts with a package debug requires listed in externals instead, as a require does', async () => {
     const output = await build({ externals: ['supports-color'] })
 
-    expect(output).toMatch(/from\s*["']supports-color["']/)
+    expect(output).toMatch(/\b\w+\(["']supports-color["']\)/)
+    expect(output).not.toMatch(/import\(["']supports-color["']\)|from\s*["']supports-color["']/)
+    expect(runAlone()).toMatchObject({ status: 0, stdout: expect.stringContaining('started') })
+  })
+
+  // An ESM import of an external is a dynamic import where its importer runs, which fails when the package is missing
+  it('fails at startup for a package the application imports, listed in externals and missing', async () => {
+    const output = await build({ externals: ['supports-color'] }, 'esm-main.ts')
+
+    expect(output).toMatch(/import\(["']supports-color["']\)/)
     const run = runAlone()
     expect(run.status).not.toBe(0)
     expect(run.stderr).toContain('supports-color')
+    expect(run.stdout).not.toContain('started')
   })
 }, 120_000)
 
