@@ -25,6 +25,7 @@ import {
 import { createMockInteraction } from '@src/testing/index.js'
 import { Logger } from '@src/common/logger.js'
 import { buildComponentRoutes } from '@src/core/component-routes.js'
+import { route } from '@src/common/route.js'
 
 describe('@MessageHandler', () => {
   it('registers a handler with a pattern and its options', () => {
@@ -225,6 +226,43 @@ describe('@Command', () => {
 
     it('leaves patterns without parameters alone', () => {
       expect(declare('gi-profile-static')).not.toThrow()
+    })
+  })
+
+  // Discord's customIds are 1 to 100 characters, and a param takes at least one
+  describe('a pattern no customId can match', () => {
+    const warned = (name: string | ReturnType<typeof route>) => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+      try {
+        class Buttons {
+          @Command(name, CommandType.BUTTON)
+          handle(..._args: any[]) {}
+        }
+        void Buttons
+        return warn.mock.calls.map(([message]) => message)
+      } finally {
+        warn.mockRestore()
+      }
+    }
+    const said = (pattern: string, length: string) =>
+      `Buttons.handle: the pattern "${pattern}" matches no customId: Discord's customIds are 1 to 100 characters, and ${length}, so the handler never runs.`
+
+    it.each([
+      ['an empty pattern', '', 'the pattern is empty'],
+      ['an empty route, once', route(''), 'the pattern is empty'],
+      ['101 characters of text', 'x'.repeat(101), 'its shortest is 101 characters'],
+      ['99 characters and a param', `${'y'.repeat(99)}/{id}`, 'its shortest is 101 characters'],
+    ])('is warned about, naming the handler: %s', (_, name, length) => {
+      expect(warned(name)).toEqual([said(String(name), length)])
+    })
+
+    it.each([
+      ['100 characters of text', 'x'.repeat(100)],
+      ['98 characters and a param', `${'y'.repeat(98)}/{id}`],
+      ['an empty segment', 'a//{x}'],
+      ['a trailing separator', 'b/'],
+    ])('is not warned about when a customId can match: %s', (_, pattern) => {
+      expect(warned(pattern)).toEqual([])
     })
   })
 

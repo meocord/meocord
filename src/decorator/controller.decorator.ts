@@ -444,19 +444,23 @@ const PLACEHOLDER_PATTERN = /\{(\w+)(?::([^}/]*))?}/g
 /** The character a parameter will not cross, so one pattern segment maps to one value. */
 export const PARAM_SEPARATOR = '/'
 
+/** The longest customId Discord accepts; the shortest is one character. */
+export const MAX_CUSTOM_ID_LENGTH = 100
+
 /** Escapes a literal stretch of a pattern so only placeholders stay meaningful. */
 const escapeLiteral = (literal: string): string => literal.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')
 
 /**
- * Compiles a pattern into a regex, its parameter names, their types and its 4.1 specificity. A `{name}` takes a
- * whole `/`-separated segment, so a uuid is captured whole and `profile/{uuid}` never overlaps
- * `profile/{uuid}/{id}`; a param that shares a segment with literal text is refused.
+ * Compiles a pattern into a regex, its parameter names, their types, its 4.1 specificity and the length of the
+ * shortest customId it matches. A `{name}` takes a whole `/`-separated segment, so a uuid is captured whole and
+ * `profile/{uuid}` never overlaps `profile/{uuid}/{id}`; a param that shares a segment with literal text is refused.
  */
 export function createRegexFromPattern(pattern: string): {
   regex: RegExp
   params: string[]
   types: Record<string, string>
   specificity: number
+  shortest: number
 } {
   const params: string[] = []
   // By the param's own name, so one named like an inherited key, such as `__proto__`, keeps its type
@@ -519,7 +523,8 @@ export function createRegexFromPattern(pattern: string): {
     params: params.length,
     typed: Object.values(types).reduce((sum, type) => sum + (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : 1), 0),
   })
-  return { regex, params, types: lookupTable(types), specificity }
+  // Each param takes at least one character
+  return { regex, params, types: lookupTable(types), specificity, shortest: literalLength + params.length }
 }
 
 /** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
@@ -812,6 +817,14 @@ export function Command<
       regex = pattern.regex
       dynamicParams = pattern.params
       specificity = pattern.specificity
+      // Warned rather than refused, so a bot that carries such a handler still starts
+      if (pattern.shortest === 0 || pattern.shortest > MAX_CUSTOM_ID_LENGTH) {
+        const length = pattern.shortest === 0 ? 'the pattern is empty' : `its shortest is ${pattern.shortest} characters`
+        logger.warn(
+          `${target.constructor.name}.${propertyKey}: the pattern "${commandName}" matches no customId: Discord's customIds ` +
+            `are 1 to ${MAX_CUSTOM_ID_LENGTH} characters, and ${length}, so the handler never runs.`,
+        )
+      }
     }
 
     const declared: CommandMeta = {
