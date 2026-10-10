@@ -127,6 +127,8 @@ export class ShardManager implements MeoCordApplication {
     const manager = (this.options.createManager ?? ((path, opts) => new ShardingManager(path, opts)))(file, {
       token,
       totalShards: total,
+      // discord.js refuses a call to every shard unless shardList counts the shards; createShard leaves it 'auto'
+      shardList: [...Array(total).keys()],
       mode: 'process',
       execArgv: process.execArgv,
       respawn: false,
