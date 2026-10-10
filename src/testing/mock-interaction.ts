@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { createMockFn, type MockedFunction, type Mock } from './mock-fn.js'
+import { createMockFn, type MockedFunction, type Mock, usesRunnerMockFn } from './mock-fn.js'
 import {
   type APIAuthorizingIntegrationOwnersMap,
   type APIInteractionDataResolvedGuildMember,
@@ -1143,8 +1143,10 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
  * A mock function that answers property access with another one, so `cache.store.flush()` works
  * on a double whose shape is an interface with nothing at runtime to read it from.
  */
-function stubCallable(): Mock {
+function stubCallable(member?: string): Mock {
   const fn = createMockFn()
+  // jest's mock reads `_protoImpl` from itself whenever it's called, so the prototype below must not answer it
+  if (usesRunnerMockFn()) Object.defineProperty(fn, '_protoImpl', { value: undefined, writable: true, enumerable: false, configurable: true })
   // Any property beyond the mock's own API is a nested mock, made on first read and kept on the function, out of its
   // keys. Its prototype makes them rather than a Proxy around it, so it stays the plain mock function matchers read
   const inherited = Object.getPrototypeOf(fn) as object
@@ -1155,7 +1157,9 @@ function stubCallable(): Mock {
         if (typeof prop === 'symbol' || prop in proto) return Reflect.get(proto, prop, receiver)
         // Never thenable — otherwise awaiting a mock hangs on itself
         if (prop === 'then') return undefined
-        const nested = stubCallable()
+        // jest's matchers take a function whose `calls` has `all` and `count` for a jasmine spy, read before `mock.calls`
+        if (member === 'calls' && (prop === 'all' || prop === 'count')) return undefined
+        const nested = stubCallable(prop)
         Object.defineProperty(receiver, prop, { value: nested, writable: true, enumerable: false, configurable: true })
         return nested
       },
@@ -1220,7 +1224,7 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
       // An explicitly supplied prop wins over the auto-stub.
       if (Object.prototype.hasOwnProperty.call(instance, key)) return Reflect.get(instance, prop, instance)
 
-      if (!stubs.has(key)) stubs.set(key, stubCallable())
+      if (!stubs.has(key)) stubs.set(key, stubCallable(typeof key === 'string' ? key : undefined))
       return stubs.get(key) as Mock
     },
 

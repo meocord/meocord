@@ -70,7 +70,7 @@ const runners: Record<string, (dir: string) => void> = {
   jest: dir => {
     const env = cleanEnv({ NODE_OPTIONS: '--experimental-vm-modules' })
     const output = run('jest: test', 'node', [node(dir, 'jest/bin/jest.js')], dir, env)
-    expectCounts('jest', output, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 1)
+    expectCounts('jest', output, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 2)
   },
   vitest: dir => {
     const output = run('vitest: test', 'node', [node(dir, 'vitest/vitest.mjs'), 'run'], dir)

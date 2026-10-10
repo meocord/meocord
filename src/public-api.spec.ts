@@ -290,6 +290,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'MockProps',
     'MockRawMemberOverrides',
     'MockResult',
+    'MockSettledResult',
     'MockState',
     'MockedFunction',
     'Provider',

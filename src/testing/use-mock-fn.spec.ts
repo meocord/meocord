@@ -103,4 +103,37 @@ describe('useMockFn', () => {
   it("refuses a function whose mocks lack jest's and Vitest's API, such as node:test's mock.fn", () => {
     expect(() => useMockFn((() => () => undefined) as never)).toThrow(/node:test.*meocord's own/)
   })
+
+  it("refuses node:test's mock.fn, as the docs write it, with that message and node's own error as its cause", async () => {
+    const { mock } = await import('node:test')
+
+    let refusal: unknown
+    try {
+      useMockFn(mock.fn as never)
+    } catch (error) {
+      refusal = error
+    }
+    expect(refusal).toBeInstanceOf(Error)
+    expect((refusal as Error).message).toMatch(/node:test.*meocord's own/)
+    expect((refusal as Error).cause).toBeInstanceOf(TypeError)
+  })
+
+  it("lets a mocked interface's methods run without an implementation under a runner that reads _protoImpl, as jest's does", () => {
+    // jest's mock runs `_protoImpl` when it finds one, reading it from the mock itself, so through its prototype chain
+    const readingProtoImpl = (impl?: (...args: any[]) => any) => {
+      const fn: any = vi.fn(function (this: unknown, ...args: unknown[]) {
+        return fn._protoImpl ? fn._protoImpl.apply(this, args) : impl?.apply(this, args)
+      })
+      return fn
+    }
+    useMockFn(readingProtoImpl)
+    const store = createMock<{ save(key: string): unknown; _save(key: string): unknown; cache: { flush(): void } }>()
+
+    expect(store.save('k')).toBeUndefined()
+    store.cache.flush()
+    expect(store.cache.flush).toHaveBeenCalled()
+    // Any other name, an underscore first included, is a nested mock as before
+    store._save.mockReturnValue(1)
+    expect(store._save('k')).toBe(1)
+  })
 })
