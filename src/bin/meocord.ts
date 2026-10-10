@@ -837,7 +837,11 @@ copies or substantial portions of the Software.
           // as they are
           if (files.has('meocord.config.ts')) {
             const checked = checkSourceConfig()
-            if ('problem' in checked) return reportConfigProblem(checked.problem)
+            if ('problem' in checked) {
+              // One that doesn't load, say mid-edit, is reported as a failed compile is, and watching goes on
+              if (checked.loadError !== undefined) return this.logger.error(`Failed to compile meocord.config.ts: ${checked.loadError}`)
+              return reportConfigProblem(checked.problem)
+            }
             if (!(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
           }
           isRunning = false
