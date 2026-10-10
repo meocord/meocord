@@ -340,8 +340,9 @@ export interface ResponseState {
   readonly state: ResponsePhase
 
   /**
-   * The message this state last replied with, updated or edited, never a follow-up, or the message a component is on.
-   * Read-only: edit through the state.
+   * The answer's message: the one this state last replied with, updated or edited, or the message a component is on. A
+   * follow-up is it only once it is the answer, after replacing a public deferral or after `delete()`; after `delete()`
+   * it is `undefined` until something is sent. Read-only: edit through the state.
    */
   readonly message: Message | undefined
 
@@ -376,6 +377,9 @@ export interface ResponseState {
    * A reply Discord refuses as already acknowledged elsewhere still throws, and the next `send()` edits.
    * After `modal()` it throws: a modal has no message, and the modal's submit is answered instead.
    *
+   * After a private `followUp()` replaced a public deferral, it edits that follow-up. After `delete()` it sends a
+   * follow-up, private when the deleted answer was unless `flags` say otherwise, and that follow-up is the answer.
+   *
    * After `@Defer` locked a message, omitting `components` puts back its components as they were
    * before the lock, and omitting `embeds` drops the loading view; `components: []` clears them.
    *
@@ -386,7 +390,8 @@ export interface ResponseState {
   send(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined>
 
   /**
-   * Edits the answer, routed as `send()` is: an edit once the interaction is answered.
+   * Edits the answer, routed as `send()` is: an edit once the interaction is answered, of the follow-up that replaced
+   * a public deferral, or, after `delete()`, a follow-up that becomes the answer.
    *
    * @param payload - Text, or edit options.
    * @param options - `fill: false` leaves this edit's embeds and containers uncoloured.
@@ -398,8 +403,9 @@ export interface ResponseState {
    * Sends another message after the answer. Before any answer it is the first reply. While a command's
    * reply is deferred and nothing is sent yet, Discord turns a follow-up into the deferred reply and
    * ignores its flags, so it is sent as that edit; a private follow-up on a public deferral deletes the
-   * deferral first and is sent privately. After `modal()` it is sent as made, and Discord decides whether it
-   * accepts a follow-up there; the modal's submit is the interaction to answer.
+   * deferral first, is sent privately, and is the answer `send()`, `edit()` and `delete()` act on. After `delete()`,
+   * it is the answer too. After `modal()` it is sent as made, and Discord decides whether it accepts a follow-up
+   * there; the modal's submit is the interaction to answer.
    *
    * @param payload - Text, or reply options; `Ephemeral` makes the follow-up private.
    * @param options - `fill: false` leaves this follow-up's embeds and containers uncoloured.
@@ -408,8 +414,9 @@ export interface ResponseState {
   followUp(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined>
 
   /**
-   * Deletes the answer: the reply, or for a component deferred without a reply of its own, its message.
-   * Throws before any answer, and after `modal()`, which leaves no message.
+   * Deletes the answer: the reply, the follow-up that replaced a public deferral, or for a component deferred
+   * without a reply of its own, its message. `message` is then `undefined` until something is sent. Throws before any
+   * answer, after `modal()`, which leaves no message, and again with nothing sent since the last `delete()`.
    */
   delete(): Promise<void>
 
@@ -455,6 +462,11 @@ export class InteractionResponse implements ResponseState {
   private modalShown = false
   private v2: boolean
   private lastMessage?: Message
+  /**
+   * Which message is the answer: the interaction's own reply, a follow-up that took its place, or none since `delete()`,
+   * with whether the deleted one was private. `sync()` leaves it alone, so every edit follows it.
+   */
+  private answer: { kind: 'original' } | { kind: 'followUp'; id: string } | { kind: 'deleted'; ephemeral: boolean } = { kind: 'original' }
   private readonly calls: ResponseCall[] = []
 
   private snapshot?: Snapshot
@@ -486,6 +498,8 @@ export class InteractionResponse implements ResponseState {
   }
 
   get message(): Message | undefined {
+    // A deleted answer, or a follow-up in its place, leaves the component's own message behind
+    if (this.answer.kind !== 'original') return this.lastMessage
     return this.lastMessage ?? ('message' in this.interaction ? (this.interaction.message ?? undefined) : undefined)
   }
 
@@ -810,16 +824,23 @@ export class InteractionResponse implements ResponseState {
     this.sync()
     const body = await this.themed(payload, options)
     if (this.phase === 'unanswered') return this.reply(body)
-    if (this.phase === 'deferred' && answersWithOwnMessage(this.interaction)) {
+    // Once the answer is deleted, the next message sent is the answer
+    if (this.answer.kind === 'deleted') return this.answerWith(body)
+    if (this.phase === 'deferred' && answersWithOwnMessage(this.interaction) && this.answer.kind === 'original') {
       // Discord makes a follow-up to a deferred, unsent reply that reply, ignoring its flags: a private one
-      // would be shown to everyone on a public deferral, so that deferral is deleted first.
+      // would be shown to everyone on a public deferral, so that deferral is deleted, and the follow-up is the answer.
       const requested = Number(MessageFlagsBitField.resolve(body.flags ?? 0))
       if (!hasEphemeral(requested)) return this.editMessage(body)
       // A private deferral is already what the flag asks for, which an edit cannot take
       if (this.interaction.ephemeral) return this.editMessage({ ...body, flags: requested & ~MessageFlags.Ephemeral })
       await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
       this.phase = 'replied'
+      return this.answerWith(body)
     }
+    return this.sendFollowUp(body)
+  }
+
+  private async sendFollowUp(body: Body): Promise<Message> {
     const flags = this.withSuppression(this.flagsFor('followUp', body.flags, false))
     const sent = forMode(body, hasComponentsV2(flags))
     const message = await this.call('followUp', { ...sent, flags }, () =>
@@ -828,12 +849,32 @@ export class InteractionResponse implements ResponseState {
     return message as Message
   }
 
+  /** Sends a follow-up that becomes the answer, which later edits and `delete()` act on by its id. */
+  private async answerWith(body: Body): Promise<Message> {
+    const message = await this.sendFollowUp(body)
+    this.answer = { kind: 'followUp', id: message.id }
+    this.lastMessage = message
+    return message
+  }
+
   delete(): Promise<void> {
     return this.queued(async () => {
       this.sync()
       if (this.phase === 'unanswered') throw new Error('There is no answer to delete: the interaction has not been answered.')
       this.refuseAfterModal()
-      await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
+      const { answer } = this
+      if (answer.kind === 'deleted') throw new Error('There is no answer to delete: it was deleted.')
+      // A command's own reply is as private as the interaction's answer; any other answer, as its message
+      const shown = this.message?.flags?.has(MessageFlags.Ephemeral) ?? false
+      const ownReply = answer.kind === 'original' && answersWithOwnMessage(this.interaction)
+      const ephemeral = ownReply ? Boolean(this.interaction.ephemeral) || shown : shown
+      if (answer.kind === 'followUp') await this.call('deleteReply', answer.id, () => this.interaction.deleteReply(answer.id))
+      else await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
+      this.answer = { kind: 'deleted', ephemeral }
+      this.lastMessage = undefined
+      // The message is gone: nothing is left to put back as it was before a lock
+      this.settled = true
+      this.leave()
     })
   }
 
@@ -954,8 +995,18 @@ export class InteractionResponse implements ResponseState {
     return rewriteAttachmentUrls(body, keptAttachmentNames(body, this.message?.attachments?.values() ?? []))
   }
 
-  /** Edits the answer through the interaction, and through the channel only once its token has expired. */
+  /**
+   * Edits the answer through the interaction, and through the channel only once its token has expired. Once the answer
+   * is deleted, the edit is sent as a follow-up that becomes the answer, as private as the deleted one unless it sets
+   * flags of its own.
+   */
   private async editMessage(body: Body, { restoring = false } = {}): Promise<Message | undefined> {
+    const { answer } = this
+    if (answer.kind === 'deleted') {
+      if (restoring) return undefined
+      const { attachments: _attachments, ...rest } = body
+      return this.answerWith({ ...rest, flags: body.flags ?? (answer.ephemeral ? MessageFlags.Ephemeral : 0) })
+    }
     if (!restoring) {
       this.settled = true
       this.leave()
@@ -969,8 +1020,10 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('edit', body.flags) | this.keptFlags(body)
     this.v2 ||= hasComponentsV2(flags)
     const sent = { ...this.withAttachments(forMode(body, this.v2)), flags }
+    // A follow-up that is the answer is edited by its id
+    const edit = answer.kind === 'followUp' ? { ...sent, message: answer.id } : sent
     try {
-      this.lastMessage = await this.call('editReply', sent, () => this.interaction.editReply(sent as InteractionEditReplyOptions))
+      this.lastMessage = await this.call('editReply', edit, () => this.interaction.editReply(edit as InteractionEditReplyOptions))
     } catch (error) {
       const message = this.message
       const expired = Date.now() - this.interaction.createdTimestamp >= TOKEN_EXPIRED_AFTER_MS
@@ -1223,6 +1276,11 @@ export class InteractionResponse implements ResponseState {
       return
     }
 
+    // A deleted message has nothing to add the error to or put back: the error follows up, and is the answer
+    if (this.answer.kind === 'deleted') {
+      await this.followUpNow(this.privateError(view))
+      return
+    }
     // The message the component is on: whether it is private does not change with edits.
     const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
     if (current?.flags?.has(MessageFlags.Ephemeral)) {

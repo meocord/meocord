@@ -130,7 +130,7 @@ describe('an application MeoCord refuses as it loads', () => {
  */
 const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   'common/redis-cooldown-store.ts': { count: 1, why: "a Redis script's reply, read as a cooldown is taken" },
-  'common/response/response-state.ts': { count: 5, why: 'a handler answering its interaction' },
+  'common/response/response-state.ts': { count: 6, why: 'a handler answering its interaction' },
   'common/route.ts': { count: 7, why: 'route().build(), called as a handler builds a customId' },
   'common/sharded-cooldown-store.ts': { count: 1, why: "a cooldown call on a shard whose manager's channel has closed" },
   'core/dispatcher.ts': { count: 1, why: 'an interaction no handler takes' },
