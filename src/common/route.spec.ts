@@ -71,13 +71,14 @@ describe('route', () => {
     expect(() => buildComponentRoutes([TicketController, Other])).toThrow(/^TicketController\.handle: .* in Other\.other match the same/)
   })
 
-  it('refuses a missing, empty or unknown value, and an id over 100 characters', () => {
+  it('refuses a missing, empty or unknown value, and an id that is empty or over 100 characters', () => {
     const build = ticket.build as (values?: Record<string, unknown>) => string
 
     expect(() => build({ id: '1' })).toThrow("route('ticket/{id}/{action}').build() needs a value for {action}.")
     expect(() => build({ id: '', action: 'close' })).toThrow('got an empty {id}')
     expect(() => build({ id: '1', action: 'close', reason: 'spam' })).toThrow("route('ticket/{id}/{action}') has no param {reason}.")
     expect(() => ticket.build({ id: 'x'.repeat(90), action: 'close' })).toThrow(RangeError)
+    expect(() => route('').build()).toThrow(new RangeError("route('').build() made an empty customId; Discord's customIds are 1 to 100 characters."))
   })
 
   it('refuses a snowflake or a uuid given as anything but text, as a number may have lost digits already', () => {

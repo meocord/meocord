@@ -1,8 +1,5 @@
-import { createRegexFromPattern } from '@src/decorator/controller.decorator.js'
+import { createRegexFromPattern, MAX_CUSTOM_ID_LENGTH } from '@src/decorator/controller.decorator.js'
 import { parseSegment } from '@src/core/scalar-types.js'
-
-/** The longest customId Discord accepts. */
-export const MAX_CUSTOM_ID_LENGTH = 100
 
 /** A `{name}` or `{name:type}` param's name. */
 type ParamName<S extends string> = S extends `${infer Name}:${string}` ? Name : S
@@ -72,7 +69,7 @@ export interface Route<T extends string = string> {
    * encoded, and the handler receives the value as it was given.
    *
    * @throws TypeError for a missing, empty or unknown value or one not of its param's type, and RangeError for an id
-   *   over 100 characters.
+   *   that is empty or over 100 characters.
    */
   build(...values: [RouteParams<T>] extends [never] ? [] : [values: RouteValues<T>]): string
   /** The pattern, so a route reads as its pattern in a template string. */
@@ -161,6 +158,7 @@ export function route<const T extends string>(pattern: T): Route<T> {
       }
       return encodeSegment(text)
     })
+    if (id === '') throw new RangeError(`route('${pattern}').build() made an empty customId; Discord's customIds are 1 to ${MAX_CUSTOM_ID_LENGTH} characters.`)
     if (id.length > MAX_CUSTOM_ID_LENGTH) {
       throw new RangeError(`route('${pattern}').build() made a customId of ${id.length} characters, over Discord's ${MAX_CUSTOM_ID_LENGTH}: "${id}".`)
     }
