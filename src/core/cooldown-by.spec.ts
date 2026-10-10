@@ -194,6 +194,19 @@ describe('@Cooldown({ by })', () => {
     expect(new Set(keys).size).toBe(2)
   })
 
+  // Text cut in the middle of an emoji leaves half of it, which encodeURIComponent refuses
+  it('encodes a value holding a lone surrogate, each one apart from the others, and keeps every other key as it was', async () => {
+    const { module, keys } = recording()
+
+    for (const uid of ['abc\uD83D', 'abc\uDE00', 'abc\uD83D\uDE00']) await module.invoke(CheckInController, 'checkIn', press(`check-in/ada/${uid}`))
+
+    expect(keys).toEqual([
+      'CheckInController.checkIn#3600000:user:user:ada:by:abc%uD83D',
+      'CheckInController.checkIn#3600000:user:user:ada:by:abc%uDE00',
+      'CheckInController.checkIn#3600000:user:user:ada:by:abc%F0%9F%98%80',
+    ])
+  })
+
   it('counts without a value when it returns undefined, under the by part alone', async () => {
     const { module, keys } = recording()
 
