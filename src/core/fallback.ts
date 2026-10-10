@@ -177,8 +177,8 @@ async function presentedReply(message: Message, error: unknown, text: string, wi
   const presenter = presenterFor(message.client)
   const translator = translatorOfClient(message.client)
   const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
-  // An empty message reads as MeoCord's generic error text, so neither the plain reply nor a presenter is left without one
-  const shown = text === '' ? renderText(translator, locale, { key: 'meocord.fallback.error' }) : text
+  // An empty or whitespace-only message, which Discord refuses, reads as MeoCord's generic error text, so neither the plain reply nor a presenter is left without one
+  const shown = text.trim() === '' ? renderText(translator, locale, { key: 'meocord.fallback.error' }) : text
   const plain = { body: { content: replyText(shown, withEmoji) } }
   const { messageError } = presenter
   if (!messageError) return plain
