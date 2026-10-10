@@ -16,7 +16,10 @@ import { type MessageUsageIssue } from '@src/common/errors.js'
 /** A value one of MeoCord's texts reads: a word or number, a list joined in the text's language, or another text. */
 export type TextParam = string | number | TextList | MeoCordText
 
-/** Words to join as a list: in an app's catalog, in its locale's words; in MeoCord's English, with `joiner`, a comma by default. */
+/**
+ * Words to join as a list. A `unit` list is joined with `joiner`, a comma unless given, in every language; an `or` list
+ * in an app's catalog reads in its locale's words, and in MeoCord's English with `joiner`.
+ */
 export interface TextList {
   readonly list: readonly string[]
   readonly style: 'or' | 'unit'
@@ -67,16 +70,17 @@ function findText(translator: Translator<any> | undefined, locale: TextLocale, k
 
 const lists = new Map<string, Intl.ListFormat>()
 
-/** A list in a locale's words: "a, b, or c" in en-US, or, for a unit, "a, b, c". */
-function listIn(locale: string, style: 'or' | 'unit', items: readonly string[]): string {
-  let format = lists.get(`${locale} ${style}`)
-  if (!format) lists.set(`${locale} ${style}`, (format = new Intl.ListFormat(locale, { type: style === 'or' ? 'disjunction' : 'unit' })))
+/** An `or` list in a locale's words, such as "a, b, or c" in en-US. */
+function orListIn(locale: string, items: readonly string[]): string {
+  let format = lists.get(locale)
+  if (!format) lists.set(locale, (format = new Intl.ListFormat(locale, { type: 'disjunction' })))
   return format.format(items)
 }
 
 /**
- * A text in `locale`, as {@link findText} finds it. A list in MeoCord's English is joined with its `joiner`, a comma
- * unless given; in an app's catalog, in the words of the locale that has it.
+ * A text in `locale`, as {@link findText} finds it. An `or` list in an app's catalog reads in the words of the locale
+ * that has it; any other list is joined with its `joiner`, a comma unless given, as Intl's `unit` lists join with
+ * nothing in zh-CN and with a space in ja.
  */
 export function renderText(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): string {
   const found = findText(translator, locale, text.key)
@@ -86,7 +90,7 @@ export function renderText(translator: Translator<any> | undefined, locale: Text
     if (!Object.hasOwn(params, name)) return whole
     const value = params[name]
     if (typeof value !== 'object') return String(value)
-    if ('list' in value) return found.own ? listIn(found.locale, value.style, value.list) : value.list.join(value.joiner ?? ', ')
+    if ('list' in value) return found.own && value.style === 'or' ? orListIn(found.locale, value.list) : value.list.join(value.joiner ?? ', ')
     return renderText(translator, locale, value)
   })
 }
