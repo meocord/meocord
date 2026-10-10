@@ -98,9 +98,12 @@ export async function validateDiscordToken(config: MeoCordConfig | undefined) {
   }
 }
 
-/** Sets `NODE_ENV` to `mode` unless it is already set. */
+/**
+ * Sets `NODE_ENV` for a command run in `mode`, before its config loads: development whatever the shell holds, so `--dev`
+ * reads the development files and registers as development, and production unless the shell set a mode of its own.
+ */
 export function setEnvironment(mode: 'production' | 'development') {
-  if (!process.env.NODE_ENV) {
+  if (mode === 'development' || !process.env.NODE_ENV) {
     process.env.NODE_ENV = mode
   }
 }
