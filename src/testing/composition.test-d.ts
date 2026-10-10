@@ -222,3 +222,19 @@ describe('a recorded response', () => {
     if (call.method === 'deferUpdate') expectTypeOf(call.payload).toEqualTypeOf<InteractionDeferUpdateOptions | undefined>()
   })
 })
+
+describe('a raw member, from a server the bot caches no channel of', () => {
+  it('refuses a channel beside it, as the mock does when built', () => {
+    const raw = { guildId: '100000000000000001', member: createMockRawMember() }
+    // @ts-expect-error a server's channel
+    createMockInteraction(ChatInputCommandInteraction, { ...raw, channel: createMockChannel(TextChannel) })
+    // @ts-expect-error no channel, which is a channel given too
+    createMockInteraction(ChatInputCommandInteraction, { ...raw, channel: null })
+    // @ts-expect-error a DM channel
+    createMockInteraction(ChatInputCommandInteraction, { ...raw, channel: createMockChannel(DMChannel) })
+    // @ts-expect-error a channel beside guild: null
+    createMockInteraction(ChatInputCommandInteraction, { ...raw, guild: null, channel: createMockChannel(TextChannel) })
+
+    expectTypeOf(createMockInteraction(ChatInputCommandInteraction, raw)).toExtend<ChatInputCommandInteraction<'raw'>>()
+  })
+})
