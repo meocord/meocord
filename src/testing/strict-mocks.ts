@@ -1,13 +1,14 @@
-// Whether useStrictMocks() is on, and whether a mock was made before it could be
-let strict = false
-let mockMade = false
+import { shared } from '@src/util/shared-state.util.js'
+
+// Whether useStrictMocks() is on, and whether a mock was made before it could be, for both builds of this version
+const settings = shared('strictMocks', () => ({ strict: false, mockMade: false }))
 
 /** Whether mocks compute discord.js's state, as {@link useStrictMocks} turns on. */
-export const strictMocks = (): boolean => strict
+export const strictMocks = (): boolean => settings.strict
 
 /** Notes that a mock was made, which useStrictMocks() must come before. */
 export function noteMockMade(): void {
-  mockMade = true
+  settings.mockMade = true
 }
 
 /**
@@ -55,18 +56,18 @@ export function noteMockMade(): void {
  * @see {@link https://meocord.dev/docs/4.2/mocks | Mocks}
  */
 export function useStrictMocks(): void {
-  if (strict) return
-  if (mockMade) {
+  if (settings.strict) return
+  if (settings.mockMade) {
     throw new Error(
       'useStrictMocks() goes before any mock is made: a mock made before it reads placeholders, and the two kinds would ' +
         "mix. Call it once, in the test runner's setup file.",
     )
   }
-  strict = true
+  settings.strict = true
 }
 
 /** Turns strict mocks off and forgets the mocks made, so a spec can turn them on afresh. */
 export function forgetStrictMocks(): void {
-  strict = false
-  mockMade = false
+  settings.strict = false
+  settings.mockMade = false
 }

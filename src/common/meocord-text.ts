@@ -12,6 +12,7 @@ import {
 } from '@src/common/translator.js'
 import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 import { type MessageUsageIssue } from '@src/common/errors.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** A value one of MeoCord's texts reads: a word or number, a list joined in the text's language, or another text. */
 export type TextParam = string | number | TextList | MeoCordText
@@ -100,7 +101,8 @@ export function textRenderer(translator: Translator<any> | undefined, locale: Te
   return text => (typeof text !== 'object' ? String(text) : 'list' in text ? text.list.join(text.joiner ?? ', ') : renderText(translator, locale, text))
 }
 
-const translators = new WeakMap<object, Translator<any>>()
+// Shared by both builds of this version, so either answers in the app's language
+const translators = shared('clientTranslators', () => new WeakMap<object, Translator<any>>())
 
 /** Records the translator of the app a client's interactions and messages come to. */
 export function registerClientTranslator(client: object, translator: Translator<any> | undefined): void {

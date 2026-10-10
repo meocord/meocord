@@ -20,6 +20,7 @@ import {
   type ResponseView,
 } from '@src/interface/index.js'
 import { renderText, translatorOfClient } from '@src/common/meocord-text.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** One of the presenter's texts, in the context's locale through the app's translator; English for a context without one. */
 const text = ({ interaction, locale }: Partial<ResponseContext>, key: string) =>
@@ -46,7 +47,8 @@ export const defaultPresenter = {
 /** The id MeoCord gives the containers it renders, so a view left behind can be found again. */
 export const RENDERED_CONTAINER_ID = 0x4d43
 
-const presenters = new WeakMap<object, ResponsePresenter>()
+// Shared by both builds of this version, so either answers with the app's presenter
+const presenters = shared('clientPresenters', () => new WeakMap<object, ResponsePresenter>())
 
 /** Sets the presenter for the interactions a client receives. */
 export function setPresenter(client: object, presenter: ResponsePresenter): void {

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { type DeepReadonly, type MeoCordTheme, type ThemeOverride } from '@src/interface/index.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** A resolved theme: every role present, frozen, since one theme is shared by every call it applies to. */
 export type ResolvedTheme = DeepReadonly<MeoCordTheme>
@@ -10,7 +11,8 @@ export interface ThemeScope {
   theme: ResolvedTheme
 }
 
-const scope = new AsyncLocalStorage<ThemeScope>()
+// One per process for this meocord version, so a call's theme reads the same from its ES module and CommonJS builds
+const scope = shared('themeScope', () => new AsyncLocalStorage<ThemeScope>())
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (value === null || typeof value !== 'object') return false
