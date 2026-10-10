@@ -1,9 +1,21 @@
 import 'reflect-metadata'
-import { Attachment, MessageContextMenuCommandInteraction, SnowflakeUtil, User } from 'discord.js'
+import {
+  Attachment,
+  AutocompleteInteraction,
+  ButtonInteraction,
+  ChatInputCommandInteraction,
+  GuildMember,
+  MessageContextMenuCommandInteraction,
+  Role,
+  SnowflakeUtil,
+  TextChannel,
+  ThreadChannel,
+  User,
+} from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockClient, createMockGuild, createMockInteraction, createMockMessage } from './mock-interaction.js'
+import { createMockChannel, createMockClient, createMockGuild, createMockInteraction, createMockMessage } from './mock-interaction.js'
 import { createModalFields } from './modal-fields.js'
 import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
 
@@ -23,6 +35,18 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 afterAll(() => forgetStrictMocks())
+
+const modes = [
+  ['default mode', () => {}],
+  ['useStrictMocks()', () => useStrictMocks()],
+] as const
+
+/** How many ids from the count every mock takes one from `run` takes. */
+async function idsTakenBy(run: () => unknown): Promise<bigint> {
+  const before = BigInt(createMockInteraction(User).id)
+  await run()
+  return BigInt(createMockInteraction(User).id) - before - 1n
+}
 
 describe("a message context menu's target", () => {
   it('is the targetMessage given, by its id', () => {
@@ -84,6 +108,75 @@ describe("a message context menu's target", () => {
 
     expect(menu.targetId).toMatch(snowflake)
     expect(menu.targetMessage.id).toBe(menu.targetId)
+  })
+
+  it.each(modes)("is made in the menu's channel and server, which a component on it agrees with, with no warning, in %s", (_mode, setUp) => {
+    setUp()
+    const guild = createMockGuild()
+    const channel = createMockChannel(TextChannel, { guild })
+    const { targetMessage } = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report', guild, channel })
+
+    expect(targetMessage.channel).toBe(channel)
+    expect(targetMessage.guild).toBe(guild)
+    expect([targetMessage.channelId, targetMessage.guildId]).toEqual([channel.id, guild.id])
+    const button = createMockInteraction(ButtonInteraction, { customId: 'b', message: targetMessage, guild, channel })
+    expect(button.message).toBe(targetMessage)
+    expect(targetMessage.channel).toBe(channel)
+    expect(warned).toEqual([])
+  })
+
+  it.each(modes)("is made in the user's DM channel for a menu used in a DM, in %s", (_mode, setUp) => {
+    setUp()
+    const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })
+
+    expect(menu.targetMessage.channel).toBe(menu.channel)
+    expect(menu.targetMessage.guildId).toBeNull()
+  })
+})
+
+describe('generated ids', () => {
+  it.each([
+    ['default mode', () => {}, () => createMockChannel(TextChannel).guildId],
+    ['useStrictMocks()', () => useStrictMocks(), () => createMockChannel(ThreadChannel).ownerId],
+  ])('come from the count every mock takes one from, so a run gives the same ids each time, in %s', (_mode, setUp, inPlace) => {
+    setUp()
+    // Each id a default gives, as an offset from where the count stood when the run began
+    const run = () => {
+      const start = BigInt(createMockInteraction(User).id)
+      const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'x' })
+      const ids = [
+        createMockGuild().ownerId,
+        createMockInteraction(Role, {}).id,
+        command.commandId,
+        command.applicationId,
+        createMockInteraction(AutocompleteInteraction, { commandName: 'x' }).commandId,
+        inPlace(),
+      ]
+      return ids.map(id => BigInt(id!) - start)
+    }
+
+    const first = run()
+    expect(first.every(offset => offset > 0n && offset < 50n)).toBe(true)
+    expect(run()).toEqual(first)
+  })
+
+  it.each(modes)('are taken once for a value, on its first read, so reading it again takes none, in %s', async (_mode, setUp) => {
+    setUp()
+    const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })
+    const member = createMockInteraction(GuildMember)
+    const role = createMockInteraction(Role, {})
+    for (const value of [() => menu.targetMessage, () => member.user, () => role.guild]) {
+      const first = value()
+      expect(await idsTakenBy(() => expect(value()).toBe(first))).toBe(0n)
+    }
+
+    const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'x' })
+    await command.reply('hi')
+    const fetched = await command.fetchReply()
+    let again = fetched
+    expect(await idsTakenBy(async () => (again = await command.fetchReply()))).toBe(0n)
+    expect(again.id).toBe(fetched.id)
+    for (const key of ['author', 'channel', 'guild'] as const) expect(again[key]).toBe(fetched[key])
   })
 })
 
