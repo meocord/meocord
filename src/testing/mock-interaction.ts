@@ -482,10 +482,11 @@ const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: o
       return guild ? createMockMember({ user: createMockUser(id ? { id } : {}), guild }) : createMockInteraction(GuildMember)
     },
   ],
-  [RoleManager, id => createMockInteraction(Role, id ? { id } : {})],
+  [RoleManager, (id, manager) => createMockInteraction(Role, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
   [GuildBanManager, () => createMockInteraction(GuildBan)],
-  [GuildMessageManager, id => createMockMessage(id ? { id } : {})],
-  [DMMessageManager, id => createMockMessage(id ? { id } : {})],
+  // A message fetched from a channel is in it, and another user's
+  [GuildMessageManager, (id, manager) => createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
+  [DMMessageManager, (id, manager) => createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
   [GuildTextThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [GuildForumThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [ThreadMemberManager, () => createMockInteraction(ThreadMember)],
@@ -502,6 +503,12 @@ const returnsPromise = (key: string, method: (...args: unknown[]) => unknown) =>
 
 // The ids a fetch asks for: an id, a discord.js object, or options naming one or several, such as `{ user: id }` or
 // `{ user: [ids] }`; undefined for a fetch of a list
+/** The channel a message manager belongs to, as `createMockMessage` takes it. */
+const channelOfManager = (manager: object): MockMessageOverrides => {
+  const channel = (manager as { channel?: unknown }).channel
+  return channel instanceof BaseChannel ? { channel: channel as never } : {}
+}
+
 function fetchedIds(args: unknown[]): string | string[] | undefined {
   const idOf = (value: unknown) => (typeof value === 'string' ? value : value instanceof Base ? (value as { id?: string }).id : undefined)
   const [first] = args
@@ -532,6 +539,10 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   if (key === 'send' && target instanceof User) {
     return createMockFn(async (...args: unknown[]) => ((await (receiver() as User).createDM()).send as (...args: unknown[]) => unknown)(...args))
   }
+  // A channel's send resolves to the message it sent there
+  if (key === 'send' && target instanceof BaseChannel) {
+    return createMockFn(async (options?: unknown) => sentMessage(sent(options, false), receiver()))
+  }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
   if (target instanceof BaseManager) {
     const item = MANAGER_ITEMS.find(([Manager]) => Manager.prototype.isPrototypeOf(target))?.[1]
@@ -545,7 +556,24 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
         return ids === undefined ? new Collection() : one(ids)
       })
     }
-    if (item && (key === 'create' || key === 'edit')) return createMockFn(async () => item(undefined, receiver()))
+    if (item && key === 'edit') return createMockFn(async () => item(undefined, receiver()))
+    // A ban resolves to the member, user or id it was given, as discord.js's does, and caches nothing
+    if (key === 'create' && target instanceof GuildBanManager) {
+      return createMockFn(async (user?: unknown) => {
+        if (user instanceof GuildMember) return user
+        if (user instanceof User) return (receiver() as GuildBanManager).guild.members.resolve(user) ?? user
+        return typeof user === 'string' ? user : (user as { id?: string } | undefined)?.id
+      })
+    }
+    // Every other manager here caches what its create() makes, as discord.js's does; check a manager's create when
+    // adding it to MANAGER_ITEMS
+    if (item && key === 'create') {
+      return createMockFn(async () => {
+        const made = item(undefined, receiver()) as { id?: unknown }
+        if (typeof made.id === 'string') cacheOf(receiver())?.set(made.id, made)
+        return made
+      })
+    }
   } else if (target instanceof Base && (SELF_METHODS.has(key) || /^set[A-Z]/.test(key))) {
     return createMockFn(async () => receiver())
   }
@@ -1147,6 +1175,15 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       return original
     }
     const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
+    // Where its answers are sent, read as the mock's own, so a placement warning stays the test's
+    const answeredIn = (): [unknown, unknown] => {
+      readingPlace++
+      try {
+        return [instance.channel, instance.client]
+      } finally {
+        readingPlace--
+      }
+    }
     // Each call's message, read by its behaviour right after the gate made it
     let made: HeldMessage | undefined
     let followUpMade: string | undefined
@@ -1165,7 +1202,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       async () => {
         const held = followUps.get(followUpMade!)!
         // One held to build when read resolves to its id alone, as building it now would refuse it
-        return typeof held === 'function' ? createMockMessage({ id: followUpMade }) : messageFrom(held)
+        return typeof held === 'function' ? createMockMessage({ id: followUpMade }) : messageFrom(held, ...answeredIn())
       },
       later('followUp', ([options]) => {
         instance.replied = true
@@ -1185,7 +1222,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       async () => {
         if (!made) throw unknownMessage()
         // The response has the message as Discord answers the edit, before its uploaded files have loaded again
-        return messageFrom({ ...made, components: made.returned ?? made.components })
+        return messageFrom({ ...made, components: made.returned ?? made.components }, ...answeredIn())
       },
       later('editReply', ([options]) => {
         const id = targetId((options as { message?: unknown } | undefined)?.message)
@@ -1203,7 +1240,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       createMockFn(async (message?: unknown) => {
         const held = target(targetId(message))
         if (!held) throw unknownMessage()
-        return messageFrom(held)
+        return messageFrom(held, ...answeredIn())
       }),
     )
     answer(
@@ -2506,16 +2543,9 @@ function edited(held: HeldMessage, options: unknown): HeldMessage {
   }
 }
 
-/** A mock message showing a held message. */
-function messageFrom(held: HeldMessage): DeepMocked<Message> & { deleted: boolean } {
-  return createMockMessage({
-    id: held.id,
-    ...(held.content !== undefined && { content: held.content }),
-    components: held.components as APIMessageTopLevelComponent[],
-    embeds: held.embeds as APIEmbed[],
-    ...(held.flags !== undefined && { flags: held.flags }),
-    editedTimestamp: held.editedTimestamp,
-  })
+/** A mock message showing a held message, one the bot sent in `channel` by `client`. */
+function messageFrom(held: HeldMessage, channel?: unknown, client?: unknown): DeepMocked<Message> & { deleted: boolean } {
+  return sentMessage(held, channel, client, { id: held.id, editedTimestamp: held.editedTimestamp })
 }
 
 /**
@@ -2539,12 +2569,14 @@ function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JS
  * `@MessageHandler` does not skip it.
  *
  * @remarks
- * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted, and `edit()`
- * and `reply()` resolve to a new mock message. Without overrides the message is empty, in a server, from a new
- * person who is its `member`; with `guild: null` it is a direct message. Give `author` to send several messages as
- * one user, such as to reach a per-user cooldown. An author given, and the users, roles and channels the content
- * mentions, are cached as the gateway delivers them. It is typed as discord.js emits a message, never in a group DM,
- * so it fits `messageCreate` and the other message events.
+ * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted. `edit()` changes
+ * this message and resolves to it, and `reply()` resolves to the reply, sent in this message's channel and holding what
+ * was sent, as a channel's `send()` does. Under `useStrictMocks()` a message the bot sends is its `client.user`'s, and
+ * one sent in a DM is in that DM. Without overrides the message is empty, in a server, from a new person who is its
+ * `member`; with `guild: null` it is a direct message. Give `author` to send several messages as one user, such as to
+ * reach a per-user cooldown. An author given, and the users, roles and channels the content mentions, are cached as the
+ * gateway delivers them. It is typed as discord.js emits a message, never in a group DM, so it fits `messageCreate` and
+ * the other message events.
  *
  * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *
@@ -2570,6 +2602,20 @@ function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JS
 export function createMockMessage(
   overrides: MockMessageOverrides = {},
 ): DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { deleted: boolean } {
+  return messageMock(overrides)
+}
+
+/** How the bot sent a message, in default mode, for the reads strict mocks would answer otherwise to warn. */
+interface SentInDefaultMode {
+  /** The bot sent it, whose `client.user` strict mocks read as its author. */
+  bot: boolean
+  /** It was sent in a DM, where strict mocks place it. */
+  dm: boolean
+}
+
+type MockMessage = DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { deleted: boolean }
+
+function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaultMode): MockMessage {
   const instance = Object.create(Message.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
 
@@ -2596,8 +2642,8 @@ export function createMockMessage(
         : createMockGuildForMessage()
   ) as { id: string } | null
   const channel = (overrides.channel ?? channelFor(guild, guild?.id ?? null, nextSnowflake(), instance.author as object)) as { id: string }
-  Object.defineProperty(instance, 'channel', { value: channel, writable: true })
-  Object.defineProperty(instance, 'guild', { value: guild, writable: true })
+  Object.defineProperty(instance, 'channel', { value: channel, writable: true, configurable: true })
+  Object.defineProperty(instance, 'guild', { value: guild, writable: true, configurable: true })
   // The author as a member of the message's server; a direct message has none. A given author's member is the one
   // the server caches, as the gateway resolves it, so every message from that author has the same member
   // The author's member, cached as the gateway caches it with the message; `member` reads the cache, as discord.js does
@@ -2668,20 +2714,31 @@ export function createMockMessage(
       instance.deleted = true
     }),
   )
+  // An edit changes this message, as Discord edits it in place, and resolves to it
   stubs.set(
     'edit',
-    createMockFn(async () => {
+    createMockFn(async (options?: unknown) => {
       if (instance.deleted) throw alreadyDeleted()
-      return createMockMessage()
+      const held = edited(heldFrom(undefined, false), options)
+      const edit = (typeof options === 'string' ? { content: options } : (options ?? {})) as Record<string, unknown>
+      if (edit.content !== undefined) instance.content = held.content
+      if (edit.components !== undefined) instance.components = held.components.map(component => asHeld(component as never, 'component'))
+      if (edit.embeds !== undefined) instance.embeds = held.embeds.map(embed => asHeld(embed as never, 'embed'))
+      if (edit.flags !== undefined) instance.flags = new MessageFlagsBitField(held.flags)
+      instance.editedTimestamp = Math.max(Date.now(), ((instance.editedTimestamp as number | null) ?? 0) + 1)
+      return message
     }),
   )
   stubs.set(
     'reply',
-    createMockFn(async () => {
+    createMockFn(async (options?: unknown) => {
       if (instance.deleted) throw alreadyDeleted()
-      return createMockMessage()
+      return sentMessage(sent(options, false), instance.channel, instance.client)
     }),
   )
+  // Crossposting publishes this message, and forwarding sends one in the channel it is forwarded to
+  stubs.set('crosspost', createMockFn(async () => message))
+  stubs.set('forward', createMockFn(async (channel?: unknown) => sentMessage(sent(undefined, false), channel, instance.client)))
   stubs.set(
     'react',
     createMockFn(async () => {
@@ -2701,7 +2758,74 @@ export function createMockMessage(
     }),
   )
 
-  return stubDeep(instance, stubs) as DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { deleted: boolean }
+  if (sentBy) warnOnSentReads(instance, stubs, sentBy)
+  const message = stubDeep(instance, stubs) as MockMessage
+  return message
+}
+
+/**
+ * Has a message the bot sent warn once where strict mocks read it otherwise: its author, the bot's `client.user` under
+ * strict mocks, and, for one sent in a DM, the server it reads as being in.
+ */
+function warnOnSentReads(instance: Record<string, unknown>, stubs: Map<string, Mock>, sentBy: SentInDefaultMode): void {
+  // A read made while reading another of these, as `member` reads `author`, warns only for the outer one
+  let reading = 0
+  const read = (key: string, warning: string) => {
+    const descriptor = Object.getOwnPropertyDescriptor(instance, key)
+    Object.defineProperty(instance, key, {
+      get: () => {
+        if (reading === 0) warnOnce(mockLogger, warning)
+        reading++
+        try {
+          return descriptor?.get ? descriptor.get.call(instance) : descriptor?.value
+        } finally {
+          reading--
+        }
+      },
+      set: (next: unknown) => Object.defineProperty(instance, key, { value: next, writable: true, enumerable: true, configurable: true }),
+      enumerable: true,
+      configurable: true,
+    })
+  }
+  if (sentBy.bot) {
+    read(
+      'author',
+      "Message.author reads a user here, though the bot sent this message; in the next major version (5.0) it is the bot's " +
+        "client.user, as Discord sends it. Call useStrictMocks() to read client.user now.",
+    )
+  }
+  if (!sentBy.dm) return
+  const inDm = (what: string) =>
+    `Message.${what} reads a server here, though this message was sent in a DM; in the next major version (5.0) it reads ` +
+    "as a DM's, with no server. Call useStrictMocks() to read it so now."
+  const inGuild = Boolean(instance.guildId)
+  for (const key of ['guild', 'guildId', 'member']) read(key, inDm(key))
+  stubs.set('inGuild', createMockFn(() => (warnOnce(mockLogger, inDm('inGuild()')), inGuild)))
+}
+
+/**
+ * A message the bot sent, as Discord returns it: in the channel it was sent in and that channel's server, holding what
+ * was sent. Under strict mocks it is the bot's `client.user`'s, and one sent in a DM is in that DM; default mode places
+ * a DM send in a server of its own and keeps another author, with a warning when read.
+ */
+function sentMessage(held: HeldMessage, channel: unknown, client?: unknown, fields: MockMessageOverrides = {}): MockMessage {
+  const by = (client ?? (channel as { client?: unknown } | null | undefined)?.client) as Client | undefined
+  const inChannel = channel instanceof BaseChannel
+  const dm = inChannel && channel.isDMBased()
+  const strict = strictMocks()
+  return messageMock(
+    {
+      ...(held.content !== undefined && { content: held.content }),
+      components: held.components as APIMessageTopLevelComponent[],
+      embeds: held.embeds as APIEmbed[],
+      ...(held.flags !== undefined && { flags: held.flags }),
+      ...(inChannel && (!dm || strict) && { channel: channel as never }),
+      ...(by && { client: by }),
+      ...(strict && by?.user && { author: by.user as User }),
+      ...fields,
+    },
+    strict ? undefined : { bot: Boolean(by?.user), dm },
+  )
 }
 
 // ---------------------------------------------------------------------------
