@@ -1,5 +1,5 @@
 import { ButtonInteraction, ChatInputCommandInteraction, Message, type MessageReaction } from 'discord.js'
-import { vi } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 import { Logger } from '@src/common/index.js'
 import { Command, Controller, Cooldown, MessageHandler, On, Once, Pipe, ReactionHandler, UsePipe, Validate } from '@src/decorator/index.js'
 import { handlerCooldowns, methodCooldowns } from '@src/core/cooldown-runner.js'
@@ -286,6 +286,7 @@ describe('@Cooldown', () => {
 
   it('warns, naming the handler, about a bypass that is not a function and seconds that are not a number', () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    onTestFinished(() => warn.mockRestore())
 
     expect(onHandler(Cooldown({ seconds: 5, bypass: true as never }))).not.toThrow()
     for (const seconds of ['5', '0x10', true, [5]]) expect(onHandler(Cooldown({ seconds: seconds as never }))).not.toThrow()
@@ -293,7 +294,7 @@ describe('@Cooldown', () => {
     expect(onHandler(Cooldown({ seconds: 5, bypass: null as never }))).not.toThrow()
 
     expect(warn.mock.calls.map(([message]) => message)).toEqual([
-      'Shop.buy: @Cooldown takes bypass as a function of the call, returning whether the call skips the cooldown, not a boolean; every call through this handler fails with it. In the next major version (5.0) it is refused.',
+      'Shop.buy: @Cooldown takes bypass as a function of the call, returning whether the call skips the cooldown, not a boolean; every call it counts fails with it. In the next major version (5.0) it is refused.',
       'Shop.buy: @Cooldown takes seconds as a number, not "5", which it counts as a window of 5000 ms. In the next major version (5.0) it is refused.',
       'Shop.buy: @Cooldown takes seconds as a number, not "0x10", which it counts as a window of 16000 ms. In the next major version (5.0) it is refused.',
       'Shop.buy: @Cooldown takes seconds as a number, not a boolean, which it counts as a window of 1000 ms. In the next major version (5.0) it is refused.',
