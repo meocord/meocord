@@ -32,11 +32,14 @@ let app: MeoCordApplication
 let gate: PromiseWithResolvers<void>
 /** Runs inside Pool's onReady before it waits, as each test sets it. */
 let inReady: () => Promise<void> | void
+/** Runs inside Early's onReady, which settles before Pool's starts. */
+let inEarly: () => void
 
 @Service()
 class Early {
   onReady() {
     order.push('Early.onReady')
+    inEarly()
   }
   onShutdown() {
     order.push('Early.onShutdown')
@@ -105,6 +108,7 @@ beforeEach(() => {
   config.shutdownTimeout = 4_000
   gate = Promise.withResolvers<void>()
   inReady = () => undefined
+  inEarly = () => undefined
   vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
 })
 afterEach(() => {
@@ -166,6 +170,28 @@ describe('a bot stopped while an onReady runs', () => {
     expect(logged.warn).toEqual([])
   })
 
+  // The timer outlives Early's onReady, so its stop() is no onReady stopping the bot itself
+  it("waits for an onReady when a timer an earlier onReady left stops the bot", async () => {
+    let stopped: Promise<void> | undefined
+    inEarly = () => void setTimeout(() => (stopped = app.stop()), 10)
+    await startApp()
+    await vi.waitFor(() => expect(stopped).toBeDefined())
+
+    await tick()
+    gate.resolve()
+    await stopped
+
+    expect(order).toEqual([
+      'Early.onReady',
+      'Pool.onReady start',
+      'Pool.onReady done',
+      'Pool.onShutdown',
+      'Early.onShutdown',
+      'client.destroy',
+    ])
+    expect(logged.warn).toEqual([])
+  })
+
   it('adds no wait and no warning when no onReady is running', async () => {
     vi.useFakeTimers()
     gate.resolve()
@@ -218,6 +244,29 @@ describe("a testing module's close() during init({ ready: true })", () => {
 
     expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Pool.onShutdown', 'Early.onShutdown'])
     expect(logged.warn).toEqual(['onReady in Pool is still running after 3000 ms; shutting down without waiting for it.'])
+  })
+
+  it('waits for the onReady hooks when a timer an earlier onReady left closes the module', async () => {
+    const module = compile()
+    let closed: Promise<void> | undefined
+    inEarly = () => void setTimeout(() => (closed = module.close()), 10)
+    const initialised = module.init({ ready: true })
+    await vi.waitFor(() => expect(closed).toBeDefined())
+
+    await tick()
+    gate.resolve()
+    await Promise.all([initialised, closed])
+
+    expect(order).toEqual([
+      'Early.onReady',
+      'Pool.onReady start',
+      'Pool.onReady done',
+      'Later.onReady',
+      'Later.onShutdown',
+      'Pool.onShutdown',
+      'Early.onShutdown',
+    ])
+    expect(logged.warn).toEqual([])
   })
 
   it("doesn't wait for an onReady that closes the module itself", async () => {

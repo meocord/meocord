@@ -639,7 +639,7 @@ export class MeoCordApp implements MeoCordApplication {
         stopped: () => this.closing,
         slowAfterMs: SLOW_READY_HOOK_MS,
         settled: unit => unit.cooldownStore && this.storeReady?.resolve(),
-        starting: this.readyPass.starting,
+        runOnReady: this.readyPass.runOnReady,
       },
     ))
     // Also when shutdown stopped the hooks before the store's, so no call waits on it

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { type Client } from 'discord.js'
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
@@ -47,17 +48,22 @@ export interface ReadyHooksOptions {
   slowAfterMs?: number
   /** Called as each unit is done: resolved and readied, or failed. */
   settled?: (unit: LifecycleUnit) => void
-  /** Called as a unit's `onReady` starts. */
-  starting?: (unit: LifecycleUnit) => void
+  /** Runs a unit's `onReady`, `run`, in place of calling it directly. */
+  runOnReady?: (unit: LifecycleUnit, run: () => unknown) => Promise<void>
 }
 
 /**
  * The ready hooks' pass, which shutdown waits for before it reads which units to shut down, so a unit whose `onReady`
- * finishes meanwhile is shut down too. A pass that asks the app to stop, from an `onReady`, is not waited for.
+ * finishes meanwhile is shut down too. An `onReady` still running that asks the app to stop is not waited for; a timer
+ * or callback an `onReady` that has settled left behind excuses nothing.
  */
 export class ReadyPass {
   private readonly passes = new RunningCalls()
-  /** The unit whose `onReady` the pass runs. */
+  /** The `onReady` each async context belongs to. */
+  private readonly hooks = new AsyncLocalStorage<object>()
+  /** The `onReady` in progress, unset between them. */
+  private current?: object
+  /** The unit whose `onReady` started last, which a warning names. */
   private unit?: string
 
   /** Runs `pass`, the ready hooks, as the pass shutdown waits for. */
@@ -65,14 +71,21 @@ export class ReadyPass {
     return this.passes.run('onReady', pass)
   }
 
-  /** Records the unit whose `onReady` starts, for {@link ReadyPass.running}. */
-  readonly starting = (unit: LifecycleUnit): void => {
+  /** Runs a unit's `onReady` as the one in progress. */
+  readonly runOnReady = async (unit: LifecycleUnit, run: () => unknown): Promise<void> => {
+    const hook = {}
+    this.current = hook
     this.unit = unit.name
+    try {
+      await this.hooks.run(hook, run)
+    } finally {
+      if (this.current === hook) this.current = undefined
+    }
   }
 
-  /** Excuses the pass this runs in, as an `onReady` that stops the app does. */
+  /** Excuses the pass when this runs within the `onReady` in progress, as one that stops the app does. */
   excuseCurrent(): void {
-    this.passes.excuseCurrent()
+    if (this.current && this.hooks.getStore() === this.current) this.passes.excuseCurrent()
   }
 
   /** Settles once the pass has, unless excused. */
@@ -98,7 +111,7 @@ export async function runReadyHooks(
   info: ReadyInfo,
   entries: LifecycleEntry[],
   report: ReadyHooksReport,
-  { stopped = () => false, slowAfterMs, settled, starting }: ReadyHooksOptions = {},
+  { stopped = () => false, slowAfterMs, settled, runOnReady }: ReadyHooksOptions = {},
 ): Promise<void> {
   const failed = new Set<unknown>()
   // For each unit, the failed units it depends on, directly or through another dependency
@@ -145,11 +158,11 @@ export async function runReadyHooks(
     }
 
     if (upstream.size > 0) report.dependsOnFailed?.(unit, [...upstream])
-    starting?.(unit)
 
     const slow = slowAfterMs !== undefined && report.slow ? setTimeout(() => report.slow!(unit), slowAfterMs) : undefined
     try {
-      await instance.onReady(client, info)
+      const onReady = () => instance.onReady!(client, info)
+      await (runOnReady ? runOnReady(unit, onReady) : onReady())
     } catch (error) {
       failed.add(unit.token)
       report.hookFailed(unit, error)
