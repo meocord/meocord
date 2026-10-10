@@ -3,7 +3,7 @@ import { Attachment, MessageContextMenuCommandInteraction, SnowflakeUtil, User }
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockInteraction, createMockMessage } from './mock-interaction.js'
+import { createMockClient, createMockGuild, createMockInteraction, createMockMessage } from './mock-interaction.js'
 import { createModalFields } from './modal-fields.js'
 import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
 
@@ -40,6 +40,23 @@ describe("a message context menu's target", () => {
 
     menu.targetId = '1400000000000009999'
     expect([menu.targetId, menu.targetMessage.id]).toEqual(['1400000000000009999', '1400000000000009999'])
+  })
+
+  it('follows a targetMessage set after a targetId was set', () => {
+    const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })
+    menu.targetId = '1400000000000009999'
+    const other = createMockMessage()
+    menu.targetMessage = other as never
+
+    expect([menu.targetId, menu.targetMessage]).toEqual([other.id, other])
+  })
+
+  it("reads a client set on a manager, over its server's", () => {
+    const guild = createMockGuild()
+    const other = createMockClient()
+    ;(guild.members as { client: unknown }).client = other
+
+    expect(guild.members.client).toBe(other)
   })
 
   it('gives a targetMessage with no id one, which targetId reads', () => {

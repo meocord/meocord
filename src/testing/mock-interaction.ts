@@ -1710,7 +1710,8 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
       const owner = manager.guild ?? manager.channel ?? manager.thread ?? manager.message
       return owner instanceof Base ? owner.client : (own ??= createMockClient())
     },
-    set: (value: unknown) => (own = value),
+    // A client the test sets is the one read from then on, as on any other mock
+    set: (value: unknown) => Object.defineProperty(manager, 'client', { value, writable: true, enumerable: true, configurable: true }),
     configurable: true,
   })
   return stubDeep(manager)
