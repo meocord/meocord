@@ -360,8 +360,13 @@ export abstract class Translator<C = CatalogShape> {
   /**
    * A message in every locale other than the default whose own catalog has it, for a builder's
    * `setNameLocalizations` or `setDescriptionLocalizations`. Locales without it are left out, so
-   * Discord falls back to the default name for them, and so is a translation with a `{param}`, which
-   * `expectCompleteCatalog` reports.
+   * Discord falls back to the default name for them, and so are an empty translation and a translation
+   * with a `{param}`, which `expectCompleteCatalog` reports.
+   *
+   * Discord shows en-US users the en-GB value, en-GB users the en-US one, and es-419 users the es-ES one,
+   * when their own locale has none. So when the default is en-US, en-GB or es-419 and its partner is in
+   * the result, the default's own message is added under the default's key, and its users keep the default
+   * wording.
    *
    * @param key - A plain message key without `{params}`: Discord shows a name or description as written, and has no
    *   plural forms for it.
@@ -475,6 +480,13 @@ function isGroup(catalog: CatalogShape | undefined, key: string): boolean {
   return typeof current === 'object' && current !== null
 }
 
+/** The locale Discord shows a locale's users when that locale has no localization of its own, by its locale fallbacks. */
+const FALLBACK_PARTNERS: Partial<Record<Locale, Locale>> = {
+  [Locale.EnglishUS]: Locale.EnglishGB,
+  [Locale.EnglishGB]: Locale.EnglishUS,
+  [Locale.SpanishLATAM]: Locale.SpanishES,
+}
+
 class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   readonly locales: readonly Locale[]
   private readonly logger = new Logger('Translator')
@@ -509,7 +521,10 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   private translate(requested: string | undefined, key: string, params: Record<string, unknown> = {}): string {
     for (const locale of this[LOCALE_CHAIN](requested)) {
       const message = lookup(this.catalogs[locale], key)
-      if (message !== undefined) return interpolate(pluralForm({ message, locale }, params.count), params)
+      if (message === undefined) continue
+      // An empty translation, as tools export an untranslated string, counts as missing: Discord refuses an empty reply
+      const text = pluralForm({ message, locale }, params.count)
+      if (text !== '') return interpolate(text, params)
     }
     this.warnUnknown(key)
     return key
@@ -549,10 +564,15 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     for (const locale of this.locales) {
       if (locale === this.defaultLocale) continue
       const message = lookup(this.catalogs[locale], key)
-      // A translation with a {param} is left out: Discord would show it as written
-      if (typeof message === 'string' && placeholderNames(message).length === 0) {
+      // A translation with a {param} is left out, as Discord would show it as written, and so is an empty one
+      if (typeof message === 'string' && message !== '' && placeholderNames(message).length === 0) {
         localized[locale] = fillPlaceholders(message, (_name, whole) => whole)
       }
+    }
+    // Discord gives a locale it falls back from its partner's value, so the default keeps its own wording beside one
+    const partner = FALLBACK_PARTNERS[this.defaultLocale]
+    if (partner && localized[partner] !== undefined && typeof original === 'string' && original !== '') {
+      localized[this.defaultLocale] = fillPlaceholders(original, (_name, whole) => whole)
     }
     return localized
   }

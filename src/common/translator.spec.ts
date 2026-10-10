@@ -175,6 +175,38 @@ describe('localizations', () => {
   it('leaves out a translation with a {param}, as expectCompleteCatalog reports it', () => {
     expect(loose.localizations('ban.description')).toEqual({ ja: 'メンバーをBANする' })
   })
+
+  // Discord shows en-US users the en-GB value, and es-419 users the es-ES one, when their own locale has none
+  it.each([
+    ['en-US', 'en-GB', 'Pick a color', 'Pick a colour'],
+    ['en-GB', 'en-US', 'Pick a colour', 'Pick a color'],
+    ['es-419', 'es-ES', 'Elige un color', 'Escoge un color'],
+  ] as const)('keeps a %s default’s own wording beside its %s partner', (locale, partner, wording, partnerWording) => {
+    const paint = createTranslator({ default: locale, locales: { [locale]: { d: wording }, [partner]: { d: partnerWording }, ja: { d: '色' } } } as never)
+
+    expect(paint.localizations('d' as never)).toEqual({ [locale]: wording, [partner]: partnerWording, ja: '色' })
+  })
+
+  it('leaves out an empty translation, so Discord shows the default there', () => {
+    const empty = createTranslator({ default: 'en-US', locales: { 'en-US': { d: 'Ban a member' }, 'en-GB': { d: '' }, id: { d: '' }, ja: { d: 'BAN' } } })
+
+    expect(empty.localizations('d')).toEqual({ ja: 'BAN' })
+  })
+})
+
+describe('an empty translation', () => {
+  const empty = createTranslator({
+    default: 'en-US',
+    locales: { 'en-US': { d: 'Ban a member', blank: '' }, 'en-GB': { d: '' }, id: { d: '' } },
+  })
+
+  it('reads as missing, so a related locale or the default answers', () => {
+    expect([empty.locale('en-GB')('d'), empty.locale('id')('d')]).toEqual(['Ban a member', 'Ban a member'])
+  })
+
+  it('in the default catalog shows the key, as a missing one does', () => {
+    expect(empty.locale('id')('blank')).toBe('blank')
+  })
 })
 
 describe('a key with no message, in development', () => {
@@ -274,7 +306,7 @@ describe('lookups, and what never resolves', () => {
 
   it('lists only plain messages among the localizations, never a plural', () => {
     expect(t.localizations('items' as never)).toEqual({})
-    expect(t.localizations('hi' as never)).toEqual({ 'en-GB': 'Hello there', id: 'Halo' })
+    expect(t.localizations('hi' as never)).toEqual({ 'en-US': 'Hi', 'en-GB': 'Hello there', id: 'Halo' })
   })
 })
 
