@@ -2416,14 +2416,20 @@ export function botMemberOf(guild: Guild): unknown {
 }
 
 /**
- * The channel an interaction's `channel` reads, for the mock's own reads: one set on it, or its server's cached one,
- * without making or caching one. Undefined where `channel` would make one, which has no overwrites.
+ * The channel an interaction's `channel` reads, for the mock's own reads: `null` in a DM, else one set on it or its
+ * server's cached one, without making or caching one. Undefined where `channel` would make one, which has no overwrites.
  */
 export function heldChannelOf(interaction: object, guild: Guild): unknown {
   const target = mockTargets.get(interaction) ?? interaction
-  const set = Object.getOwnPropertyDescriptor(target, 'channel')
-  if (set && 'value' in set) return set.value
-  return cacheOf(guild.channels)?.get((target as { channelId: string }).channelId)
+  readingPlace++
+  try {
+    const set = Object.getOwnPropertyDescriptor(target, 'channel')
+    if (set && 'value' in set) return set.value
+    const { guildId, channelId } = target as { guildId?: string | null; channelId: string }
+    return guildId ? cacheOf(guild.channels)?.get(channelId) : null
+  } finally {
+    readingPlace--
+  }
 }
 
 /** Gives a guild's managers the guild, as discord.js's do, so what they fetch or make is in it. */
