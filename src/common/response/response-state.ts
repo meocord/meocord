@@ -1,5 +1,6 @@
 import {
   type APIEmbed,
+  type APIMessageTopLevelComponent,
   type BitFieldResolvable,
   type Interaction,
   type InteractionEditReplyOptions,
@@ -345,7 +346,7 @@ export interface ResponseState {
   readonly message: Message | undefined
 
   /** The components and embeds of the message before `@Defer` locked it; `undefined` until then. */
-  readonly original: { readonly components: readonly unknown[]; readonly embeds: readonly APIEmbed[] } | undefined
+  readonly original: { readonly components: readonly APIMessageTopLevelComponent[]; readonly embeds: readonly APIEmbed[] } | undefined
 
   /**
    * Acknowledges the interaction without answering it yet: a deferred reply for a command, and an
@@ -488,8 +489,9 @@ export class InteractionResponse implements ResponseState {
     return this.lastMessage ?? ('message' in this.interaction ? (this.interaction.message ?? undefined) : undefined)
   }
 
-  get original(): { readonly components: readonly unknown[]; readonly embeds: readonly APIEmbed[] } | undefined {
-    return this.snapshot
+  get original(): { readonly components: readonly APIMessageTopLevelComponent[]; readonly embeds: readonly APIEmbed[] } | undefined {
+    // Each component is a top-level component's API JSON, as `toJSON()` gave it; the lock reads them as plain JSON
+    return this.snapshot as { components: APIMessageTopLevelComponent[]; embeds: APIEmbed[] } | undefined
   }
 
   /** The Discord calls made through this state, for tests. */
