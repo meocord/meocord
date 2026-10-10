@@ -1,5 +1,8 @@
-import { createRegexFromPattern, MAX_CUSTOM_ID_LENGTH } from '@src/decorator/controller.decorator.js'
+import { createRegexFromPattern, literalBraces, MAX_CUSTOM_ID_LENGTH } from '@src/decorator/controller.decorator.js'
 import { parseSegment } from '@src/core/scalar-types.js'
+import { Logger } from '@src/common/logger.js'
+
+const logger = new Logger('Route')
 
 /** A `{name}` or `{name:type}` param's name. */
 type ParamName<S extends string> = S extends `${infer Name}:${string}` ? Name : S
@@ -108,7 +111,8 @@ const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
  * fails to compile, and a typed param takes a value of its type.
  *
  * @param pattern - The customId pattern, where `{name}` captures one `/`-separated segment and `{name:int}` a
- *   typed one.
+ *   typed one. A param's name is ASCII letters, digits and _: a brace pair such as `{café}` is literal text, and is
+ *   warned about.
  * @returns A route whose `build` takes a value for each param.
  * @throws Error when the pattern cannot be read, as `@Command` would throw for it.
  *
@@ -134,6 +138,8 @@ const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
  */
 export function route<const T extends string>(pattern: T): Route<T> {
   const { params, types } = createRegexFromPattern(pattern)
+  const braces = literalBraces(pattern)
+  if (braces) logger.warn(`Pattern "${pattern}": ${braces}`)
   const names = new Set(params)
 
   const build = (values: Record<string, RouteValue> = {}): string => {
