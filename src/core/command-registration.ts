@@ -169,13 +169,25 @@ function defaultGuildsEmpty(options: TargetOptions): boolean {
   return !everythingTarget(options) && guilds.length > 0 && ids(guilds).length === 0
 }
 
+/** Whether a command is an activity's primary entry point, which Discord takes only globally. */
+const isEntryPoint = (command: CollectedCommand): boolean => command.body.type === ApplicationCommandType.PrimaryEntryPoint
+
 /**
  * Where each command is sent: one bulk update per scope. A scope's update replaces everything the application has
  * there, so the default scope is included even when it ends up empty, unless `commands.guilds` lists no guild id.
+ *
+ * A primary entry point command goes in the global update, as Discord refuses a guild update that holds one. A run
+ * that sends everything to one guild sends nothing global, so it leaves the entry point out.
  */
 export function planTargets(commands: CollectedCommand[], options: TargetOptions, logger: RegistrationLogger): RegistrationTarget[] {
   const everythingTo = everythingTarget(options)
-  if (everythingTo) return [{ scope: { guild: everythingTo }, commands }]
+  if (everythingTo) {
+    // A global update from here would hold only what this run sends, deleting the application's other global commands
+    for (const command of commands.filter(isEntryPoint)) {
+      logger.warn(`Entry point command "${command.name}" is registered globally only; a production run or \`meocord register\` registers it.`)
+    }
+    return [{ scope: { guild: everythingTo }, commands: commands.filter(command => !isEntryPoint(command)) }]
+  }
 
   const defaultGuilds = ids(options.config?.guilds)
   const nowhere = defaultGuildsEmpty(options)
@@ -191,7 +203,12 @@ export function planTargets(commands: CollectedCommand[], options: TargetOptions
 
   const unregistered: string[] = []
   for (const command of commands) {
-    if (command.guilds) {
+    if (isEntryPoint(command)) {
+      if (command.guilds) {
+        logger.warn(`Entry point command "${command.name}" can only be registered globally, so the guilds its builder lists are ignored.`)
+      }
+      add('global', command)
+    } else if (command.guilds) {
       const own = ids(command.guilds)
       // Falling back to the default scope could publish a staff-only command everywhere.
       if (own.length === 0) logger.warn(`Command "${command.name}" lists no guild ids in its builder, so it is not registered.`)
@@ -208,7 +225,9 @@ export function planTargets(commands: CollectedCommand[], options: TargetOptions
   if (nowhere) {
     const outcome =
       unregistered.length === 0
-        ? 'nothing is registered globally'
+        ? targets.has('global')
+          ? 'only the entry point command is registered globally'
+          : 'nothing is registered globally'
         : `${unregistered.join(', ')} ${unregistered.length === 1 ? 'is' : 'are'} not registered, rather than registered globally`
     logger.warn(
       `commands.guilds lists no guild id, as an unset environment variable leaves it, so ${outcome}. ` +

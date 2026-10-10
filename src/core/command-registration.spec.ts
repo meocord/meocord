@@ -8,7 +8,7 @@ import { vi } from 'vitest'
 import { Command, CommandBuilder, Controller } from '@src/decorator/index.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
-import { collectCommands, planTargets, registerCommands } from '@src/core/command-registration.js'
+import { type CollectedCommand, collectCommands, planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
 
 const createLogger = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })
 
@@ -869,6 +869,50 @@ describe('registration, message by message', () => {
       planTargets(collectCommands([controllerWith([{ name: 'ban', guilds: ['staff'] }])], createLogger())!, { development: false }, logger)
 
       expect(logger.warn).not.toHaveBeenCalled()
+    })
+  })
+
+  // Discord refuses a guild bulk update holding one whole: 400, code 50222
+  describe('a primary entry point command', () => {
+    const ping: CollectedCommand = { name: 'ping', body: { name: 'ping', type: 1 } }
+    const launch: CollectedCommand = { name: 'launch', body: { name: 'launch', type: 4 } }
+    const where = (targets: RegistrationTarget[]) =>
+      targets.map(({ scope, commands }) => [scope === 'global' ? 'global' : scope.guild, commands.map(command => command.name)])
+
+    it('goes in the global update of a production run, whatever commands.guilds says', () => {
+      expect(where(planTargets([ping, launch], { development: false }, createLogger()))).toEqual([['global', ['ping', 'launch']]])
+      expect(where(planTargets([ping, launch], { development: false, config: { guilds: ['555'] } }, createLogger()))).toEqual([
+        ['555', ['ping']],
+        ['global', ['launch']],
+      ])
+    })
+
+    // commands.guilds listing no id registers nothing else globally, as an unset variable leaves it
+    it('goes global alone when commands.guilds lists no guild id', () => {
+      const logger = createLogger()
+
+      expect(where(planTargets([launch], { development: false, config: { guilds: [undefined] } }, logger))).toEqual([['global', ['launch']]])
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('so only the entry point command is registered globally'))
+    })
+
+    it("ignores its builder's guilds, with a warning", () => {
+      const logger = createLogger()
+
+      const targets = planTargets([ping, { ...launch, guilds: ['555'] }], { development: false }, logger)
+
+      expect(where(targets)).toEqual([['global', ['ping', 'launch']]])
+      expect(logger.warn).toHaveBeenCalledWith('Entry point command "launch" can only be registered globally, so the guilds its builder lists are ignored.')
+    })
+
+    it('is left out of a development or --guild update, with a warning, and nothing goes global', () => {
+      for (const options of [{ development: true, config: { developmentGuild: '999' } }, { development: false, onlyGuild: '999' }]) {
+        const logger = createLogger()
+
+        expect(where(planTargets([ping, launch], options, logger))).toEqual([['999', ['ping']]])
+        expect(logger.warn).toHaveBeenCalledWith(
+          'Entry point command "launch" is registered globally only; a production run or `meocord register` registers it.',
+        )
+      }
     })
   })
 })
