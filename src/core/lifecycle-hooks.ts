@@ -3,6 +3,7 @@ import { type Client } from 'discord.js'
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { storeOperationsSettled } from '@src/core/cooldown-runner.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
+import { RunningCalls } from '@src/core/running-calls.js'
 
 /** A unit whose `onReady` stage was reached, so its `onShutdown` runs when the app closes. */
 export interface LifecycleEntry {
@@ -46,6 +47,43 @@ export interface ReadyHooksOptions {
   slowAfterMs?: number
   /** Called as each unit is done: resolved and readied, or failed. */
   settled?: (unit: LifecycleUnit) => void
+  /** Called as a unit's `onReady` starts. */
+  starting?: (unit: LifecycleUnit) => void
+}
+
+/**
+ * The ready hooks' pass, which shutdown waits for before it reads which units to shut down, so a unit whose `onReady`
+ * finishes meanwhile is shut down too. A pass that asks the app to stop, from an `onReady`, is not waited for.
+ */
+export class ReadyPass {
+  private readonly passes = new RunningCalls()
+  /** The unit whose `onReady` the pass runs. */
+  private unit?: string
+
+  /** Runs `pass`, the ready hooks, as the pass shutdown waits for. */
+  run<T>(pass: () => Promise<T>): Promise<T> {
+    return this.passes.run('onReady', pass)
+  }
+
+  /** Records the unit whose `onReady` starts, for {@link ReadyPass.running}. */
+  readonly starting = (unit: LifecycleUnit): void => {
+    this.unit = unit.name
+  }
+
+  /** Excuses the pass this runs in, as an `onReady` that stops the app does. */
+  excuseCurrent(): void {
+    this.passes.excuseCurrent()
+  }
+
+  /** Settles once the pass has, unless excused. */
+  settled(): Promise<void> {
+    return this.passes.settled()
+  }
+
+  /** The unit whose `onReady` a wait would still wait for, if any. */
+  running(): string[] {
+    return this.passes.running().length > 0 ? [this.unit ?? 'a unit'] : []
+  }
 }
 
 /**
@@ -60,7 +98,7 @@ export async function runReadyHooks(
   info: ReadyInfo,
   entries: LifecycleEntry[],
   report: ReadyHooksReport,
-  { stopped = () => false, slowAfterMs, settled }: ReadyHooksOptions = {},
+  { stopped = () => false, slowAfterMs, settled, starting }: ReadyHooksOptions = {},
 ): Promise<void> {
   const failed = new Set<unknown>()
   // For each unit, the failed units it depends on, directly or through another dependency
@@ -98,8 +136,8 @@ export async function runReadyHooks(
     }
     firstToken.set(instance, unit.token)
     const entry = lifecycleEntry(unit, instance)
-    // Only a unit whose onReady has settled, or that has none, is shut down: a stop mid-ready skips
-    // the one still starting, and those not reached yet
+    // Only a unit whose onReady has settled, or that has none, is shut down: a stop mid-ready waits for the one still
+    // starting, within its time, and skips those not reached yet
     if (typeof instance.onReady !== 'function') {
       entries.push(entry)
       settled?.(unit)
@@ -107,6 +145,7 @@ export async function runReadyHooks(
     }
 
     if (upstream.size > 0) report.dependsOnFailed?.(unit, [...upstream])
+    starting?.(unit)
 
     const slow = slowAfterMs !== undefined && report.slow ? setTimeout(() => report.slow!(unit), slowAfterMs) : undefined
     try {
@@ -151,6 +190,8 @@ export interface ShutdownSequence {
   drainAlways?: boolean
   /** The calls still running, which the warning names when the drain stops before they settle. */
   runningCalls?(): readonly string[]
+  /** The ready hooks' pass, waited for, within the drain's time, before the entries are read. */
+  readyPass?: Pick<ReadyPass, 'settled' | 'running'>
   /** How long the whole sequence is waited for, the drain included. */
   timeoutMs: number
   /** A unit's `onShutdown` threw or rejected. */
@@ -174,40 +215,48 @@ function after<T>(ms: number, value: T): { promise: Promise<T>; cancel(): void }
 }
 
 /**
- * Shuts down the entries there are when it begins, as a bot and a testing module both do. The calls under way finish
- * first, on every shutdown with `drainAlways`, and otherwise when the cooldown store, or anything it injects directly or
- * through another, has an `onShutdown`; then the store operations they started, so the store's last writes and releases
- * still reach it. The other hooks then run in reverse dependency order, and the store and what it injects last.
+ * Shuts down the entries there are once an `onReady` in progress has settled, as a bot and a testing module both do.
+ * The calls under way finish first, on every shutdown with `drainAlways`, and otherwise when the cooldown store, or
+ * anything it injects directly or through another, has an `onShutdown`; then the store operations they started, so the
+ * store's last writes and releases still reach it. The other hooks then run in reverse dependency order, and the store
+ * and what it injects last.
  *
- * The whole sequence is waited for at most `timeoutMs`. The drain stops early enough to leave the hooks
- * {@link hooksReserveMs}, with a warning naming the calls still running, and the hooks run in the time left.
+ * The whole sequence is waited for at most `timeoutMs`. The wait for the `onReady` and the drain stop early enough to
+ * leave the hooks {@link hooksReserveMs}, with a warning naming what still runs, and the hooks run in the time left.
  */
 export async function runShutdownSequence(
   container: Container,
-  entries: readonly LifecycleEntry[],
-  { drainCalls, drainAlways = false, runningCalls, timeoutMs, hookFailed, warn }: ShutdownSequence,
+  readEntries: () => readonly LifecycleEntry[],
+  { drainCalls, drainAlways = false, runningCalls, readyPass, timeoutMs, hookFailed, warn }: ShutdownSequence,
 ): Promise<void> {
-  // A unit whose onReady settles while the calls drain was still starting when shutdown began, so it is not shut down
-  entries = [...entries]
-  const byToken = new Map(entries.map(entry => [entry.token, entry]))
-  // The store and everything it reaches through what it injects
-  const storeSide = new Set<LifecycleEntry>()
-  const reach = (entry: LifecycleEntry | undefined) => {
-    if (!entry || storeSide.has(entry)) return
-    storeSide.add(entry)
-    for (const dependency of entry.dependencies) reach(byToken.get(dependency))
-  }
-  for (const entry of entries) if (entry.cooldownStore) reach(entry)
-  const needsStore = [...storeSide].some(entry => typeof entry.instance.onShutdown === 'function')
-
   const whole = after(timeoutMs, 'timeout' as const)
+  const reserve = hooksReserveMs(timeoutMs)
+  const drainEnds = after(timeoutMs - reserve, false)
+  // At once on a shutdown that always drains, so no call starts while an onReady finishes
+  let draining = drainAlways ? drainCalls().then(() => true) : undefined
   try {
+    const readying = readyPass?.running() ?? []
+    if (readying.length > 0 && !(await Promise.race([readyPass!.settled().then(() => true), drainEnds.promise]))) {
+      warn(`onReady in ${readying.join(', ')} is still running after ${timeoutMs - reserve} ms; shutting down without waiting for it.`)
+    }
+
+    // Read once the onReady in progress has settled, so its unit is among them
+    const entries = [...readEntries()]
+    const byToken = new Map(entries.map(entry => [entry.token, entry]))
+    // The store and everything it reaches through what it injects
+    const storeSide = new Set<LifecycleEntry>()
+    const reach = (entry: LifecycleEntry | undefined) => {
+      if (!entry || storeSide.has(entry)) return
+      storeSide.add(entry)
+      for (const dependency of entry.dependencies) reach(byToken.get(dependency))
+    }
+    for (const entry of entries) if (entry.cooldownStore) reach(entry)
+    const needsStore = [...storeSide].some(entry => typeof entry.instance.onShutdown === 'function')
+
     let drained = true
-    if (drainAlways || needsStore) {
-      const reserve = hooksReserveMs(timeoutMs)
-      const drainEnds = after(timeoutMs - reserve, false)
-      drained = await Promise.race([drainCalls().then(() => true), drainEnds.promise])
-      drainEnds.cancel()
+    if (needsStore) draining ??= drainCalls().then(() => true)
+    if (draining) {
+      drained = await Promise.race([draining, drainEnds.promise])
       if (!drained) {
         const running = runningCalls?.() ?? []
         warn(
@@ -216,6 +265,7 @@ export async function runShutdownSequence(
         )
       }
     }
+    drainEnds.cancel()
 
     const sequence = (async () => {
       // Only after the calls settled: a call still running may never let its store operations settle
@@ -229,6 +279,7 @@ export async function runShutdownSequence(
       warn(`onShutdown hooks did not finish within ${timeoutMs} ms; shutting down anyway.`)
     }
   } finally {
+    drainEnds.cancel()
     whole.cancel()
   }
 }
