@@ -35,11 +35,13 @@ import {
   DEFAULT_ATTACHMENT_SIZE_LIMIT,
   defaultPresenter,
   isTooLarge,
+  presentedMessage,
   presenterFor,
   REFUSED_AS_TOO_LARGE,
   renderContainer,
   renderEmbed,
   withoutFiles,
+  TEXT_LIMITS,
   withSendableFiles,
 } from '@src/common/response/presenter.js'
 import {
@@ -1086,8 +1088,10 @@ export class InteractionResponse implements ResponseState {
     theme: ResolvedTheme,
   ): Promise<{ view: ResponseView; failure?: unknown; gone?: boolean }> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
-    const presented = { message, error, tone } as const
     const context = this.presenterContext(this.v2, theme)
+    // Fitted to the mode's limit first, so a presenter that writes the message as its text, MeoCord's own included, renders
+    const generic = () => textFor(this.interaction, { key: 'meocord.fallback.error' })
+    const presented = { message: presentedMessage(message, TEXT_LIMITS[context.mode], generic), error, tone } as const
     const ready = (view: ResponseView) => {
       const sendable = this.sendable(themedView(view, theme), this.keptBeside())
       // Rendered once here, so a view MeoCord cannot render fails before anything is sent

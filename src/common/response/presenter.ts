@@ -58,9 +58,37 @@ export function presenterFor(client: object | null | undefined): ResponsePresent
   return (client && presenters.get(client)) || defaultPresenter
 }
 
-function textOf(view: ResponseView): string {
-  return view.emoji ? `${view.emoji} ${view.text}` : view.text
+/** Discord's limits on a message's text, counted by `String.length` as discord.js's builders count them. */
+export const TEXT_LIMITS = { embed: 4096, v2: 4000, content: 2000 } as const
+
+/** `text` cut to `limit` characters ending in `…`, on a code point boundary so no surrogate pair is split. */
+export function fitText(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  let cut = text.slice(0, Math.max(0, limit - 1))
+  const last = cut.charCodeAt(cut.length - 1)
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1)
+  return `${cut}…`
 }
+
+/**
+ * An error's message as a presenter is given it: fitted to `limit`, and, when empty, MeoCord's generic error text, so a
+ * presenter that writes it as its text always renders.
+ */
+export function presentedMessage(message: string, limit: number, generic: () => string): string {
+  return fitText(message === '' ? generic() : message, limit)
+}
+
+/**
+ * The view's text after what MeoCord puts before it, its emoji and a Text Display's title line. When only those take
+ * the two past `limit`, the text is cut so they fit; a text past `limit` by itself is left, a view MeoCord can't render.
+ */
+function textAfter(prefix: string, view: ResponseView, limit: number): string {
+  const total = prefix.length + view.text.length
+  if (total <= limit || view.text.length > limit || prefix.length >= limit) return prefix + view.text
+  return prefix + fitText(view.text, limit - prefix.length)
+}
+
+const emojiOf = (view: ResponseView) => (view.emoji ? `${view.emoji} ` : '')
 
 /** Discord's limit of attachments on one message. */
 export const ATTACHMENT_LIMIT = 10
@@ -173,7 +201,7 @@ function unshownFiles(view: ResponseView): ResponseFile[] {
 
 /** A view as an embed: its image, or else its first image file not its thumbnail, as the embed's image. */
 export function renderEmbed(view: ResponseView): APIEmbed {
-  const embed = new EmbedBuilder().setDescription(textOf(view))
+  const embed = new EmbedBuilder().setDescription(textAfter(emojiOf(view), view, TEXT_LIMITS.embed))
   if (view.title) embed.setTitle(view.title)
   if (view.color !== undefined) embed.setColor(view.color)
   const image = view.image ?? unshownFiles(view).map(nameOf).find(name => IMAGE.test(name))
@@ -186,7 +214,8 @@ export function renderEmbed(view: ResponseView): APIEmbed {
 export function renderContainer(view: ResponseView): APIContainerComponent {
   const container = new ContainerBuilder().setId(RENDERED_CONTAINER_ID)
   if (view.color !== undefined) container.setAccentColor(resolveColor(view.color))
-  const text = new TextDisplayBuilder().setContent(view.title ? `### ${view.title}\n${textOf(view)}` : textOf(view))
+  const titleLine = view.title ? `### ${view.title}\n` : ''
+  const text = new TextDisplayBuilder().setContent(textAfter(titleLine + emojiOf(view), view, TEXT_LIMITS.v2))
   if (view.thumbnail) {
     container.addSectionComponents(
       new SectionBuilder().addTextDisplayComponents(text).setThumbnailAccessory(new ThumbnailBuilder().setURL(urlOf(view, view.thumbnail))),
