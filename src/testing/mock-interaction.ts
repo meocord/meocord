@@ -11,6 +11,22 @@ import {
   type APIEmbed,
   type APIMessageTopLevelComponent,
   Component,
+  ActionRow,
+  ButtonComponent,
+  ChannelSelectMenuComponent,
+  ContainerComponent,
+  FileComponent,
+  LabelComponent,
+  MediaGalleryComponent,
+  MentionableSelectMenuComponent,
+  RoleSelectMenuComponent,
+  SectionComponent,
+  SeparatorComponent,
+  StringSelectMenuComponent,
+  TextDisplayComponent,
+  TextInputComponent,
+  ThumbnailComponent,
+  UserSelectMenuComponent,
   Embed,
   type JSONEncodable,
   type MessageFlagsResolvable,
@@ -1994,9 +2010,12 @@ export interface MockMessageOverrides {
    * on the message's client, and in a server its `member` is the guild's cached member for that user, or a new one.
    */
   author?: User
-  /** Its top-level components: action rows, or Components V2 such as a container. */
+  /**
+   * Its top-level components: action rows, or Components V2 such as a container. Builders or API JSON, held as
+   * discord.js's classes, such as `ActionRow` and `ButtonComponent`, built from their JSON at the time of the call.
+   */
   components?: readonly (APIMessageTopLevelComponent | JSONEncodable<APIMessageTopLevelComponent>)[]
-  /** Its embeds. */
+  /** Its embeds, builders or API JSON, held as discord.js's `Embed` built from their JSON at the time of the call. */
   embeds?: readonly (APIEmbed | JSONEncodable<APIEmbed>)[]
   /** Its flags: a number, flag names or a `MessageFlagsBitField`. */
   flags?: MessageFlagsResolvable
@@ -2152,16 +2171,38 @@ function messageFrom(held: HeldMessage): DeepMocked<Message> & { deleted: boolea
   })
 }
 
+// The class discord.js builds each component type into, as its own `createComponent`, which it doesn't export, does.
+// Its typings make these constructors private, so the classes are held untyped
+const COMPONENT_CLASSES: Partial<Record<number, unknown>> = {
+  [ComponentType.ActionRow]: ActionRow,
+  [ComponentType.Button]: ButtonComponent,
+  [ComponentType.StringSelect]: StringSelectMenuComponent,
+  [ComponentType.TextInput]: TextInputComponent,
+  [ComponentType.UserSelect]: UserSelectMenuComponent,
+  [ComponentType.RoleSelect]: RoleSelectMenuComponent,
+  [ComponentType.MentionableSelect]: MentionableSelectMenuComponent,
+  [ComponentType.ChannelSelect]: ChannelSelectMenuComponent,
+  [ComponentType.Container]: ContainerComponent,
+  [ComponentType.TextDisplay]: TextDisplayComponent,
+  [ComponentType.File]: FileComponent,
+  [ComponentType.MediaGallery]: MediaGalleryComponent,
+  [ComponentType.Section]: SectionComponent,
+  [ComponentType.Separator]: SeparatorComponent,
+  [ComponentType.Thumbnail]: ThumbnailComponent,
+  [ComponentType.Label]: LabelComponent,
+}
+
 /**
- * A component or embed as a message holds it: a discord.js instance as it is; anything else as
- * its API JSON at the time of the call, behind `toJSON()`.
+ * A component or embed as a message holds it: a discord.js instance as it is, anything else as the discord.js class
+ * built from its API JSON at the time of the call, an unknown component type as a plain `Component`.
  */
-function asHeld<T>(value: T | JSONEncodable<T>): JSONEncodable<T> {
+function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JSONEncodable<T> {
   if (value instanceof Component || value instanceof Embed) return value as JSONEncodable<T>
-  const json = structuredClone(
-    typeof (value as Partial<JSONEncodable<T>>).toJSON === 'function' ? (value as JSONEncodable<T>).toJSON() : (value as T),
-  )
-  return { toJSON: () => json }
+  // A copy, since discord.js's classes keep what they are given, one level deep
+  const json = structuredClone(jsonOf(value)) as { type?: number }
+  if (kind === 'embed') return new (Embed as unknown as new (data: unknown) => Embed)(json) as unknown as JSONEncodable<T>
+  const Class = ((json.type !== undefined && COMPONENT_CLASSES[json.type]) || Component) as new (data: unknown) => Component
+  return new Class(json) as unknown as JSONEncodable<T>
 }
 
 /**
@@ -2278,8 +2319,8 @@ export function createMockMessage(
 
   // Data a message always has, real rather than stubbed, so code reading it sees an empty message
   instance.flags = new MessageFlagsBitField(overrides.flags)
-  instance.components = (overrides.components ?? []).map(asHeld)
-  instance.embeds = (overrides.embeds ?? []).map(asHeld)
+  instance.components = (overrides.components ?? []).map(component => asHeld(component, 'component'))
+  instance.embeds = (overrides.embeds ?? []).map(embed => asHeld(embed, 'embed'))
   instance.attachments = new Collection()
   instance.editedTimestamp = overrides.editedTimestamp ?? null
   const generatedId = overrides.id === undefined ? nextSnowflake() : undefined
