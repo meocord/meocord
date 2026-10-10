@@ -117,6 +117,7 @@ describe('where a mock interaction is, in default mode', () => {
     expect(warned).toEqual([
       expect.stringMatching(/^ButtonInteraction\.guildId .*message.*5\.0.*useStrictMocks\(\)/s),
       expect.stringMatching(/^ButtonInteraction\.guild .*message.*5\.0.*useStrictMocks\(\)/s),
+      expect.stringMatching(/^ButtonInteraction\.inGuild\(\) .*message.*5\.0.*useStrictMocks\(\)/s),
       expect.stringMatching(/^ButtonInteraction\.channel .*message.*5\.0.*useStrictMocks\(\)/s),
     ])
   })
@@ -157,11 +158,33 @@ describe('where a mock interaction is, in default mode', () => {
     ])
   })
 
-  it("says nothing when its guild checks read where it is, as they answer alike in both modes", () => {
+  it('says nothing when its guild checks answer as under strict mocks, as for a guildId alone', () => {
     const interaction = slash({ guildId: ELSEWHERE })
 
     expect([interaction.inGuild(), interaction.inRawGuild(), interaction.inCachedGuild()]).toEqual([true, true, false])
     expect(warned).toEqual([])
+  })
+
+  it('warns once by the check it ran where strict mocks answer otherwise, as for a member alone', () => {
+    const member = createMockMember()
+    const interaction = slash({ member, user: member.user })
+
+    expect([interaction.inGuild(), interaction.inGuild(), interaction.inCachedGuild(), interaction.inRawGuild()]).toEqual([false, false, false, false])
+    expect(warned).toEqual([
+      expect.stringMatching(/^ChatInputCommandInteraction\.inGuild\(\) reads a DM's value, though the mock was given a member.*5\.0.*useStrictMocks\(\)/s),
+      expect.stringMatching(/^ChatInputCommandInteraction\.inCachedGuild\(\) reads a DM's value/),
+    ])
+  })
+
+  it("warns by memberPermissions and appPermissions, not by what they read, where strict mocks place it otherwise", () => {
+    const interaction = slash({ guildId: ELSEWHERE })
+
+    void [interaction.memberPermissions, interaction.appPermissions]
+
+    expect(warned).toEqual([
+      expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions reads a server the bot is in, though the mock was given only a guildId/),
+      expect.stringMatching(/^ChatInputCommandInteraction\.appPermissions reads a server the bot is in/),
+    ])
   })
 
   it("warns only that a message the bot sent in a DM reads as a DM's, where strict mocks refuse it beside a guild", async () => {
