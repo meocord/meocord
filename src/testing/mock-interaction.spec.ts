@@ -1689,19 +1689,26 @@ describe('createMock', () => {
     expect(before).not.toContain('flush')
   })
 
-  it("isn't taken for a jasmine spy by jest's matchers, while a member named calls still nests", () => {
+  it("isn't taken for a jasmine spy by jest's matchers, while a nested member named calls still nests", () => {
     // jest's expect reads a received function as a jasmine spy when this holds, before it reads `mock.calls`
     const isSpy = (received: any) =>
       received != null && received.calls != null && typeof received.calls.all === 'function' && typeof received.calls.count === 'function'
-    const api = createMock<{ cache: { flush(): void }; calls: { foo(): number; all(): number[] } }>()
+    const api = createMock<{ cache: { flush(): void; calls: { foo(): number; all(): number[] } } }>()
 
-    expect([isSpy(api.cache.flush), isSpy(api)]).toEqual([false, false])
-    api.calls.foo.mockReturnValue(1)
-    expect(api.calls.foo()).toBe(1)
-    // `all` and `count` directly under a `calls` member are left for a test to set
-    expect(api.calls.all).toBeUndefined()
-    api.calls.all = createMockFn(() => [2])
-    expect(api.calls.all()).toEqual([2])
+    expect([isSpy(api.cache.flush), isSpy(api.cache)]).toEqual([false, false])
+    api.cache.calls.foo.mockReturnValue(1)
+    expect(api.cache.calls.foo()).toBe(1)
+    // `all` and `count` directly under a nested `calls` member are left for a test to set
+    expect(api.cache.calls.all).toBeUndefined()
+    api.cache.calls.all = createMockFn(() => [2])
+    expect(api.cache.calls.all()).toEqual([2])
+  })
+
+  it('keeps all and count under a calls member at the root as mocks', () => {
+    const api = createMock<{ calls: { all(): number[]; count(): number } }>()
+
+    api.calls.all.mockReturnValue([1])
+    expect([api.calls.all(), vi.isMockFunction(api.calls.count)]).toEqual([[1], true])
   })
 
   it('auto-stubs every method as a mock fn', () => {

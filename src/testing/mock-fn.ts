@@ -355,6 +355,10 @@ export function resetAllMocks(): void {
  * across meocord's own mocks, apart from the runner's, so compare the order of two of meocord's mocks, or of two of the
  * runner's, not one of each.
  *
+ * A promise the implementation returns is handed back as one that settles the same way, not as the same object: test
+ * it with `toEqual`, `toHaveReturnedWith` or by awaiting it, not with `toBe`. A property set on the given promise, such
+ * as a `cancel` method, isn't carried over.
+ *
  * @param impl - The implementation to run until another is set.
  *
  * @example

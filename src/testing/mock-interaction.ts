@@ -1224,7 +1224,8 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
       // An explicitly supplied prop wins over the auto-stub.
       if (Object.prototype.hasOwnProperty.call(instance, key)) return Reflect.get(instance, prop, instance)
 
-      if (!stubs.has(key)) stubs.set(key, stubCallable(typeof key === 'string' ? key : undefined))
+      // The double itself is no function a matcher reads, so a `calls` member here keeps its `all` and `count`
+      if (!stubs.has(key)) stubs.set(key, stubCallable())
       return stubs.get(key) as Mock
     },
 
