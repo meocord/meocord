@@ -17,6 +17,7 @@ import {
   matchesHandler,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
+import { setOwn } from '@src/util/value.util.js'
 import { commandRouteKeys, matchCommandRoute } from '@src/core/command-routes.js'
 
 /** The second argument an interaction handler receives, and the names given twice while building it. */
@@ -42,8 +43,8 @@ function modalFields(interaction: ModalSubmitInteraction): Record<string, unknow
   for (const [customId, field] of fields as Map<string, unknown>) {
     const data = field as unknown as Record<string, unknown>
     // An upload's `values` are the attachments' ids; discord.js resolves the attachments themselves alongside
-    if (data.type === ComponentType.FileUpload) values[customId] = entriesOf(interaction.fields.getUploadedFiles(customId))
-    else values[customId] = 'value' in data ? data.value : data.values
+    if (data.type === ComponentType.FileUpload) setOwn(values, customId, entriesOf(interaction.fields.getUploadedFiles(customId)))
+    else setOwn(values, customId, 'value' in data ? data.value : data.values)
   }
   return values
 }
@@ -82,7 +83,7 @@ export function handlerInput(interaction: Interaction, routeParams: Record<strin
   if (!hasCustomId(interaction)) return { params: {}, collisions: [] }
 
   const fields = interaction instanceof ModalSubmitInteraction ? modalFields(interaction) : selectChoices(interaction)
-  const collisions = Object.keys(routeParams).filter(name => name in fields)
+  const collisions = Object.keys(routeParams).filter(name => Object.hasOwn(fields, name))
   return { params: { ...fields, ...routeParams }, collisions }
 }
 

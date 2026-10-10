@@ -122,9 +122,9 @@ export function dropInheritedRoutes(prototype: object): void {
     inherited.includes(entry) && redeclared.has(method(entry as never))
 
   const commands = ownCommandMap(prototype)
-  const baseCommands: Record<string, CommandMeta[]> = Reflect.getMetadata(META.commands, base) ?? {}
+  const baseCommands: Record<string, CommandMeta[]> = Reflect.getMetadata(META.commands, base) ?? Object.create(null)
   for (const [name, metas] of Object.entries(commands)) {
-    const kept = metas.filter(meta => !inheritedFor(baseCommands[name] ?? [], (entry: CommandMeta) => entry.methodName)(meta))
+    const kept = metas.filter(meta => !inheritedFor(commandsNamed(baseCommands, name), (entry: CommandMeta) => entry.methodName)(meta))
     if (kept.length > 0) commands[name] = kept
     else delete commands[name]
   }
@@ -141,13 +141,23 @@ export function dropInheritedRoutes(prototype: object): void {
   }
 }
 
-/** The class's own command map, started from a copy of the inherited one, for the same reason. */
+/**
+ * The class's own command map, started from a copy of the inherited one, for the same reason. Keyed by command name
+ * without a prototype, so a command named like an inherited key, such as `constructor`, is a key like any other.
+ */
 function ownCommandMap(target: object): Record<string, CommandMeta[]> {
   const own: Record<string, CommandMeta[]> | undefined = Reflect.getOwnMetadata(META.commands, target)
   if (own) return own
 
   const inherited: Record<string, CommandMeta[]> = Reflect.getMetadata(META.commands, target) ?? {}
-  return Object.fromEntries(Object.entries(inherited).map(([name, metas]) => [name, [...metas]]))
+  const copy: Record<string, CommandMeta[]> = Object.create(null)
+  for (const [name, metas] of Object.entries(inherited)) copy[name] = [...metas]
+  return copy
+}
+
+/** The handlers a command map holds for `name`: its own entry only, never one `Object.prototype` holds. */
+export function commandsNamed<T extends string>(map: Record<string, CommandMeta<T>[]> | undefined, name: string): CommandMeta<T>[] {
+  return map && Object.hasOwn(map, name) ? map[name] : []
 }
 
 /** A `@MessageHandler` as the decorator stores it. */
@@ -804,8 +814,9 @@ export function Command<
       ...(guilds && { guilds }),
     }
     // One the class inherits for this method and route is replaced where it stands, so this one's options apply
-    const metas = (commands[commandName] ??= [])
-    const inherited: CommandMeta[] = getCommandMap(Object.getPrototypeOf(target) as object)?.[commandName] ?? []
+    if (!Object.hasOwn(commands, commandName)) commands[commandName] = []
+    const metas = commands[commandName]
+    const inherited = commandsNamed(getCommandMap(Object.getPrototypeOf(target) as object), commandName)
     const replaced = metas.findIndex(meta => inherited.includes(meta) && meta.methodName === propertyKey && meta.type === commandType)
     if (replaced === -1) metas.push(declared)
     else metas[replaced] = declared

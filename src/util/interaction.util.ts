@@ -17,7 +17,7 @@ import {
 } from 'discord.js'
 import { CommandType } from '@src/enum/controller.enum.js'
 import { quoteForLog } from '@src/util/user-text.util.js'
-import { withArticle } from '@src/util/value.util.js'
+import { setOwn, withArticle } from '@src/util/value.util.js'
 
 /**
  * The discord.js interaction class each command type handles, shared by `@Command`, the dispatcher and the testing
@@ -143,7 +143,7 @@ export function resolveOptionParams(
         walk(option.options ?? [])
         continue
       }
-      params[option.name] = resolveOptionValue(option)
+      setOwn(params, option.name, resolveOptionValue(option))
     }
   }
 
