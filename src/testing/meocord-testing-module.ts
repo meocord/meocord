@@ -72,7 +72,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
-import { createMockClient } from './mock-interaction.js'
+import { createMockClient, noteReactionDispatch } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createFallback, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
@@ -696,6 +696,7 @@ export class TestingModule {
     }
 
     if (options) {
+      noteReactionDispatch(input)
       await this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action: options.action ?? ReactionHandlerAction.ADD }, record))
     } else if (input instanceof BaseInteraction) {
       const presenter = appPresenterOf(this.container)

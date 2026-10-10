@@ -15,9 +15,13 @@ export function noteMockMade(): void {
  *
  * Call it once in the test runner's setup file. A message's `editable`, `deletable`, `pinnable`, `crosspostable`,
  * `bulkDeletable`, `hasThread` and `partial`, a member's `manageable`, `kickable`, `bannable` and `moderatable`, a
- * role's `editable`, a channel's and a thread's `viewable`, `manageable`, `deletable`, `joinable` and the rest, and
- * `partial` on users, channels and reactions then run discord.js's own getters against the mock, and `message.thread`
- * is `null` when the channel caches no thread under the message's id. No placeholder warning is logged.
+ * role's `editable`, a channel's and a thread's `viewable`, `manageable`, `deletable`, `joinable` and the rest, a voice
+ * channel's `full`, and `partial` on users, channels and reactions then run discord.js's own getters against the mock,
+ * and `message.thread` is `null` when the channel caches no thread under the message's id. So do a message's
+ * `editedAt`, a member's `presence`, a server's `verified` and `systemChannel` and a channel's `parent`, each `null` or
+ * `false` until the test gives what it is computed from. A reaction's `me` is `false`, a message's
+ * `mentions.repliedUser` and a modal's `message` are `null`, and a reaction has a whole message of its own, so
+ * MeoCord's dispatcher fetches neither. No placeholder warning is logged.
  *
  * @remarks
  * Those getters read what a server holds, so strict mocks also have it as Discord sends it: the bot's member is in
