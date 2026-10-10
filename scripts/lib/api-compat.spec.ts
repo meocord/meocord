@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
-import { apiBreaks } from './api-compat.js'
+import { type ApiBreak, apiBreaks, judgeBreaks } from './api-compat.js'
 
 /** The breaks between two declaration files, compiled together in memory as the check compiles the real ones. */
 function breaksBetween(before: string, after: string): string[] {
   return compare(before, after).breaks
 }
 
-/** The breaks and the generic signatures to review between two declaration files, compiled together in memory. */
+/** {@link compared}, each break as one line. */
 function compare(before: string, after: string): { breaks: string[]; review: string[] } {
+  const { breaks, review } = compared(before, after)
+  return { breaks: breaks.map(({ path, problem }) => `${path} ${problem}`), review }
+}
+
+/** The breaks and the generic signatures to review between two declaration files, compiled together in memory. */
+function compared(before: string, after: string): { breaks: ApiBreak[]; review: string[] } {
   const files: Record<string, string> = { '/before.d.ts': before, '/after.d.ts': after }
   const options: ts.CompilerOptions = { strict: true, noEmit: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext }
   const host = ts.createCompilerHost(options)
@@ -16,8 +22,7 @@ function compare(before: string, after: string): { breaks: string[]; review: str
   host.getSourceFile = (name, language) => (name in files ? ts.createSourceFile(name, files[name]!, language) : read(name, language))
   host.fileExists = name => name in files || ts.sys.fileExists(name)
   const program = ts.createProgram(Object.keys(files), options, host)
-  const { breaks, review } = apiBreaks(program.getTypeChecker(), program.getSourceFile('/before.d.ts')!, program.getSourceFile('/after.d.ts')!)
-  return { breaks: breaks.map(({ path, problem }) => `${path} ${problem}`), review }
+  return apiBreaks(program.getTypeChecker(), program.getSourceFile('/before.d.ts')!, program.getSourceFile('/after.d.ts')!)
 }
 
 describe('apiBreaks', () => {
@@ -121,5 +126,26 @@ describe('apiBreaks', () => {
     it('lists nothing for one unchanged but for its type parameters’ names', () => {
       expect(compare('export declare function f<T>(a: T): T[]', 'export declare function f<U>(a: U): U[]').review).toEqual([])
     })
+  })
+})
+
+describe('judgeBreaks', () => {
+  /** What the allowlist leaves to refuse when it names the one break between two declaration files. */
+  function judged(before: string, after: string, major: boolean) {
+    const breaks = compared(before, after).breaks.map(found => ({ ...found, id: `core ${found.path}`, file: 'dist/types/core/index.d.ts' }))
+    expect(breaks).toHaveLength(1)
+    const { unlisted, stale, majorOnly } = judgeBreaks(breaks, { [breaks[0]!.id]: 'Deliberate.' }, major)
+    return [...unlisted.map(({ id }) => id), ...stale, ...majorOnly]
+  }
+
+  const removal = ['export interface Meta { name: string; specificity: number[] }', 'export interface Meta { name: string }'] as const
+
+  it.each([
+    ['a narrowed member type in a patch', "export interface State { readonly items: readonly unknown[] }", 'export interface State { readonly items: readonly string[] }', false, []],
+    ['a removed member in a major', ...removal, true, []],
+    ['a removed member in a patch', ...removal, false, ['core Meta.specificity']],
+    ['a narrowed parameter in a patch', 'export declare function f(a: string | number): void', 'export declare function f(a: string): void', false, ['core f']],
+  ])('judges an allowlist entry for %s', (_, before, after, major, refused) => {
+    expect(judged(before, after, major)).toEqual(refused)
   })
 })

@@ -247,3 +247,29 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
   }
   return { breaks, review }
 }
+
+/** A break in one entry's declarations, under the id the allowlist names it by, such as `common Meta.specificity`. */
+export interface EntryBreak extends ApiBreak {
+  id: string
+  file: string
+}
+
+/**
+ * Whether the allowlist may accept a break outside a major release: a member whose type was narrowed. Code that
+ * reads the member still compiles; only code that builds its own value with the wider type breaks.
+ */
+const narrowsMember = ({ path, problem }: ApiBreak) => path.includes('.') && problem.startsWith('narrowed: ')
+
+/**
+ * The breaks judged against the allowlist: those it doesn't name, the entries that name no break, and, unless the
+ * release is a major one, the entries that allow a break other than a narrowed member type.
+ */
+export function judgeBreaks(breaks: EntryBreak[], allowlist: Record<string, string>, major: boolean) {
+  const allowed = new Set(breaks.filter(({ id }) => allowlist[id]).map(({ id }) => id))
+  return {
+    unlisted: breaks.filter(({ id }) => !allowlist[id]),
+    allowed,
+    stale: Object.keys(allowlist).filter(id => !allowed.has(id)),
+    majorOnly: major ? [] : [...new Set(breaks.filter(entry => allowlist[entry.id] && !narrowsMember(entry)).map(({ id }) => id))],
+  }
+}
