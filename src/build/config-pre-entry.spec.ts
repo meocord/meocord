@@ -39,8 +39,10 @@ export const greeting: string | null = Reflect.get(App, 'options').greeting ?? n
 const MAIN = `
 import { greeting } from './app'
 import logo from './logo.png'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const load = createRequire(import.meta.url)
 load(path.resolve(process.cwd(), 'dist', 'meocord.config.mjs'))
@@ -51,6 +53,11 @@ console.log(
     evaluations: Reflect.get(globalThis, 'configEvaluations'),
     bundleEntry: Reflect.get(globalThis, Symbol.for('meocord.bundleEntry')),
     asset: logo,
+    urlFile: fileURLToPath(import.meta.url),
+    dirname: import.meta.dirname,
+    urlAsset: existsSync(fileURLToPath(new URL('./note.txt', import.meta.url))),
+    // @ts-expect-error The bundler defines it; the fixture has no type for it
+    envMode: import.meta.env.MODE,
   }),
 )
 `
@@ -60,6 +67,13 @@ interface RunResult {
   evaluations: number
   bundleEntry: string
   asset: string
+  /** The file `import.meta.url` names, and `import.meta.dirname`, in the entry module. */
+  urlFile: string
+  dirname: string
+  /** Whether a file found through `new URL('./note.txt', import.meta.url)` is there. */
+  urlAsset: boolean
+  /** `import.meta.env.MODE`, which the bundler writes in. */
+  envMode: string
   /** The same build, its dist copied elsewhere and run from there, as a deploy does. */
   copied?: RunResult
   /** The same build, imported by a wrapper, as pm2 starts a bundle, so process.argv[1] is the wrapper's. */
@@ -113,6 +127,7 @@ beforeAll(() => {
   writeFileSync(path.join(fixture, 'src', 'app.ts'), APP)
   writeFileSync(path.join(fixture, 'src', 'main.ts'), MAIN)
   writeFileSync(path.join(fixture, 'src', 'logo.png'), 'not really a png')
+  writeFileSync(path.join(fixture, 'src', 'note.txt'), 'a note')
 })
 
 afterAll(() => {
@@ -153,6 +168,19 @@ describe('the config pre-entry, built and run with node', () => {
 
       expect(realpathSync(wrapped!.bundleEntry)).toBe(realpathSync(path.join(fixture, 'dist', 'main.js')))
       expect(path.normalize(wrapped!.asset)).toBe(path.join(fixture, 'dist', 'assets', 'logo.png'))
+    },
+  )
+
+  // import.meta.dirname is the running bundle's, so import.meta.url must name the same file, not the build machine's source
+  it.each(['production', 'development'] as const)(
+    'gives import.meta.url the running bundle, and finds a new URL() asset beside it, wherever dist was copied to, in a %s build',
+    async mode => {
+      const { copied } = await runFor(mode)
+
+      expect(path.dirname(copied!.urlFile)).toBe(copied!.dirname)
+      expect(copied!.dirname).toBe(copyOf(mode))
+      expect(copied!.urlAsset).toBe(true)
+      expect(copied!.envMode).toBe(mode)
     },
   )
 

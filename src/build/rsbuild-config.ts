@@ -119,12 +119,11 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
         const wasmDir = environment.config.output.distPath.wasm
         chain.output.webassemblyModuleFilename(path.posix.join(wasmDir, '[contenthash:10].module.wasm'))
         // `new URL('./file', import.meta.url)` stays a URL relative to the bundle. Through the asset prefix, a disk path,
-        // it would parse as a URL of scheme `c:` on Windows rather than a file: URL
-        chain.module.parser.merge({ javascript: { url: 'new-url-relative' } })
-        // The pre-entry records the bundle's own path from import.meta.url, which the bundler would otherwise fix at
-        // build time to the pre-entry's source file. In every mode: a process manager such as pm2 starts the bundle
-        // from a wrapper of its own, so process.argv[1] names that wrapper, not the bundle
-        chain.module.rule('meocord-pre-entry').test(CONFIG_PRE_ENTRY).parser({ importMeta: false })
+        // it would parse as a URL of scheme `c:` on Windows rather than a file: URL. import.meta.url itself is left to the
+        // runtime, as import.meta.dirname is, so it names the running bundle rather than the source file on the machine
+        // that built it; the pre-entry records the bundle's own path from it, which a process manager's wrapper in
+        // process.argv[1] would hide
+        chain.module.parser.merge({ javascript: { url: 'new-url-relative', importMeta: false } })
         // Hoisting modules into one scope renames a class whose name another module also declares, and
         // MeoCord keys cooldowns and names handlers by class name, so a build keeps each module's own scope
         chain.optimization.concatenateModules(false)
