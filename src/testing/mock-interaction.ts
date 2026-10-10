@@ -1320,7 +1320,13 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const generatedId = unset('id') ? (instance.id = nextSnowflake()) : undefined
     defineCreatedTime(instance, generatedId)
     // Strict mocks place it where its message, guild or member is, and a guildId alone in a server the bot isn't in
-    strictPlace = strictPlaceOf(own)
+    // Read as the mock's own, so a message's placement warning stays the test's
+    readingPlace++
+    try {
+      strictPlace = strictPlaceOf(own)
+    } finally {
+      readingPlace--
+    }
     if (strictPlace && strictMocks()) {
       if (strictPlace.refused) throw new Error(strictPlace.refused)
       const set = (key: string, value: unknown) => Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true })
@@ -1497,16 +1503,18 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
 
   // In default mode, where strict mocks place it elsewhere, reading where it is warns
   if (strictPlace && !strictMocks()) warnOnPlaceReads(instance, strictPlace, new Set(Object.keys(props ?? {})))
-  // Under strict mocks, a message whose place the mock made moves to where the test placed the interaction
+  // A message whose place the mock made moves to where the test placed the interaction under strict mocks, and is then
+  // one the test placed; in default mode it stays, and reading its place warns
   const message = own('message') as Record<string, unknown> | undefined
-  if (strictMocks() && BaseInteraction.prototype.isPrototypeOf(instance) && typeof message === 'object' && message !== null && placeWasMade(message)) {
-    const placed = ['channel', 'guild', 'guildId'].some(key => Object.keys(props ?? {}).includes(key))
-    if (placed) {
+  const placed = ['channel', 'guild', 'guildId'].some(key => Object.keys(props ?? {}).includes(key))
+  if (BaseInteraction.prototype.isPrototypeOf(instance) && placed && typeof message === 'object' && message !== null && placeWasMade(message)) {
+    if (strictMocks()) {
       const guild = own('guild') as Guild | null | undefined
       const channel = instance.channel as { id?: string } | null
       Object.assign(message, { guild: guild ?? null, guildId: own('guildId') ?? null, ...(channel && { channel, channelId: channel.id }) })
       if (guild) memberFor(guild, message.author as { id: string }, true)
-    }
+      placesMade.delete(mockTargets.get(message) ?? message)
+    } else warnOnMadePlaceReads(mockTargets.get(message) ?? message)
   }
 
   // Options assigned after creation, directly or through Object.assign, belong to it as those given do
@@ -2201,6 +2209,47 @@ interface StrictPlace {
  */
 // Mock messages whose channel and server the mock made, as neither was given
 const placesMade = new WeakSet<object>()
+
+// Messages whose place reads already warn, so a message reused for several interactions is wrapped once
+const madePlaceWarned = new WeakSet<object>()
+
+/**
+ * Has a message whose place the mock made warn once per key when its place is read, in default mode, where strict mocks
+ * move it to the interaction it was given to. A read made while reading another of these, or by the mock, stays quiet.
+ */
+function warnOnMadePlaceReads(message: object): void {
+  if (madePlaceWarned.has(message)) return
+  madePlaceWarned.add(message)
+  for (const key of ['guild', 'guildId', 'channel', 'channelId', 'member']) {
+    const descriptor = Object.getOwnPropertyDescriptor(message, key)
+    if (!descriptor) continue
+    let value = descriptor.value
+    Object.defineProperty(message, key, {
+      get: () => {
+        if (readingPlace === 0) {
+          warnOnce(
+            mockLogger,
+            `Message.${key} reads the place createMockMessage() made for this message here, though the interaction it was ` +
+              "given to is placed elsewhere; in the next major version (5.0) the message moves to the interaction's place. " +
+              'Give the message a channel or guild, or call useStrictMocks() to move it now.',
+          )
+        }
+        readingPlace++
+        try {
+          return descriptor.get ? descriptor.get.call(message) : value
+        } finally {
+          readingPlace--
+        }
+      },
+      set: (next: unknown) => {
+        if (descriptor.set) descriptor.set.call(message, next)
+        else value = next
+      },
+      enumerable: true,
+      configurable: true,
+    })
+  }
+}
 
 /** Whether a message is one whose channel and server the mock made, which a test placing an interaction overrides. */
 const placeWasMade = (message: object): boolean => placesMade.has(mockTargets.get(message) ?? message)
