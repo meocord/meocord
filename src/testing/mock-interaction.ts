@@ -1021,8 +1021,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       return new MessageFlagsBitField(flags).has(MessageFlags.Ephemeral)
     }
 
-    // A message the interaction holds: its original response, or a follow-up, by id. One an answer sent is built from
-    // its payload when first read, so sending builds nothing into JSON that discord.js would build itself
+    // A message the interaction holds: its original response, or a follow-up, by id. An answer's is built when sent,
+    // as discord.js builds it; only one discord.js refuses to build, sent in default mode, is built when first read
     type Held = HeldMessage | (() => HeldMessage)
     const built = (held: Held): HeldMessage => (typeof held === 'function' ? held() : held)
     let original: Held | undefined
@@ -1071,6 +1071,25 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
     const answered = () => instance.deferred || instance.replied
 
+    /**
+     * What an answer sends, built now, as discord.js builds it when sending. One it refuses to build is refused under
+     * strict mocks; default mode warns and holds it to build when first read.
+     */
+    const hold = (method: string, build: () => HeldMessage): Held => {
+      try {
+        return build()
+      } catch (error) {
+        if (strictMocks()) throw error
+        warnOnce(
+          mockLogger,
+          `${method}() here sends what discord.js refuses to build: "${(error as Error).message}". The mock sends it and ` +
+            'builds it when read; in the next major version (5.0) it rejects, as discord.js does. Call useStrictMocks() to ' +
+            'have it rejected now.',
+        )
+        return build
+      }
+    }
+
     /** A first answer: refused once the interaction has one, else it replies or defers. */
     const first = (method: string, kind: 'replied' | 'deferred', then: (args: unknown[]) => void): AnswerGate =>
       (args, byTest) => {
@@ -1081,7 +1100,12 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         instance[kind] = true
         if (ephemeral) instance.ephemeral = true
         answeredByTest = byTest
-        then(args)
+        try {
+          then(args)
+        } catch (error) {
+          undo()
+          throw error
+        }
         return undo
       }
 
@@ -1090,7 +1114,12 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       (args, byTest) => {
         if (!answered()) refuse(method, notYetReplied(method), byTest)
         const undo = snapshot()
-        then(args)
+        try {
+          then(args)
+        } catch (error) {
+          undo()
+          throw error
+        }
         return undo
       }
 
@@ -1123,18 +1152,22 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const answer = (method: ResponseCall['method'], impl: Behaviour, gate: AnswerGate) =>
       stubs.set(method, recordedMock(method, impl, log, gate))
 
-    answer('reply', async () => undefined, first('reply', 'replied', ([options]) => (original = () => sent(options))))
+    answer('reply', async () => undefined, first('reply', 'replied', ([options]) => (original = hold('reply', () => sent(options)))))
     answer('deferReply', async () => undefined, first('deferReply', 'deferred', () => (original = sent(undefined))))
     answer(
       'followUp',
       // The follow-up as sent, which an edit, fetch or delete reaches by its id
-      async () => messageFrom(built(followUps.get(followUpMade!)!)),
+      async () => {
+        const held = followUps.get(followUpMade!)!
+        // One held to build when read resolves to its id alone, as building it now would refuse it
+        return typeof held === 'function' ? createMockMessage({ id: followUpMade }) : messageFrom(held)
+      },
       later('followUp', ([options]) => {
         instance.replied = true
         // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen
         const id = nextSnowflake()
         made = undefined
-        followUps.set(id, { ...sent(options), id })
+        followUps.set(id, hold('followUp', () => ({ ...sent(options), id })))
         followUpMade = id
       }),
     )
@@ -1194,7 +1227,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
 
     // deferUpdate / update — components, and modals submitted from a message's component
     if (isComponent || instance.type === InteractionType.ModalSubmit) {
-      answer('update', async () => undefined, first('update', 'replied', ([options]) => (original = () => edited(componentMessage(), options))))
+      answer('update', async () => undefined, first('update', 'replied', ([options]) => (original = hold('update', () => edited(componentMessage(), options)))))
       answer('deferUpdate', async () => undefined, first('deferUpdate', 'deferred', () => (original = componentMessage())))
     }
   }
