@@ -5,9 +5,12 @@ import { createMockInteraction, createMockMessage, getResponse } from '@src/test
 const { Ephemeral } = MessageFlags
 
 const command = () => createMockInteraction(ChatInputCommandInteraction)
-/** A button on a message with these flags. */
-const button = (flags = 0) => {
-  const message = Object.assign(createMockMessage(), { flags: new MessageFlagsBitField(flags) })
+/** A button on a message with these flags and embeds. */
+const button = (flags = 0, embeds: object[] = []) => {
+  const message = Object.assign(createMockMessage(), {
+    flags: new MessageFlagsBitField(flags),
+    embeds: embeds.map(embed => ({ toJSON: () => embed })),
+  })
   return createMockInteraction(ButtonInteraction, { customId: 'refresh', message: message as never })
 }
 const methods = (interaction: object) => getResponse(interaction as never).calls.map(call => (call.error ? `${call.method}!` : call.method))
@@ -65,6 +68,16 @@ describe('an answer deleted with delete()', () => {
     expect(ephemeral(payload(interaction).flags)).toBe(private_)
   })
 
+  it("sends an edit's follow-up without the attachments the edit would keep", async () => {
+    const interaction = command()
+    await respond(interaction).send('one')
+    await respond(interaction).delete()
+
+    await respond(interaction).edit({ content: 'two', attachments: [] })
+
+    expect(payload(interaction)).not.toHaveProperty('attachments')
+  })
+
   it('makes a follow-up the answer that send() then edits', async () => {
     const interaction = command()
     await respond(interaction).send('one')
@@ -91,17 +104,32 @@ describe('an answer deleted with delete()', () => {
 
   // A private message is where a component's error is added, while it is there
   it("follows a component's deleted private message with an error of its own, never adding it there", async () => {
-    const interaction = button(Ephemeral)
+    const interaction = button(Ephemeral, [{ description: 'OLD CONTENT' }])
     await respond(interaction).acknowledge()
     await respond(interaction).delete()
 
     await respond(interaction).error(new Error('broke'))
 
     expect(methods(interaction)).toEqual(['deferUpdate', 'deleteReply', 'followUp'])
+    expect(payload(interaction).embeds).toHaveLength(1)
+    expect(JSON.stringify(payload(interaction))).not.toContain('OLD CONTENT')
   })
 })
 
 describe('a private follow-up that replaced a public deferral', () => {
+  // Its privacy is the flags it was sent with: the message Discord returns may not say
+  it('is deleted as the private answer it is, so the next one is private too', async () => {
+    const interaction = command()
+    await interaction.deferReply()
+    await respond(interaction).followUp({ content: 'Only you see this.', flags: Ephemeral })
+    await respond(interaction).delete()
+
+    await respond(interaction).send('Again.')
+
+    expect(methods(interaction).at(-1)).toBe('followUp')
+    expect(ephemeral(payload(interaction).flags)).toBe(true)
+  })
+
   it('is the answer send(), edit() and delete() act on, by its id', async () => {
     const interaction = command()
     await interaction.deferReply()

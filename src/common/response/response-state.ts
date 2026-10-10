@@ -466,7 +466,10 @@ export class InteractionResponse implements ResponseState {
    * Which message is the answer: the interaction's own reply, a follow-up that took its place, or none since `delete()`,
    * with whether the deleted one was private. `sync()` leaves it alone, so every edit follows it.
    */
-  private answer: { kind: 'original' } | { kind: 'followUp'; id: string } | { kind: 'deleted'; ephemeral: boolean } = { kind: 'original' }
+  private answer:
+    | { kind: 'original' }
+    | { kind: 'followUp'; id: string; ephemeral: boolean }
+    | { kind: 'deleted'; ephemeral: boolean } = { kind: 'original' }
   private readonly calls: ResponseCall[] = []
 
   private snapshot?: Snapshot
@@ -837,22 +840,24 @@ export class InteractionResponse implements ResponseState {
       this.phase = 'replied'
       return this.answerWith(body)
     }
-    return this.sendFollowUp(body)
+    return (await this.sendFollowUp(body)).message
   }
 
-  private async sendFollowUp(body: Body): Promise<Message> {
+  /** Sends a follow-up, with the flags it was sent with. */
+  private async sendFollowUp(body: Body): Promise<{ message: Message; flags: number }> {
     const flags = this.withSuppression(this.flagsFor('followUp', body.flags, false))
     const sent = forMode(body, hasComponentsV2(flags))
     const message = await this.call('followUp', { ...sent, flags }, () =>
       this.interaction.followUp({ ...sent, flags } as InteractionReplyOptions),
     )
-    return message as Message
+    return { message: message as Message, flags }
   }
 
   /** Sends a follow-up that becomes the answer, which later edits and `delete()` act on by its id. */
   private async answerWith(body: Body): Promise<Message> {
-    const message = await this.sendFollowUp(body)
-    this.answer = { kind: 'followUp', id: message.id }
+    const { message, flags } = await this.sendFollowUp(body)
+    // Its privacy as sent, which the message Discord returns may not carry
+    this.answer = { kind: 'followUp', id: message.id, ephemeral: hasEphemeral(flags) }
     this.lastMessage = message
     return message
   }
@@ -864,10 +869,15 @@ export class InteractionResponse implements ResponseState {
       this.refuseAfterModal()
       const { answer } = this
       if (answer.kind === 'deleted') throw new Error('There is no answer to delete: it was deleted.')
-      // A command's own reply is as private as the interaction's answer; any other answer, as its message
+      // A follow-up is as private as it was sent, a command's own reply as the interaction's answer, a component's
+      // message as its flags
       const shown = this.message?.flags?.has(MessageFlags.Ephemeral) ?? false
-      const ownReply = answer.kind === 'original' && answersWithOwnMessage(this.interaction)
-      const ephemeral = ownReply ? Boolean(this.interaction.ephemeral) || shown : shown
+      const ephemeral =
+        answer.kind === 'followUp'
+          ? answer.ephemeral
+          : answersWithOwnMessage(this.interaction)
+            ? Boolean(this.interaction.ephemeral) || shown
+            : shown
       if (answer.kind === 'followUp') await this.call('deleteReply', answer.id, () => this.interaction.deleteReply(answer.id))
       else await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
       this.answer = { kind: 'deleted', ephemeral }
