@@ -127,15 +127,13 @@ export const CHECKED_SHARDING_KEYS: readonly string[] = Object.keys(shardingShap
  */
 export function configProblems(config: unknown): ConfigProblems {
   const problems: ConfigProblems = { errors: [], warnings: [] }
-  // jiti's interop proxy lists only `default` among its keys, while reading through to it.
-  const loaded = (config as { default?: unknown } | null)?.default ?? config
-  if (typeof loaded !== 'object' || loaded === null) {
-    problems.errors.push(`it must export an object as its default export (got ${describe(loaded)})`)
+  if (typeof config !== 'object' || config === null) {
+    problems.errors.push(`it must export an object as its default export (got ${describe(config)})`)
     return problems
   }
 
   const shape = configShape(problems)
-  for (const [name, value] of Object.entries(loaded)) {
+  for (const [name, value] of Object.entries(config)) {
     const check = shape[name as keyof MeoCordConfig]
     if (!check) {
       problems.warnings.push(`${name} is not a MeoCord option, so it has no effect.`)
