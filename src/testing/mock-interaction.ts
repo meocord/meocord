@@ -12,21 +12,6 @@ import {
   type APIMessageTopLevelComponent,
   Component,
   ActionRow,
-  ButtonComponent,
-  ChannelSelectMenuComponent,
-  ContainerComponent,
-  FileComponent,
-  LabelComponent,
-  MediaGalleryComponent,
-  MentionableSelectMenuComponent,
-  RoleSelectMenuComponent,
-  SectionComponent,
-  SeparatorComponent,
-  StringSelectMenuComponent,
-  TextDisplayComponent,
-  TextInputComponent,
-  ThumbnailComponent,
-  UserSelectMenuComponent,
   Embed,
   type JSONEncodable,
   type MessageFlagsResolvable,
@@ -2171,38 +2156,18 @@ function messageFrom(held: HeldMessage): DeepMocked<Message> & { deleted: boolea
   })
 }
 
-// The class discord.js builds each component type into, as its own `createComponent`, which it doesn't export, does.
-// Its typings make these constructors private, so the classes are held untyped
-const COMPONENT_CLASSES: Partial<Record<number, unknown>> = {
-  [ComponentType.ActionRow]: ActionRow,
-  [ComponentType.Button]: ButtonComponent,
-  [ComponentType.StringSelect]: StringSelectMenuComponent,
-  [ComponentType.TextInput]: TextInputComponent,
-  [ComponentType.UserSelect]: UserSelectMenuComponent,
-  [ComponentType.RoleSelect]: RoleSelectMenuComponent,
-  [ComponentType.MentionableSelect]: MentionableSelectMenuComponent,
-  [ComponentType.ChannelSelect]: ChannelSelectMenuComponent,
-  [ComponentType.Container]: ContainerComponent,
-  [ComponentType.TextDisplay]: TextDisplayComponent,
-  [ComponentType.File]: FileComponent,
-  [ComponentType.MediaGallery]: MediaGalleryComponent,
-  [ComponentType.Section]: SectionComponent,
-  [ComponentType.Separator]: SeparatorComponent,
-  [ComponentType.Thumbnail]: ThumbnailComponent,
-  [ComponentType.Label]: LabelComponent,
-}
-
 /**
  * A component or embed as a message holds it: a discord.js instance as it is, anything else as the discord.js class
- * built from its API JSON at the time of the call, an unknown component type as a plain `Component`.
+ * built from its API JSON at the time of the call, as discord.js builds it, an unknown type as a plain `Component`.
  */
 function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JSONEncodable<T> {
   if (value instanceof Component || value instanceof Embed) return value as JSONEncodable<T>
   // A copy, since discord.js's classes keep what they are given, one level deep
   const json = structuredClone(jsonOf(value)) as { type?: number }
   if (kind === 'embed') return new (Embed as unknown as new (data: unknown) => Embed)(json) as unknown as JSONEncodable<T>
-  const Class = ((json.type !== undefined && COMPONENT_CLASSES[json.type]) || Component) as new (data: unknown) => Component
-  return new Class(json) as unknown as JSONEncodable<T>
+  // An action row builds each child with discord.js's own createComponent, which it doesn't export
+  const row = new (ActionRow as unknown as new (data: unknown) => { components: Component[] })({ type: ComponentType.ActionRow, components: [json] })
+  return row.components[0] as unknown as JSONEncodable<T>
 }
 
 /**
