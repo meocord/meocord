@@ -899,14 +899,15 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * channel its server; one in another server than the `guildId` given is refused, naming both. Under `useStrictMocks()`
  * a `message` given places it in the message's channel and server, a `guild` or a member's guild in that server, and a
  * `guildId` alone in a server the bot isn't in, with no `guild` or `channel` and a raw member for its user; a
- * `channel`, `guild` or `guildId` other than the message's is refused. In default mode it stays where its own channel
- * and guild fields place it, and reading where it is warns once where strict mocks would place it otherwise. A select
- * menu has picked nothing unless given: its `values` are the ids of the `users` and `members`, `roles` or `channels`
- * given, the collections of what it picks, each empty unless given. Other data Discord always sends reads as Discord
- * sends it, such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName` or
- * `customId`, is the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and {@link
- * getResponse} reports every answer the interaction got. Every method is a mock function, and one that returns a
- * promise in discord.js resolves.
+ * `channel`, `guild` or `guildId` other than the place a test gave the message is refused, and a message whose place
+ * `createMockMessage()` made moves to the one given. In default mode it stays where its own channel and guild fields
+ * place it, and reading where it is warns once where strict mocks would place it otherwise. A select menu has picked
+ * nothing unless given: its `values` are the ids of the `users` and `members`, `roles` or `channels` given, the
+ * collections of what it picks, each empty unless given. Other data Discord always sends reads as Discord sends it,
+ * such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName` or `customId`, is
+ * the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports
+ * every answer the interaction got. Every method is a mock function, and one that returns a promise in discord.js
+ * resolves.
  *
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
@@ -1496,6 +1497,17 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
 
   // In default mode, where strict mocks place it elsewhere, reading where it is warns
   if (strictPlace && !strictMocks()) warnOnPlaceReads(instance, strictPlace, new Set(Object.keys(props ?? {})))
+  // Under strict mocks, a message whose place the mock made moves to where the test placed the interaction
+  const message = own('message') as Record<string, unknown> | undefined
+  if (strictMocks() && BaseInteraction.prototype.isPrototypeOf(instance) && typeof message === 'object' && message !== null && placeWasMade(message)) {
+    const placed = ['channel', 'guild', 'guildId'].some(key => Object.keys(props ?? {}).includes(key))
+    if (placed) {
+      const guild = own('guild') as Guild | null | undefined
+      const channel = instance.channel as { id?: string } | null
+      Object.assign(message, { guild: guild ?? null, guildId: own('guildId') ?? null, ...(channel && { channel, channelId: channel.id }) })
+      if (guild) memberFor(guild, message.author as { id: string }, true)
+    }
+  }
 
   // Options assigned after creation, directly or through Object.assign, belong to it as those given do
   return stubDeep(instance, stubs, (prop, value) => {
@@ -2187,13 +2199,21 @@ interface StrictPlace {
  * Where strict mocks place an interaction: in its message's channel and server, in a guild's or a member's server, and
  * with a guildId alone in a server the bot isn't in. Undefined where a channel given, or nothing, places it.
  */
+// Mock messages whose channel and server the mock made, as neither was given
+const placesMade = new WeakSet<object>()
+
+/** Whether a message is one whose channel and server the mock made, which a test placing an interaction overrides. */
+const placeWasMade = (message: object): boolean => placesMade.has(mockTargets.get(message) ?? message)
+
 function strictPlaceOf(own: (key: string) => unknown): StrictPlace | undefined {
   const message = own('message') as { channelId?: unknown; guildId?: string | null; guild?: object | null; channel?: object } | undefined
   const channel = own('channel') as { id?: string } | null | undefined
   const guild = own('guild') as { id?: string } | null | undefined
   const guildId = own('guildId') as string | null | undefined
   const member = own('member')
-  if (typeof message === 'object' && message !== null && typeof message.channelId === 'string') {
+  // A message whose place the mock made has none a test meant, so where the test placed the interaction wins
+  const placed = channel !== undefined || guild !== undefined || guildId !== undefined
+  if (typeof message === 'object' && message !== null && typeof message.channelId === 'string' && !(placed && placeWasMade(message))) {
     const at = message.guildId ?? null
     const refused =
       channel && channel.id !== message.channelId
@@ -2618,6 +2638,7 @@ type MockMessage = DeepMocked<Message> & OmitPartialGroupDMChannel<Message> & { 
 function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaultMode): MockMessage {
   const instance = Object.create(Message.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
+  if (overrides.channel === undefined && overrides.guild === undefined) placesMade.add(instance)
 
   instance.deleted = false
 
@@ -2649,7 +2670,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
   // The author's member, cached as the gateway caches it with the message; `member` reads the cache, as discord.js does
   if (guild) memberFor(guild, instance.author as { id: string }, true)
   Object.defineProperty(instance, 'member', {
-    get: () => (guild ? (guild as Guild).members.resolve(instance.author as User) : null),
+    get: () => (instance.guild ? (instance.guild as Guild).members.resolve(instance.author as User) : null),
     set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
     enumerable: true,
     configurable: true,
