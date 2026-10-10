@@ -125,6 +125,20 @@ describe("a message context menu's target", () => {
     expect(warned).toEqual([])
   })
 
+  it.each(modes)("makes and caches no channel when read, and reads the menu's channel the test caches later, in %s", (_mode, setUp) => {
+    setUp()
+    const guild = createMockGuild()
+    const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report', guild, guildId: guild.id })
+    const { targetMessage } = menu
+
+    expect([guild.channels.cache.size, menu.client.channels.cache.size]).toEqual([0, 0])
+    const channel = createMockChannel(TextChannel, { id: menu.channelId, guild })
+    guild.channels.cache.set(channel.id, channel)
+    expect([targetMessage.channelId, targetMessage.guildId]).toEqual([menu.channelId, guild.id])
+    expect(targetMessage.channel).toBe(channel)
+    expect(menu.channel).toBe(channel)
+  })
+
   it.each(modes)("is made in the user's DM channel for a menu used in a DM, in %s", (_mode, setUp) => {
     setUp()
     const menu = createMockInteraction(MessageContextMenuCommandInteraction, { commandName: 'Report' })

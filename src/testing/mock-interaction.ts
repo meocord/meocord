@@ -703,7 +703,7 @@ function defineCreatedTime(instance: object, generatedId: string | undefined): v
 }
 
 /**
- * Gives a user, role, server or channel mock its creation time. Under strict mocks, a generated id gives the time the mock
+ * Gives a user, server or channel mock its creation time. Under strict mocks, a generated id gives the time the mock
  * was made, as a message's. Otherwise it gives that id's own time, a fixed day in 2025, with a warning once when read.
  * An id the test gives decides it in both modes, and a value the test sets replaces it.
  */
@@ -1477,18 +1477,26 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         explicitId = value as string
         given = undefined
       })
-      // Made in the channel the menu was used in, and its server, as the message a menu is used on is; read as the
-      // mock's own, so a placement warning stays the test's
-      const makeTarget = () => {
+      // In the channel the menu was used in, and its server, as the message a menu is used on is: its channel is the
+      // menu's, read live, so making the message makes and caches no channel. Read as the mock's own, so a placement
+      // warning stays the test's
+      const quietly = <V>(read: () => V): V => {
         readingPlace++
-        let channel: unknown
         try {
-          channel = instance.channel
+          return read()
         } finally {
           readingPlace--
         }
-        return createMockMessage({ id: targetId(), ...(channel instanceof BaseChannel && { channel: channel as never }) })
       }
+      const makeTarget = () =>
+        quietly(() => {
+          const [guild, guildId] = [own('guild'), (own('guildId') as string | null | undefined) ?? null]
+          return messageMock({ id: targetId(), guild: guildId && guild instanceof Guild ? guild : null, client: instance.client as Client }, undefined, {}, {
+            channelId: own('channelId') as string,
+            guildId,
+            channel: () => quietly(() => instance.channel),
+          })
+        })
       accessor(
         'targetMessage',
         () => given ?? (made?.id === targetId() ? made : (made = makeTarget())),
@@ -1501,10 +1509,15 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
   }
 
-  // A user or role has an id of its own, as Discord sends one, and was created when the mock was made under strict mocks
-  if ((User.prototype.isPrototypeOf(instance) || Role.prototype.isPrototypeOf(instance)) && !Object.prototype.hasOwnProperty.call(instance, 'id')) {
+  // A user has an id of its own, as Discord sends one, and was created when the mock was made under strict mocks
+  if (User.prototype.isPrototypeOf(instance) && !Object.prototype.hasOwnProperty.call(instance, 'id')) {
     const generatedId = (instance.id = nextSnowflake())
     defineMadeTime(instance, generatedId)
+  }
+  // A role too, created when the mock was made in both modes
+  if (Role.prototype.isPrototypeOf(instance) && !Object.prototype.hasOwnProperty.call(instance, 'id')) {
+    const generatedId = (instance.id = nextSnowflake())
+    defineCreatedTime(instance, generatedId)
   }
   // An attachment too, from the same count as every mock's
   if (Attachment.prototype.isPrototypeOf(instance) && !Object.prototype.hasOwnProperty.call(instance, 'id')) instance.id = nextSnowflake()
@@ -2792,7 +2805,14 @@ interface MadePlace {
   channel?: object
 }
 
-function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaultMode, made: MadePlace = {}): MockMessage {
+/** Where a message is whose channel is another mock's, read live: its ids, and how to read that channel. */
+interface LivePlace {
+  channelId: string
+  guildId: string | null
+  channel: () => unknown
+}
+
+function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaultMode, made: MadePlace = {}, at?: LivePlace): MockMessage {
   const instance = Object.create(Message.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
   const unplaced = overrides.channel === undefined && overrides.guild === undefined
@@ -2824,8 +2844,15 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
           : createMockGuildForMessage()
   ) as { id: string } | null
   const madeChannel = () => channelFor(guild, guild?.id ?? null, nextSnowflake(), instance.author as object)
-  const channel = (overrides.channel ?? (unplaced ? (made.channel ??= madeChannel()) : madeChannel())) as { id: string }
-  Object.defineProperty(instance, 'channel', { value: channel, writable: true, configurable: true })
+  const channel = at ? undefined : ((overrides.channel ?? (unplaced ? (made.channel ??= madeChannel()) : madeChannel())) as { id: string })
+  if (channel) Object.defineProperty(instance, 'channel', { value: channel, writable: true, configurable: true })
+  else {
+    Object.defineProperty(instance, 'channel', {
+      get: at!.channel,
+      set: (value: unknown) => Object.defineProperty(instance, 'channel', { value, writable: true, configurable: true }),
+      configurable: true,
+    })
+  }
   Object.defineProperty(instance, 'guild', { value: guild, writable: true, configurable: true })
   // The author as a member of the message's server; a direct message has none. A given author's member is the one
   // the server caches, as the gateway resolves it, so every message from that author has the same member
@@ -2839,8 +2866,8 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
     configurable: true,
   })
   // In a server's text channel, the ids matching the objects; with no guild, a DM
-  instance.channelId = channel.id
-  instance.guildId = guild?.id ?? null
+  instance.channelId = channel?.id ?? at!.channelId
+  instance.guildId = at ? at.guildId : (guild?.id ?? null)
   // The thread its channel caches under its id, as discord.js reads it; until 5.0, a placeholder thread otherwise
   let placeholderThread: object | undefined
   Object.defineProperty(instance, 'thread', {
@@ -2867,7 +2894,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
   if (guild && overrides.guild === undefined) (guild as Record<string, unknown>).client = client
   Object.defineProperty(instance, 'client', { value: client, writable: true, configurable: true })
   if (guild instanceof Guild) cached(cacheOf(client.guilds), guild.id, () => guild)
-  cacheChannel(channel, guild, client)
+  if (channel) cacheChannel(channel, guild, client)
   const userCache = cacheOf(client.users)
   for (const user of [...(overrides.users ?? []), instance.author as User]) userCache?.set(user.id, user)
 

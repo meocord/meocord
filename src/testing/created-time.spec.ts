@@ -33,7 +33,6 @@ const generated = () =>
     thread: createMockChannel(ThreadChannel),
     'interaction user': createMockInteraction(ButtonInteraction).user,
     "message's guild": createMockMessage().guild!,
-    role: createMockInteraction(Role, {}),
   }) as Record<string, { id: string; createdTimestamp: number | null; createdAt: Date | null }>
 
 describe('a generated mock, under useStrictMocks()', () => {
@@ -72,9 +71,23 @@ describe('a generated mock, in default mode', () => {
     void createMockUser().createdAt
 
     expect(warned).toEqual(
-      ['User', 'Guild', 'TextChannel', 'ThreadChannel', 'Role'].map(name =>
+      ['User', 'Guild', 'TextChannel', 'ThreadChannel'].map(name =>
         expect.stringMatching(new RegExp(`^${name}\\.createdTimestamp reads .*generated id.*2025.*5\\.0.*time the mock was made.*useStrictMocks\\(\\)`, 's')),
       ),
     )
+  })
+})
+
+describe.each([
+  ['default', () => {}],
+  ['strict', () => useStrictMocks()],
+])('a role made with a generated id, in %s mode', (_mode, setUp) => {
+  beforeEach(() => setUp())
+
+  it('was created when the mock was made, with no warning', () => {
+    const role = createMockInteraction(Role, {})
+
+    expect([role.createdTimestamp, role.createdAt.getTime()]).toEqual([NOW, NOW])
+    expect(warned).toEqual([])
   })
 })
