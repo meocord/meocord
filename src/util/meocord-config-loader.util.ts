@@ -53,11 +53,26 @@ export function compiledConfigMessage(): string {
     const reason = (problem.error instanceof Error ? problem.error.message : String(problem.error)).replace(/\.$/, '')
     const missing = missingPackage(problem.error)
     const neededBy = missing?.importer ? `, which ${missing.importer} imports,` : ''
-    const fix = missing ? `Install ${missing.name}${neededBy} in the project` : 'Fix meocord.config.ts'
-    return `MeoCord config at ${problem.path} failed to load: ${reason}. ${fix}, then run \`meocord build\`.`
+    const fix = missing
+      ? `Install ${missing.name}${neededBy} in the project, then run \`meocord build\`.`
+      : fixedInConfig(problem.error)
+        ? 'Fix meocord.config.ts, then run `meocord build`.'
+        : // Thrown by the config's own code as it ran, such as for a variable it requires: rebuilding would not help
+          'It threw as it loaded: check the environment it reads, such as its .env files.'
+    return `MeoCord config at ${problem.path} failed to load: ${reason}. ${fix}`
   }
   const where = problem?.path ?? 'meocord.config.mjs'
   return `MeoCord config not found at ${where} (working directory ${process.cwd()}). Run \`meocord build\`, and start the bot from the dist it writes.`
+}
+
+/**
+ * Whether the config's file or imports are at fault, which a rebuild after fixing it mends: it could not be read as a
+ * module, or imports a file that isn't there. Otherwise its code threw as it ran.
+ */
+function fixedInConfig(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  if (error instanceof SyntaxError || code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return true
+  return typeof code === 'string' && code.startsWith('ERR_REQUIRE_')
 }
 
 /**

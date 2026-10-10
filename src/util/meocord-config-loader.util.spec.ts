@@ -92,9 +92,18 @@ describe('loadMeoCordConfig', () => {
     const failed = await freshLoader()
     expect(failed.loadMeoCordConfig()).toBeUndefined()
     expect(failed.compiledConfigProblem()).toEqual({ path: compiled, missing: false, error: expect.objectContaining({ message: 'dotenv is not installed.' }) })
-    expect(failed.compiledConfigMessage()).toBe(
-      `MeoCord config at ${compiled} failed to load: dotenv is not installed. Fix meocord.config.ts, then run \`meocord build\`.`,
-    )
+  })
+
+  // A config that throws as it runs, such as for a variable it requires, is mended by its environment, not by a rebuild
+  it.each([
+    ['throws as it runs', `if (!process.env.MEOCORD_PROBE_FOO) throw new Error('FOO is required')\nexport default {}\n`, 'FOO is required. It threw as it loaded: check the environment it reads, such as its .env files.'],
+    ['is not a module', 'export default {\n', 'Fix meocord.config.ts, then run `meocord build`.'],
+  ])('advises on a compiled config that %s', async (_, source, advice) => {
+    writeCompiledConfig(source)
+    const failed = await freshLoader()
+
+    expect(failed.loadMeoCordConfig()).toBeUndefined()
+    expect(failed.compiledConfigMessage()).toMatch(new RegExp(`${escapeRegExp(advice)}$`))
   })
 
   // A package the config imports that is not installed is fixed by installing it, not by editing the config

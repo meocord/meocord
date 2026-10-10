@@ -23,6 +23,12 @@ vi.mock('node:fs', async importOriginal => {
   return { ...actual, default: { ...actual }, existsSync: vi.fn().mockReturnValue(true), watch: vi.fn(actual.watch) }
 })
 
+// The reload's config check reads meocord.config.ts, which these cases leave to a stubbed compileConfig
+vi.mock('@src/util/common.util.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('@src/util/common.util.js')>()),
+  checkSourceConfig: vi.fn(() => ({ config: {} })),
+}))
+
 vi.mock('@src/util/meocord-config-loader.util.js', async importOriginal => {
   const actual = await importOriginal<typeof import('@src/util/meocord-config-loader.util.js')>()
   return { ...actual, loadMeoCordConfig: vi.fn(actual.loadMeoCordConfig) }
