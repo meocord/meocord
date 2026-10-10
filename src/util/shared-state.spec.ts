@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction } from 'discord.js'
+import { ButtonInteraction, ChatInputCommandInteraction, type Message, MessageFlagsBitField } from 'discord.js'
 import { vi } from 'vitest'
 import packageJson from '../../package.json' with { type: 'json' }
 import * as errors from '@src/common/errors.js'
@@ -9,12 +9,13 @@ import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { defaultPresenter, setPresenter } from '@src/common/response/presenter.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
 import { mergeTheme, runWithTheme } from '@src/core/theme-scope.js'
-import { createMockFn, createMockInteraction, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
+import { createMockFn, createMockInteraction, createMockMessage, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
 import { forgetMockFn, useMockFn } from '@src/testing/mock-fn.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import { nextSnowflake } from '@src/testing/snowflake.js'
 import { sharedKey } from '@src/util/shared-state.util.js'
-import { respond } from '@src/common/response/response-state.js'
+import { respond, responseOf } from '@src/common/response/response-state.js'
+import { callOrder, stampCall } from '@src/common/response/call-order.js'
 
 // The other build of this version, as a CommonJS file beside ES module ones loads it: the same source, made again
 async function otherBuild() {
@@ -30,6 +31,7 @@ async function otherBuild() {
     snowflake: await import('@src/testing/snowflake.js'),
     testing: await import('@src/testing/index.js'),
     response: await import('@src/common/response/response-state.js'),
+    callOrder: await import('@src/common/response/call-order.js'),
   }
 }
 
@@ -128,6 +130,52 @@ describe('state the two builds of one meocord version share', () => {
 
     expect(respond(interaction)).toBe(theirs)
     expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+  })
+
+  it("reads the answers a mock of the other build got directly, without respond()", async () => {
+    const interaction = other.testing.createMockInteraction(ChatInputCommandInteraction, { commandName: 'buy' })
+
+    await interaction.reply('one')
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['reply'])
+  })
+
+  it('orders the calls either build stamps as one sequence', () => {
+    const [first, second, third] = [{}, {}, {}]
+    stampCall(first)
+    other.callOrder.stampCall(second)
+    stampCall(third)
+
+    expect([callOrder(first), callOrder(second), other.callOrder.callOrder(third)]).toEqual([callOrder(first), callOrder(first) + 1, callOrder(first) + 2])
+  })
+
+  it('puts a message two buttons locked, one through each build, back as it was once both release', async () => {
+    const original = [{ type: 1, components: ['a', 'b'].map(custom_id => ({ type: 2, style: 1, custom_id, label: custom_id })) }]
+    let current: unknown[] = original
+    // The message as its last edit left it, as Discord shows it to the next click
+    const message = Object.assign(createMockMessage(), { flags: new MessageFlagsBitField(0), embeds: [] }) as unknown as Message
+    Object.defineProperty(message, 'components', { get: () => current.map(row => ({ toJSON: () => row })), configurable: true })
+    const clickOn = (make: typeof createMockInteraction, customId: string) => {
+      const interaction = make(ButtonInteraction, { customId, message })
+      interaction.editReply.mockImplementation(async payload => {
+        current = ((payload as { components?: unknown[] }).components ?? current) as unknown[]
+        return message as never
+      })
+      interaction.fetchReply.mockRejectedValue(new Error('not readable'))
+      return interaction
+    }
+    const ours = clickOn(createMockInteraction, 'a')
+    const theirs = clickOn(other.testing.createMockInteraction, 'b')
+    await respond(ours).acknowledge()
+    await other.response.respond(theirs).acknowledge()
+    await respond(ours).lock({ disable: 'clicked' })
+    await other.response.respond(theirs).lock({ disable: 'clicked' })
+
+    await responseOf(ours).release()
+    await other.response.responseOf(theirs).release()
+
+    const disabled = (current as { components: { disabled?: boolean }[] }[])[0].components.map(button => button.disabled ?? false)
+    expect(disabled).toEqual([false, false])
   })
 
   it('follows a delete() in one build with a send() in the other as a follow-up, not an edit of the deleted reply', async () => {
