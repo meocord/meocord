@@ -26,6 +26,7 @@ import {
   type CommandMeta,
 } from '@src/interface/command-decorator.interface.js'
 import { interactionClassName, isCustomIdRouted, matchesCommandType } from '@src/util/interaction.util.js'
+import { wrapsMethod } from '@src/util/method-wrapper.util.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
@@ -714,7 +715,7 @@ export function Command<
 
     // Wrap original method for interaction type validation
     const declaredAs = typeof builderOrType === 'function' ? builderOrType.name : `CommandType.${builderOrType}`
-    _descriptor.value = function (interaction, params) {
+    const checked: NonNullable<typeof _descriptor.value> = function (this: unknown, interaction, params) {
       if (!matchesCommandType(commandType, interaction)) {
         throw new Error(
           `${target.constructor.name}.${propertyKey}: @Command('${commandName}', ${declaredAs}) takes ` +
@@ -724,6 +725,7 @@ export function Command<
 
       return (originalMethod as (...args: unknown[]) => R).apply(this, [interaction, params])
     }
+    _descriptor.value = wrapsMethod(checked, originalMethod)
 
     // This class's own map, inherited routes included
     const commands = ownCommandMap(target)

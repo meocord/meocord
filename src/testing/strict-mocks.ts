@@ -27,6 +27,9 @@ export function noteMockMade(): void {
  * a role to let it do more, such as kick a member its role ranks above. A value the test sets on a mock wins over the
  * computed one. The next major version (5.0) computes these values without the call.
  *
+ * `invoke` also refuses a call that gives a handler fewer arguments than it declares where it builds none, such as a
+ * reaction handler given its reaction without its `ReactionEvent`; without strict mocks, it warns once and calls it.
+ *
  * @throws Error when a mock already exists, which was made without it.
  *
  * @example

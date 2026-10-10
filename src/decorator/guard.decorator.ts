@@ -3,6 +3,7 @@ import { type GuardOptions } from '@src/interface/stage-options.interface.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { classChain, classLevelGuards, consumeDispatchMark, declaringPrototype, handlerMethods, type GuardEntry, runDirectCall } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
+import { wrapsMethod } from '@src/util/method-wrapper.util.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
@@ -32,10 +33,10 @@ function recordGuards(key: MetaKey, guards: GuardEntry[], prototype: object, met
 function applyGuards(descriptor: PropertyDescriptor, prototype: object, propertyKey: string) {
   const originalMethod = descriptor.value
 
-  descriptor.value = async function (this: object, ...args: unknown[]) {
+  descriptor.value = wrapsMethod(async function (this: object, ...args: unknown[]) {
     if (consumeDispatchMark(args[0], this, propertyKey)) return originalMethod.apply(this, args)
     return runDirectCall(this, propertyKey, args, () => originalMethod.apply(this, args))
-  }
+  }, originalMethod)
 
   const wrappers: number = Reflect.getOwnMetadata(META.guardWrappers, prototype, propertyKey) ?? 0
   Reflect.defineMetadata(META.guardWrappers, wrappers + 1, prototype, propertyKey)

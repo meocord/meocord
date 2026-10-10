@@ -93,6 +93,8 @@ import {
 } from '@src/core/providers.js'
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
+import { getReactionHandlers } from '@src/decorator/controller.decorator.js'
+import { strictMocks } from './strict-mocks.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -493,7 +495,9 @@ export class TestingModule {
    * @returns Whether the handler ran, and the error a filter handled, if any. Rejects with an error no
    *   filter handles, or with the error a filter throws: the built-in fallback, which answers such
    *   errors in the bot, does not run here. Rejects before running anything with an interaction or a
-   *   message the handler's route does not match, naming both.
+   *   message the handler's route does not match, naming both. Given fewer arguments than the handler
+   *   declares, with a first that is neither an interaction nor a message, such as a reaction without its
+   *   `ReactionEvent`, it rejects under `useStrictMocks()`, and otherwise warns once and runs the handler.
    *
    * @example
    * ```ts
@@ -547,6 +551,7 @@ export class TestingModule {
         hooks = messageCommandHooks(route, params, first, start, given, this.messageOptions.types)
       }
     }
+    this.checkArgumentCount(controller, methodName, instance[methodName], first, callArgs.length)
     const presenter = appPresenterOf(this.container)
     // A message command's errors are drawn by the app's presenter too, as an interaction's are
     const client = first instanceof BaseInteraction || first instanceof Message ? first.client : undefined
@@ -554,6 +559,26 @@ export class TestingModule {
     this.registerClient(first)
     const { ran, error } = await this.track(runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
+  }
+
+  /** The handlers already warned about for being given fewer arguments than they take, so each is named once. */
+  private readonly warnedArgumentCounts = new Set<string>()
+
+  /**
+   * Refuses under `useStrictMocks()`, or warns once otherwise, a call that gives a handler fewer arguments than it
+   * declares when `invoke` builds none for it, as for a reaction given without its `ReactionEvent`.
+   */
+  private checkArgumentCount(controller: new (...args: any[]) => unknown, methodName: string, method: (...args: unknown[]) => unknown, first: unknown, given: number): void {
+    if (first instanceof BaseInteraction || first instanceof Message || method.length <= given) return
+    const reaction = getReactionHandlers(controller.prototype).some(handler => handler.method === methodName)
+    const problem =
+      `${controller.name}.${methodName} takes ${method.length} arguments, and invoke was given ${given}: ` +
+      (reaction ? 'pass its ReactionEvent after the reaction, as { user, action }.' : 'pass each argument it takes.')
+    if (strictMocks()) throw new Error(problem)
+    const key = `${controller.name}.${methodName}`
+    if (this.warnedArgumentCounts.has(key)) return
+    this.warnedArgumentCounts.add(key)
+    new Logger('TestingModule').warn(problem)
   }
 
   /** The calls under way, each removed once it settles: what `close()` lets finish before the cooldown store stops. */
