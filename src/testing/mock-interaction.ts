@@ -1127,15 +1127,14 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     answer('deferReply', async () => undefined, first('deferReply', 'deferred', () => (original = sent(undefined))))
     answer(
       'followUp',
-      // Its id, which an edit, fetch or delete reaches it by
-      async () => createMockMessage({ id: followUpMade }),
+      // The follow-up as sent, which an edit, fetch or delete reaches by its id
+      async () => messageFrom(built(followUps.get(followUpMade!)!)),
       later('followUp', ([options]) => {
         instance.replied = true
-        // Its id now, for the message followUp() resolves to; the rest when first read
+        // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen
         const id = nextSnowflake()
         made = undefined
-        const held = () => ({ ...sent(options), id })
-        followUps.set(id, held)
+        followUps.set(id, { ...sent(options), id })
         followUpMade = id
       }),
     )
