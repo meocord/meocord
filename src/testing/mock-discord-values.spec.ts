@@ -143,6 +143,7 @@ describe('what discord.js gives empty, in default mode', () => {
     ['Guild.systemChannel', () => createMockGuild().systemChannel, 'guild.systemChannel = null'],
     ['TextChannel.parent', () => createMockChannel(TextChannel).parent, 'textChannel.parent = null'],
     ['ModalSubmitInteraction.message', () => createMockInteraction(ModalSubmitInteraction).message, 'modalSubmitInteraction.message = null'],
+    ['MessageReaction.message', () => createMockInteraction(MessageReaction).message, 'messageReaction.message = createMockMessage()'],
   ])('reads %s as before, and warns once that strict mocks read it as discord.js does', (name, read, example) => {
     expect(read()).toBeTruthy()
     read()

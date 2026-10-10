@@ -336,7 +336,7 @@ const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
  * that, which the warning on reading one names.
  */
 const PLACEHOLDER_VALUES = new Map<object, Readonly<Record<string, string>>>([
-  [MessageReaction.prototype, { me: 'false' }],
+  [MessageReaction.prototype, { me: 'false', message: 'createMockMessage()' }],
   [MessageMentions.prototype, { repliedUser: 'null' }],
   [Message.prototype, { editedAt: 'null' }],
   [GuildMember.prototype, { presence: 'null' }],
