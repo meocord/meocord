@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { inspect, stripVTControlCharacters } from 'util'
@@ -31,11 +31,16 @@ function controllerWith(commands: { name: string; guilds?: (string | undefined)[
   return GeneratedController
 }
 
-/** A REST client that keeps what each PUT sends, as Discord does, and lists it back. */
+/**
+ * A REST client that keeps what each PUT sends and lists it back, as Discord does: a command keeps its id by name, and
+ * gets a new version with every update.
+ */
 const createRest = (existing: Record<string, { name: string }[]> = {}) => {
-  const registered: Record<string, { name: string }[]> = { ...existing }
+  let version = 0
+  const stamp = (command: { name: string }) => ({ ...command, id: `id-${command.name}`, version: String(++version) })
+  const registered: Record<string, { name: string }[]> = Object.fromEntries(Object.entries(existing).map(([route, commands]) => [route, commands.map(stamp)]))
   return {
-    put: vi.fn((route: string, { body }: { body: { name: string }[] }) => Promise.resolve((registered[route] = body))),
+    put: vi.fn((route: string, { body }: { body: { name: string }[] }) => Promise.resolve((registered[route] = body.map(stamp)))),
     get: vi.fn((route: string) => Promise.resolve(registered[route] ?? [])),
   }
 }
@@ -584,6 +589,34 @@ describe('registerCommands', () => {
       await register({ development: true, rest }).run
 
       expect(sentTo(rest)).toEqual({ '/applications/app/commands': ['ping'] })
+    })
+
+    // Another checkout or developer registering the same names to a shared development guild
+    it.each([
+      ['edited', [{ name: 'ping', description: 'edited elsewhere' }]],
+      ['deleted', []],
+    ])('sends again when the scope was %s from elsewhere', async (_label, body) => {
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      await rest.put('/applications/app/commands', { body })
+      rest.put.mockClear()
+      await register({ development: true, rest }).run
+
+      expect(sentTo(rest)).toEqual({ '/applications/app/commands': ['ping'] })
+    })
+
+    it('sends once more from a record without versions, then skips again', async () => {
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      const file = path.join(cwd, 'node_modules', '.cache', 'meocord', 'commands-app-global.json')
+      const { hash } = JSON.parse(readFileSync(file, 'utf8')) as { hash: string }
+      writeFileSync(file, `${JSON.stringify({ hash })}\n`)
+      rest.put.mockClear()
+
+      await register({ development: true, rest }).run
+      await register({ development: true, rest }).run
+
+      expect(rest.put).toHaveBeenCalledTimes(1)
     })
 
     it('sends again after this checkout cleared the scope with clearOther', async () => {
