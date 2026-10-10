@@ -153,8 +153,20 @@ describe("MeoCord's own texts", () => {
     const client = await startApp(partial)
 
     expect((await repliesTo(client, ['!help tag'], serverIn('id')))[0]).toBe(
-      'Usage: !tag <names…> [--loud]\nTags things.\nnames: text, one or more, --loud (optional): on when given\nJuga: !label, !mark, !t',
+      'Usage: !tag <names…> [--loud]\nTags things.\nnames: text, one or more · --loud (optional): on when given\nJuga: !label, !mark, !t',
     )
+  })
+
+  // Intl's unit lists join with nothing in zh-CN, and with a space in ja, and in ru on Node
+  it.each([
+    ['zh-CN', '参数：{params}', '别名：{aliases}', '参数：names: text, one or more · --loud (optional): on when given\n别名：!label, !mark, !t'],
+    ['ja', 'パラメーター: {params}', '別名: {aliases}', 'パラメーター: names: text, one or more · --loud (optional): on when given\n別名: !label, !mark, !t'],
+    ['ru', 'Параметры: {params}', 'Также: {aliases}', 'Параметры: names: text, one or more · --loud (optional): on when given\nТакже: !label, !mark, !t'],
+  ])("keeps help's params and aliases apart in %s, as in MeoCord's English", async (locale, params, aliases, lines) => {
+    const translated = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, [locale]: { meocord: { help: { params, aliases } } } } as never })
+    const client = await startApp(translated)
+
+    expect((await repliesTo(client, ['!help tag'], serverIn(locale)))[0]).toBe(`Usage: !tag <names…> [--loud]\nTags things.\n${lines}`)
   })
 
   it("answers an English server in MeoCord's English when the default locale is another language", async () => {
