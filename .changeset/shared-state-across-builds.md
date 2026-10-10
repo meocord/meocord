@@ -8,4 +8,4 @@ A process that loads meocord both as an ES module and through `require()`, such 
 - A handler's `@UseTheme` theme, the app's translator for meocord's own texts, and its presenter apply whichever build answers.
 - `useStrictMocks()` and `useMockFn()` called in a setup file in one format apply to mocks made in the other, and the two never give two mocks one id.
 
-The two builds share this state only within one installed version. Mock ids keep counting across `vi.resetModules()` and `jest.resetModules()`, where they restarted.
+The two builds share this state only within one installed version. It now outlasts `vi.resetModules()`, `jest.resetModules()` and jest's `resetModules` config, where it was made afresh: mock ids keep counting, and `useStrictMocks()` and `useMockFn()` called in a setup file stay in effect for every test.

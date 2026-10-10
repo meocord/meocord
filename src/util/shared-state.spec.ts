@@ -108,7 +108,9 @@ describe('state the two builds of one meocord version share', () => {
       expect(other.strict.strictMocks()).toBe(true)
       expect(other.mockFn.usesRunnerMockFn()).toBe(true)
       expect(vi.isMockFunction(other.mockFn.createMockFn())).toBe(true)
-      expect(new Set([nextSnowflake(), other.snowflake.nextSnowflake(), nextSnowflake()]).size).toBe(3)
+      // One counter: the other build's next id follows this build's last
+      const ours = BigInt(nextSnowflake())
+      expect(BigInt(other.snowflake.nextSnowflake())).toBe(ours + 1n)
     } finally {
       forgetStrictMocks()
       forgetMockFn()
