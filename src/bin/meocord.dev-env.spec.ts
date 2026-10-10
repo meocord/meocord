@@ -47,6 +47,8 @@ async function run(shellEnv: string | undefined, ...args: string[]) {
   const cli = new MeoCordCLI()
   vi.spyOn(cli, 'startDev').mockResolvedValue(undefined)
   vi.spyOn(cli, 'startProd').mockResolvedValue(undefined)
+  vi.spyOn(cli, 'build').mockResolvedValue(undefined)
+  vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
   await cli.program().parseAsync(['node', 'meocord', ...args])
 }
 
@@ -68,7 +70,7 @@ describe("the mode a command runs in, against the shell's NODE_ENV", () => {
     else process.env.NODE_ENV = original
   })
 
-  it.each([['start --dev'], ['start']])('%s loads the config as development under NODE_ENV=production', async command => {
+  it.each([['start --dev'], ['start'], ['build --dev']])('%s loads the config as development under NODE_ENV=production', async command => {
     await run('production', ...command.split(' '))
 
     expect(loadedUnder).toEqual(['development'])
