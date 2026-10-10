@@ -6,7 +6,7 @@
 
 An empty translation, `''`, which translation tools export for an untranslated string, now counts as missing:
 
-- `t.localizations()` leaves it out, so Discord shows the default there, and a bot with one starts where it stopped;
+- `t.localizations()` leaves it out, so Discord shows the default there, and a bot with one now starts instead of stopping at startup;
 - a reply falls back to a related locale or the default, where it was empty;
 - `expectCompleteCatalog` reports it as missing.
 
