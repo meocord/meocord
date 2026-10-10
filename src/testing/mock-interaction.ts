@@ -600,6 +600,40 @@ function defineCreatedTime(instance: object, generatedId: string | undefined): v
   }
 }
 
+/**
+ * Gives a user, server or channel mock its creation time. Under strict mocks, a generated id gives the time the mock
+ * was made, as a message's. Otherwise it gives that id's own time, a fixed day in 2025, with a warning once when read.
+ * An id the test gives decides it in both modes, and a value the test sets replaces it.
+ */
+function defineMadeTime(mock: object, generatedId: string | undefined): void {
+  if (strictMocks()) return defineCreatedTime(mock, generatedId)
+  const own = (key: string) => Object.prototype.hasOwnProperty.call(mock, key)
+  const name = (Object.getPrototypeOf(mock) as { constructor: { name: string } }).constructor.name
+  if (!own('createdTimestamp')) {
+    Object.defineProperty(mock, 'createdTimestamp', {
+      get(this: { id?: unknown }) {
+        if (this.id === generatedId) {
+          warnOnce(
+            mockLogger,
+            `${name}.createdTimestamp reads the time of its generated id here, a fixed day in 2025; in the next major version (5.0) ` +
+              'it is the time the mock was made. Give the mock an id or a createdTimestamp, or call useStrictMocks() to have it read the time the mock was made now.',
+          )
+        }
+        return isSnowflake(this.id) ? SnowflakeUtil.timestampFrom(this.id) : null
+      },
+      configurable: true,
+    })
+  }
+  if (!own('createdAt')) {
+    Object.defineProperty(mock, 'createdAt', {
+      get(this: { createdTimestamp: number | null }) {
+        return this.createdTimestamp === null ? null : new Date(this.createdTimestamp)
+      },
+      configurable: true,
+    })
+  }
+}
+
 /** Where a mock interaction keeps every answer it got, through respond() or discord.js directly, in order. */
 export const RESPONSE_LOG: unique symbol = Symbol('response log')
 
@@ -706,7 +740,12 @@ const ownOptions = (interaction: object, options: unknown): void => {
 }
 
 /** A mock user that is a person, with an id of its own unless given one. */
-const mockUser = (id = nextSnowflake()): object => stubDeep(Object.assign(Object.create(User.prototype), { id, bot: false }))
+const mockUser = (id?: string): object => {
+  const generatedId = id === undefined ? nextSnowflake() : undefined
+  const user = Object.assign(Object.create(User.prototype) as object, { id: id ?? generatedId, bot: false })
+  defineMadeTime(user, generatedId)
+  return stubDeep(user)
+}
 
 // ---------------------------------------------------------------------------
 // createMockInteraction
@@ -1376,8 +1415,12 @@ export function createMock<T extends object>(props?: MockProps<T>): DeepMocked<T
  * @category Mocks
  * @see {@link createMockInteraction}
  */
-export const createMockUser = (props: MockProps<User> = {}): DeepMocked<User> =>
-  createMockInteraction(User, { id: nextSnowflake(), bot: false, ...props })
+export function createMockUser(props: MockProps<User> = {}): DeepMocked<User> {
+  const generatedId = props.id === undefined ? nextSnowflake() : undefined
+  const user = createMockInteraction(User, { id: generatedId, bot: false, ...props })
+  defineMadeTime(user, generatedId)
+  return user
+}
 
 /**
  * Creates a mock {@link Client}, with `users`, `channels`, `guilds` and `application.commands` ready to stub.
@@ -1529,9 +1572,10 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
  */
 export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<Guild> {
   const instance = Object.create(Guild.prototype) as Record<string, unknown>
-  instance.id = nextSnowflake()
+  const generatedId = overrides.id === undefined ? nextSnowflake() : undefined
+  instance.id = overrides.id ?? generatedId
+  defineMadeTime(instance, generatedId)
 
-  if (overrides.id !== undefined) instance.id = overrides.id
   if (overrides.name !== undefined) instance.name = overrides.name
   if (overrides.preferredLocale !== undefined) instance.preferredLocale = overrides.preferredLocale
   instance.members = managerWith(GuildMemberManager.prototype, overrides.members as never)
@@ -1585,7 +1629,8 @@ export function createMockChannel<T extends BaseChannel>(
   props: MockProps<T> = {},
 ): DeepMocked<ChannelOf<T>> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
-  instance.id = nextSnowflake()
+  const generatedId = props.id === undefined ? nextSnowflake() : undefined
+  instance.id = generatedId
   const is = (Base: { prototype: object }) => Base.prototype.isPrototypeOf(Class.prototype) || Class === Base
 
   // Text and announcement channels: messages, and threads made in the channel
@@ -1614,6 +1659,7 @@ export function createMockChannel<T extends BaseChannel>(
   // A server's channel has its overwrites, none until a test puts some in the cache, which its permissions read
   if (is(GuildChannel) && !is(ThreadChannel)) instance.permissionOverwrites = managerWith(PermissionOverwriteManager.prototype, undefined)
   Object.assign(instance, props)
+  defineMadeTime(instance, generatedId)
 
   const stubs = new Map<string, StubValue>()
   const channel = stubDeep(instance, stubs)
@@ -1932,9 +1978,11 @@ function cacheChannel(channel: object, guild: unknown, client: unknown): void {
 }
 
 /** The guild a mock message carries: a guild with the same stubbed managers as createMockGuild. */
-function createMockGuildForMessage(id = nextSnowflake()): object {
+function createMockGuildForMessage(id?: string): object {
   const guild = Object.create(Guild.prototype) as Record<string, unknown>
-  guild.id = id
+  const generatedId = id === undefined ? nextSnowflake() : undefined
+  guild.id = id ?? generatedId
+  defineMadeTime(guild, generatedId)
   guild.members = managerWith(GuildMemberManager.prototype, undefined)
   guild.channels = managerWith(GuildChannelManager.prototype, undefined)
   guild.roles = guildRoleManager(guild.id as string, undefined)
