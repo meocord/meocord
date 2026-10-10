@@ -84,6 +84,17 @@ describe('where a mock interaction is, under useStrictMocks()', () => {
     expect([inChannel.channel, inChannel.message.channel, inChannel.message.guild]).toEqual([channel, channel, guild])
   })
 
+  it('refuses a message it moved when a later interaction is elsewhere, naming both, and takes it in the same place', () => {
+    const [first, second] = [createMockGuild(), createMockGuild()]
+    const message = createMockMessage()
+
+    const one = click({ message, guild: first, guildId: first.id })
+    expect(() => click({ message, guild: second, guildId: second.id })).toThrow(new RegExp(`message.*${first.id}.*${second.id}`, 's'))
+    const again = click({ message, guild: first, guildId: first.id })
+
+    expect([one.message.guild, again.guild, again.message.guild]).toEqual([first, first, first])
+  })
+
   it("takes a channel, guild and guildId that are its message's", () => {
     const message = createMockMessage()
 
@@ -129,6 +140,21 @@ describe('where a mock interaction is, in default mode', () => {
     void click({ message: createMockMessage(), guild, guildId: guild.id }).channel
 
     expect(warned.filter(text => text.includes('refused'))).toEqual([])
+  })
+
+  it("warns once per key on reading the place the mock made for its message, where strict mocks move it, and not for the mock's own reads", () => {
+    const guild = createMockGuild()
+    const message = createMockMessage()
+    const interaction = click({ message, guild, guildId: guild.id })
+    click({ message, guild, guildId: guild.id })
+    expect(warned).toEqual([])
+
+    void [interaction.message.guild, interaction.message.guild, interaction.message.member]
+
+    expect(warned).toEqual([
+      expect.stringMatching(/^Message\.guild reads the place createMockMessage\(\) made.*5\.0.*useStrictMocks\(\)/s),
+      expect.stringMatching(/^Message\.member reads the place createMockMessage\(\) made/),
+    ])
   })
 
   it('says nothing where it is placed as strict mocks place it', () => {
