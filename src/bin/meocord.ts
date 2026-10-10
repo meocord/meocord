@@ -621,6 +621,13 @@ copies or substantial portions of the Software.
    * them over REST and exits, without logging in. Exits with the application's code.
    */
   async register(guild?: string) {
+    // An unset variable passed as the guild: registering where commands.* says instead could publish everywhere
+    if (guild !== undefined && !guild.trim()) {
+      this.logger.error('--guild was given no guild id, so nothing is registered. Pass a guild id, or leave --guild out to register where commands.* says.')
+      await wait(100)
+      process.exit(1)
+      return
+    }
     if (!fs.existsSync(this.mainJSPath)) {
       this.logger.error('Main entry file (main.js) not found! Build first, or run `meocord register --build`.')
       await wait(100)

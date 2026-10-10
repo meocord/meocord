@@ -249,6 +249,16 @@ describe('spawning the application', () => {
       expect(registerEnv(lastSpawn().options.env)).toMatchObject({ MEOCORD_REGISTER_GUILD: 'guild-id' })
     })
 
+    // `meocord register --guild "$DEV_GUILD_ID"` with the variable unset or blank
+    it.each(['', ' '])('exits 1, and spawns nothing, for a blank guild %j', async guild => {
+      spawnMock.mockClear()
+
+      await new MeoCordCLI().register(guild)
+
+      expect(exitSpy).toHaveBeenCalledWith(1)
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+
     it("exits with the application's code", async () => {
       await new MeoCordCLI().register()
 

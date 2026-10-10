@@ -31,10 +31,14 @@ function controllerWith(commands: { name: string; guilds?: (string | undefined)[
   return GeneratedController
 }
 
-const createRest = (existing: Record<string, { name: string }[]> = {}) => ({
-  put: vi.fn().mockResolvedValue([]),
-  get: vi.fn((route: string) => Promise.resolve(existing[route] ?? [])),
-})
+/** A REST client that keeps what each PUT sends, as Discord does, and lists it back. */
+const createRest = (existing: Record<string, { name: string }[]> = {}) => {
+  const registered: Record<string, { name: string }[]> = { ...existing }
+  return {
+    put: vi.fn((route: string, { body }: { body: { name: string }[] }) => Promise.resolve((registered[route] = body))),
+    get: vi.fn((route: string) => Promise.resolve(registered[route] ?? [])),
+  }
+}
 
 const sentTo = (rest: ReturnType<typeof createRest>) =>
   Object.fromEntries(rest.put.mock.calls.map(([route, { body }]) => [route, body.map((command: { name: string }) => command.name)]))
@@ -430,7 +434,7 @@ describe('registerCommands', () => {
   describe('what it logs and touches', () => {
     it('lists what it registered in a table: name, type, sub-commands', async () => {
       const typed = controllerBuilding([
-        { name: 'settings', body: { name: 'settings', description: 's', options: [{ name: 'language' }, { name: 'theme' }] } },
+        { name: 'settings', body: { name: 'settings', description: 's', options: [{ name: 'language', type: 1 }, { name: 'theme', type: 2 }, { name: 'reason', type: 3 }] } },
         { name: 'Report', body: { name: 'Report', type: 3 } },
         { name: 'Profile', body: { name: 'Profile', type: 2 } },
         { name: 'launch', body: { name: 'launch', type: 4 } },
@@ -445,10 +449,12 @@ describe('registerCommands', () => {
       for (const text of ['Name', 'Type', 'Sub-commands', 'SlashCommand', 'MessageContextMenu', 'UserContextMenu', 'PrimaryEntryPoint', 'Command', 'language, theme']) {
         expect(message).toContain(text)
       }
+      // A plain option is no subcommand
+      expect(message).not.toContain('reason')
     })
 
     it('wraps a long list of sub-commands, and names an unknown type "Command"', async () => {
-      const options = Array.from({ length: 8 }, (_, index) => ({ name: `option-${index}` }))
+      const options = Array.from({ length: 8 }, (_, index) => ({ name: `option-${index}`, type: 1 }))
       const typed = controllerBuilding([
         { name: 'wide', body: { name: 'wide', type: 1, description: 'w', options } },
         { name: 'odd', body: { name: 'odd', type: 9 } },
@@ -554,13 +560,53 @@ describe('registerCommands', () => {
   })
 
   describe('in development', () => {
-    it('skips a scope whose payload is unchanged since it was last sent', async () => {
-      await register({ development: true }).run
-      const { rest, logger, run } = register({ development: true })
+    it('skips a scope whose payload is unchanged since it was last sent, and still registered', async () => {
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      rest.put.mockClear()
+      const { logger, run } = register({ development: true, rest })
       await run
 
       expect(rest.put).not.toHaveBeenCalled()
       expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('unchanged'))
+    })
+
+    // Production on another machine, or another tool, cleared or changed the scope since
+    it.each([
+      ['cleared', () => Promise.resolve([])],
+      ['holding other commands', () => Promise.resolve([{ name: 'other' }])],
+      ['not listable', () => Promise.reject(new Error('down'))],
+    ])('sends again when Discord holds the scope %s', async (_label, listing) => {
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      rest.put.mockClear()
+      rest.get.mockImplementationOnce(listing)
+      await register({ development: true, rest }).run
+
+      expect(sentTo(rest)).toEqual({ '/applications/app/commands': ['ping'] })
+    })
+
+    it('sends again after this checkout cleared the scope with clearOther', async () => {
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      await register({ rest, config: { guilds: ['one'], clearOther: true } }).run
+      rest.put.mockClear()
+      rest.get.mockClear()
+      await register({ development: true, rest }).run
+
+      expect(sentTo(rest)).toEqual({ '/applications/app/commands': ['ping'] })
+      expect(rest.get).not.toHaveBeenCalled()
+    })
+
+    it('sends again after a production run sent to the scope', async () => {
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      await register({ rest }).run
+      rest.put.mockClear()
+      await register({ development: true, rest }).run
+
+      expect(rest.put).toHaveBeenCalled()
+      expect(existsSync(path.join(cwd, 'node_modules', '.cache', 'meocord', 'commands-app-global.json'))).toBe(true)
     })
 
     it('records the payload per application and scope', async () => {
@@ -575,8 +621,10 @@ describe('registerCommands', () => {
       ['for another scope', { config: { guilds: ['one'] } }],
       ['after the commands changed', { controllerClasses: [controllerWith([{ name: 'pong' }])] }],
     ])('sends again when %s', async (_label, overrides) => {
-      await register({ development: true }).run
-      const { rest, run } = register({ development: true, ...overrides })
+      const rest = createRest()
+      await register({ development: true, rest }).run
+      rest.put.mockClear()
+      const { run } = register({ development: true, rest, ...overrides })
       await run
 
       expect(rest.put).toHaveBeenCalled()
@@ -646,7 +694,27 @@ describe('registerCommands', () => {
     })
   })
 
+  // `meocord register --guild "$DEV_GUILD_ID"` with the variable unset or blank
+  it.each(['', ' '])('registers nothing, and reports failure, for a blank guild %j', async onlyGuild => {
+    const { rest, logger, run } = register({ onlyGuild, config: { guilds: ['555'] } })
+
+    await expect(run).resolves.toBe(false)
+    expect(rest.put).not.toHaveBeenCalled()
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('the guild to register to is blank'))
+    expect(planTargets(collectCommands([controllerWith([{ name: 'ping' }])], createLogger())!, { development: false, onlyGuild }, createLogger())).toEqual([])
+  })
+
   describe('leftovers in scopes the configuration names but does not send to', () => {
+    it("says why it keeps them while commands go to the development guild, rather than advising clearOther", async () => {
+      const rest = createRest({ '/applications/app/commands': [{ name: 'ping' }] })
+      const { logger, run } = register({ rest, development: true, config: { developmentGuild: 'dev' } })
+      await run
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/They are not removed while commands go to the development guild, since a production bot sharing this application may own them, even with commands\.clearOther\.$/),
+      )
+    })
+
     it('warns about global commands left behind by a guild scope', async () => {
       const rest = createRest({ '/applications/app/commands': [{ name: 'ping' }] })
       const { logger, run } = register({ rest, config: { guilds: ['one'] } })
@@ -707,12 +775,13 @@ describe('registerCommands', () => {
       expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('Missing Access'))
     })
 
-    it('checks nothing when every scope was unchanged', async () => {
-      await register({ development: true, config: { guilds: ['one'] } }).run
-      const { rest, run } = register({ development: true, config: { guilds: ['one'] } })
-      await run
+    it('checks no other scope when every scope was unchanged, listing only the ones it skips', async () => {
+      const rest = createRest()
+      await register({ development: true, rest, config: { guilds: ['one'] } }).run
+      rest.get.mockClear()
+      await register({ development: true, rest, config: { guilds: ['one'] } }).run
 
-      expect(rest.get).not.toHaveBeenCalled()
+      expect(rest.get.mock.calls.map(([route]) => route)).toEqual(['/applications/app/guilds/one/commands'])
     })
   })
 })
