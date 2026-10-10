@@ -1139,6 +1139,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       // Answered without one of the mock's calls, as after a 40060 or a test setting `replied`: the original is there
       if (!original && answered()) original = componentMessage()
       if (original) original = built(original)
+      // An answer's message gets its id when first read, as it would be built then without strict mocks
+      if (original?.id === '') original = { ...original, id: nextSnowflake() }
       return original
     }
     const unknownMessage = () => createDiscordError(10008, 'Unknown Message')
@@ -1152,7 +1154,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const answer = (method: ResponseCall['method'], impl: Behaviour, gate: AnswerGate) =>
       stubs.set(method, recordedMock(method, impl, log, gate))
 
-    answer('reply', async () => undefined, first('reply', 'replied', ([options]) => (original = hold('reply', () => sent(options)))))
+    answer('reply', async () => undefined, first('reply', 'replied', ([options]) => (original = hold('reply', () => sent(options, false)))))
     answer('deferReply', async () => undefined, first('deferReply', 'deferred', () => (original = sent(undefined))))
     answer(
       'followUp',
@@ -1164,10 +1166,12 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       },
       later('followUp', ([options]) => {
         instance.replied = true
-        // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen
+        // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen; its id taken
+        // once built, so one that fails to build under strict mocks takes none
+        const held = hold('followUp', () => sent(options, false))
         const id = nextSnowflake()
         made = undefined
-        followUps.set(id, hold('followUp', () => ({ ...sent(options), id })))
+        followUps.set(id, typeof held === 'function' ? () => ({ ...held(), id }) : { ...held, id })
         followUpMade = id
       }),
     )
@@ -1227,7 +1231,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
 
     // deferUpdate / update — components, and modals submitted from a message's component
     if (isComponent || instance.type === InteractionType.ModalSubmit) {
-      answer('update', async () => undefined, first('update', 'replied', ([options]) => (original = hold('update', () => edited(componentMessage(), options)))))
+      answer('update', async () => undefined, first('update', 'replied', ([options]) => (original = hold('update', () => edited(heldFrom(instance.message, false), options)))))
       answer('deferUpdate', async () => undefined, first('deferUpdate', 'deferred', () => (original = componentMessage())))
     }
   }
@@ -2413,12 +2417,15 @@ interface HeldMessage {
 const jsonOf = (value: unknown): unknown =>
   value && typeof (value as { toJSON?: unknown }).toJSON === 'function' ? (value as { toJSON: () => unknown }).toJSON() : value
 
-/** The message a reply method starts from: the one a component is on, as it was, or an empty original response. */
-function heldFrom(message: unknown): HeldMessage {
+/**
+ * The message a reply method starts from: the one a component is on, as it was, or an empty original response. Without
+ * `allocate`, one with no id of its own gets `''`, for its holder to give it one when first read.
+ */
+function heldFrom(message: unknown, allocate = true): HeldMessage {
   // Read only what the message really has: a mock's unset fields are stubs
   const from = (message ?? {}) as Partial<Record<keyof Message, unknown>>
   return {
-    id: typeof from.id === 'string' ? from.id : nextSnowflake(),
+    id: typeof from.id === 'string' ? from.id : allocate ? nextSnowflake() : '',
     content: typeof from.content === 'string' ? from.content : undefined,
     components: Array.isArray(from.components) ? from.components.map(jsonOf) : [],
     embeds: Array.isArray(from.embeds) ? from.embeds.map(jsonOf) : [],
@@ -2428,7 +2435,11 @@ function heldFrom(message: unknown): HeldMessage {
 }
 
 /** A message as an answer sends it: a new one, with what the answer gave, never edited. */
-const sent = (options: unknown): HeldMessage => ({ ...edited(heldFrom(undefined), options), editedTimestamp: null })
+const sent = (options: unknown, allocate = true): HeldMessage => {
+  // Its id taken only once it builds, so a payload that fails to build takes none
+  const held = edited(heldFrom(undefined, false), options)
+  return { ...held, id: allocate ? nextSnowflake() : '', editedTimestamp: null }
+}
 
 /** A held message after an edit: what the edit sets replaced in Discord's shape, and a later edit stamp. */
 function edited(held: HeldMessage, options: unknown): HeldMessage {
