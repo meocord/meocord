@@ -381,7 +381,11 @@ export interface MessageResponseContext {
  * @category Presenters
  */
 export interface PresentedError {
-  /** What the user is told. */
+  /**
+   * What the user is told, fitted to Discord's limit for the answer's `mode`: at most 4096 characters for an embed and
+   * 4000 for a Components V2 Text Display, cut to end in `…`. An empty message comes as MeoCord's generic error text.
+   * So a presenter that writes it as its view's text renders, whatever the error's message.
+   */
   message: string
 
   /** The error being answered, so a presenter can style it by kind. */

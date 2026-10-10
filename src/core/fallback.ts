@@ -14,11 +14,13 @@ import { logFailedSend } from '@src/common/response/send-failure.js'
 import {
   attachmentsOf,
   DEFAULT_ATTACHMENT_SIZE_LIMIT,
+  fitText,
   isTooLarge,
   presenterFor,
   REFUSED_AS_TOO_LARGE,
   renderEmbed,
   withoutFiles,
+  TEXT_LIMITS,
   withSendableFiles,
 } from '@src/common/response/presenter.js'
 import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
@@ -159,8 +161,11 @@ async function sendReply<T>(reply: PresentedReply, send: (body: ReplyBody) => Pr
   }
 }
 
-/** The text of a reply to a message, after the call's `emojis.warning` when `withEmoji`. */
-const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ? `${useTheme().emojis.warning} ${text}` : text)
+/** The text of a reply to a message, after the call's `emojis.warning` when `withEmoji`, cut to fit a message's content. */
+function replyText(text: string, withEmoji: boolean | undefined): string {
+  const emoji = withEmoji ? `${useTheme().emojis.warning} ` : ''
+  return emoji + fitText(text, TEXT_LIMITS.content - emoji.length)
+}
 
 /**
  * `text`, answering `error` for `message`: plain, after the call's `emojis.warning` when `withEmoji`, unless the
@@ -170,15 +175,18 @@ const replyText = (text: string, withEmoji: boolean | undefined) => (withEmoji ?
  */
 async function presentedReply(message: Message, error: unknown, text: string, withEmoji: boolean | undefined, logger: Logger): Promise<PresentedReply> {
   const presenter = presenterFor(message.client)
-  const plain = { body: { content: replyText(text, withEmoji) } }
+  const translator = translatorOfClient(message.client)
+  const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
+  // An empty message reads as MeoCord's generic error text, so neither the plain reply nor a presenter is left without one
+  const shown = text === '' ? renderText(translator, locale, { key: 'meocord.fallback.error' }) : text
+  const plain = { body: { content: replyText(shown, withEmoji) } }
   const { messageError } = presenter
   if (!messageError) return plain
   try {
     const theme = await themeForInteraction(message)
-    const translator = translatorOfClient(message.client)
-    const locale = messageLocale(message) ?? translator?.defaultLocale ?? 'en-US'
     const tone = isUserOutcome(error, message) ? 'warning' : 'danger'
-    const drawn = await messageError.call(presenter, { message, locale, mode: 'embed', theme }, { message: text, error, tone })
+    const presented = { message: fitText(shown, TEXT_LIMITS.embed), error, tone } as const
+    const drawn = await messageError.call(presenter, { message, locale, mode: 'embed', theme }, presented)
     let view = drawn.color === undefined ? { ...drawn, color: theme.colors.primary } : drawn
     if (withEmoji && view.emoji === undefined) view = { ...view, emoji: theme.emojis.warning }
     const warn = (problem: string) =>
