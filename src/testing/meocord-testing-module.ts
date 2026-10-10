@@ -393,7 +393,8 @@ export class TestingModule {
    */
   async close(): Promise<void> {
     this.closing ??= (async () => {
-      // A close during init waits for the hooks it started, so it shuts down whatever they constructed
+      // A close during init waits for the providers and hooks it started, so it shuts down whatever they constructed
+      await this.resolving?.catch(() => undefined)
       await this.readying?.catch(() => undefined)
       const entries: LifecycleEntry[] = this.lifecycle
         .filter(unit => this.constructed.has(unit.token))

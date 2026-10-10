@@ -32,6 +32,7 @@ import {
   type ProviderMap,
   resolutionOrder,
   resolveProviders,
+  type StartupControl,
   tokenDependencies,
   tokenName,
 } from '@src/core/providers.js'
@@ -407,19 +408,22 @@ export class MeoCordFactory {
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory
     // has made its value, including those that return a promise
     const logger = this.logger
-    const startup = async () => {
+    const startup = async (control: StartupControl) => {
       try {
-        await resolveProviders(container, providers, order)
+        await resolveProviders(container, providers, order, control)
       } catch (error) {
         logger.error(`${(error as Error).message}. The bot cannot start without it.`)
         logger.debug('Provider failure:', (error as Error).cause)
         markExplained(error)
         throw error
       }
-      // The listed services are made now, so constructors that attach listeners or connect run before login
+      // The listed services are made now, so constructors that attach listeners or connect run before login; a stop
+      // meanwhile makes no more of them
       for (const svc of (options.services ?? []) as any[]) {
+        if (control.stopped()) return
         container.get(svc)
       }
+      if (control.stopped()) return
       if (shard && container.get(CooldownStore) instanceof MemoryCooldownStore) {
         warnPerShardCooldowns(options.controllers, logger)
       }

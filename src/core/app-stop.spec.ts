@@ -147,8 +147,10 @@ describe('app.stop()', () => {
 
     const started = app.start()
     await new Promise(resolve => setTimeout(resolve, 20))
-    await app.stop()
+    // The stop waits for the provider being made, and the startup makes nothing more after it
+    const stopped = app.stop()
     release()
+    await stopped
 
     await expect(started).rejects.toThrow('The bot was stopped before it came online.')
     expect(Client.prototype.login).not.toHaveBeenCalled()

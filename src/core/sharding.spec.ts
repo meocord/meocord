@@ -643,8 +643,9 @@ describe('sharding', () => {
       const started = loaded.MeoCordFactory.create(App).start()
       await vi.waitFor(() => expect(connect).toBeTypeOf('function'))
       process.emit('message', { meocord: 'shutdown' }, undefined)
-      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+      // The shutdown waits for the provider being made, and the startup makes nothing more after it
       connect()
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
 
       await expect(started).rejects.toThrow('The bot was stopped before it came online.')
       expect(login).not.toHaveBeenCalled()
@@ -657,7 +658,7 @@ describe('sharding', () => {
       channel.closed = true
 
       await expect(loaded.MeoCordFactory.create(appClass(loaded)).start()).rejects.toThrow('The bot was stopped before it came online.')
-      expect(exit).toHaveBeenCalledWith(0)
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
       expect(login).not.toHaveBeenCalled()
     })
 

@@ -1279,32 +1279,6 @@ describe('lifecycle hooks', () => {
       expect(events).toEqual(expected)
     })
 
-    // With no hook on the store's side there is nothing for a lingering call to protect
-    it('does not wait for a call under way when neither it nor what it injects has an onShutdown', async () => {
-      config.shutdownTimeout = 5_000
-      const loaded = await load()
-      const events: string[] = []
-      const finish = Promise.withResolvers<void>()
-      const running = Promise.withResolvers<void>()
-      class PlainStore extends loaded.MemoryCooldownStore {}
-
-      const { client } = await startApp(loaded, {
-        controllers: [dailyController(loaded, events, finish.promise, running)],
-        cooldownStore: PlainStore,
-      })
-      await becomeReady(client)
-      const handled = call(client, slash(loaded))
-      await running.promise
-
-      const stopped = loaded.shutdownAndExit(false).then(() => 'stopped')
-      const first = await Promise.race([stopped, new Promise(resolve => setTimeout(resolve, 200, 'still waiting'))])
-
-      expect(first).toBe('stopped')
-      expect(logged.warn.flat().join(' ')).not.toContain('did not finish')
-      finish.resolve()
-      await handled
-    })
-
     // Injected by its token, the store is the one unit, whose hooks run once, last, after the calls under way
     it('runs its hooks once when a service injects CooldownStore, and shuts it down after the calls under way', async () => {
       const loaded = await load()

@@ -333,18 +333,36 @@ export function providerFailure(token: unknown, error: unknown): Error {
   return new Error(`The factory providing ${tokenName(token)} failed: ${reason}`, { cause: error })
 }
 
+/** How a startup that makes the providers learns that the app is stopping, and tells which factory it waits for. */
+export interface StartupControl {
+  /** Whether the app is stopping, after which nothing more is made. */
+  stopped(): boolean
+  /** The factory now awaited, by its token's name, or `undefined` once none is. */
+  pending(name: string | undefined): void
+}
+
 /**
  * Runs every factory in `order`, awaiting those that return a promise, so each value is made before
- * anything that injects it is resolved. Rejects with {@link providerFailure} for the first that fails.
+ * anything that injects it is resolved. Rejects with {@link providerFailure} for the first that fails. With `control`,
+ * it makes no further value once the app is stopping.
  */
-export async function resolveProviders(container: Container, providers: ProviderMap, order: readonly unknown[]): Promise<void> {
+export async function resolveProviders(
+  container: Container,
+  providers: ProviderMap,
+  order: readonly unknown[],
+  control?: StartupControl,
+): Promise<void> {
   for (const token of order) {
     const provider = providers.get(token)
     if (!provider || !isFactoryProvider(provider)) continue
+    if (control?.stopped()) return
+    control?.pending(tokenName(token))
     try {
       await container.getAsync(token as ServiceIdentifier)
     } catch (error) {
       throw providerFailure(token, error)
+    } finally {
+      control?.pending(undefined)
     }
   }
 }
