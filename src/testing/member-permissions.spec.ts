@@ -85,6 +85,14 @@ describe('memberPermissions, under useStrictMocks()', () => {
     expect(inThread.memberPermissions!.has(SendMessages)).toBe(false)
   })
 
+  it("reads the member it has without resolving it again, so a test's resolve stub stays for its own caller", () => {
+    const { interaction, member } = deniedChannel()
+    vi.mocked(member.guild.members.resolve).mockReturnValueOnce(null)
+
+    expect(interaction.memberPermissions!.has(SendMessages)).toBe(false)
+    expect(member.guild.members.resolve(member.id)).toBeNull()
+  })
+
   it("keeps a raw member's permissions as given", () => {
     const raw = createMockRawMember({ permissions: SendMessages })
     const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guildId: '1400000000000009999', member: raw })
