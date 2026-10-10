@@ -15,7 +15,7 @@ import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
 import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
-import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupClasses, lateGuardCheck, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { meocordClasses } from '@src/core/meocord-classes.js'
@@ -339,6 +339,9 @@ export class MeoCordFactory {
     // Observers are services too: bound here so their lifecycle hooks run in dependency order
     const observers = appObservers(target as object)
     for (const observer of observers) bindDependencies(container, observer, providers)
+    // What the stages and presenter inject, bound now so a service among them is made as the bot comes online
+    const stageServices = stageDependencies(runs, providers, options.presenter)
+    for (const service of stageServices) bindDependencies(container, service, providers)
     // What follows walks what these bound, so a class refused here is not reported again as missing
     stopOnStartupErrors()
     // Providers first, then the services, the controllers and the observers, each after what it depends on. The app's
@@ -356,9 +359,11 @@ export class MeoCordFactory {
       }),
     )
     assertProvided(container, providers, runs.classes, '@MeoCord({ providers })')
+    // With what the stages inject among them, each after what it depends on, so their hooks run as a listed service's do
+    const roots = stageServices.length > 0 ? resolutionOrder(container, providers, [...order, ...stageServices], { followOwnTokens: false }) : order
     // The store first, after only what it injects: it is ready before anything a call reaches, and shuts down last
     const store = options.cooldownStore
-    const lifecycle: LifecycleUnit[] = (store ? resolutionOrder(container, providers, [store, ...order]) : order).map(token => ({
+    const lifecycle: LifecycleUnit[] = (store ? resolutionOrder(container, providers, [store, ...roots]) : roots).map(token => ({
       token,
       name: tokenName(token),
       dependencies: tokenDependencies(container, providers, token),

@@ -66,7 +66,7 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
-import { assertStartupClasses, lateGuardCheck, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupClasses, lateGuardCheck, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
@@ -1043,12 +1043,13 @@ export class TestingModuleBuilder {
         const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
         // Every class the module runs, as the app finds them, except stage classes an override stands in for
         const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
+        const appPresenterClass = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter
         const startup = startupClasses({
           controllers: this.options.controllers ?? [],
           services,
           providers,
           stages,
-          presenter: this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter,
+          presenter: appPresenterClass,
           cooldownStore: store,
           themeFor: stages?.themeFor?.resolvers,
           observers: [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
@@ -1158,12 +1159,16 @@ export class TestingModuleBuilder {
         bindObservers(container, observers)
         // The store calls ask: the test's own when it provides CooldownStore, else the app's
         const boundStore = store ?? (providers.has(CooldownStore) ? CooldownStore : undefined)
+        // What the stages and presenter inject, as the bot makes it; a stage the test replaced contributes nothing
+        const stageServices = stageDependencies(startup, providers, appPresenterClass)
+        for (const service of stageServices) bindClass(service)
         // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
         // after what it injects
         const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
           ...(boundStore ? [boundStore] : []),
           ...providers.keys(),
           ...services,
+          ...stageServices,
           ...(themeResolver ? [themeResolver] : []),
           ...(this.options.controllers ?? []),
           ...observers,
