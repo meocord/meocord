@@ -4,6 +4,7 @@ import {
   ChatInputCommandInteraction,
   DiscordjsError,
   DiscordjsErrorCodes,
+  EmbedBuilder,
   MessageFlags,
   MessageFlagsBitField,
 } from 'discord.js'
@@ -127,6 +128,18 @@ describe('the original response', () => {
 
   it('is missing before any reply or deferral', async () => {
     await expect(command().fetchReply()).rejects.toMatchObject({ code: 10008 })
+  })
+
+  it('resolves followUp() to the follow-up it sent, as fetchReply() reads it back', async () => {
+    const interaction = command()
+    await interaction.deferReply()
+    const embed = new EmbedBuilder().setTitle('Only you')
+    const followUp = await interaction.followUp({ content: 'Only you see this.', embeds: [embed], flags: MessageFlags.Ephemeral })
+    embed.setTitle('Changed after sending')
+
+    const read = (message: typeof followUp) => [message.id, message.content, message.flags.has(MessageFlags.Ephemeral), message.embeds[0]?.toJSON().title]
+    expect(read(followUp)).toEqual([followUp.id, 'Only you see this.', true, 'Only you'])
+    expect(read(await interaction.fetchReply(followUp.id))).toEqual(read(followUp))
   })
 
   it('keeps follow-ups reachable by their id once it is deleted', async () => {
