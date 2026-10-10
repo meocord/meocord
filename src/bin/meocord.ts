@@ -738,8 +738,8 @@ copies or substantial portions of the Software.
       cwd: this.projectRoot,
       env: {
         ...this.inheritedEnv,
-        // Watch mode runs a development build, whose config reads the development files; Bun reads them for this too
-        ...(devRunner ? { NODE_ENV: 'development' } : process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
+        // The mode the command set, development for --dev, so the bot's config and Bun read the same .env files as the CLI
+        ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
         ...this.appEnv,
         ...(devRunner && { [DEV_RUNNER_ENV]: '1' }),
       },

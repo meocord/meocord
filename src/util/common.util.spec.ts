@@ -68,10 +68,12 @@ describe('setEnvironment', () => {
     expect(process.env.NODE_ENV).toBe('development')
   })
 
-  it('does not override process.env.NODE_ENV when already set', () => {
-    process.env.NODE_ENV = 'production'
+  it('keeps a NODE_ENV the shell set for production, and replaces it for development', () => {
+    process.env.NODE_ENV = 'staging'
+    setEnvironment('production')
+    expect(process.env.NODE_ENV).toBe('staging')
     setEnvironment('development')
-    expect(process.env.NODE_ENV).toBe('production')
+    expect(process.env.NODE_ENV).toBe('development')
   })
 })
 
