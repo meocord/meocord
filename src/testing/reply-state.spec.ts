@@ -14,7 +14,7 @@ import {
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockInteraction } from './mock-interaction.js'
+import { createMockInteraction, createMockUser } from './mock-interaction.js'
 import { getResponse } from './response.js'
 import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
 
@@ -247,6 +247,26 @@ describe('what an answer sends, held as sent', () => {
 
     await expect(send(interaction, { components: [labelless()] })).rejects.toThrow()
     expect(getResponse(interaction).state).toBe(before)
+  })
+
+  // reply() and update() take an id for their message only when it is first read; followUp() takes as many either way
+  it.each([
+    ['reply', 0n],
+    ['update', 0n],
+    ['followUp', undefined],
+  ] as const)('%s takes as many generated ids for a payload that fails to build as for one that builds, in default mode', async (method, ids) => {
+    const [, make, send] = answers.find(([name]) => name === method)!
+    const takenBy = async (body?: object) => {
+      const interaction = make()
+      if (method === 'followUp') await interaction.deferReply()
+      const before = BigInt(createMockUser().id)
+      if (body) await (method === 'followUp' ? (interaction as any).followUp(body) : send(interaction, body))
+      return BigInt(createMockUser().id) - before - 1n
+    }
+
+    const [valid, invalid] = [await takenBy({ components: [] }), await takenBy({ components: [labelless()] })]
+    expect(invalid).toBe(valid)
+    if (ids !== undefined) expect(valid).toBe(ids)
   })
 
   it.each(answers)('%s sends a component discord.js refuses to build in default mode, with one warning', async (method, make, send) => {
