@@ -1,5 +1,13 @@
 import { vi } from 'vitest'
-import { CooldownStore, type CooldownLimit, type CooldownVerdict, MemoryCooldownStore } from '@src/common/index.js'
+import {
+  type CooldownBatchVerdict,
+  type CooldownEntry,
+  CooldownStore,
+  type CooldownLimit,
+  type CooldownVerdict,
+  MemoryCooldownStore,
+} from '@src/common/index.js'
+import { withRelease } from '@src/common/cooldown-store.js'
 import { testCooldownStore } from '@src/testing/index.js'
 
 testCooldownStore('MemoryCooldownStore', () => new MemoryCooldownStore(), { describe, it, expect })
@@ -91,6 +99,65 @@ class NewestStore extends MemoryCooldownStore {
   }
 }
 
+/** A store that counts a batch at once, as the built-in ones do, with what its subclasses get wrong left overridable. */
+class BatchStore extends CooldownStore {
+  protected readonly calls = new Map<string, number[]>()
+
+  /** How long until `times` allows a call: until a use frees up, from the oldest of the newest `uses`. */
+  protected waitOf(times: number[], { uses, windowMs }: CooldownLimit, now: number): number {
+    return times[times.length - uses] + windowMs - now
+  }
+
+  /** Which refusal a batch reports: the longest wait. */
+  protected pick(refusals: { blocked: number; retryAfterMs: number }[]) {
+    return refusals.reduce((longest, refusal) => (refusal.retryAfterMs > longest.retryAfterMs ? refusal : longest))
+  }
+
+  /** Gives back the call recorded at `at` against `key`. */
+  protected release(key: string, at: number) {
+    const times = this.calls.get(key)!
+    times.splice(times.lastIndexOf(at), 1)
+  }
+
+  async consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
+    const { allowed, retryAfterMs } = await this.consumeMany([{ key, limit }])
+    return { allowed, retryAfterMs }
+  }
+
+  consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
+    const now = Date.now()
+    const refusals = entries.flatMap(({ key, limit }, blocked) => {
+      const times = (this.calls.get(key) ?? []).filter(time => now - time < limit.windowMs)
+      this.calls.set(key, times)
+      return times.length < limit.uses ? [] : [{ blocked, retryAfterMs: this.waitOf(times, limit, now) }]
+    })
+    if (refusals.length > 0) return Promise.resolve({ allowed: false, ...this.pick(refusals) })
+    for (const { key } of entries) this.calls.get(key)!.push(now)
+    return Promise.resolve(withRelease({ allowed: true, retryAfterMs: 0 }, async () => entries.forEach(({ key }) => this.release(key, now))))
+  }
+}
+
+/** A store whose release drops every call of a key, other calls' uses included. */
+class OverReleaseStore extends BatchStore {
+  protected release(key: string) {
+    this.calls.delete(key)
+  }
+}
+
+/** A store whose batch refusal names the first cooldown that refuses, not the longest wait. */
+class FirstBlockedStore extends BatchStore {
+  protected pick(refusals: { blocked: number; retryAfterMs: number }[]) {
+    return refusals[0]
+  }
+}
+
+/** A store that counts a wait from the oldest call in the window, however many calls past `uses` it holds. */
+class OldestCallStore extends BatchStore {
+  protected waitOf(times: number[], { windowMs }: CooldownLimit, now: number): number {
+    return times[0] + windowMs - now
+  }
+}
+
 /** A store that counts every key together. */
 class OneCountStore extends MemoryCooldownStore {
   consume(_key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
@@ -143,6 +210,14 @@ describe('testCooldownStore', { timeout: 30_000 }, () => {
 
   it('fails a store that counts retryAfterMs from the newest call', async () => {
     expect(await failures(() => new NewestStore())).toContainEqual(expect.stringContaining('from the oldest call'))
+  })
+
+  it.each([
+    ['frees other calls’ uses when it releases one', () => new OverReleaseStore(), 'releases only the call it counted'],
+    ['names the first refusal of a batch rather than the longest wait', () => new FirstBlockedStore(), 'names the longest wait when several'],
+    ['counts a wait from the oldest call when a lowered limit leaves more in the window', () => new OldestCallStore(), 'when a lowered limit'],
+  ])('fails a store that %s', async (_what, factory, failing) => {
+    expect(await failures(factory)).toEqual([expect.stringContaining(failing)])
   })
 
   it('fails a store that counts every key together', async () => {

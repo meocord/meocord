@@ -41,8 +41,9 @@ const CLOCK_SLACK_MS = 50
  *
  * @remarks
  * The cases cover what a shared store most often gets wrong: a sliding window rather than fixed buckets,
- * `retryAfterMs` from the oldest call still in the window, calls in the same millisecond kept apart, and concurrent
- * calls at the limit where exactly one may pass. They use real time, with windows short enough that the suite takes
+ * `retryAfterMs` until a use frees up, from the oldest of the newest `uses` calls in the window, calls in the same
+ * millisecond kept apart, concurrent calls at the limit where exactly one may pass, a batch refusal that names the
+ * longest wait, and a release that frees only the call it gave back. They use real time, with windows short enough that the suite takes
  * a few seconds and margins wide enough that a correct store passes when timers fire late, as on a busy CI runner,
  * and each case counts under keys of its own. Each window is a whole number of milliseconds, as
  * `@Cooldown` gives a store: it rounds its `seconds` to the millisecond.
@@ -119,6 +120,23 @@ export function testCooldownStore(
       expect(retryAfterMs).toBeGreaterThanOrEqual(limit.windowMs - (thirdDone - firstSent) - CLOCK_SLACK_MS)
     })
 
+    // @Cooldown keeps the calls counted so far when a limit is lowered, so a key can hold more calls than `uses`
+    test('counts retryAfterMs from the oldest of the newest `uses` calls when a lowered limit leaves more in the window', async store => {
+      const windowMs = 2_000
+      for (let call = 0; call < 3; call += 1) await store.consume(key('lowered'), { uses: 5, windowMs })
+      await sleep(1_000)
+      const newerSent = Date.now()
+      for (let call = 0; call < 2; call += 1) await store.consume(key('lowered'), { uses: 5, windowMs })
+
+      const { allowed, retryAfterMs } = await store.consume(key('lowered'), { uses: 2, windowMs })
+      const refusedDone = Date.now()
+      expect(allowed).toBe(false)
+      // A use frees up when the older of the two newest calls leaves the window; counted from the oldest call, it would
+      // be a second sooner
+      expect(retryAfterMs).toBeGreaterThanOrEqual(windowMs - (refusedDone - newerSent) - CLOCK_SLACK_MS)
+      expect(retryAfterMs).toBeLessThanOrEqual(windowMs + CLOCK_SLACK_MS)
+    })
+
     test('counts each key on its own', async store => {
       const limit = { uses: 1, windowMs: 2_000 }
       expect((await store.consume(key('first'), limit)).allowed).toBe(true)
@@ -159,6 +177,25 @@ export function testCooldownStore(
       expect(refused.retryAfterMs).toBeLessThanOrEqual(long.windowMs)
     })
 
+    // A refusal names the wait until every cooldown of the batch allows the call; the default consumeMany stops at the first
+    test('names the longest wait when several cooldowns refuse a batch, or with the default consumeMany, the first', async store => {
+      const short = { uses: 1, windowMs: 1_000 }
+      const long = { uses: 1, windowMs: 2_000 }
+      const batch = [
+        { key: key('both-short'), limit: short },
+        { key: key('both-long'), limit: long },
+      ]
+      await store.consume(batch[0].key, short)
+      await store.consume(batch[1].key, long)
+
+      const refused = await store.consumeMany(batch)
+      expect(refused.allowed).toBe(false)
+      const [blocked, limit] = overridesConsumeMany(store) ? [1, long] : [0, short]
+      expect(refused.blocked).toBe(blocked)
+      expect(refused.retryAfterMs).toBeGreaterThan(limit.windowMs - 1_000)
+      expect(refused.retryAfterMs).toBeLessThanOrEqual(limit.windowMs)
+    })
+
     // The default consumeMany counts in order and stops at the first refusal, so the entries before it count
     test('records nothing when one cooldown of a batch refuses it, or with the default consumeMany, counts those before it', async store => {
       const limit = { uses: 1, windowMs: 2_000 }
@@ -185,10 +222,12 @@ export function testCooldownStore(
       expect(verdicts.filter(verdict => verdict.allowed).length).toBe(1)
     })
 
-    // A store without release keeps a counted call counted, as the default consumeMany does
-    test('releases a call it counted when the verdict gives release, or keeps it counted without one', async store => {
-      const limit = { uses: 1, windowMs: 2_000 }
+    // A store without release keeps a counted call counted, as the default consumeMany does. Two uses tell a release of
+    // the one call apart from one that frees the key's other calls too
+    test('releases only the call it counted when the verdict gives release, or keeps it counted without one', async store => {
+      const limit = { uses: 2, windowMs: 2_000 }
       const entries = [{ key: key('release-a'), limit }, { key: key('release-b'), limit }]
+      expect((await store.consumeMany(entries)).allowed).toBe(true)
       const counted = await store.consumeMany(entries)
       expect(counted.allowed).toBe(true)
       if (!counted.release) {
