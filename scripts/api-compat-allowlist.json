@@ -1,1 +1,3 @@
-{}
+{
+  "common ResponseState.original": "Its components are typed as the message components they are, rather than unknown. Code reading them compiles; only a hand-made ResponseState whose original has unknown[] components must use Discord's component type."
+}

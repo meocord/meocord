@@ -337,7 +337,8 @@ jobs:
           key: api-compat-${{ steps.published.outputs.version }}
 
       # Nothing the latest release's declarations export, or any member of it, is removed, narrowed where it is given or
-      # widened where it is returned; a deliberate break needs a major release and scripts/api-compat-allowlist.json
+      # widened where it is returned; a deliberate break is named in scripts/api-compat-allowlist.json and needs a major
+      # release, unless it narrows a member's type
       - name: Check the public API against the latest release
         env:
           AGAINST: ${{ steps.published.outputs.version }}

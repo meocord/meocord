@@ -1,8 +1,8 @@
 /**
  * Checks, after `bun run build`, that the built public declarations break nothing code written against the latest
  * published release compiled with: each entry's `.d.ts` and `.d.cts`, export by export and member by member (see
- * lib/api-compat.ts). Additions pass. A deliberate break is named in api-compat-allowlist.json with its reason, and
- * the allowlist must be empty unless the release is a major one.
+ * lib/api-compat.ts). Additions pass. A deliberate break is named in api-compat-allowlist.json with its reason;
+ * outside a major release, an entry may allow only a narrowed member type.
  *
  *   bun scripts/check-api-compat.ts [--against <version>]
  */
@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import ts from 'typescript'
-import { apiBreaks } from './lib/api-compat.js'
+import { apiBreaks, type EntryBreak, judgeBreaks } from './lib/api-compat.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ENTRIES = ['core', 'decorator', 'common', 'interface', 'enum', 'testing']
@@ -66,21 +66,17 @@ const major =
     file => file.endsWith('.md') && /^['"]?meocord['"]?:\s*major\s*$/m.test(readFileSync(path.join(repoRoot, '.changeset', file), 'utf8')),
   )
 
-const problems: string[] = []
-const allowed = new Set<string>()
+const breaks: EntryBreak[] = []
 // The generic signatures that changed as text, once per entry: its .d.ts and .d.cts declare the same ones
 const review = new Set<string>()
 for (const { file, before, after } of pairs) {
   const entry = file.replace(/^dist\/types\//, '').replace(/\/index\.d\.c?ts$|\.d\.c?ts$/, '')
   const compared = apiBreaks(checker, program.getSourceFile(before)!, program.getSourceFile(after)!)
   for (const line of compared.review) review.add(`${entry} ${line}`)
-  for (const { path: where, problem } of compared.breaks) {
-    const id = `${entry} ${where}`
-    if (allowlist[id]) allowed.add(id)
-    else problems.push(`${file}: ${where} ${problem}`)
-  }
+  for (const found of compared.breaks) breaks.push({ ...found, id: `${entry} ${found.path}`, file })
 }
-const stale = Object.keys(allowlist).filter(id => !allowed.has(id))
+const { unlisted, allowed, stale, majorOnly } = judgeBreaks(breaks, allowlist, major)
+const problems = unlisted.map(({ file, path: where, problem }) => `${file}: ${where} ${problem}`)
 
 // Listed for a reviewer to read, not failed: the checker cannot relate a generic's parameters and return across versions
 if (review.size > 0) {
@@ -94,7 +90,8 @@ if (problems.length > 0) {
   console.error(
     `The built declarations break ${problems.length} thing(s) code written against meocord@${against} relies on:\n` +
       problems.map(problem => `  - ${problem}`).join('\n') +
-      '\nRestore them, or, for a deliberate break in a major release, name each in scripts/api-compat-allowlist.json with its reason.',
+      '\nRestore them, or, for a deliberate break, name each in scripts/api-compat-allowlist.json with its reason ' +
+        '(outside a major release, only a narrowed member type).',
   )
   process.exit(1)
 }
@@ -102,11 +99,14 @@ if (stale.length > 0) {
   console.error(`scripts/api-compat-allowlist.json names what no longer breaks; remove: ${stale.join(', ')}`)
   process.exit(1)
 }
-if (Object.keys(allowlist).length > 0 && !major) {
-  console.error('scripts/api-compat-allowlist.json allows breaks, but this release is not a major one: no pending changeset or version makes it one.')
+if (majorOnly.length > 0) {
+  console.error(
+    `scripts/api-compat-allowlist.json allows breaks only a major release may make, but no pending changeset or version makes this one major: ${majorOnly.join(', ')}. ` +
+      'Outside a major, an entry may allow only a narrowed member type.',
+  )
   process.exit(1)
 }
 console.log(
   `The built declarations keep every export and member of meocord@${against}'s ${pairs.length} declaration files` +
-    (allowed.size ? `, but the ${allowed.size} allowed for this major release.` : '.'),
+    (allowed.size ? `, but the ${allowed.size} the allowlist names.` : '.'),
 )
