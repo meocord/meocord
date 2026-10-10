@@ -9,6 +9,7 @@ import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited
 import { assertBuiltForThisPlatform } from '@src/util/platform.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
+import { warnOnce } from '@src/common/deprecation.js'
 import { missingTranslatorError, Translator } from '@src/common/translator.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
@@ -55,7 +56,7 @@ import {
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { registerClientTheme } from '@src/core/theme-runtime.js'
-import { themeResolverClass } from '@src/core/theme-resolvers.js'
+import { ThemeCache, themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import {
   allDeclaredErrors,
@@ -160,7 +161,8 @@ export class MeoCordFactory {
    * @returns The application, which `start()` logs in.
    * @throws Error when the class has no `@MeoCord`, when the compiled config is missing beside the bundle or fails to
    *   load, naming the file and the reason, with what to do about it, when a provider cannot
-   *   be bound, such as one for a token MeoCord binds itself, when two handlers take one command, or two builder
+   *   be bound, such as one for a token MeoCord binds itself (a provider for `ThemeCache` or `ExecutionContext` is warned
+   *   about instead, and refused from the next major version, 5.0), when two handlers take one command, or two builder
    *   classes build one, naming both, and for any other mistake it refuses as the app loads, such as two component
    *   patterns that match the same customIds. Each check reports every error it finds, and the first is thrown,
    *   unchanged. When there are several, each is logged first, with where in the source it comes from; a lone one is
@@ -313,6 +315,14 @@ export class MeoCordFactory {
     // After MeoCord's own tokens, which a provider may not replace, and before the app's classes, so
     // a class token that is provided is not also bound as itself
     for (const [token, provider] of providers) {
+      // Bound later, or for each call, so not caught below; supported until 5.0 refuses it
+      if (token === ThemeCache || token === ExecutionContext) {
+        warnOnce(
+          this.logger,
+          `${(target as { name?: string }).name}: @MeoCord({ providers }) provides ${tokenName(token)}, which MeoCord binds itself; ` +
+            'the next major version (5.0) refuses it. Remove the provider.',
+        )
+      }
       if (container.isBound(token as ServiceIdentifier)) {
         startupError(new Error(`${(target as { name?: string }).name}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`))
         continue
