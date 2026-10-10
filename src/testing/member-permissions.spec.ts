@@ -166,3 +166,55 @@ describe('memberPermissions, in default mode', () => {
     expect(warned).toEqual([])
   })
 })
+
+describe("appPermissions, beside discord.js's own permissionsFor", () => {
+  /** A server and #general, where the bot's roles are `permissions` and @everyone is denied SendMessages. */
+  function botIn(permissions: bigint[]) {
+    const { guild, channel } = deniedChannel()
+    const me = guild.members.me!
+    const role = createMockInteraction(Role, { id: '300000000000000006', position: 6, permissions: bits(...permissions), guild } as never)
+    guild.roles.cache.set(role.id, role as never)
+    me.roles.add(role)
+    return { guild, channel, me }
+  }
+
+  it.each([
+    ['@everyone denied', () => botIn([SendMessages, ViewChannel])],
+    ['an Administrator', () => botIn([Administrator])],
+    ['the owner', () => {
+      const place = botIn([ViewChannel])
+      place.guild.ownerId = place.me.id
+      return place
+    }],
+    ['a role over @everyone', () => {
+      const place = botIn([SendMessages, ViewChannel])
+      const [role] = [...place.me.roles.cache.values()].filter(each => each.id !== place.guild.id)
+      place.channel.permissionOverwrites.cache.set(role.id, { id: role.id, type: OverwriteType.Role, allow: bits(SendMessages), deny: bits() } as never)
+      return place
+    }],
+  ])('agrees for %s, in a channel and in a thread of it', (_case, make) => {
+    const { guild, channel, me } = make()
+    const thread = createMockChannel(ThreadChannel, { guild, parentId: channel.id } as never)
+    const expected = channel.permissionsFor(me)!.bitfield
+
+    for (const place of [channel, thread]) {
+      const click = createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guild, channel: place } as never)
+      expect(click.appPermissions.bitfield).toBe(expected)
+    }
+  })
+})
+
+it("memberPermissions in a thread made without a parent makes and caches none, and uses the one a test reads, under useStrictMocks()", () => {
+  useStrictMocks()
+  const { guild, member } = deniedChannel()
+  const thread = createMockChannel(ThreadChannel, { guild } as never)
+  const inThread = () => createMockInteraction(ChatInputCommandInteraction, { commandName: 'post', guild, channel: thread, member } as never)
+  const first = inThread()
+  const size = guild.channels.cache.size
+
+  expect(first.memberPermissions!.has(SendMessages)).toBe(true)
+  expect(guild.channels.cache.size).toBe(size)
+  const parent = guild.channels.cache.get(thread.parentId!) as TextChannel
+  parent.permissionOverwrites.cache.set(guild.id, { id: guild.id, type: OverwriteType.Role, allow: bits(), deny: bits(SendMessages) } as never)
+  expect(inThread().memberPermissions!.has(SendMessages)).toBe(false)
+})

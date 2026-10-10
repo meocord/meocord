@@ -45,7 +45,7 @@ describe.each([
     expect(interaction.channel).toBe(tickets)
   })
 
-  it("memberPermissions leaves the test's overwritesFor stub for its own caller", () => {
+  it("memberPermissions and appPermissions leave the test's overwritesFor stub for its own caller", () => {
     const guild = createMockGuild()
     const channel = createMockChannel(TextChannel, { guild } as never)
     guild.channels.cache.set(channel.id, channel as never)
@@ -55,7 +55,7 @@ describe.each([
     const overwrites = { roles: ['stubbed'] }
     stubbed.overwritesFor.mockReturnValueOnce(overwrites)
 
-    void interaction.memberPermissions
+    void [interaction.memberPermissions, interaction.appPermissions]
 
     expect(stubbed.overwritesFor(interaction.member)).toBe(overwrites)
   })
