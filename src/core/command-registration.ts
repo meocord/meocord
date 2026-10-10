@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import { ApplicationCommandType, Routes } from 'discord.js'
 import Table from 'cli-table3'
@@ -172,6 +172,9 @@ function defaultGuildsEmpty(options: TargetOptions): boolean {
 /** Whether a command is an activity's primary entry point, which Discord takes only globally. */
 const isEntryPoint = (command: CollectedCommand): boolean => command.body.type === ApplicationCommandType.PrimaryEntryPoint
 
+/** What a blank guild to register every command to says, as an unset variable gives one. */
+const BLANK_GUILD = 'No commands were registered: the guild to register to is blank. Give a guild id, or leave it out to register where commands.* says.'
+
 /**
  * Where each command is sent: one bulk update per scope. A scope's update replaces everything the application has
  * there, so the default scope is included even when it ends up empty, unless `commands.guilds` lists no guild id.
@@ -180,6 +183,11 @@ const isEntryPoint = (command: CollectedCommand): boolean => command.body.type =
  * that sends everything to one guild sends nothing global, so it leaves the entry point out.
  */
 export function planTargets(commands: CollectedCommand[], options: TargetOptions, logger: RegistrationLogger): RegistrationTarget[] {
+  // Registering to the default scopes instead could publish everywhere
+  if (options.onlyGuild !== undefined && !options.onlyGuild.trim()) {
+    logger.error(BLANK_GUILD)
+    return []
+  }
   const everythingTo = everythingTarget(options)
   if (everythingTo) {
     // A global update from here would hold only what this run sends, deleting the application's other global commands
@@ -285,13 +293,43 @@ function writeHash(file: string | undefined, hash: string, logger: RegistrationL
   }
 }
 
+/** Forgets what development last sent to a scope, once that scope is written some other way. */
+function forgetHash(file: string | undefined, logger: RegistrationLogger): void {
+  if (!file || !existsSync(file)) return
+  try {
+    rmSync(file)
+  } catch (error) {
+    logger.debug(`Could not forget the registered commands: ${String(error)}`)
+  }
+}
+
+/**
+ * Whether the commands Discord holds in a scope, by type and name, are the ones a target sends. A scope cleared or
+ * changed elsewhere, by production on another machine or another tool, differs; a listing that fails counts as
+ * differing, so the commands are sent.
+ */
+async function registeredAsSent(rest: RegistrationRest, route: `/${string}`, target: RegistrationTarget, logger: RegistrationLogger): Promise<boolean> {
+  let registered: unknown
+  try {
+    registered = await rest.get(route)
+  } catch (error) {
+    logger.debug(`Could not list the commands registered ${describeScope(target.scope)}, so they are sent again: ${String(error)}`)
+    return false
+  }
+  if (!Array.isArray(registered)) return false
+  const keys = (bodies: CollectedCommand['body'][]) => bodies.map(body => registrationKey(body, '')).sort().join('\n')
+  return keys(registered as CollectedCommand['body'][]) === keys(target.commands.map(({ body }) => body))
+}
+
 function logRegistered(target: RegistrationTarget, logger: RegistrationLogger): void {
   const table = new Table({ head: ['Name', 'Type', 'Sub-commands'], colWidths: [null, null, 30], wordWrap: true })
   const typeNames: Record<number, string> = { 1: 'SlashCommand', 2: 'UserContextMenu', 3: 'MessageContextMenu', 4: 'PrimaryEntryPoint' }
 
   for (const { name, body } of target.commands) {
-    const options = Array.isArray(body.options) ? (body.options as { name?: string }[]) : []
-    table.push([name, typeNames[typeof body.type === 'number' ? body.type : 1] ?? 'Command', options.map(option => option.name).join(', ')])
+    const options = Array.isArray(body.options) ? (body.options as { name?: string; type?: unknown }[]) : []
+    // A subcommand or a subcommand group, not a plain option
+    const subcommands = options.filter(option => option.type === 1 || option.type === 2)
+    table.push([name, typeNames[typeof body.type === 'number' ? body.type : 1] ?? 'Command', subcommands.map(option => option.name).join(', ')])
   }
 
   logger.log(`Registered ${target.commands.length} bot commands ${describeScope(target.scope)}:\n${table.toString()}`)
@@ -308,14 +346,19 @@ export interface RegisterCommandsOptions extends TargetOptions {
 }
 
 /**
- * Registers the commands, one bulk update per scope; development skips a scope unchanged since its last send, unless
- * `force`. Once one is sent, and not to `onlyGuild`, the other scopes the configuration names are checked for
+ * Registers the commands, one bulk update per scope; development skips a scope unchanged since its last send and still
+ * registered as sent, which one listing per skipped scope checks, unless `force`. A blank `onlyGuild` registers nothing. Once one is sent, and not to `onlyGuild`, the other scopes the configuration names are checked for
  * leftovers, which `clearOther` removes; a development-guild run or a `commands.guilds` with no id only warns. Never
  * throws.
  * @returns Whether every scope was sent or unchanged, and `commands.guilds`, if set, lists a guild id.
  */
 export async function registerCommands(options: RegisterCommandsOptions): Promise<boolean> {
   const { rest, applicationId, controllerClasses, logger, config, development, onlyGuild, force = false } = options
+  // An unset variable passed as the guild; registering to the default scopes instead could publish everywhere
+  if (onlyGuild !== undefined && !onlyGuild.trim()) {
+    logger.error(BLANK_GUILD)
+    return false
+  }
 
   const commands = collectCommands(controllerClasses, logger)
   if (!commands) return false
@@ -327,18 +370,22 @@ export async function registerCommands(options: RegisterCommandsOptions): Promis
   let sent = false
 
   for (const target of targets) {
-    const file = development ? cacheFile(applicationId, target.scope) : undefined
+    const file = cacheFile(applicationId, target.scope)
     const hash = hashOf(target.commands)
+    const route = routeFor(applicationId, target.scope)
 
-    if (development && !force && readHash(file, logger) === hash) {
+    // Unchanged since development last sent it, and still what Discord holds there
+    if (development && !force && readHash(file, logger) === hash && (await registeredAsSent(rest, route, target, logger))) {
       logger.log(`Commands ${describeScope(target.scope)} are unchanged; not registering them again.`)
       continue
     }
 
     try {
-      await rest.put(routeFor(applicationId, target.scope), { body: target.commands.map(({ body }) => body) })
+      await rest.put(route, { body: target.commands.map(({ body }) => body) })
       sent = true
+      // Outside development the record would be stale, so the next development start sends again
       if (development) writeHash(file, hash, logger)
+      else forgetHash(file, logger)
       logRegistered(target, logger)
     } catch (error) {
       succeeded = false
@@ -381,16 +428,23 @@ async function reportOtherScopes(
 
     const names = existing.map(({ name }) => name).join(', ')
     if (!config?.clearOther || keptBecause) {
+      // Advising clearOther when it would not apply sends the reader to a setting that changes nothing
+      const advice = !keptBecause
+        ? 'Set commands.clearOther to remove them.'
+        : config?.clearOther
+          ? `clearOther is on, but they are not removed ${keptBecause}.`
+          : `They are not removed ${keptBecause}, even with commands.clearOther.`
       logger.warn(
         `${existing.length} command(s) are still registered ${describeScope(scope)} (${names}), which this ` +
-          `configuration does not register to, so Discord keeps showing them there. ` +
-          (config?.clearOther ? `clearOther is on, but they are not removed ${keptBecause}.` : 'Set commands.clearOther to remove them.'),
+          `configuration does not register to, so Discord keeps showing them there. ${advice}`,
       )
       continue
     }
 
     try {
       await rest.put(routeFor(applicationId, scope), { body: [] })
+      // What development last sent there is gone, so its next start sends again
+      forgetHash(cacheFile(applicationId, scope), logger)
       logger.log(`Removed ${existing.length} command(s) left registered ${describeScope(scope)}: ${names}`)
     } catch (error) {
       logger.error(`Error removing the commands left registered ${describeScope(scope)}:`, error)
