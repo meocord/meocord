@@ -1,5 +1,6 @@
 import {
   AutocompleteInteraction,
+  AutoModerationRule,
   BaseGuild,
   BaseGuildVoiceChannel,
   BaseChannel,
@@ -14,11 +15,14 @@ import {
   ForumChannel,
   Guild,
   GuildChannel,
+  GuildEmoji,
+  GuildScheduledEvent,
   GuildMember,
   GuildMemberFlagsBitField,
   GuildNSFWLevel,
   GuildPremiumTier,
   GuildVerificationLevel,
+  Invite,
   Locale,
   MediaChannel,
   Message,
@@ -33,6 +37,7 @@ import {
   ReactionManager,
   ReactionUserManager,
   Role,
+  Sticker,
   TextChannel,
   ThreadChannel,
   User,
@@ -226,6 +231,13 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     roles: member => memberRoles(member, []),
     permissions: REAL_GETTER,
   }),
+  // A server's emoji, sticker, scheduled event and AutoMod rule are named, and what discord.js formats from them
+  // computes: an emoji's mention and identifier, an event's and an invite's link
+  defaultsOf(GuildEmoji, { name: () => 'emoji', animated: () => false, identifier: REAL_GETTER }),
+  defaultsOf(Sticker, { name: () => 'sticker' }),
+  defaultsOf(GuildScheduledEvent, { name: () => 'event', url: REAL_GETTER }),
+  defaultsOf(AutoModerationRule, { name: () => 'rule' }),
+  defaultsOf(Invite, { url: REAL_GETTER }),
   defaultsOf(Role, {
     name: () => 'role',
     // Above @everyone, which a server's role manager makes at position 0

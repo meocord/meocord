@@ -63,6 +63,18 @@ describe.each([
     expect((await guild.invites.fetch(invite.code)).code).toBe(invite.code)
   })
 
+  it('name their items, and format them as discord.js does', async () => {
+    const guild = createMockGuild()
+    const emoji = await guild.emojis.create({ attachment: 'emoji.png', name: 'party' })
+    const event = await guild.scheduledEvents.create({ name: 'Game night' } as never)
+    const invite = await guild.invites.create(createMockChannel(TextChannel, { guild } as never))
+    const [sticker, rule] = [await guild.stickers.create({ file: 'sticker.png', name: 's', tags: 't' }), await guild.autoModerationRules.create({ name: 'r' } as never)]
+
+    expect([String(emoji), emoji.identifier]).toEqual([`<:emoji:${emoji.id}>`, `emoji:${emoji.id}`])
+    expect([event.url, invite.url, String(invite)]).toEqual([`https://discord.com/events/${guild.id}/${event.id}`, `https://discord.gg/${invite.code}`, `https://discord.gg/${invite.code}`])
+    expect([event.name, sticker.name, rule.name]).toEqual(['event', 'sticker', 'rule'])
+  })
+
   it("are a message's guild's too", async () => {
     const { guild } = createMockMessage()
 
