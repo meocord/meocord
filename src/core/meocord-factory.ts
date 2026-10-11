@@ -15,7 +15,8 @@ import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
 import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
-import { assertStartupClasses, lateGuardCheck, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupClasses, lateGuardCheck, perCallEventWarnings, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
+import { type EventSource, eventSources } from '@src/core/event-sources.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { meocordClasses } from '@src/core/meocord-classes.js'
@@ -38,7 +39,7 @@ import {
   tokenName,
 } from '@src/core/providers.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
-import { HandlerRegistry } from '@src/core/handler-registry.js'
+import { HandlerRegistry, listEventSources } from '@src/core/handler-registry.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
 import {
@@ -56,7 +57,7 @@ import {
   shardingRole,
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { registerClientTheme } from '@src/core/theme-runtime.js'
+import { prepareLateThemes, registerClientTheme } from '@src/core/theme-runtime.js'
 import { ThemeCache, themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import {
@@ -294,9 +295,8 @@ export class MeoCordFactory {
 
     // Bound before the app's classes, so a class that injects it gets this instance; filled once they are bound
     const appClasses: (new (...args: any[]) => unknown)[] = []
-    container
-      .bind(HandlerRegistry)
-      .toConstantValue(new HandlerRegistry(appClasses, options.messages, () => options.i18n, options.controllers as (new (...args: any[]) => unknown)[]))
+    const registry = new HandlerRegistry(appClasses, options.messages, () => options.i18n, options.controllers as (new (...args: any[]) => unknown)[])
+    container.bind(HandlerRegistry).toConstantValue(registry)
     container
       .bind(ShardContext)
       .toDynamicValue(() => {
@@ -401,6 +401,7 @@ export class MeoCordFactory {
 
     // Every check has run, and touched only the container: from here the app is made, once none found an error
     stopOnStartupErrors()
+    for (const warning of perCallEventWarnings(runs, providers, options.presenter)) this.logger.warn(warning)
     const discordClient = container.get(Client)
     Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
     // Stamp every class the app runs with the container, so @UseGuard resolves guards on a direct call to any of them
@@ -413,6 +414,7 @@ export class MeoCordFactory {
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory
     // has made its value, including those that return a promise
     const logger = this.logger
+    let sources: EventSource[] | undefined
     const startup = async (control: StartupControl) => {
       try {
         await resolveProviders(container, providers, order, control)
@@ -421,6 +423,12 @@ export class MeoCordFactory {
         logger.debug('Provider failure:', (error as Error).cause)
         markExplained(error)
         throw error
+      }
+      // Read once every provided value is made, and before anything the app makes could list its handlers
+      if (!sources) {
+        sources = eventSources(container, providers, lifecycle, appClasses, text => logger.warn(text))
+        listEventSources(registry, sources)
+        prepareLateThemes(container, sources.map(({ cls }) => cls))
       }
       // The listed services are made now, so constructors that attach listeners or connect run before login; a stop
       // meanwhile makes no more of them
@@ -443,7 +451,7 @@ export class MeoCordFactory {
       discordClient,
       meocordConfig.discordToken,
       options.activities,
-      appClasses,
+      () => sources ?? [],
       meocordConfig.shutdownTimeout,
       startup,
       lifecycle,

@@ -50,7 +50,7 @@ import {
   type ThemeResolvers,
 } from '@src/interface/index.js'
 import { ThemeCache, type ThemeResolverClass, themeResolverClass } from '@src/core/theme-resolvers.js'
-import { claimAmbientAppTheme, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import { claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
@@ -64,9 +64,10 @@ import {
 } from '@src/core/command-conflicts.js'
 import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
-import { HandlerRegistry } from '@src/core/handler-registry.js'
+import { HandlerRegistry, listEventSources } from '@src/core/handler-registry.js'
+import { type EventSource, eventSources } from '@src/core/event-sources.js'
 import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
-import { assertStartupClasses, lateGuardCheck, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
+import { assertStartupClasses, lateGuardCheck, perCallEventWarnings, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
@@ -94,7 +95,6 @@ import {
   tokenName,
 } from '@src/core/providers.js'
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
-import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { strictMocks } from './strict-mocks.js'
 import { warnOnce } from '@src/common/deprecation.js'
@@ -316,6 +316,8 @@ export class TestingModule {
   ) {}
 
   private resolving?: Promise<void>
+  /** The instances whose `@On` and `@Once` handlers `emit` runs, read at `init()`. */
+  private sources?: readonly EventSource[]
   private readying?: Promise<void>
   private closing?: Promise<void>
   /** The `onReady` hooks' pass, which `close()` waits for, less one whose `onReady` called `close()`. */
@@ -354,6 +356,12 @@ export class TestingModule {
    */
   async init(options: TestingModuleInitOptions = {}): Promise<this> {
     this.resolving ??= resolveProviders(this.container, this.providers, this.order).then(() => {
+      // As the bot reads them, once every provided value is made and before the services that could list them
+      this.sources ??= eventSources(this.container, this.providers, this.lifecycle, this.eventClasses, text =>
+        new Logger('TestingModule').warn(text),
+      )
+      listEventSources(this.container.get(HandlerRegistry), this.sources)
+      prepareLateThemes(this.container, this.sources.map(({ cls }) => cls))
       for (const service of this.services) this.container.get(service)
     })
     await this.resolving
@@ -762,8 +770,9 @@ export class TestingModule {
   /**
    * Emits a client event to the module's `@On` and `@Once` handlers, through the pipeline the app runs
    * them in up to its event fallback: the global guards of the module's `app`, then each handler's own.
-   * Handlers on the module's controllers, class providers and their dependencies all receive it. A
-   * `@Once` handler handles only the first event, as it would on a client.
+   * As on the bot, every instance the module runs lifecycle hooks on, the cooldown store aside, receives
+   * it: the controllers and services, what they and the stages inject, and each provided class or value.
+   * A `@Once` handler handles only the first event, as it would on a client.
    *
    * The bot's event fallback doesn't run here. On a bot, a guard's `GuardDeniedError` is logged and the
    * event skipped, and a handler's `UserError` is logged and, when the event carries a message, answered
@@ -789,17 +798,18 @@ export class TestingModule {
     this.warnIfClosed()
     await this.init()
     const calls: Promise<boolean>[] = []
-    for (const cls of this.eventClasses) {
-      for (const handler of getEventHandlers(cls.prototype)) {
+    for (const [index, source] of (this.sources ?? []).entries()) {
+      for (const handler of source.handlers) {
         if (handler.event !== event) continue
         if (handler.once) {
-          const key = `${cls.name}.${handler.method}:${event}`
+          const key = `${index}.${handler.method}:${event}`
           if (this.firedOnce.has(key)) continue
           this.firedOnce.add(key)
         }
         // Resolved inside the call, so a class that cannot be resolved fails as its handler would
         const run = async () => {
-          const instance = this.container.get(cls) as Record<string, (...args: unknown[]) => unknown>
+          const instance = source.resolve()
+          if (!instance) return false
           const { ran } = await runHandler(this.container, instance, handler.method, args, { type: 'event', awaitObservers: true })
           return ran
         }
@@ -1259,6 +1269,7 @@ export class TestingModuleBuilder {
         warnInheritedRoutes(this.options.controllers ?? [])
         warnOverlappingPatterns(this.options.controllers ?? [])
         warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
+        for (const warning of perCallEventWarnings(startup, providers, appPresenterClass)) new Logger('TestingModule').warn(warning)
         if (this.options.app) bindAppPresenter(container, this.options.app)
         // Recorded as the container makes each one, so close() shuts down exactly what exists
         const constructed = new Set<unknown>()

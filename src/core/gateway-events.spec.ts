@@ -15,7 +15,9 @@ import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import {
   Catch,
   Controller,
+  Defer,
   Guard,
+  Inject,
   Interceptor,
   MeoCord,
   MessageHandler,
@@ -58,7 +60,14 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 
 /** Starts an app built by the factory, with a client that logs in without a network. */
 async function startApp(
-  options: { controllers?: any[]; services?: any[]; guards?: any[]; interceptors?: any[]; messages?: MessageCommandOptions },
+  options: {
+    controllers?: any[]
+    services?: any[]
+    providers?: any[]
+    guards?: any[]
+    interceptors?: any[]
+    messages?: MessageCommandOptions
+  },
   clientOptions: ClientOptions = { intents: [] },
 ): Promise<Client> {
   const clients: Client[] = []
@@ -70,6 +79,7 @@ async function startApp(
   @MeoCord({
     controllers: options.controllers ?? [],
     services: options.services,
+    providers: options.providers,
     guards: options.guards,
     interceptors: options.interceptors,
     messages: options.messages,
@@ -504,6 +514,197 @@ describe('gateway event handlers', () => {
       await startApp({ services: [], guards: [RolesGuard] })
 
       expect(logged.info).toEqual([])
+    })
+  })
+
+  describe('every instance the app makes or is given', () => {
+    /** A controller whose guard injects `dependency`, so only a stage reaches it. */
+    function guardedBy(dependency: new (...args: any[]) => unknown) {
+      @Guard()
+      class NeedsDependency implements GuardInterface {
+        constructor(@Inject(dependency) readonly dependency: unknown) {}
+        canActivate() {
+          return true
+        }
+      }
+
+      @Controller()
+      @UseGuard(NeedsDependency)
+      class Guarded {
+        @MessageHandler('ping')
+        ping() {}
+      }
+      return Guarded
+    }
+
+    it('runs @On handlers on a service only a stage injects, a class provided under another token, and a provided or made value', async () => {
+      const heard: string[] = []
+
+      @Service()
+      class StageOnly {
+        @On('guildMemberAdd')
+        joined() {
+          heard.push('StageOnly')
+        }
+      }
+
+      abstract class Weather {}
+      @Service()
+      class OpenMeteo extends Weather {
+        @On('guildMemberAdd')
+        joined() {
+          heard.push('OpenMeteo')
+        }
+      }
+
+      class Given {
+        constructor(readonly name: string) {}
+        @On('guildMemberAdd')
+        joined() {
+          heard.push(this.name)
+        }
+      }
+
+      const client = await startApp({
+        controllers: [guardedBy(StageOnly)],
+        providers: [
+          { provide: Weather, useClass: OpenMeteo },
+          { provide: 'given', useValue: new Given('value') },
+          { provide: 'made', useFactory: () => new Given('factory') },
+        ],
+      })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect(heard.sort()).toEqual(['OpenMeteo', 'StageOnly', 'factory', 'value'])
+    })
+
+    it('runs the handlers of one instance once, however many tokens reach it', async () => {
+      const heard: string[] = []
+
+      @Service()
+      class Listed {
+        @On('guildMemberAdd')
+        joined() {
+          heard.push('Listed')
+        }
+      }
+
+      class Given {
+        @On('guildMemberAdd')
+        joined() {
+          heard.push('Given')
+        }
+      }
+
+      const given = new Given()
+      const client = await startApp({
+        services: [Listed],
+        providers: [
+          { provide: 'given', useValue: given },
+          { provide: 'again', useValue: given },
+          { provide: 'listed', useFactory: (listed: Listed) => listed, inject: [Listed] },
+        ],
+      })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect(heard.sort()).toEqual(['Given', 'Listed'])
+    })
+
+    it('checks the intents of handlers on a service only a stage injects', async () => {
+      @Service()
+      class StageOnly {
+        @On('guildMemberAdd')
+        joined() {}
+      }
+
+      await startApp({ controllers: [guardedBy(StageOnly)] }, { intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] })
+
+      const warnings = logged.warn.map(args => String(args[0])).filter(text => text.includes('GuildMembers'))
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain("@On('guildMemberAdd') in StageOnly.joined")
+    })
+
+    it('lists the event handlers of a service only a stage injects in the HandlerRegistry', async () => {
+      let registry: HandlerRegistry | undefined
+
+      @Service()
+      class StageOnly {
+        @On('guildMemberAdd')
+        joined() {}
+      }
+
+      @Service()
+      class Help {
+        constructor(handlers: HandlerRegistry) {
+          registry = handlers
+        }
+      }
+
+      await startApp({ controllers: [guardedBy(StageOnly)], services: [Help] })
+
+      expect(registry?.list({ kind: 'event' }).map(entry => `${entry.controller.name}.${entry.method}`)).toEqual(['StageOnly.joined'])
+    })
+
+    it('warns of a misused handler on a class only a stage reaches, leaves it unattached, and attaches the others', async () => {
+      const heard: string[] = []
+
+      @Service()
+      class StageOnly {
+        @On('guildMemberAdd')
+        @Defer()
+        misused() {
+          heard.push('misused')
+        }
+
+        @On('guildMemberAdd')
+        joined() {
+          heard.push('joined')
+        }
+      }
+
+      const client = await startApp({ controllers: [guardedBy(StageOnly)] })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect(heard).toEqual(['joined'])
+      const warning = logged.warn.map(args => String(args[0])).find(text => text.includes('StageOnly.misused'))
+      expect(warning).toContain('@Defer is for interaction handlers')
+      expect(warning).toContain('(5.0)')
+    })
+
+    it('warns of an @Once on a class only a stage reaches that shares its name with another, and leaves it unattached', async () => {
+      const heard: string[] = []
+      const audit = (where: string) => {
+        @Service()
+        class Audit {
+          @Once('guildMemberAdd')
+          first() {
+            heard.push(where)
+          }
+        }
+        return Audit
+      }
+
+      const client = await startApp({ controllers: [guardedBy(audit('stage'))], services: [audit('listed')] })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect(heard).toEqual(['listed'])
+      const warning = logged.warn.map(args => String(args[0])).find(text => text.includes('two classes have this name'))
+      expect(warning).toContain("@Once('guildMemberAdd') in Audit.first does not run")
+    })
+
+    it('warns of an @On on a class made for each call, which receives no events', async () => {
+      @Service()
+      class PerCall {
+        constructor(readonly context: ExecutionContext) {}
+        @On('guildMemberAdd')
+        joined() {}
+      }
+
+      await startApp({ controllers: [guardedBy(PerCall)] })
+
+      const warning = logged.warn.map(args => String(args[0])).find(text => text.includes('PerCall.joined'))
+      expect(warning).toContain("@On('guildMemberAdd') is on a class made for each call")
+      expect(warning).toContain('(5.0)')
     })
   })
 

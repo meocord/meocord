@@ -81,6 +81,15 @@ export function configureThemes(
   attachThemeCache(container.get(ThemeCache), resolvers)
 }
 
+/** Counts `classes`, whose handlers are prepared once the app's providers are made, among those a theme can vary by. */
+export function prepareLateThemes(container: Container, classes: readonly object[]): void {
+  const themes = apps.get(container)
+  if (!themes || themes.varies || !classes.some(cls => chainOf(cls).some(link => THEMED_CLASSES.has(link)))) return
+  themes.varies = true
+  // Built again on its next read, with each handler's own theme
+  themes.version = -1
+}
+
 /** The app's themes, built again when the layers beneath the app's have changed. */
 function current(container: Container): AppThemes | undefined {
   const themes = apps.get(container)

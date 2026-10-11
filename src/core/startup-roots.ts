@@ -5,6 +5,7 @@ import { assertTypedParameters, type ProviderMap, reachableClasses } from '@src/
 import { themeResolverClass, type ThemeResolverClass } from '@src/core/theme-resolvers.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
+import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { type ThemeResolvers } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
 import { startupError } from '@src/util/refusal.util.js'
@@ -82,18 +83,44 @@ function reachesContext(cls: object, providers: ProviderMap, seen = new Set<obje
   )
 }
 
+/** The app's classes the stages and presenter inject. */
+function stageInjected({ decorators }: StartupClasses, presenter?: unknown): AnyClass[] {
+  const stages = [...decorators].filter(([, decorator]) => decorator !== '@Controller()').map(([stage]) => stage)
+  if (typeof presenter === 'function') stages.push(presenter)
+  return [...new Set(stages.flatMap(stage => injectedTokens(stage as object)))].filter(isAppClassToken)
+}
+
 /**
  * The classes the app's stages and presenter inject, which they would make only at their first call. Made with the
  * app's own classes, a service among them gets its lifecycle hooks. One that reaches the call's `ExecutionContext` is
  * made for each call, so it is left out, and a stage a test replaces is not among the stages, so what it would inject
  * is not made.
  */
-export function stageDependencies({ decorators }: StartupClasses, providers: ProviderMap, presenter?: unknown): AnyClass[] {
-  const stages = [...decorators].filter(([, decorator]) => decorator !== '@Controller()').map(([stage]) => stage)
-  if (typeof presenter === 'function') stages.push(presenter)
-  return [...new Set(stages.flatMap(stage => injectedTokens(stage as object)))]
-    .filter(isAppClassToken)
-    .filter(cls => !reachesContext(cls, providers))
+export function stageDependencies(startup: StartupClasses, providers: ProviderMap, presenter?: unknown): AnyClass[] {
+  return stageInjected(startup, presenter).filter(cls => !reachesContext(cls, providers))
+}
+
+/**
+ * A warning for each `@On` and `@Once` handler on a class the stages and presenter reach that is made for each call,
+ * as it reaches `ExecutionContext`: no one instance of it receives events.
+ */
+export function perCallEventWarnings(startup: StartupClasses, providers: ProviderMap, presenter?: unknown): string[] {
+  const perCall = new Set<AnyClass>()
+  // What a class made for each call injects is made for each call too only if it also reaches the context
+  const visit = (cls: AnyClass) => {
+    if (perCall.has(cls) || providers.has(cls) || !reachesContext(cls, providers)) return
+    perCall.add(cls)
+    injectedTokens(cls).filter(isAppClassToken).forEach(visit)
+  }
+  stageInjected(startup, presenter).forEach(visit)
+  return [...perCall].flatMap(cls =>
+    getEventHandlers(cls.prototype as object).map(
+      ({ event, method, once }) =>
+        `${cls.name}.${method}: @${once ? 'Once' : 'On'}('${event}') is on a class made for each call, as it injects ` +
+        'ExecutionContext or a class that does, so it receives no events. The next major version (5.0) refuses it; ' +
+        'move the handler to a service that does not.',
+    ),
+  )
 }
 
 /** How a container checks a guard first met at a call: the guard and what it injects, as the startup checks would. */
