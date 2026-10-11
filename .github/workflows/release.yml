@@ -27,6 +27,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # The newest Bun 1.4 patch; a new minor is a deliberate edit
+  BUN_VERSION: 1.4.x
+
 jobs:
   lint:
     name: Lint
@@ -37,6 +41,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -96,6 +102,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -159,6 +167,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -195,6 +205,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -218,6 +230,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -242,6 +256,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -298,6 +314,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -382,6 +400,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -481,6 +501,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -549,6 +571,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -619,6 +643,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile --ignore-scripts
@@ -659,6 +685,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -712,6 +740,8 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       # Changesets' CLI, which the action runs: the lockfile's exact packages, with no install scripts
       - name: Install dependencies
