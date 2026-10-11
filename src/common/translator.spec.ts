@@ -113,6 +113,15 @@ describe('plurals', () => {
     // Russian's rules select `few` for 3, which this message has no form for
     expect(items.locale('ru')('items', { count: 3 })).toBe('3 предметов')
   })
+
+  it('falls back to the default for a translation whose plural lacks `other`', () => {
+    const items = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { items: { one: '{count} item', other: '{count} items' } }, ru: { items: { one: '{count} предмет', few: '{count} предмета' } } },
+    } as never) as unknown as { locale: (locale: string) => (key: string, params: object) => string }
+
+    expect(items.locale('ru')('items', { count: 3 })).toBe('3 items')
+  })
 })
 
 describe('interpolation', () => {
@@ -256,6 +265,28 @@ describe('a key with no message, in development', () => {
     fresh().default('nope')
 
     expect(warned).toEqual([])
+  })
+
+  // A plural is an object whose every key is a plural category, as the types and expectCompleteCatalog read one
+  it('reads a group with an `other` key, or with plural categories beside other keys, as a group', () => {
+    const own = createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': { reasons: { spam: 'Spam', other: 'Other' }, mixed: { one: 'one {count}', other: '{count}', note: 'A note' } },
+        id: { reasons: { spam: 'Spam', other: 'Lainnya' } },
+      },
+    } as never) as unknown as {
+      default: (key: string, params?: object) => string
+      localizations: (key: string) => unknown
+    }
+
+    expect([own.default('reasons'), own.default('reasons', { count: 2 }), own.default('mixed', { count: 1 })]).toEqual(['reasons', 'reasons', 'mixed'])
+    expect(own.localizations('reasons')).toEqual({})
+    expect([own.default('reasons.other'), own.default('mixed.note'), own.localizations('reasons.other')]).toEqual(['Other', 'A note', { id: 'Lainnya' }])
+    expect(warned).toEqual([
+      '"reasons" names a group of messages, not one, so the key is shown in its place.',
+      '"mixed" names a group of messages, not one, so the key is shown in its place.',
+    ])
   })
 })
 
