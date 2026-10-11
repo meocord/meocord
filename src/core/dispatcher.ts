@@ -136,7 +136,7 @@ const SLOW_HANDLER_MS = 5000
 
 /** One dispatched call: when it arrived, the fallback that answers it, and who is told what it did. */
 interface Call {
-  startedAt?: number
+  startedAt: number
   fallback: Fallback
   record?: DispatchRecorder
 }
@@ -208,15 +208,19 @@ export class Dispatcher {
     }
   }
 
-  /** The call for one event: the fallback, told of each error that reaches it when there is a recorder. */
-  private callFor(record: DispatchRecorder | undefined, startedAt?: number): Call {
+  /**
+   * The call for one event, stamped as it is made, so every handler it runs reports one start and a duration that
+   * includes routing and any handler that ran before it; the fallback is told of each error that reaches it when there
+   * is a recorder.
+   */
+  private callFor(record: DispatchRecorder | undefined): Call {
     const fallback: Fallback = record
       ? async (error, context) => {
           record.unhandled(error)
           return this.fallback(error, context)
         }
       : this.fallback
-    return { startedAt, fallback, record }
+    return { startedAt: performance.now(), fallback, record }
   }
 
   private getInstance(controllerClass: ControllerClass): any {
@@ -249,8 +253,7 @@ export class Dispatcher {
    * the controller, goes to the global filters, then the fallback.
    */
   async interaction(interaction: Interaction<CacheType>, record?: DispatchRecorder): Promise<void> {
-    // From the moment it arrives, so an observer's duration includes routing
-    const call = this.callFor(record, performance.now())
+    const call = this.callFor(record)
     try {
       await this.dispatchInteraction(interaction, call)
     } catch (error) {
