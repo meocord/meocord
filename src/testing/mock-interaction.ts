@@ -1099,13 +1099,17 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const strict = strictMocks()
     let ephemeral: boolean | null = strict ? null : false
     let ephemeralDecided = false
+    // Whether one of the mock's own first answers ran; flags a test sets without one leave ephemeral as discord.js would
+    let answeredByMock = false
+    const answeredOutside = () => Boolean(instance.replied || instance.deferred) && !answeredByMock
     const decideEphemeral = (value: boolean | null, decided: boolean) => {
       ephemeral = value
       ephemeralDecided = decided
     }
     Object.defineProperty(instance, 'ephemeral', {
       get: () => {
-        if (!ephemeralDecided && !strict) {
+        // A read once a test answered the interaction itself, as MeoCord's own reads are then, reads the same in both modes
+        if (!ephemeralDecided && !strict && !answeredOutside()) {
           warnPlaceholder(
             mockLogger,
             `${(Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name}.ephemeral`,
@@ -1155,6 +1159,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         deferred: instance.deferred,
         ephemeral,
         ephemeralDecided,
+        answeredByMock,
         original,
         originalGone,
         followUps: new Map(followUps),
@@ -1164,7 +1169,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       return () => {
         Object.assign(instance, { replied: saved.replied, deferred: saved.deferred })
         decideEphemeral(saved.ephemeral, saved.ephemeralDecided)
-        ;({ original, originalGone, answeredByTest, modalAnswered } = saved)
+        ;({ original, originalGone, answeredByTest, answeredByMock, modalAnswered } = saved)
         followUps.clear()
         for (const [id, held] of saved.followUps) followUps.set(id, held)
       }
@@ -1215,6 +1220,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         instance[kind] = true
         if (flagged !== undefined) decideEphemeral(flagged, true)
         answeredByTest = byTest
+        answeredByMock = true
         try {
           then(args)
         } catch (error) {
