@@ -211,6 +211,9 @@ export function useTheme(): ResolvedTheme {
  * Such a listener runs in its emitter's context, so without it a `useTheme()` inside reads the theme outside any call.
  * Timers and promises the handler starts keep its theme without it.
  *
+ * The theme is the binding call's whole theme, its server's and user's themes included, so every later call, whoever
+ * it is for, is answered in the starting member's theme.
+ *
  * @param fn - The function to run in the call's theme; `this` and its arguments are passed through.
  * @returns A function that runs `fn` in the theme `useTheme()` returns where `bindTheme` is called.
  *
@@ -220,7 +223,7 @@ export function useTheme(): ResolvedTheme {
  * async poll(message: Message) {
  *   const collector = message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60_000 })
  *   collector.on('collect', bindTheme(async (click: ButtonInteraction) => {
- *     const { emojis } = useTheme() // the handler's theme, @UseTheme included
+ *     const { emojis } = useTheme() // the starting member's theme, @UseTheme included
  *     await click.reply(`${emojis.success} Picked`)
  *   }))
  * }
