@@ -13,6 +13,7 @@ type Overloads<T> = T extends {
 }
   ? ((...args: A1) => R1) | ((...args: A2) => R2) | ((...args: A3) => R3) | ((...args: A4) => R4)
   : T
+// With the catch-all last, which `Parameters` and `ReturnType` read, every mock API value is `any`, as MockedFunction says
 type CallArgs<T> = Parameters<Overloads<T> & ((...args: any[]) => any)>
 type CallResult<T> = ReturnType<Overloads<T> & ((...args: any[]) => any)>
 // A function for any of `T`'s signatures; declared as a method so a narrower parameter, one overload's, is accepted
@@ -79,7 +80,8 @@ export interface MockState<T extends (...args: any[]) => any = (...args: any[]) 
  * The mock API of a mock function: what it has recorded, and the methods that change what it does.
  *
  * Every mock from `meocord/testing` has it, with the names jest and Vitest use, so a test written for either runner
- * reads the same.
+ * reads the same. The values it takes and records aren't checked against the function it mocks; see
+ * {@link MockedFunction}.
  *
  * @group Testing
  * @category Mocks
@@ -122,9 +124,11 @@ export interface MockInstance<T extends (...args: any[]) => any = (...args: any[
 /**
  * A mock function with the signature of `T`, and the mock API of {@link MockInstance}.
  *
- * It takes the place of jest's `MockedFunction<T>` and Vitest's `MockedFunction<T>`. The mock factories type each
- * method of a mock with it, so `interaction.reply.mockResolvedValue(...)` type-checks. For an overloaded method, such as
- * a manager's `fetch`, the mock API takes what any of its overloads takes or returns.
+ * It takes the place of jest's `MockedFunction<T>` and Vitest's `MockedFunction<T>`, and the mock factories type each
+ * method of a mock with it. Calling the mock is checked against `T`. The values its mock API takes and records are
+ * not, for a plain function as for an overloaded one: `mockReturnValue`, `mockResolvedValue` and `mockImplementation`
+ * take any value, and `mock.calls` and `mock.results` read as `any`. So a partial fake, such as
+ * `guild.members.fetch.mockResolvedValue({ id })`, type-checks, and so does a value of the wrong type.
  *
  * @group Testing
  * @category Mocks
