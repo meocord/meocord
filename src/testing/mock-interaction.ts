@@ -1094,7 +1094,31 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
   if (repliable) {
     instance.replied = false
     instance.deferred = false
-    instance.ephemeral = false
+    // Null until reply() or deferReply() decides it, as discord.js has it; default mode reads false until then, and a
+    // test reading it there is told once. A value the test sets is read as set
+    const strict = strictMocks()
+    let ephemeral: boolean | null = strict ? null : false
+    let ephemeralDecided = false
+    const decideEphemeral = (value: boolean | null, decided: boolean) => {
+      ephemeral = value
+      ephemeralDecided = decided
+    }
+    Object.defineProperty(instance, 'ephemeral', {
+      get: () => {
+        if (!ephemeralDecided && !strict) {
+          warnPlaceholder(
+            mockLogger,
+            `${(Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name}.ephemeral`,
+            'it is null until reply() or deferReply() decides it, as discord.js has it',
+            'Reply or defer first, or call useStrictMocks() to read null now.',
+          )
+        }
+        return ephemeral
+      },
+      set: (value: boolean | null) => decideEphemeral(value, true),
+      enumerable: true,
+      configurable: true,
+    })
 
     // discord.js's errors, with their codes; a call before any answer keeps the message the mock has always given
     const alreadyReplied = () => discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
@@ -1129,7 +1153,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       const saved = {
         replied: instance.replied,
         deferred: instance.deferred,
-        ephemeral: instance.ephemeral,
+        ephemeral,
+        ephemeralDecided,
         original,
         originalGone,
         followUps: new Map(followUps),
@@ -1137,7 +1162,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         modalAnswered,
       }
       return () => {
-        Object.assign(instance, { replied: saved.replied, deferred: saved.deferred, ephemeral: saved.ephemeral })
+        Object.assign(instance, { replied: saved.replied, deferred: saved.deferred })
+        decideEphemeral(saved.ephemeral, saved.ephemeralDecided)
         ;({ original, originalGone, answeredByTest, modalAnswered } = saved)
         followUps.clear()
         for (const [id, held] of saved.followUps) followUps.set(id, held)
@@ -1182,11 +1208,12 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const first = (method: string, kind: 'replied' | 'deferred', then: (args: unknown[]) => void): AnswerGate =>
       (args, byTest) => {
         if (answered()) refuse(method, alreadyReplied(), byTest)
-        // Read first: flags discord.js refuses throw before anything changes
-        const ephemeral = method === 'reply' || method === 'deferReply' ? hasEphemeralFlag(args[0]) : undefined
+        // Read first: flags discord.js refuses throw before anything changes; reply() and deferReply() decide
+        // ephemeral, as discord.js's do, and update() and deferUpdate() leave it
+        const flagged = method === 'reply' || method === 'deferReply' ? hasEphemeralFlag(args[0]) : undefined
         const undo = snapshot()
         instance[kind] = true
-        if (ephemeral) instance.ephemeral = true
+        if (flagged !== undefined) decideEphemeral(flagged, true)
         answeredByTest = byTest
         try {
           then(args)
