@@ -784,16 +784,16 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
-   * Undoes `@Defer`'s acknowledgement after a guard denied the call silently: a command's deferred
-   * reply is deleted while nothing was sent into it; a component's invisible acknowledgement needs
-   * nothing. Never throws.
+   * Ends a call a guard denied silently. A component still unanswered is acknowledged invisibly, with or without
+   * `@Defer`, since Discord tells the user an unanswered call failed; so is a command `@Defer`'s 'auto' timer was
+   * waiting on, whose deferred reply is then deleted, as `@Defer`'s is while nothing was sent into it. Never throws.
    */
   abandon(): Promise<void> {
     const waiting = this.timer !== undefined
     this.cancelScheduled()
     return this.queued(async () => {
-      // Denied before the 'auto' timer: acknowledged here, since Discord tells the user an unanswered call failed
-      if (waiting) await this.acknowledgeUnanswered({ ephemeral: true })
+      // A command's acknowledgement shows "thinking…", so one is made only for the timer that would have made it
+      if (waiting || !answersWithOwnMessage(this.interaction)) await this.acknowledgeUnanswered({ ephemeral: true })
       this.sync()
       const onlyDeferred = this.calls.every(call => call.method === 'deferReply')
       if (this.phase !== 'deferred' || !answersWithOwnMessage(this.interaction) || !onlyDeferred) return
