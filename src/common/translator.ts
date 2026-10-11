@@ -445,7 +445,16 @@ const DISCORD_LOCALES: ReadonlySet<string> = new Set(Object.values(Locale))
 
 export const languageOf = (locale: string): string => locale.split('-')[0]
 
-/** A message by its dotted key, or undefined when the catalog lacks it or the key names a group. */
+const PLURAL_CATEGORIES: ReadonlySet<string> = new Set<PluralCategory>(['zero', 'one', 'two', 'few', 'many', 'other'])
+
+/** A plural's shape: a non-empty object whose every key is a plural category, as the types read one; any other is a group. */
+export const isPluralShape = (value: unknown): value is Partial<Record<PluralCategory, unknown>> =>
+  typeof value === 'object' && value !== null && Object.keys(value).length > 0 && Object.keys(value).every(key => PLURAL_CATEGORIES.has(key))
+
+/**
+ * A message by its dotted key, or undefined when the catalog lacks it or the key names a group. A plural without an
+ * `other` form reads as missing, so a translation that left it out falls back to the next catalog.
+ */
 export function lookup(catalog: CatalogShape | undefined, key: string): string | PluralMessage | undefined {
   let current: unknown = catalog
   for (const part of key.split('.')) {
@@ -453,9 +462,7 @@ export function lookup(catalog: CatalogShape | undefined, key: string): string |
     current = (current as Record<string, unknown>)[part]
   }
   if (typeof current === 'string') return current
-  if (typeof current === 'object' && current !== null && typeof (current as PluralMessage).other === 'string') {
-    return current as PluralMessage
-  }
+  if (isPluralShape(current) && typeof current.other === 'string') return current as PluralMessage
   return undefined
 }
 

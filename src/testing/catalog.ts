@@ -1,20 +1,14 @@
-import { type CatalogShape, CATALOGS, placeholderNames, type Translator } from '@src/common/translator.js'
+import { type CatalogShape, CATALOGS, isPluralShape, placeholderNames, type Translator } from '@src/common/translator.js'
 import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 interface Leaf { key: string; plural: boolean }
-
-const PLURAL_CATEGORIES = new Set(['zero', 'one', 'two', 'few', 'many', 'other'])
-
-/** A plural: an object whose every key is a plural category, as the translator's types read one; any other is a group. */
-const isPlural = (value: unknown): boolean =>
-  typeof value === 'object' && value !== null && Object.keys(value).length > 0 && Object.keys(value).every(key => PLURAL_CATEGORIES.has(key))
 
 /** Every message key of a catalog, and whether it is a plural. */
 function leaves(catalog: CatalogShape, prefix = ''): Leaf[] {
   return Object.entries(catalog).flatMap(([name, value]) => {
     const key = `${prefix}${name}`
     if (typeof value === 'string') return [{ key, plural: false }]
-    if (isPlural(value)) return [{ key, plural: true }]
+    if (isPluralShape(value)) return [{ key, plural: true }]
     return leaves(value as CatalogShape, `${key}.`)
   })
 }
@@ -47,7 +41,7 @@ const shown = (message: unknown): string => (typeof message === 'string' ? messa
 /** The `{params}` a translation uses that the message it translates doesn't take; a plural's `{count}` is taken. */
 function strayParams(translation: unknown, original: unknown): string[] {
   const taken = placeholders(original)
-  if (isPlural(original)) taken.add('count')
+  if (isPluralShape(original)) taken.add('count')
   return [...placeholders(translation)].filter(name => !taken.has(name))
 }
 
@@ -116,7 +110,7 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
         continue
       }
       // A translation of another shape than the default's can't be read as it: a text for a plural, or the reverse
-      if (plural !== isPlural(message) || (!plural && typeof message !== 'string')) {
+      if (plural !== isPluralShape(message) || (!plural && typeof message !== 'string')) {
         problems.push(`${key} should be a ${plural ? 'plural' : 'text'}, as the default is`)
         continue
       }
