@@ -833,11 +833,17 @@ export function matchMessageSubcommands(
   return found.length > 0 ? found : undefined
 }
 
+/** Whether a message has text a handler could take; dispatch runs no handler for one without. */
+export function hasMessageText(content: string | null | undefined): boolean {
+  return Boolean(content?.trim())
+}
+
 /**
  * What a test calling a handler with a message alone passes as its params, as dispatch builds them: `undefined` for a
- * listener, `{}` for a message without content, else what the pattern captures with the route and start; for one naming
- * the command without fitting it, the route, start and `given`, the words after the command words. Either only when
- * dispatch would give the message to this handler among `controllers`; otherwise why it does not reach the handler.
+ * listener, `{}` for a message whose content isn't a string, as a mock's without strict mocks, else what the pattern
+ * captures with the route and start; for one naming the command without fitting it, the route, start and `given`, the
+ * words after the command words. Either only when dispatch would give the message to this handler among
+ * `controllers`; otherwise why it does not reach the handler, a message with no text included.
  */
 export async function messageParamsFor(
   controllerClass: ControllerClass,
@@ -850,6 +856,11 @@ export async function messageParamsFor(
   const routes = buildMessageRoutes([controllerClass], options).filter(candidate => candidate.method === methodName)
   if (routes.length === 0) return undefined
   if (typeof message.content !== 'string') return { params: {} }
+  const handler = `${controllerClass.name}.${methodName}`
+  const pattern = routes.find(route => !route.aliasOf)?.pattern ?? routes[0].pattern
+  if (!hasMessageText(message.content)) {
+    return { mismatch: `message has no text, so dispatch runs no handler for it: give the mock the content ${handler}'s pattern '${pattern}' takes.` }
+  }
 
   const botId = message.client?.user?.id
   const all = buildMessageRoutes(controllers, options)
@@ -858,10 +869,9 @@ export async function messageParamsFor(
   const target = matchMessageRoute(all, message.content, starts) ?? matchMessageCommand(all, message.content, starts)
   if (target && (target.route.controllerClass !== controllerClass || target.route.method !== methodName)) {
     const other = `${target.route.controllerClass.name}.${target.route.method}`
-    return { mismatch: `message '${message.content}' does not reach ${controllerClass.name}.${methodName}: dispatch runs ${other}.` }
+    return { mismatch: `message '${message.content}' does not reach ${handler}: dispatch runs ${other}.` }
   }
   if (target && 'params' in target) return { params: target.params, route: target.route, start: target.start }
   if (target) return { params: {}, route: target.route, start: target.start, given: target.given }
-  const pattern = routes.find(route => !route.aliasOf)?.pattern ?? routes[0].pattern
-  return { mismatch: `message '${message.content}' does not match ${controllerClass.name}.${methodName}'s pattern '${pattern}'.` }
+  return { mismatch: `message '${message.content}' does not match ${handler}'s pattern '${pattern}'.` }
 }
