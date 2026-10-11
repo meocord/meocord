@@ -884,9 +884,33 @@ const optionError = (code: DiscordjsErrorCodes, ...args: unknown[]): DiscordjsTy
 // In discord.js's error codes, though missing from its typings
 const INVALID_CHANNEL_TYPE = 'CommandInteractionOptionInvalidChannelType' as DiscordjsErrorCodes
 
-/** Records the interaction a mock options resolver belongs to. */
+/** The entity options of a mock options resolver, by name and id, for one given to an autocomplete. */
+const optionEntities = new WeakMap<object, [name: string, id: unknown][]>()
+
+/** The resolvers whose entity options a warning has named. */
+const warnedEntities = new WeakSet<object>()
+
+/** Whether a mock options resolver belongs to an autocomplete, whose options Discord sends unresolved. */
+const ownedByAutocomplete = (options: object): boolean =>
+  (optionOwners.get(options) as { type?: unknown } | undefined)?.type === InteractionType.ApplicationCommandAutocomplete
+
+/**
+ * Records the interaction a mock options resolver belongs to. Given to an autocomplete, an entity option reads as its
+ * id under strict mocks, as Discord sends it; otherwise it keeps the object given, with a warning once per resolver.
+ */
 const ownOptions = (interaction: object, options: unknown): void => {
-  if (typeof options === 'object' && options !== null) optionOwners.set(options, interaction)
+  if (typeof options !== 'object' || options === null) return
+  optionOwners.set(options, interaction)
+  const entities = optionEntities.get(options)
+  if (!entities?.length || strictMocks() || warnedEntities.has(options) || !ownedByAutocomplete(options)) return
+  warnedEntities.add(options)
+  const [first] = entities as [[string, unknown], ...[string, unknown][]]
+  const names = entities.map(([name]) => `"${name}"`).join(', ')
+  mockLogger.warn(
+    `The autocomplete option${entities.length > 1 ? 's' : ''} ${names} ${entities.length > 1 ? 'hold resolved objects' : 'holds a resolved object'} here, ` +
+      'where Discord sends an autocomplete only their ids, so a bot\'s handler gets the id and getUser() and the like return null. ' +
+      `Give the id, such as '${String(first[1])}', or call useStrictMocks() to have the mock read it so.`,
+  )
 }
 
 /** A mock user that is a person, with an id of its own unless given one. */
@@ -3284,7 +3308,7 @@ type MemberOf = (name: string, user: User) => object | null
  * its own field, and code that reads only one of the two is exactly what this lets a
  * test catch — so both are set. A user option has its user, and in a server its member too.
  */
-function toOptionData(name: string, value: ChatInputOptions[string], memberOf?: MemberOf): CommandInteractionOption {
+function toOptionData(name: string, value: ChatInputOptions[string], memberOf?: MemberOf, unresolved?: () => boolean): CommandInteractionOption {
   const type = optionTypeOf(value)
   const isEntity = typeof value === 'object' && value !== null
 
@@ -3293,7 +3317,7 @@ function toOptionData(name: string, value: ChatInputOptions[string], memberOf?: 
   if (value instanceof User) {
     option.user = value
     // Read once the options are given to an interaction, which says whether it was made in a server
-    if (memberOf) Object.defineProperty(option, 'member', { get: () => memberOf(name, value) ?? undefined, enumerable: true })
+    if (memberOf) Object.defineProperty(option, 'member', { get: () => memberOf(name, value) ?? undefined, enumerable: true, configurable: true })
   } else if (value instanceof GuildMember) {
     option.user = value.user
     option.member = value
@@ -3301,6 +3325,16 @@ function toOptionData(name: string, value: ChatInputOptions[string], memberOf?: 
   else if (value instanceof BaseChannel) option.channel = value
   else if (value instanceof Attachment) option.attachment = value
   else if (isEntity) option.user = value
+
+  // An autocomplete's entity option is its id alone, as Discord sends it, when the options belong to one
+  if (unresolved) {
+    for (const field of ['user', 'member', 'role', 'channel', 'attachment'] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(option, field)
+      if (!descriptor) continue
+      const read = descriptor.get ?? (() => descriptor.value)
+      Object.defineProperty(option, field, { get: () => (unresolved() ? undefined : read()), enumerable: true, configurable: true })
+    }
+  }
 
   return option as unknown as CommandInteractionOption
 }
@@ -3341,9 +3375,10 @@ function buildOptionData(
   values: Record<string, ChatInputOptions[string]>,
   memberOf: MemberOf,
   focused: string | null,
+  unresolved: () => boolean,
 ): CommandInteractionOption[] {
   const leaves = Object.entries(values).map(([name, value]) =>
-    name === focused ? focusedOptionData(name, value) : toOptionData(name, value, memberOf),
+    name === focused ? focusedOptionData(name, value) : toOptionData(name, value, memberOf, unresolved),
   )
   if (focused !== null && !Object.hasOwn(values, focused)) leaves.push(focusedOptionData(focused, null))
 
@@ -3384,6 +3419,10 @@ function buildOptionData(
  * The `focused` option reads as Discord sends it, through `getFocused()`, `getFocused(true)` and `data` alike: a
  * string, `''` when no value is given, and marked `focused` in `data`. A number given for it is its digits under
  * `useStrictMocks()`; otherwise it stays the number, with a warning when read.
+ *
+ * Given to an `AutocompleteInteraction`, a user, member, role, channel, mentionable or attachment option reads as
+ * Discord sends an autocomplete's options under `useStrictMocks()`: its id alone, in `data` and the handler's params,
+ * with the entity getters returning `null`. Otherwise it keeps the object given, with a warning once.
  *
  * @typeParam Cached - `any` by default, to match `createMockInteraction(ChatInputCommandInteraction)`; pass it when the
  *   interaction under test is cache-pinned.
@@ -3433,6 +3472,8 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getSubcommand = createMockFn<(required?: boolean) => string | null>((required = true) =>
     resolveSubEntry(subcommand, DiscordjsErrorCodes.CommandInteractionOptionNoSubcommand, required),
   )
+  // Under strict mocks, options given to an autocomplete hold their entities as ids alone, as Discord sends them
+  const unresolved = (): boolean => strictMocks() && ownedByAutocomplete(resolver)
   // As discord.js reads an option by its type: another type throws its type error, required or not. A value whose
   // option may be of the getter's type, as a user may be a mentionable option's, reads as null if the getter doesn't
   // take it, and throws when required
@@ -3441,6 +3482,11 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     if (value === undefined || value === null) return resolveOrThrow<V>(name, null, required)
     const typeError = () => optionError(DiscordjsErrorCodes.CommandInteractionOptionType, name, optionTypeOf(value), expected.join(', '))
     if (!possibleTypesOf(value).some(type => expected.includes(type))) throw typeError()
+    // An entity in an autocomplete's options is its id alone, so a getter finds nothing, as in discord.js
+    if (typeof value === 'object' && unresolved()) {
+      if (required === true) throw optionError(DiscordjsErrorCodes.CommandInteractionOptionEmpty, name, optionTypeOf(value))
+      return null
+    }
     if (takes(value)) return value as V
     if (required === true) throw typeError()
     return null
@@ -3506,7 +3552,7 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   )
   base.get = createMockFn<(name: string, required?: boolean) => CommandInteractionOption | null>((name: string, required?: boolean) => {
     const value = values[name]
-    return value === undefined || value === null ? resolveOrThrow(name, null, required) : toOptionData(name, value, memberOf)
+    return value === undefined || value === null ? resolveOrThrow(name, null, required) : toOptionData(name, value, memberOf, unresolved)
   })
   // A message option is a message context menu's own, never a slash command's
   base.getMessage = createMockFn<(name: string, required?: boolean) => null>((name: string, required?: boolean) =>
@@ -3522,12 +3568,14 @@ export function createChatInputOptions<Cached extends CacheType = any>(
 
   // `data` is what the framework reads to build a handler's params, so it is materialised here rather than
   // auto-stubbed, or every params assertion would see an empty record.
-  base.data = buildOptionData(subcommandGroup, subcommand, values, memberOf, focused)
+  base.data = buildOptionData(subcommandGroup, subcommand, values, memberOf, focused, unresolved)
   // The fields discord.js's constructor sets from it, which its toString() reads
   base._group = subcommandGroup
   base._subcommand = subcommand
   base._hoistedOptions = (subcommand === null ? base.data : (subcommandGroup === null ? base.data[0] : base.data[0].options[0]).options) as CommandInteractionOption[]
 
   const resolver = stubDeep(base)
+  const entities = Object.entries(values).filter(([name, value]) => name !== focused && typeof value === 'object' && value !== null)
+  optionEntities.set(resolver, entities.map(([name, value]) => [name, (value as { id?: unknown }).id]))
   return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
 }
