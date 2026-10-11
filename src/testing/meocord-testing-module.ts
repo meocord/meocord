@@ -531,13 +531,14 @@ export class TestingModule {
    *   An interaction's customId or command name must be one dispatch routes to the handler, ranking
    *   every handler of the module as the bot does; a mock built without one is not checked. An autocomplete is
    *   checked by its command path and its focused option: one dispatch gives to another `@Autocomplete` handler,
-   *   or to none, is refused under `useStrictMocks()`, and otherwise warned about once and run. With a message
-   *   alone, a patterned `@MessageHandler` gets the
-   *   params its pattern captures from the content, after the prefix of the module's `app`, with typed
-   *   params resolved as dispatch resolves them, from the message's guild caches first; a message
-   *   without content gets `{}`. A word that is not a value of its type, and a prefixed message that names
-   *   the command but leaves out a param, go through the handler's filters as a `MessageUsageError`, as
-   *   dispatch answers them.
+   *   or to none, is refused under `useStrictMocks()`, and otherwise warned about once and run.
+   *   With a message alone, a patterned `@MessageHandler` gets the params its pattern captures from the content,
+   *   after the prefix of the module's `app`, with typed params resolved as dispatch resolves them, from the
+   *   message's guild caches first. A message whose `content` isn't a string, as a mock's without
+   *   `useStrictMocks()`, gets `{}`. Under strict mocks a message has empty `content`, and a patterned handler
+   *   rejects it, as dispatch runs no handler for a message with no text: give the mock the `content` the handler
+   *   takes. A word that is not a value of its type, and a prefixed message that names the command but leaves out
+   *   a param, go through the handler's filters as a `MessageUsageError`, as dispatch answers them.
    * @returns Whether the handler ran, and the error a filter handled, if any. Rejects with an error no
    *   filter handles, or with the error a filter throws: the built-in fallback, which answers such
    *   errors in the bot, does not run here. Rejects before running anything with an interaction or a

@@ -55,6 +55,7 @@ import { HandlerRegistry, shareMessageRoutes } from '@src/core/handler-registry.
 import {
   buildMessageRoutes,
   commandWordsOf,
+  hasMessageText,
   matchMessageCommand,
   matchMessageSubcommands,
   matchMessageRoute,
@@ -438,7 +439,7 @@ export class Dispatcher {
    * it, and a failure to read the prefixes, go through the global filters, then the fallback; the listeners still run.
    */
   async message(message: Message, record?: DispatchRecorder): Promise<void> {
-    if (message.author.bot || !message.content?.trim()) return
+    if (message.author.bot || !hasMessageText(message.content)) return
     const call = this.callFor(record)
 
     let target: { route: MessageRoute; params: Record<string, string>; start: string; given?: number } | undefined
