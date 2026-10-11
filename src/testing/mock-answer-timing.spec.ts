@@ -155,6 +155,44 @@ describe('when a mock interaction is answered, in default mode', () => {
 describe.each([
   ['default', () => {}],
   ['strict', () => useStrictMocks()],
+])('an answer that fails after another answer, in %s mode', (_mode, setUp) => {
+  beforeEach(() => setUp())
+
+  it('leaves the other answer in place, undoing only a change nothing has followed', async () => {
+    const interaction = slash()
+    interaction.reply.mockRejectedValueOnce(new Error('network'))
+    const [a, b] = [outcome(interaction.reply('a')), outcome(interaction.reply('b'))]
+    await Promise.all([a, b])
+
+    expect([interaction.replied, (await interaction.fetchReply()).content]).toEqual([true, 'b'])
+  })
+
+  it('keeps a later edit when an earlier one fails after it', async () => {
+    const interaction = slash()
+    await interaction.deferReply()
+    interaction.editReply.mockRejectedValueOnce(new Error('network'))
+    await Promise.all([outcome(interaction.editReply('a')), outcome(interaction.editReply('b'))])
+
+    expect((await interaction.fetchReply()).content).toBe('b')
+  })
+
+  it('leaves the interaction unanswered when both answers fail, in either order', async () => {
+    for (const order of [[0, 1], [1, 0]]) {
+      const interaction = slash()
+      const failures = order.map(() => Promise.withResolvers<never>())
+      interaction.reply.mockImplementationOnce(() => failures[0].promise).mockImplementationOnce(() => failures[1].promise)
+      const answers = [outcome(interaction.reply('a')), outcome(interaction.reply('b'))]
+      for (const index of order) failures[index].reject(new Error('network'))
+      await Promise.all(answers)
+
+      expect(interaction.replied).toBe(false)
+    }
+  })
+})
+
+describe.each([
+  ['default', () => {}],
+  ['strict', () => useStrictMocks()],
 ])('an awaited answer, in %s mode', (_mode, setUp) => {
   beforeEach(() => setUp())
 

@@ -1227,6 +1227,18 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       }
     }
 
+    // The changes answers make to the reply state, in order. One whose answer fails is undone once every change after
+    // it is undone too, so a later answer's change stands while it does, as on a bot
+    const changes: { undo: () => void; failed: boolean }[] = []
+    const undoneInTurn = (undo: () => void): (() => void) => {
+      const change = { undo, failed: false }
+      changes.push(change)
+      return () => {
+        change.failed = true
+        while (changes.at(-1)?.failed) changes.pop()!.undo()
+      }
+    }
+
     // The first answers called and not yet settled, oldest first, for default mode to warn where a bot would differ
     const unsettled: string[] = []
     // Default mode warns once per interaction where code that doesn't await an answer would fail on a bot
@@ -1280,7 +1292,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
           }
         }
         unsettled.push(method)
-        return { undo, settle: () => void unsettled.splice(unsettled.indexOf(method), 1) }
+        return { undo: undoneInTurn(undo), settle: () => void unsettled.splice(unsettled.indexOf(method), 1) }
       }
 
     /** A later answer: refused before the interaction has one. */
@@ -1300,7 +1312,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
           undo()
           throw error
         }
-        return { undo }
+        return { undo: undoneInTurn(undo) }
       }
 
     /** The id an edit, fetch or delete names, `undefined` for the original response. */

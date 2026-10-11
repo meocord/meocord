@@ -10,4 +10,6 @@ Under `useStrictMocks()`, a mock interaction is marked `replied`, `deferred` or 
 
 This catches overlaps within one synchronous run of the test's code. A mock answer resolves on the next microtask, so an answer still in flight across an `await`, as a guard's `void interaction.reply()` followed by `return false` is on a bot, isn't caught.
 
+In both modes, an answer that fails no longer undoes an answer made after it. A test could make the first of two un-awaited replies reject, and the interaction then read as unanswered though the second reply went through; it now reads as answered by the second. A failed answer's change is undone once every change after it is undone too, so an interaction whose answers all fail still reads as unanswered.
+
 In default mode the flags are still set at the call. The first time an interaction does what a bot would refuse, an edit or a second answer while its first is in flight, a warning says what the bot would do. The next major version (5.0) marks answers as strict mocks do, without the call.
