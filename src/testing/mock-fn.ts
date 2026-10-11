@@ -126,9 +126,10 @@ export interface MockInstance<T extends (...args: any[]) => any = (...args: any[
  *
  * It takes the place of jest's `MockedFunction<T>` and Vitest's `MockedFunction<T>`, and the mock factories type each
  * method of a mock with it. Calling the mock is checked against `T`. The values its mock API takes and records are
- * not, for a plain function as for an overloaded one: `mockReturnValue`, `mockResolvedValue` and `mockImplementation`
- * take any value, and `mock.calls` and `mock.results` read as `any`. So a partial fake, such as
- * `guild.members.fetch.mockResolvedValue({ id })`, type-checks, and so does a value of the wrong type.
+ * not, for a plain function as for an overloaded one: `mockReturnValue` and `mockResolvedValue` take any value,
+ * `mockImplementation` takes any function, and each of `mock.calls`' arguments and each of `mock.results`' values reads
+ * as `any`. So a partial fake, such as `guild.members.fetch.mockResolvedValue({ id })`, type-checks, and so does a
+ * value of the wrong type.
  *
  * @group Testing
  * @category Mocks
