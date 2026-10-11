@@ -12,4 +12,4 @@ This catches overlaps within one synchronous run of the test's code. A mock answ
 
 In both modes, an answer that fails no longer undoes an answer made after it. A test could make the first of two un-awaited replies reject, and the interaction then read as unanswered though the second reply went through; it now reads as answered by the second. A failed answer's change is undone once every change after it is undone too, so an interaction whose answers all fail still reads as unanswered.
 
-In default mode the flags are still set at the call. The first time an interaction does what a bot would refuse, an edit or a second answer while its first is in flight, a warning says what the bot would do. The next major version (5.0) marks answers as strict mocks do, without the call.
+In default mode the flags are still set at the call. The first time an interaction does what a bot would refuse, an edit or a second answer while its first is in flight, a warning says what the bot would do. In the next major version (5.0), every mock interaction marks its answers when they resolve, as strict mocks do now.
