@@ -1132,7 +1132,7 @@ export class TestingModuleBuilder {
           presenter: appPresenterClass,
           cooldownStore: store,
           themeFor: stages?.themeFor?.resolvers,
-          observers: observers.filter(isConstructor),
+          observers,
           stubs: [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()],
         })
         const hasTranslator = i18n !== undefined || providers.has(Translator)

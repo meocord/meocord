@@ -4,7 +4,7 @@ import { quoteForLog } from '@src/util/user-text.util.js'
 export function isConstructible(value: unknown): value is abstract new (...args: any[]) => unknown {
   if (typeof value !== 'function') return false
   try {
-    // Fails unless value can be new.target, which only a constructor can; none of value's own code runs
+    // Fails unless value can be new.target, which only a constructor can; none of value's constructor code runs
     Reflect.construct(String, [], value)
     return true
   } catch {
