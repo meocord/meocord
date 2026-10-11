@@ -1290,7 +1290,7 @@ export class TestingModuleBuilder {
         warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })
         warnInheritedRoutes(this.options.controllers ?? [])
         warnOverlappingPatterns(this.options.controllers ?? [])
-        warnHandlersOffControllers(this.options.controllers ?? [], appClasses)
+        warnHandlersOffControllers(this.options.controllers ?? [], startup.classes)
         for (const warning of perCallEventWarnings(startup, providers, appPresenterClass)) new Logger('TestingModule').warn(warning)
         if (this.options.app) bindAppPresenter(container, this.options.app)
         // Recorded as the container makes each one, so close() shuts down exactly what exists
