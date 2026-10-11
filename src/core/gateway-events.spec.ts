@@ -645,6 +645,32 @@ describe('gateway event handlers', () => {
       expect(registry?.list({ kind: 'event' }).map(entry => `${entry.controller.name}.${entry.method}`)).toEqual(['StageOnly.joined'])
     })
 
+    it('lists them in a HandlerRegistry that a provider listed before the app came online', async () => {
+      let early: HandlerRegistry | undefined
+
+      @Service()
+      class StageOnly {
+        @On('guildMemberAdd')
+        joined() {}
+      }
+
+      await startApp({
+        controllers: [guardedBy(StageOnly)],
+        providers: [
+          {
+            provide: 'early',
+            useFactory: (registry: HandlerRegistry) => {
+              early = registry
+              return registry.list({ kind: 'event' }).length
+            },
+            inject: [HandlerRegistry],
+          },
+        ],
+      })
+
+      expect(early?.list({ kind: 'event' }).map(entry => `${entry.controller.name}.${entry.method}`)).toEqual(['StageOnly.joined'])
+    })
+
     it('warns of a misused handler on a class only a stage reaches, leaves it unattached, and attaches the others', async () => {
       const heard: string[] = []
 

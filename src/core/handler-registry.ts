@@ -292,13 +292,17 @@ function entryBase(controller: HandlerClass, method: string): HandlerEntryBase {
   return { controller, method, get: context.get.bind(context), getAll: context.getAll.bind(context) } as HandlerEntryBase
 }
 
-const lateEventSources = new WeakMap<HandlerRegistry, readonly { cls: HandlerClass; handlers: readonly EventHandlerMetadata[] }[]>()
+type LateEventSources = readonly { cls: HandlerClass; handlers: readonly EventHandlerMetadata[] }[]
+
+const lateEventSources = new WeakMap<HandlerRegistry, LateEventSources>()
+// The late sources each registry's cached entries were read with, so a list made before they arrived is read again
+const collectedWith = new WeakMap<HandlerRegistry, LateEventSources | undefined>()
 
 /**
  * Has `registry` list the `@On` and `@Once` handlers that run on `sources`, the instances the app attaches them for,
  * where they are on a class it does not list already.
  */
-export function listEventSources(registry: HandlerRegistry, sources: readonly { cls: HandlerClass; handlers: readonly EventHandlerMetadata[] }[]): void {
+export function listEventSources(registry: HandlerRegistry, sources: LateEventSources): void {
   lateEventSources.set(registry, sources)
 }
 
@@ -365,7 +369,11 @@ export class HandlerRegistry {
    * @returns The handlers, class by class in the order the app makes its classes, each after what it injects.
    */
   list<K extends HandlerKind = HandlerKind>(filter: HandlerFilter<K> = {}): Extract<HandlerEntry, { kind: K }>[] {
-    this.entries ??= this.collect()
+    const late = lateEventSources.get(this)
+    if (!this.entries || collectedWith.get(this) !== late) {
+      this.entries = this.collect()
+      collectedWith.set(this, late)
+    }
     return this.entries.filter(
       entry =>
         (filter.kind === undefined || entry.kind === filter.kind) &&
