@@ -77,7 +77,7 @@ const isPlainObject = (value: unknown): boolean => {
   return prototype === Object.prototype || prototype === null
 }
 
-const PLAIN = "give a plain object, such as { ...value }, or a row's toObject(), since anything else would replace the whole"
+const PLAIN = "give a plain object: a database row's plain form, such as Mongoose's toObject() or Sequelize's get({ plain: true }), or an object literal of the values you set, since anything else would replace the whole"
 
 /** What a non-plain object is: by its class, or as one without a plain prototype when it has none named. */
 const describeInstance = (value: object): string => {

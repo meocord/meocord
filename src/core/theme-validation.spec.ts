@@ -36,13 +36,13 @@ describe('themeProblems', () => {
     const unnamed = Object.create(Object.create(null))
 
     expect(themeProblems(new Row(), 'x')).toEqual([
-      "x: theme must be a plain object of groups (got a Row): give a plain object, such as { ...value }, or a row's toObject(), since anything else would replace the whole theme",
+      "x: theme must be a plain object of groups (got a Row): give a plain object: a database row's plain form, such as Mongoose's toObject() or Sequelize's get({ plain: true }), or an object literal of the values you set, since anything else would replace the whole theme",
     ])
     expect(themeProblems({ colors: new Colours() }, 'x')).toEqual([
-      "x: theme.colors must be a plain object of roles (got a Colours): give a plain object, such as { ...value }, or a row's toObject(), since anything else would replace the whole group",
+      "x: theme.colors must be a plain object of roles (got a Colours): give a plain object: a database row's plain form, such as Mongoose's toObject() or Sequelize's get({ plain: true }), or an object literal of the values you set, since anything else would replace the whole group",
     ])
     expect(themeProblems(unnamed)).toEqual([
-      "theme must be a plain object of groups (got an object without a plain prototype): give a plain object, such as { ...value }, or a row's toObject(), since anything else would replace the whole theme",
+      "theme must be a plain object of groups (got an object without a plain prototype): give a plain object: a database row's plain form, such as Mongoose's toObject() or Sequelize's get({ plain: true }), or an object literal of the values you set, since anything else would replace the whole theme",
     ])
   })
 
