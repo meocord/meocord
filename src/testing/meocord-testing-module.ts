@@ -36,7 +36,7 @@ import {
   runHandler,
 } from '@src/core/handler-pipeline.js'
 import { setPresenter } from '@src/common/response/presenter.js'
-import { commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
+import { autocompleteMismatch, commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
 import { buildComponentRoutes, type ComponentRoute } from '@src/core/component-routes.js'
 import { hasCustomId } from '@src/util/interaction.util.js'
 import {
@@ -529,7 +529,10 @@ export class TestingModule {
    *   command's or an autocomplete's options, or the handler's customId params with a modal's fields or
    *   a select menu's choices.
    *   An interaction's customId or command name must be one dispatch routes to the handler, ranking
-   *   every handler of the module as the bot does; a mock built without one is not checked. With a message alone, a patterned `@MessageHandler` gets the
+   *   every handler of the module as the bot does; a mock built without one is not checked. An autocomplete is
+   *   checked by its command path and its focused option: one dispatch gives to another `@Autocomplete` handler,
+   *   or to none, is refused under `useStrictMocks()`, and otherwise warned about once and run. With a message
+   *   alone, a patterned `@MessageHandler` gets the
    *   params its pattern captures from the content, after the prefix of the module's `app`, with typed
    *   params resolved as dispatch resolves them, from the message's guild caches first; a message
    *   without content gets `{}`. A word that is not a value of its type, and a prefixed message that names
@@ -538,7 +541,8 @@ export class TestingModule {
    * @returns Whether the handler ran, and the error a filter handled, if any. Rejects with an error no
    *   filter handles, or with the error a filter throws: the built-in fallback, which answers such
    *   errors in the bot, does not run here. Rejects before running anything with an interaction or a
-   *   message the handler's route does not match, naming both. Given fewer arguments than the handler
+   *   message the handler's route does not match, naming both, and under `useStrictMocks()` with such an
+   *   autocomplete. Given fewer arguments than the handler
    *   declares, with a first that is neither an interaction nor a message, such as a reaction without its
    *   `ReactionEvent`, it rejects under `useStrictMocks()`, and otherwise warns once and runs the handler.
    *
@@ -581,6 +585,7 @@ export class TestingModule {
     const component = interaction && hasCustomId(interaction) ? componentRouteFor(this.componentRoutes(), controller, methodName, interaction) : undefined
     const mismatch = component && 'mismatch' in component ? component.mismatch : interaction && commandMismatch(this.controllers, controller, methodName, interaction)
     if (mismatch) throw new Error(mismatch)
+    if (interaction) this.checkAutocompleteRoute(controller, methodName, interaction)
     let hooks: Pick<RunOptions, 'parseArgs' | 'fetchArgs'> = {}
     let callArgs =
       args.length === 1 && interaction
@@ -607,6 +612,22 @@ export class TestingModule {
 
   /** The handlers already warned about for being given fewer arguments than they take, so each is named once. */
   private readonly warnedArgumentCounts = new Set<string>()
+
+  /** The autocomplete mismatches already warned about without strict mocks, so each handler and route warns once. */
+  private readonly warnedAutocompleteRoutes = new Set<string>()
+
+  /**
+   * Refuses under strict mocks, and otherwise warns once, an autocomplete dispatch gives to another handler or to none.
+   * Without strict mocks the handler still runs, since a test that passes that way would fail.
+   */
+  private checkAutocompleteRoute(controller: new (...args: any[]) => unknown, methodName: string, interaction: Interaction): void {
+    const mismatch = autocompleteMismatch(this.controllers, controller, methodName, interaction)
+    if (!mismatch) return
+    if (strictMocks()) throw new Error(mismatch)
+    if (this.warnedAutocompleteRoutes.has(mismatch)) return
+    this.warnedAutocompleteRoutes.add(mismatch)
+    new Logger('TestingModule').warn(`${mismatch} Under useStrictMocks(), invoke rejects it.`)
+  }
 
   /**
    * Refuses under `useStrictMocks()`, or warns once otherwise, a call that gives a handler fewer arguments than it

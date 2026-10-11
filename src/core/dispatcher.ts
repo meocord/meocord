@@ -11,7 +11,6 @@ import {
 import { type Container } from 'inversify'
 import { type Logger } from '@src/common/logger.js'
 import {
-  getAutocompleteHandlers,
   getMessageHandlers,
   getReactionHandlers,
   matchesEmoji,
@@ -19,14 +18,13 @@ import {
 } from '@src/decorator/controller.decorator.js'
 import {
   describeInteraction,
-  focusedOptionName,
   hasCustomId,
   matchesCommandType,
-  resolveCommandPaths,
   resolveOptionParams,
 } from '@src/util/interaction.util.js'
 import { type MessageCommandOptions, type ReactionEvent } from '@src/interface/index.js'
-import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
+import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
+import { type AutocompleteRoute, buildAutocompleteRoutes, matchAutocompleteRoute } from '@src/core/autocomplete-routes.js'
 import {
   buildComponentRoutes,
   type ComponentRoute,
@@ -102,11 +100,6 @@ function answered(interaction: Interaction): boolean {
 }
 
 type ControllerClass = new (...args: any[]) => any
-
-interface AutocompleteRoute {
-  controllerClass: ControllerClass
-  meta: AutocompleteMeta
-}
 
 /** Told what one dispatched call did: each handler it ran, as it settled, and each error that reached the fallback. */
 export interface DispatchRecorder {
@@ -244,25 +237,11 @@ export class Dispatcher {
     return (this.componentRoutes ??= buildComponentRoutes([...this.controllerClasses]))
   }
 
-  /**
-   * Every `@Autocomplete` handler, option-specific ones first. Cached, since autocomplete runs on
-   * every keystroke.
-   */
-  private autocompleteRoutes?: AutocompleteRoute[]
+  /** Every `@Autocomplete` handler, option-specific ones first. Cached, since autocomplete runs on every keystroke. */
+  private autocompleteRoutes?: AutocompleteRoute<ControllerClass>[]
 
-  private getAutocompleteRoutes(): AutocompleteRoute[] {
-    if (this.autocompleteRoutes) return this.autocompleteRoutes
-
-    const routes: AutocompleteRoute[] = []
-    for (const controllerClass of this.controllerClasses) {
-      for (const meta of getAutocompleteHandlers(this.getInstance(controllerClass))) {
-        routes.push({ controllerClass, meta })
-      }
-    }
-
-    routes.sort((a, b) => Number(Boolean(b.meta.optionName)) - Number(Boolean(a.meta.optionName)))
-    this.autocompleteRoutes = routes
-    return routes
+  private getAutocompleteRoutes(): AutocompleteRoute<ControllerClass>[] {
+    return (this.autocompleteRoutes ??= buildAutocompleteRoutes(this.controllerClasses))
   }
 
   /**
@@ -335,20 +314,14 @@ export class Dispatcher {
    * option gets an empty list and a warning, rather than a menu stuck loading until Discord times out.
    */
   private async handleAutocomplete(interaction: AutocompleteInteraction<CacheType>, call: Call): Promise<void> {
-    const focusedName = focusedOptionName(interaction)
-
-    for (const path of resolveCommandPaths(interaction)) {
-      for (const { controllerClass, meta } of this.getAutocompleteRoutes()) {
-        if (meta.commandPath !== path) continue
-        if (meta.optionName !== undefined && meta.optionName !== focusedName) continue
-
-        const controllerInstance = this.getInstance(controllerClass)
-        this.logger.log('[AUTOCOMPLETE]', `[${path}]`, `[${meta.methodName}]`)
-        const params = resolveOptionParams(interaction)
-        const ran = await this.invokeHandler(controllerInstance, meta.methodName, [interaction, params], call)
-        if (!ran) await closeAutocomplete(interaction, this.logger)
-        return
-      }
+    const route = matchAutocompleteRoute(this.getAutocompleteRoutes(), interaction)
+    if (route) {
+      const { controllerClass, meta } = route
+      this.logger.log('[AUTOCOMPLETE]', `[${meta.commandPath}]`, `[${meta.methodName}]`)
+      const params = resolveOptionParams(interaction)
+      const ran = await this.invokeHandler(this.getInstance(controllerClass), meta.methodName, [interaction, params], call)
+      if (!ran) await closeAutocomplete(interaction, this.logger)
+      return
     }
 
     this.logger.warn(

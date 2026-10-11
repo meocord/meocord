@@ -8,9 +8,10 @@ import {
   StringSelectMenuInteraction,
   UserSelectMenuInteraction,
 } from 'discord.js'
-import { getCommandMap } from '@src/decorator/controller.decorator.js'
 import { type ComponentRoute, matchComponentRoute, type RouteParamValue } from '@src/core/component-routes.js'
 import {
+  describeInteraction,
+  focusedOptionName,
   hasCustomId,
   isCustomIdRouted,
   matchesCommandType,
@@ -19,6 +20,8 @@ import {
 } from '@src/util/interaction.util.js'
 import { setOwn } from '@src/util/value.util.js'
 import { commandRouteKeys, matchCommandRoute } from '@src/core/command-routes.js'
+import { buildAutocompleteRoutes, matchAutocompleteRoute } from '@src/core/autocomplete-routes.js'
+import { getAutocompleteHandlers, getCommandMap } from '@src/decorator/controller.decorator.js'
 
 /** The second argument an interaction handler receives, and the names given twice while building it. */
 export interface HandlerInput {
@@ -144,3 +147,29 @@ export function commandMismatch<C extends { name: string; prototype: object }>(
   return `command '${keys[0]}' does not match ${handler}'s route ${named.map(({ route }) => `'${route}'`).join(' or ')}.`
 }
 
+/**
+ * Why an autocomplete could not reach a handler, for a test calling the handler directly: the handler is checked
+ * against the one dispatch routes the autocomplete to among `controllers`, by its command path and focused option.
+ * `undefined` when it is that one, when the handler has no `@Autocomplete` route, or when the interaction is not an
+ * autocomplete or has no command name.
+ */
+export function autocompleteMismatch<C extends { name: string; prototype: object }>(
+  controllers: readonly C[],
+  controller: C,
+  methodName: string,
+  interaction: Interaction,
+): string | undefined {
+  if (!interaction.isAutocomplete() || typeof interaction.commandName !== 'string') return undefined
+  const own = getAutocompleteHandlers(controller.prototype).filter(meta => meta.methodName === methodName)
+  if (own.length === 0) return undefined
+  const winner = matchAutocompleteRoute(buildAutocompleteRoutes(controllers), interaction)
+  if (winner?.controllerClass === controller && winner.meta.methodName === methodName) return undefined
+  const handler = `${controller.name}.${methodName}`
+  const received = describeInteraction(interaction)
+  // A mock without a focused option reaches no option's handler, the commonest way to miss one
+  const option = focusedOptionName(interaction) === undefined ? own.find(meta => meta.optionName !== undefined)?.optionName : undefined
+  const fix = option === undefined ? '' : ` Give the mock the focused option: options: createChatInputOptions({ focused: '${option}' }).`
+  if (winner) return `${received} does not reach ${handler}: dispatch runs ${winner.controllerClass.name}.${winner.meta.methodName}.${fix}`
+  const routes = own.map(meta => (meta.optionName === undefined ? `'${meta.commandPath}'` : `'${meta.commandPath}' option '${meta.optionName}'`))
+  return `${received} does not match ${handler}'s route ${routes.join(' or ')}.${fix}`
+}
