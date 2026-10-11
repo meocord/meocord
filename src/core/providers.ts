@@ -12,6 +12,7 @@ import {
   type ValueProvider,
 } from '@src/interface/provider.interface.js'
 import { refuse, startupError } from '@src/util/refusal.util.js'
+import { isConstructor } from '@src/util/value.util.js'
 
 /** The providers an app or a testing module binds, by the token each is bound under. */
 export type ProviderMap = Map<unknown, Provider>
@@ -63,7 +64,7 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
       startupError(new Error(`${where}: the provider for ${name} needs exactly one of useValue, useClass and useFactory.`))
       continue
     }
-    if ('useClass' in entry && typeof entry.useClass !== 'function') {
+    if ('useClass' in entry && !isConstructor(entry.useClass)) {
       startupError(new Error(`${where}: the provider for ${name} has a useClass that is not a class.`))
       continue
     }
@@ -142,6 +143,17 @@ export function bindProvider(container: Container, provider: Provider, bindClass
     return pending
   })
   for (const dependency of inject) if (isAppClassToken(dependency)) bindClass(dependency)
+}
+
+/**
+ * Reports each service listed by a string or symbol token that no provider provides, which would otherwise be bound
+ * as if it were a class.
+ */
+export function assertProvidedServices(appName: string, services: readonly unknown[], providers: ProviderMap, where: string): void {
+  for (const service of services) {
+    if (typeof service === 'function' || providers.has(service as ProviderToken)) continue
+    startupError(new Error(`${appName}: @MeoCord({ services }) lists ${tokenName(service)}, which nothing provides: add a provider for it to ${where}.`))
+  }
 }
 
 /**

@@ -24,6 +24,7 @@ import { appObservers, bindObservers } from '@src/core/observer-runner.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import {
   assertProvided,
+  assertProvidedServices,
   reachableClasses,
   bindProvider,
   bindsOwnToken,
@@ -216,7 +217,9 @@ export class MeoCordFactory {
     const providers = collectStartupErrors(() => {
       declared.forEach(startupError)
       assertDistinctCommands(options.controllers)
-      return providerMap(options.providers ?? [], '@MeoCord({ providers })')
+      const providers = providerMap(options.providers ?? [], '@MeoCord({ providers })')
+      assertProvidedServices(typeof target === 'function' ? target.name : String(target), options.services ?? [], providers, '@MeoCord({ providers })')
+      return providers
     })
     // A themeFor class is bound on its own, as the cooldown store is, and resolved like a service
     const themeResolver = themeResolverClass(options.themeFor)

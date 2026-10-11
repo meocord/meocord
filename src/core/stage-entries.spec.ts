@@ -109,6 +109,48 @@ describe('a malformed entry', () => {
     )
   })
 
+  it.each([
+    ['an arrow function', () => true],
+    ['a method', { canActivate() {} }.canActivate],
+    ['an async function', async function canActivate() {}],
+    ['a generator function', function* canActivate() {}],
+    ['a bound class, which has no prototype', Allow.bind(null)],
+  ])('is refused by @UseGuard when it is %s, which is no class', (_label, entry) => {
+    expect(onMethod(UseGuard(entry as never))).toThrow('Handlers.handle: @UseGuard: a function is not a class. Give a guard class')
+    expect(onMethod(UseGuard({ provide: entry } as never))).toThrow('Handlers.handle: @UseGuard: { provide } does not name a class.')
+  })
+
+  it('is refused by every stage decorator when it is an arrow function', () => {
+    const arrow = (() => true) as never
+    expect(() => UseGuard(arrow)(class Staff {})).toThrow('Staff: @UseGuard: a function is not a class.')
+    expect(onMethod(UseInterceptor(arrow) as never)).toThrow('Handlers.handle: @UseInterceptor: a function is not a class.')
+    expect(onMethod(UseFilter(arrow) as never)).toThrow('Handlers.handle: @UseFilter: a function is not a class.')
+    expect(onMethod(UsePipe('text', arrow) as never)).toThrow('Handlers.handle: @UsePipe: a function is not a class.')
+    expect(() => MeoCord({ controllers: [], clientOptions: { intents: [] }, guards: [arrow] })(class Bot {})).toThrow(
+      'Bot: @MeoCord({ guards }): a function is not a class.',
+    )
+  })
+
+  it('is taken as a class when it is a function declaration', async () => {
+    function Legacy() {}
+    Legacy.prototype.canActivate = () => {
+      log.push('guard')
+      return true
+    }
+    @Controller()
+    class Old {
+      @Command('old', CommandType.SLASH)
+      @UseGuard(Legacy as never)
+      async old() {
+        log.push('handler')
+      }
+    }
+
+    await MeoCordTestingModule.create({ controllers: [Old] }).compile().invoke(Old, 'old', createMockInteraction(ChatInputCommandInteraction))
+
+    expect(log).toEqual(['guard', 'handler'])
+  })
+
   it('is refused by a class-level @UseGuard, naming the class', () => {
     expect(() => UseGuard(null as never)(class Staff {})).toThrow('Staff: @UseGuard: null is not a class.')
   })

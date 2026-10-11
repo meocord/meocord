@@ -79,8 +79,10 @@ import { Logger } from '@src/common/logger.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
+import { describeValue, isConstructor } from '@src/util/value.util.js'
 import {
   assertProvided,
+  assertProvidedServices,
   bindProvider,
   bindsOwnToken,
   isClassProvider,
@@ -1101,7 +1103,14 @@ export class TestingModuleBuilder {
         }
         // Each pass of checks ends before the next step that is no check, so a module with one error stops where it always did
         stopOnStartupErrors()
+        // What the walk below takes as classes, reported with what the walk finds; an entry refused here is left out of it
         const services = this.wiring?.services ?? []
+        if (this.options.app) assertProvidedServices(this.options.app.name, services, providers, "@MeoCord({ providers }) or the testing module's providers")
+        for (const controller of this.options.controllers ?? []) {
+          if (!isConstructor(controller)) startupError(new Error(`the testing module's controllers takes classes, not ${describeValue(controller)}.`))
+        }
+        const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
+        assertObservers("the testing module's observers", observers)
         const appOptions = this.options.app
           ? (Reflect.getMetadata(META.appOptions, this.options.app) as
               | { cooldownStore?: new (...args: any[]) => CooldownStore; cooldownStoreFailure?: CooldownStoreFailure; cooldownStoreTimeoutMs?: number }
@@ -1116,14 +1125,14 @@ export class TestingModuleBuilder {
         const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
         const appPresenterClass = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter
         const startup = startupClasses({
-          controllers: this.options.controllers ?? [],
+          controllers: (this.options.controllers ?? []).filter(isConstructor),
           services,
           providers,
           stages,
           presenter: appPresenterClass,
           cooldownStore: store,
           themeFor: stages?.themeFor?.resolvers,
-          observers: [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])],
+          observers: observers.filter(isConstructor),
           stubs: [...this.guardOverrides.keys(), ...this.interceptorOverrides.keys(), ...this.filterOverrides.keys()],
         })
         const hasTranslator = i18n !== undefined || providers.has(Translator)
@@ -1213,10 +1222,6 @@ export class TestingModuleBuilder {
         // As the app does when it is created, so a test sees the refusal the bot would give
         assertDistinctCommands(this.options.controllers ?? [])
         if (this.options.app) prepareAppPresenter(container, this.options.app)
-        const observers = [...(this.options.app ? appObservers(this.options.app) : []), ...(this.options.observers ?? [])]
-        assertObservers("the testing module's observers", observers)
-        // Only @Observer classes are bound as observers
-        stopOnStartupErrors()
         bindObservers(container, observers)
         // The store calls ask: the test's own when it provides CooldownStore, else the app's
         const boundStore = store ?? (providers.has(CooldownStore) ? CooldownStore : undefined)
@@ -1344,7 +1349,8 @@ export class MeoCordTestingModule {
    * @param app - The class `@MeoCord` decorates.
    * @param options - Providers that replace the app's by token, extra controllers, and observers.
    * @returns The builder, whose `override*` methods still apply, for `compile()`.
-   * @throws TypeError when `app` is not a `@MeoCord` class.
+   * @throws TypeError when `app` is not a `@MeoCord` class. After {@link reportAllStartupErrors}, an app whose
+   *   `@MeoCord` was refused throws the error it was refused for instead.
    *
    * @example
    * ```ts
@@ -1392,7 +1398,11 @@ export class MeoCordTestingModule {
           providers?: Provider[]
         }
       | undefined
-    if (!appOptions) throw new TypeError(`${app?.name ?? String(app)} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.`)
+    if (!appOptions) {
+      // A refused @MeoCord stores no options, so its own errors, kept with startupErrors: 'all', say why
+      collectStartupErrors(() => declaredErrorsOf([app]).forEach(startupError))
+      throw new TypeError(`${app?.name ?? String(app)} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.`)
+    }
     const controllers = [...new Set([...appOptions.controllers, ...(options.controllers ?? [])])]
     return new TestingModuleBuilder(
       { app, controllers, providers: options.providers, observers: options.observers, shutdownTimeout: options.shutdownTimeout },
