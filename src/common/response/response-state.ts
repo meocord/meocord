@@ -24,7 +24,7 @@ import { logFailedSend } from '@src/common/response/send-failure.js'
 import { describeInteraction } from '@src/util/interaction.util.js'
 import { getInstallContext, type InstallContext } from '@src/common/response/install-context.js'
 import {
-  flagNames,
+  droppedFlagsWarning,
   hasComponentsV2,
   hasEphemeral,
   resolveFlags,
@@ -539,7 +539,7 @@ export class InteractionResponse implements ResponseState {
   private flagsFor(step: ResponseStep, requested: MessageFlagsResolvable | undefined, v2 = this.v2): number {
     const { flags, dropped } = resolveFlags(step, requested, v2)
     if (dropped && development()) {
-      logger.warn(`Dropped flags ${flagNames(dropped).join(', ')}, which a ${step} cannot take.`)
+      logger.warn(droppedFlagsWarning(step, dropped))
     }
     return flags
   }

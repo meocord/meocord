@@ -785,7 +785,7 @@ describe('respond(), call by call', () => {
       await respond(interaction).acknowledge()
 
       await respond(interaction).edit({ content: 'x', flags: SuppressNotifications } as never)
-      expect(warn).toHaveBeenCalledWith('Dropped flags SuppressNotifications, which a edit cannot take.')
+      expect(warn).toHaveBeenCalledWith('Dropped flags SuppressNotifications, which an edit cannot take.')
 
       warn.mockClear()
       vi.stubEnv('NODE_ENV', 'production')
@@ -1226,7 +1226,23 @@ describe('respond(), the last details', () => {
 
     await respond(interaction).edit({ content: 'x', flags: SuppressNotifications | Ephemeral } as never)
 
-    expect(warn).toHaveBeenCalledWith('Dropped flags Ephemeral, SuppressNotifications, which a edit cannot take.')
+    expect(warn).toHaveBeenCalledWith(
+      'Dropped flags Ephemeral, SuppressNotifications, which an edit cannot take. An edit keeps the message as public or ' +
+        'private as it was; to answer only the member, use respond(interaction).followUp() with MessageFlags.Ephemeral.',
+    )
+  })
+
+  it('says how to answer privately when a component\'s first send() drops Ephemeral', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const interaction = button()
+
+    await respond(interaction).send({ content: 'Only you', flags: Ephemeral })
+
+    expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['update'])
+    expect(warn).toHaveBeenCalledWith(
+      'Dropped flags Ephemeral, which an update cannot take. An update changes the message the member clicked, for ' +
+        'everyone; to answer only them, use respond(interaction).followUp() with MessageFlags.Ephemeral.',
+    )
   })
 
   it('sends exactly the flags a payload sets, even on a message with suppressed embeds', async () => {
