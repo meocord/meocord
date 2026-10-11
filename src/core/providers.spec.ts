@@ -10,6 +10,7 @@ describe('providerMap', () => {
     expect(check({ useValue: 1 })).toThrow(`${where}: a provider has no token: set provide to a class, a string or a symbol.`)
     expect(check(null)).toThrow('a provider has no token')
     expect(check({ provide: 'a', useClass: 'A' })).toThrow("@MeoCord({ providers }): the provider for 'a' has a useClass that is not a class.")
+    expect(check({ provide: 'a', useClass: () => ({}) })).toThrow("@MeoCord({ providers }): the provider for 'a' has a useClass that is not a class.")
     expect(check({ provide: 'a', useFactory: 'make' })).toThrow("@MeoCord({ providers }): the provider for 'a' has a useFactory that is not a function.")
     expect(check({ provide: 'a', useFactory: () => 1, inject: [42] })).toThrow(
       "@MeoCord({ providers }): the provider for 'a' has an inject that is not a list of tokens.",

@@ -1,7 +1,26 @@
 import { quoteForLog } from '@src/util/user-text.util.js'
 
-/** Whether a value is a class, which a stage entry or a `@Catch` type must be: what `new` and `instanceof` take. */
-export const isConstructor = (value: unknown): value is abstract new (...args: any[]) => unknown => typeof value === 'function'
+/** Whether `new` takes a value, as `instanceof` needs of its right side, such as a `@Catch` type. */
+export function isConstructible(value: unknown): value is abstract new (...args: any[]) => unknown {
+  if (typeof value !== 'function') return false
+  try {
+    // Fails unless value can be new.target, which only a constructor can; none of value's own code runs
+    Reflect.construct(String, [], value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether a value is a class, which a stage entry or an app option must be: constructible, with an object prototype for
+ * the metadata MeoCord reads. An arrow function, a method, an async or a generator function is none.
+ */
+export function isConstructor(value: unknown): value is abstract new (...args: any[]) => unknown {
+  if (!isConstructible(value)) return false
+  const prototype = (value as { prototype?: unknown }).prototype
+  return typeof prototype === 'object' && prototype !== null
+}
 
 /** A value as a refusal or a warning names it: a string quoted, `null` and `undefined` as written, else its kind. */
 export function describeValue(value: unknown): string {

@@ -73,7 +73,8 @@ export function assertStageEntries(
 
 /** The class of a stage entry. */
 export function stageClass(entry: StageEntry): new (...args: any[]) => unknown {
-  return isConstructor(entry) ? (entry as new (...args: any[]) => unknown) : entry.provide
+  // Entries were checked as they were declared, so a function is the class itself
+  return typeof entry === 'function' ? entry : entry.provide
 }
 
 /** The context types a stage declared, or `undefined` when it runs for every type. */

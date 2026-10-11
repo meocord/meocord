@@ -8,6 +8,7 @@ import { bindShared } from '@src/core/interceptor-runner.js'
 import { appliesTo } from '@src/core/stage-scope.js'
 import { respond, type ResponsePhase } from '@src/common/response/response-state.js'
 import { startupError } from '@src/util/refusal.util.js'
+import { isConstructor } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /** Where a container keeps the observers its calls are reported to, in order. */
@@ -21,7 +22,7 @@ const logger = new Logger('Observer')
 export function assertObservers(where: string, observers: readonly unknown[]): void {
   for (const observer of observers) {
     if (typeof observer !== 'function' || !Reflect.getMetadata(META.observerClass, observer)) {
-      const name = typeof observer === 'function' ? observer.name : String(observer)
+      const name = isConstructor(observer) ? observer.name || 'an anonymous class' : typeof observer === 'function' ? 'a function' : String(observer)
       startupError(new Error(`${where} takes classes decorated with @Observer(), not ${name}.`))
       continue
     }

@@ -118,4 +118,55 @@ describe('@Catch given something that is not an error class', () => {
     // No filter matches, so invoke rejects with the handler's own error rather than one from the matching
     await expect(module.invoke(ShopController, 'sell', createMockInteraction(ChatInputCommandInteraction))).rejects.toBe(other)
   })
+
+  it('takes a function new cannot take, such as an arrow function, as one that matches no error', async () => {
+    const caught: unknown[] = []
+    @Catch((() => true) as never)
+    class Arrow implements ExceptionFilter {
+      catch(error: unknown) {
+        caught.push(error)
+      }
+    }
+    const thrown = new Error('boom')
+    @Controller()
+    class Panel {
+      @Command('panel', CommandType.SLASH)
+      @UseFilter(Arrow)
+      async panel() {
+        throw thrown
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Panel] }).compile()
+
+    expect(warnings()).toEqual([expect.stringMatching(/^Arrow: @Catch's first entry, a function, which matches no error, is deprecated/)])
+    // The handler's own error, not a TypeError from instanceof
+    await expect(module.invoke(Panel, 'panel', createMockInteraction(ChatInputCommandInteraction))).rejects.toBe(thrown)
+    expect(caught).toEqual([])
+  })
+
+  it('matches by a bound error class, as instanceof does', async () => {
+    class StockError {}
+    const caught: unknown[] = []
+    @Catch(StockError.bind(null) as never)
+    class Stock implements ExceptionFilter {
+      catch(error: unknown) {
+        caught.push(error)
+      }
+    }
+    const thrown = new StockError()
+    @Controller()
+    class Shop {
+      @Command('buy', CommandType.SLASH)
+      @UseFilter(Stock)
+      async buy() {
+        throw thrown
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Shop] }).compile()
+
+    await module.invoke(Shop, 'buy', createMockInteraction(ChatInputCommandInteraction))
+
+    expect(warnings()).toEqual([])
+    expect(caught).toEqual([thrown])
+  })
 })

@@ -13,6 +13,7 @@ import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js
 import { copyLayer } from '@src/core/theme-scope.js'
 import { deprecatedOnMethod, refuse, declaring } from '@src/util/refusal.util.js'
 import { timeoutProblem } from '@src/util/timer-limit.util.js'
+import { describeValue, isConstructor } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /** Refuses a `messages` option of the wrong type where the app is declared, rather than at the first message. */
@@ -58,6 +59,29 @@ function assertMessageOptions(appName: string, messages: MessageCommandOptions |
       throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { types } }): "${name}" needs a parse(word, message) function.`))
     }
     if (type.labelKey !== undefined) assertLabelKey(appName, name, type.labelKey, i18n)
+  }
+}
+
+/**
+ * Refuses an option that takes a class given anything else, such as an object or an arrow function, where the app is
+ * declared: the startup checks read each class's prototype, and would otherwise fail on it without naming the option.
+ */
+function assertClassOptions(
+  appName: string,
+  { presenter, cooldownStore, controllers, services }: { presenter?: unknown; cooldownStore?: unknown; controllers?: readonly unknown[]; services?: readonly unknown[] },
+): void {
+  for (const [name, value, implementing] of [['presenter', presenter, 'ResponsePresenter'], ['cooldownStore', cooldownStore, 'CooldownStore']] as const) {
+    if (value !== undefined && !isConstructor(value)) {
+      throw refuse(new TypeError(`${appName}: @MeoCord({ ${name} }) takes a class implementing ${implementing}, not ${describeValue(value)}.`))
+    }
+  }
+  for (const controller of controllers ?? []) {
+    if (!isConstructor(controller)) throw refuse(new TypeError(`${appName}: @MeoCord({ controllers }) takes classes, not ${describeValue(controller)}.`))
+  }
+  // A string or symbol is a token, which a provider has to provide; that is checked as the app is created
+  for (const service of services ?? []) {
+    if (isConstructor(service) || typeof service === 'string' || typeof service === 'symbol') continue
+    throw refuse(new TypeError(`${appName}: @MeoCord({ services }) takes classes, or tokens that providers provide, not ${describeValue(service)}.`))
   }
 }
 
@@ -110,6 +134,7 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
 ): (target: any, propertyKey?: string | symbol) => void {
   return declaring((target: any, propertyKey?: string | symbol): void => {
     if (deprecatedOnMethod('@MeoCord', target, propertyKey)) return
+    assertClassOptions(target.name, options)
     assertStageEntries('@MeoCord({ guards })', 'guard', target.name, options.guards ?? [])
     assertStageEntries('@MeoCord({ interceptors })', 'interceptor', target.name, options.interceptors ?? [])
     assertStageEntries('@MeoCord({ filters })', 'filter', target.name, options.filters ?? [])
