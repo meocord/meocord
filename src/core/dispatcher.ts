@@ -40,6 +40,7 @@ import {
   type HandlerOutcome,
   observeUnclaimed,
   type RunOptions,
+  type Unanswered,
   runHandler,
   runInAppTheme,
 } from '@src/core/handler-pipeline.js'
@@ -417,9 +418,7 @@ export class Dispatcher {
     hooks: Pick<RunOptions, 'parseArgs' | 'fetchArgs'> = {},
   ): Promise<boolean> {
     const handler = `${instance.constructor.name}.${methodName}`
-    const onUnanswered: RunOptions['onUnanswered'] = this.options.warnUnanswered
-      ? (phase, returnedBy) => this.warnUnansweredOnce(handler, phase, returnedBy && { name: returnedBy.interceptor.name, handlerStarted: returnedBy.handlerStarted })
-      : undefined
+    const onUnanswered: RunOptions['onUnanswered'] = this.options.warnUnanswered ? unanswered => this.warnUnansweredOnce(handler, unanswered) : undefined
     const outcome = await runHandler(this.container, instance, methodName, args, { ...this.runOptions(call), onUnanswered, ...hooks })
     call.record?.settled(instance.constructor as ControllerClass, methodName, outcome)
     return outcome.ran
@@ -429,32 +428,33 @@ export class Dispatcher {
   private readonly warnedUnanswered = new Set<string>()
 
   /**
-   * Warns, once per handler, that it left its interaction unanswered or deferred without a follow-up, or that
-   * `interceptor` returned before the handler ran or finished, and the call ended so.
+   * Warns, once per handler, that it left its interaction or autocomplete unanswered or deferred without a follow-up,
+   * or that an interceptor returned before the handler ran or finished, and the call ended so.
    */
-  private warnUnansweredOnce(
-    handler: string,
-    phase: 'unanswered' | 'deferred',
-    interceptor?: { name: string; handlerStarted: boolean },
-  ): void {
+  private warnUnansweredOnce(handler: string, { type, phase, returnedBy }: Unanswered): void {
     if (this.warnedUnanswered.has(handler)) return
     this.warnedUnanswered.add(handler)
+    const interceptor = returnedBy && { name: returnedBy.interceptor.name, handlerStarted: returnedBy.handlerStarted }
     const returned = interceptor && `${handler}: its interceptor ${interceptor.name} returned before the handler ${interceptor.handlerStarted ? 'finished' : 'ran'}`
-    const what = interceptor
-      ? phase === 'unanswered'
-        ? `${returned}, without answering the interaction, so the user saw "The application did not respond". Answer it ` +
-          `in ${interceptor.name}, or await next.handle().`
-        : interceptor.handlerStarted
-          ? `${returned}, and the deferred interaction had no follow-up when the call ended, so @Defer's lock was ` +
-            `released while the user still saw it thinking. Follow up in ${interceptor.name} with respond(interaction).send(), ` +
-            'or await next.handle().'
-          : `${returned}, and the deferred interaction was never followed up, so the user saw it thinking until Discord ` +
-            `gave up. Follow up in ${interceptor.name} with respond(interaction).send(), or await next.handle().`
-      : phase === 'unanswered'
-        ? `${handler} finished without answering its interaction, so the user saw "The application did not respond". ` +
-          'Answer it with respond(interaction).send(), or acknowledge it first with @Defer().'
-        : `${handler} deferred its interaction and never followed up, so the user saw it thinking until Discord gave up. ` +
-          'Follow up with respond(interaction).send().'
+    const what =
+      type === 'autocomplete'
+        ? `${handler} finished without answering its autocomplete, so the user saw its options fail to load. Answer it ` +
+          'with interaction.respond(choices) within 3 seconds.'
+        : interceptor
+          ? phase === 'unanswered'
+            ? `${returned}, without answering the interaction, so the user saw "The application did not respond". Answer it ` +
+              `in ${interceptor.name}, or await next.handle().`
+            : interceptor.handlerStarted
+              ? `${returned}, and the deferred interaction had no follow-up when the call ended, so @Defer's lock was ` +
+                `released while the user still saw it thinking. Follow up in ${interceptor.name} with respond(interaction).send(), ` +
+                'or await next.handle().'
+              : `${returned}, and the deferred interaction was never followed up, so the user saw it thinking until Discord ` +
+                `gave up. Follow up in ${interceptor.name} with respond(interaction).send(), or await next.handle().`
+          : phase === 'unanswered'
+            ? `${handler} finished without answering its interaction, so the user saw "The application did not respond". ` +
+              'Answer it with respond(interaction).send(), or acknowledge it first with @Defer().'
+            : `${handler} deferred its interaction and never followed up, so the user saw it thinking until Discord gave up. ` +
+              'Follow up with respond(interaction).send().'
     this.logger.warn(`${what} Shown once per handler; @MeoCord({ warnUnanswered: false }) turns it off.`)
   }
 
