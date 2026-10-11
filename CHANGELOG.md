@@ -1,5 +1,269 @@
 # meocord
 
+## 4.2.1
+
+### Patch Changes
+
+- [#577](https://github.com/meocord/meocord/pull/577) [`2b4be88`](https://github.com/meocord/meocord/commit/2b4be88ac101c24e1da1e6cf290e547f76c0a0a1) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Catalog checks read a catalog's own keys and shapes, and a refused builder says what is wrong with a name:
+
+  - `expectCompleteCatalog` reads a group with an `other` key, such as `reasons: { spam, offTopic, other }`, as a group, as the translator's types do. It no longer fails a correct catalog for "lacking" plural forms, and it reports a key such a group misses in a locale.
+  - `expectCompleteCatalog` reads only a catalog's own keys, so a missing key named `constructor` or `toString` is reported. It also reports a translation of another shape than the default's, a text for a plural or the reverse, as `n should be a plural, as the default is`.
+  - A key with a `.` in its name, such as `'ban.done'`, is never found, because a lookup reads it as a path. `createTranslator` now warns about each one, naming the locale and the key, and `MessageKey`, `StringMessageKey` and `LocalizationKey` leave it out, so using one fails to compile. Nest it as a group: `ban: { done: … }`.
+  - `LocaleCatalog<C>` takes a `meocord` group with your translations of MeoCord's own texts, as `createTranslator` does.
+  - A builder refused for a name gives Discord's rule for one: letters, numbers, `-` and `_`, lowercase where the script has case, without spaces, up to 32 characters, in every locale.
+
+  A catalog test that passed with a gap of these kinds can now fail and name it. See [Localisation](https://meocord.dev/docs/4.2/localisation).
+
+- [#620](https://github.com/meocord/meocord/pull/620) [`4e395ac`](https://github.com/meocord/meocord/commit/4e395acf4659e30653fe9107cc24598efdc16767) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A testing module asked to `dispatch`, `invoke` or `emit` after `close()` now warns once that it is closed and its services are shut down, or shutting down, including while `close()` is still running. It still runs the call, as before. A misplaced `close()`, such as one in `afterEach` that runs before a test's last call, shows instead of passing quietly on that state. See [Testing](https://meocord.dev/docs/4.2/testing).
+
+- [#605](https://github.com/meocord/meocord/pull/605) [`33d724b`](https://github.com/meocord/meocord/commit/33d724b13fc3a3d4e51be89c1ded7288cdf0009d) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@Command` warns, naming the handler, about a component pattern no customId can match: one that is empty, or whose shortest customId is over Discord's 100 characters. Such a handler never runs; the bot still starts. `route('').build()` throws a RangeError, as it does for an id over 100 characters, rather than returning an empty customId Discord refuses.
+
+- [#595](https://github.com/meocord/meocord/pull/595) [`cdb8dcf`](https://github.com/meocord/meocord/commit/cdb8dcf51fa6a9b16eb98eb73b94b912e0108ffe) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `meocord start --dev` checks a saved `meocord.config.ts` as startup does: a config with options of the wrong type, or one that fails to load, is reported once, with every problem, and the running bot is left as it is, rather than starting with that config and failing later. A config that exports only named values is refused with "it must export an object as its default export", naming what it exports, instead of a warning for each export. A config that throws as it loads, such as for a variable it requires, is reported with the line in `meocord.config.ts` it threw at, and a built bot whose config throws says to check the environment it reads, rather than to rebuild.
+
+- [#599](https://github.com/meocord/meocord/pull/599) [`e3c727a`](https://github.com/meocord/meocord/commit/e3c727a2d82d2fb96a05df7268c1b1af2373b6a2) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A controller listed twice in `@MeoCord({ controllers })` or `MeoCordTestingModule.create({ controllers })` is one controller: its `@MessageHandler()` listeners run once per message, and its reaction handlers once per reaction, where they ran twice. Commands and components were already routed once.
+
+- [#598](https://github.com/meocord/meocord/pull/598) [`585c076`](https://github.com/meocord/meocord/commit/585c076dedcc91bef09198de93538457d82cf625) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A cooldown's `by` may return any string, one holding half of an emoji included, such as text cut short with `slice`. Such a value made the call fail with "URIError: URI malformed" before the handler ran; it now counts under a key of its own. Every value that worked before keeps its key, so running cooldowns carry on across the upgrade.
+
+- [#598](https://github.com/meocord/meocord/pull/598) [`585c076`](https://github.com/meocord/meocord/commit/585c076dedcc91bef09198de93538457d82cf625) Thanks [@l7aromeo](https://github.com/l7aromeo)! - With `dmOnCooldown`, a cooldown counted per server, per channel or globally tells each author it refuses once per wait, as `per: 'user'` already did. Only the first author refused in a wait was told, and the rest were refused without a word.
+
+- [#579](https://github.com/meocord/meocord/pull/579) [`4aba54d`](https://github.com/meocord/meocord/commit/4aba54dbde09e78c40d9bf9338eee377930f3760) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@Cooldown` now warns, naming the handler, when it is given a `bypass` that is not a function, such as `true`, which fails every call it counts, or a `seconds` that is not a number, such as `'5'`, which it reads as one. Both get past the types only from JavaScript or through a cast. They still decorate as before, and the next major version (5.0) refuses them; give `bypass` a function and `seconds` a number to silence the warning. A `bypass` of `false` or `null` still means none.
+
+- [#581](https://github.com/meocord/meocord/pull/581) [`150e174`](https://github.com/meocord/meocord/commit/150e174f39787e3440605693aa99d56fc2a801c4) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `testCooldownStore` now catches three ways a store can break the cooldown contract:
+
+  - a `release` that frees the key's other calls too, which resets a user's cooldown whenever `@Cooldown` gives back a call;
+  - a batch refusal that names the first cooldown to refuse rather than the longest wait, which tells users to retry too soon;
+  - a wait counted from the oldest call in the window, rather than from the oldest of the newest `uses` calls, after a limit is lowered.
+
+  A store that keeps the contract passes as before. A store that gets one of these wrong now fails its own suite run, naming the case. See [Cooldown stores](https://meocord.dev/docs/4.2/recipes/cooldown-stores).
+
+- [#588](https://github.com/meocord/meocord/pull/588) [`27b03a5`](https://github.com/meocord/meocord/commit/27b03a58d1b22a3adaf802f67a6e2993f1fe6673) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `meocord create` folds accented letters into the app's folder and package name instead of dropping them: "Café Bot" gives `cafe-bot`, where it gave `caf-bot`, and "Straße" gives `strasse`. A name with no Latin letters or digits, such as one written only in another script, is refused with a message that says it needs Latin letters or digits.
+
+- [#612](https://github.com/meocord/meocord/pull/612) [`9cb5e9e`](https://github.com/meocord/meocord/commit/9cb5e9e3d563a0919c62855c02dd3ee4d7692b0f) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `respond()` keeps track of which message is the answer, so it no longer edits or deletes a reply that is gone, which Discord refused with 10008 (Unknown Message):
+
+  - After `delete()`, `send()`, `edit()`, an error answer and `followUp()` send a follow-up, which becomes the answer that later `send()`, `edit()` and `delete()` act on. A follow-up that takes the place of an edit is private when the deleted answer was, unless the payload sets `flags`. `message` is `undefined` until something is sent, and a second `delete()` with nothing sent since throws.
+  - After a private `followUp()` on a public deferral, which deletes the deferral, the follow-up is the answer: `send()` and `edit()` edit it, `delete()` deletes it, and `message` is it.
+
+  A test that expected `editReply` in these sequences now sees a `followUp`, or an edit of the follow-up by its id.
+
+- [#571](https://github.com/meocord/meocord/pull/571) [`e9fc8bc`](https://github.com/meocord/meocord/commit/e9fc8bcd331271ee564f1467daf06cae363b079e) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `meocord start --dev`, `register --dev` and `build --dev` run as development whatever `NODE_ENV` the shell holds, as their help and the [CLI guide](https://meocord.dev/docs/4.2/cli) say. With `NODE_ENV=production` set in the shell, `start --dev` loaded the config from the production `.env` files, so a token kept only in `.env.development` was reported missing, and `register --dev` registered the commands as production does rather than to `commands.developmentGuild`. `--prod` still keeps a `NODE_ENV` the shell sets.
+
+- [#583](https://github.com/meocord/meocord/pull/583) [`0b4be9c`](https://github.com/meocord/meocord/commit/0b4be9cecf42b7798fb46d2c96a3e9fa543020e4) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A direct call on a controller, `module.get(Controller).method(interaction)`, runs its guards in the testing module that made the instance. With two modules compiled from one controller, a direct call on the first ran the second module's guard stubs, services and container, since the last compiled module was the only one recorded on the class. A bot has one container, so nothing changes there. See [Testing](https://meocord.dev/docs/4.2/testing).
+
+- [#585](https://github.com/meocord/meocord/pull/585) [`5cfb77d`](https://github.com/meocord/meocord/commit/5cfb77dca37858f6be1dd8261f2c67ea7f38e7e8) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A built bot now loads its packages after its config, and so after `.env`: a package that reads `process.env` as it loads, in a build without `bundleDependencies`, gets the values `.env` sets, as a self-contained build already gave it. A package kept out of the bundle loads where the code importing it runs: an ESM `import` is a dynamic `import()`, and a CommonJS `require` stays a `require` at its call site. A package listed in `externals` that a dependency requires inside a `try` therefore no longer stops the bot at startup when it is missing; an ESM import of one still does.
+
+  A self-contained build started on another platform stops with MeoCord's message naming both platforms, before any native addon loads, instead of the addon's own error. The message is now printed before the bot's logger is set up, as a plain `[ERROR] [MeoCord]` line.
+
+  A build without `bundleDependencies` removes the `node_modules`, `package.json` and `meocord.platform.json` a previous self-contained build left in `dist`, so it no longer runs packages from that stale copy. An external named as a file inside a package, such as `externals: ['lodash/fp.js']`, now packs its package.
+
+- [#584](https://github.com/meocord/meocord/pull/584) [`f2a9bf4`](https://github.com/meocord/meocord/commit/f2a9bf417f5ff38142f1f68a102720fdbcc88149) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `emit`'s JSDoc, and `EmitResult.ran`'s, now say what a test sees from a guard's `GuardDeniedError` and a handler's `UserError`: they reject `emit` as any error does, because the bot's event fallback doesn't run in a testing module. On a bot, that fallback skips a refused event, and logs a `UserError`, answering it as a reply when the event carries a message. Check them with `rejects`. See [Invoke and dispatch](https://meocord.dev/docs/4.2/invoke-and-dispatch).
+
+- [#600](https://github.com/meocord/meocord/pull/600) [`4729b10`](https://github.com/meocord/meocord/commit/4729b10e26dd5948c1e2f60f4a5cb9183b6f8fdc) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A primary entry point command is now registered only globally, as Discord requires. Discord refuses a guild update that holds one (400, code 50222), and before, that refusal took every other command in the update with it.
+
+  - A production run sends the entry point in the global update, even with `commands.guilds` set, and ignores a `guilds` restriction on its builder, with a warning. With `commands.guilds`, that global update holds the entry point and replaces any global commands left from an earlier configuration.
+  - A development run with `developmentGuild`, and `meocord register --guild`, leave the entry point out of the guild update with a warning, so the rest of the commands register. They send nothing global, as a global update from such a run would delete the application's other global commands. A production run or `meocord register` registers the entry point.
+
+  See [Slash commands](https://meocord.dev/docs/4.2/slash-commands).
+
+- [#575](https://github.com/meocord/meocord/pull/575) [`f8c2a51`](https://github.com/meocord/meocord/commit/f8c2a516eeee194be0515ff751a7fb9e184b4b1a) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Help rendered from your catalog's `meocord.help` texts now keeps its lists apart in every language, on Node and Bun alike: params join with `·` and aliases with `, `, as in MeoCord's English. Before, zh-CN ran them together, ja and ru joined them with a space, and de joined the last two with "und". MeoCord's own English help is unchanged. A test that pins translated help sees the new separators. See [Message commands](https://meocord.dev/docs/4.2/message-commands).
+
+- [#608](https://github.com/meocord/meocord/pull/608) [`772dbd4`](https://github.com/meocord/meocord/commit/772dbd49f6dfb3753771d9748d8bc3e17f872225) Thanks [@l7aromeo](https://github.com/l7aromeo)! - In a built bot, `import.meta.url` names the running bundle in `dist`, as `import.meta.dirname` and `import.meta.filename` already do. It named the source file on the machine that built the bot, so code finding its files from it worked only there, and the bundle carried the build machine's source path. `new URL('./file', import.meta.url)` assets keep resolving beside the bundle, and `import.meta.env.MODE` is still written in.
+
+- [#589](https://github.com/meocord/meocord/pull/589) [`921ff91`](https://github.com/meocord/meocord/commit/921ff917ef602da316a83c44cc68b759a69ce408) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `invoke` checks a handler gets the arguments it declares when it builds none for it, as for a reaction handler given its reaction without its `ReactionEvent`. The call used to reach the handler and fail inside it, with `Cannot destructure property 'user' of 'undefined'`. Now:
+
+  - under `useStrictMocks()`, `invoke` refuses the call before the handler runs, naming the fix: `Stars.star takes 2 arguments, and invoke was given 1: pass its ReactionEvent after the reaction, as { user, action }.`
+  - by default, `invoke` warns once with the same words and calls the handler as before, so a handler that never reads its second argument keeps running.
+
+  A handler behind `@UseGuard`, or behind `@Command`'s check, keeps the `length` and `name` it was declared with. See [Testing](https://meocord.dev/docs/4.2/testing).
+
+- [#596](https://github.com/meocord/meocord/pull/596) [`90034c7`](https://github.com/meocord/meocord/commit/90034c74a0bed91253d5f908d2d7abc4cc85585e) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Every service the app makes now gets its lifecycle hooks once, in the bot and in `MeoCordTestingModule`:
+
+  - A service that only a guard, interceptor, filter, pipe or the presenter injects is made as the bot comes online, and its `onReady` and `onShutdown` run, as `@Service` documents. Before, it never got its hooks, and it was made anew for every call that reached its stage. It is now the one shared instance `@Service` promises. A constructor that throws in such a service is reported as the bot comes online instead of failing each call. A class that injects the call's `ExecutionContext` is still made for each call, without hooks. If you worked around the missing hooks by calling an init method from the guard, or by listing the service in `services`, you can remove that.
+  - One instance that two tokens reach, such as a factory alias of a service or one value provided twice, runs its `onReady` and `onShutdown` once instead of twice.
+
+- [#610](https://github.com/meocord/meocord/pull/610) [`44a9a8e`](https://github.com/meocord/meocord/commit/44a9a8ef13fa70658f984fa09b38ee9e90e7e345) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@Command` and `route()` warn about a customId pattern with a brace pair that isn't a param, such as `profile/{café}`: a param's name is ASCII letters, digits and `_`, so the pair is matched as literal text and a click on `profile/123` never reaches the handler. The pattern matches as before; rename the param, such as to `{cafe}`, to capture the segment.
+
+- [#573](https://github.com/meocord/meocord/pull/573) [`c88e7a2`](https://github.com/meocord/meocord/commit/c88e7a26fff4febb60c30d99466b1ede6caf8f73) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `t.localizations()` keeps the default locale's wording where Discord would show another locale's. Discord shows en-US users the en-GB value, en-GB users the en-US one, and es-419 users the es-ES one when their own locale has none. So when your default is en-US, en-GB or es-419 and its partner has a translation, the result now includes the default's own message too. A bot with such a pair re-registers its commands once, and a test that pins `t.localizations()` for one sees the default's entry.
+
+  An empty translation, `''`, which translation tools export for an untranslated string, now counts as missing:
+
+  - `t.localizations()` leaves it out, so Discord shows the default there, and a bot with one now starts instead of stopping at startup;
+  - a reply falls back to a related locale or the default, where it was empty;
+  - `expectCompleteCatalog` reports it as missing.
+
+  See [Localisation](https://meocord.dev/docs/4.2/localisation).
+
+- [#591](https://github.com/meocord/meocord/pull/591) [`31760bf`](https://github.com/meocord/meocord/commit/31760bfbea3ec661a5e449bca2998b7271ab334f) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Under `meocord start --dev` with process sharding (`sharding: { mode: 'process', development: true }`), a shard that can't log in is reported as a failed login again: watch mode says the bot could not log in and starts it again on the next change in `src` or `.env`, where it reported a plain exit with code 1. Each app now decides once, as it is created, whether its process is a shard, before discord.js's `ShardingManager` writes the variable that marks one into the manager's own process. Nothing to change in your bot.
+
+- [#602](https://github.com/meocord/meocord/pull/602) [`85ff84a`](https://github.com/meocord/meocord/commit/85ff84a6661f5bc17ef47ef5935762ad6f429e60) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A `MemoryCooldownStore` that nothing uses any more is garbage-collected once its calls have expired. Its sweep timer held it for as long as the process ran, so a test run kept one store per testing module that dispatched a cooldown. The sweep now stops when it leaves the store empty and starts again on its next call; counting is unchanged.
+
+- [#603](https://github.com/meocord/meocord/pull/603) [`eee2287`](https://github.com/meocord/meocord/commit/eee22875358f6086cc2f7588ea29f0e9114e59b2) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `@MeoCord({ providers })` now warns about a provider for `ThemeCache` or `ExecutionContext`, tokens MeoCord binds itself: a `ThemeCache` provider silently replaced the app's theme cache. The bot still starts; the next major version (5.0) refuses such a provider. Remove it. A `Translator` provider without `i18n` stays supported, and `MeoCordTestingModule`'s providers are unchanged.
+
+- [#609](https://github.com/meocord/meocord/pull/609) [`0ef1597`](https://github.com/meocord/meocord/commit/0ef15975dd0582b4992f843b0c17d472eacbcb20) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock thread's `createdTimestamp` and `createdAt` are read from its id, as another channel's are, in both modes. `createdTimestamp` read a stub and `createdAt` an Invalid Date.
+
+  Under `useStrictMocks()`, a user, server or channel made with a generated id was created when the mock was made, as a message and an interaction already were. That covers `createMockUser()`, `createMockGuild()`, `createMockChannel()` and an interaction's own user, so a test of an account-age check gets a new account. `SnowflakeUtil.timestampFrom(id)` still reads the id's own time.
+
+  In default mode their creation time is still their generated id's, a fixed day in 2025. Reading it warns once, saying to give the mock an id or a `createdTimestamp`, or to call `useStrictMocks()`. An id the test gives decides the time in both modes. The next major version (5.0) reads the time the mock was made without the call.
+
+- [#594](https://github.com/meocord/meocord/pull/594) [`111acdd`](https://github.com/meocord/meocord/commit/111acdd4d356a2ae4869cb9370284ad35fabdbdd) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Mocks give the values discord.js always sets where they gave stubs without methods, and the warnings about placeholders name the right reader.
+
+  - **Calls that threw now work, in both modes.**
+    - `String(interaction)` on a slash command writes `/settings email address:a@b.c`, as discord.js does. An interaction made without `options` has an empty resolver.
+    - `message.mentions.has(user, { ignoreRepliedUser: true })` answers. `mentions.parsedUsers` and `mentions.crosspostedChannels` are Collections.
+    - These are empty collections and bitfields: `message.reactions`, `message.messageSnapshots`, a reaction's `users`, a member's and a user's `flags`, an interaction's `entitlements`, and a server's `presences`. A reaction's `users.fetch()` resolves an empty Collection.
+    - A manager's lookups that read discord.js's own cache, such as `guild.presences.resolve(id)` and a thread's `members.resolve(id)`, find what its `cache` holds, else `null`.
+    - So in default mode too, these fields hold discord.js's types instead of stubs. A test that relied on a stub's shape there sees the real value.
+  - **Under `useStrictMocks()`, data reads as discord.js gives it.**
+    - A reaction's `me` is `false`, `mentions.repliedUser` is `null`, and a modal's `message` is `null`.
+    - A message's `editedAt` comes from `editedTimestamp`. A member's `presence` is the one its server caches, else `null`. A server's `verified` comes from its `features`. `systemChannel` and a channel's `parent` are the channels their ids name, else `null`.
+    - A voice or stage channel's `full` is computed.
+    - A reaction made without a message has a whole one of its own, so a dispatched reaction is neither warned about nor fetched.
+  - **In default mode, values are unchanged.** Reading one of those values, or a voice channel's `full`, logs a warning once. The warning says what to set, or to call `useStrictMocks()`.
+    - When MeoCord's dispatcher reads a reaction's placeholder `partial`, the warning says so. It also says the reaction was fetched because of it, and to set `reaction.partial = false` and `reaction.message.partial = false`.
+    - `mentions.has()` reads `repliedUser` without a warning, since that placeholder matches no user.
+  - **Under `useStrictMocks()`, a test that asserted `reaction.fetch` or `message.fetch` was called during dispatch changes.** A whole mock reaction is no longer fetched. The next major version (5.0) reads these values as strict mocks do.
+
+- [#597](https://github.com/meocord/meocord/pull/597) [`eef4c72`](https://github.com/meocord/meocord/commit/eef4c725f3ba5dc4ed0501251f1273c31f81fc14) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock autocomplete's focused option reads as Discord sends it: a string. `getFocused()`, `getFocused(true).value` and the option's entry in `options.data` now agree, and `data` marks it `focused`.
+
+  - With no value given, as before anything is typed, the focused option reads `''` instead of `null`, in both modes. A test that checked for `null` changes; discord.js's types rule `null` out.
+  - The focused option is now in `options.data`, as Discord sends it, so with no value given an autocomplete handler's params are `{ query: '' }` rather than `{}`, in both modes. A test asserting `toEqual({})` there changes.
+  - A number given for it reads as its digits under `useStrictMocks()`, keeping its option type. In default mode it stays the number and warns once when read. The next major version (5.0) gives the string without the call.
+
+- [#617](https://github.com/meocord/meocord/pull/617) [`9e10a4e`](https://github.com/meocord/meocord/commit/9e10a4ee7b3a0b4f1aa15147c5f18158e98b4ff6) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock interaction holds each message it sends as it was sent, as Discord does:
+
+  - `followUp()` resolves to the follow-up it sent, with the content, embeds, components and flags that `fetchReply(id)` reads back, as discord.js resolves it to the message Discord returns. It used to resolve to a message holding only the id, with a stub `content` and flags of 0, so code reading whether a follow-up was private saw a different value than against Discord.
+  - `reply()`, `update()` and `followUp()` build what they send when they are called, so a builder changed afterwards no longer changes what `fetchReply()` reads. Reading a follow-up no longer uses up a generated id.
+  - Under `useStrictMocks()`, an answer whose components or embeds discord.js refuses to build, such as a button with no label, rejects at the call with discord.js's error and leaves the interaction as it was. In default mode it still resolves, and it warns once. The next major version (5.0) rejects it without the call.
+
+- [#638](https://github.com/meocord/meocord/pull/638) [`08b990a`](https://github.com/meocord/meocord/commit/08b990a629e6d67963652564243c5f654a2d696c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Every id a mock generates comes from one count, so a test run gives the same ids each time. A server's `ownerId`, a role made without an id, an interaction's `commandId` and `applicationId`, a thread's `ownerId` and a channel's `guildId` fallback were time-based snowflakes, which differed between runs and sorted apart from every other mock id. A test that matched one of them against a time-based snowflake reads a counter id instead.
+
+  A role made with `createMockInteraction(Role)` and no id gets its id when it is made, as a user does. Its `createdTimestamp` is still the time the mock was made, in both modes.
+
+  In default mode, a reply read again, through `fetchReply()` or as `editReply()` resolves it, has the same author, server and channel each time, where each read made new ones. A test comparing two reads of the same reply sees the same objects, and reading it again uses up no ids.
+
+- [#607](https://github.com/meocord/meocord/pull/607) [`542cd81`](https://github.com/meocord/meocord/commit/542cd8115867a30f5ec82e3533ce65cf26976311) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Under `useStrictMocks()`, a mock interaction is in the place its `message`, `guild`, `member` or `guildId` gives it, as Discord sends it:
+
+  - An interaction given a `message` is in the message's channel and server. A button built on a default `createMockMessage()` is in that message's server, no longer a DM. When the test also gives the interaction a `channel`, `guild` or `guildId`, a message whose server `createMockMessage()` made itself moves to that place instead.
+  - An interaction given a `guild`, or a `member` of a server, is in that server, with its `guildId`.
+  - An interaction given a `guildId` alone is in a server the bot isn't in. Its `guild` and `channel` are `null`, and its `member` is a raw member for its user.
+  - A `channel`, `guild` or `guildId` that is somewhere other than a message the test placed, by giving it a `channel` or `guild`, is refused, naming both.
+
+  In default mode, placement is unchanged. Where strict mocks would place the interaction elsewhere, reading its `guildId`, `guild`, `channelId`, `channel` or `member` warns once, saying what to give or to call `useStrictMocks()`, and so do `inGuild()`, `inCachedGuild()`, `memberPermissions` and `appPermissions`, each under its own name, where strict mocks would answer otherwise. The same goes for the message, where strict mocks would move one whose place `createMockMessage()` made. The next major version (5.0) places interactions this way without the call.
+
+- [#618](https://github.com/meocord/meocord/pull/618) [`41f908f`](https://github.com/meocord/meocord/commit/41f908f93bebc662fb7d920d86cea2f9f219d140) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Under `useStrictMocks()`, a mock interaction's `memberPermissions` applies its channel's permission overwrites, as Discord computes it, so a guard that checks it denies in a test where it denies in production. The overwrites go on top of `member.permissions`, so a value a test sets there still decides the base. As in discord.js:
+
+  - an Administrator or the server's owner has every permission, `PermissionsBitField.All`;
+  - a thread takes its parent's overwrites;
+  - a raw member's permissions are kept as given.
+
+  In default mode `memberPermissions` is still the member's own permissions. Where strict mocks would read otherwise, because of the channel's overwrites or an Administrator's or owner's every permission, reading it warns once, naming the permissions strict mocks read without or with. It, and `appPermissions`, also warn once where the server's @everyone role has no permissions set, since strict mocks give @everyone the permissions Discord gives it in a new server; set `guild.roles.everyone.permissions` to read the same in both modes. The next major version (5.0) applies the overwrites without the call.
+
+- [#613](https://github.com/meocord/meocord/pull/613) [`6f54ab0`](https://github.com/meocord/meocord/commit/6f54ab0cacbb3b7cd7926feadf8f42a18874bd51) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock message's `components` and `embeds` are discord.js's classes, as a real message holds them. `createMockMessage({ components, embeds })`, and the messages `editReply()` and `fetchReply()` return, used to keep each one as a bare `{ toJSON }`, so `message.components[0].type` and `message.embeds[0].title` read `undefined`.
+
+  Each one is now built from its JSON at the time of the call, whether it was given as a builder or as API JSON:
+
+  - an action row is an `ActionRow` holding a `ButtonComponent`, a select menu component, and so on;
+  - Components V2 are `ContainerComponent`, `TextDisplayComponent` and the rest;
+  - an embed is an `Embed`;
+  - a type discord.js doesn't know is a plain `Component`, as discord.js builds it.
+
+  A discord.js instance you give is kept as it is. `toJSON()` still returns the same JSON, so no passing test changes.
+
+- [#636](https://github.com/meocord/meocord/pull/636) [`379932f`](https://github.com/meocord/meocord/commit/379932ff4f2dd42d383141740955820f1df2e4b4) Thanks [@l7aromeo](https://github.com/l7aromeo)! - What a mock computes for itself no longer calls a method a test may stub, or caches anything a test can see.
+
+  - A mock message's `member` reads its server's member cache, as discord.js does, without calling `guild.members.resolve()`. A test's `members.resolve.mockReturnValueOnce()` is left for its own code.
+  - A mock interaction's `appPermissions` computes the bot's permissions with discord.js's own computation, without calling `channel.permissionsFor()`. Reading it no longer caches the bot's member in `guild.members.cache`. In a thread, it is the bot's permissions in the thread's parent, as Discord gives them, where it was empty.
+  - A mock interaction's `channel` is the channel its server caches under `channelId` each time it is read, so a channel a test caches there after a first read is the one read.
+
+- [#590](https://github.com/meocord/meocord/pull/590) [`54d76f9`](https://github.com/meocord/meocord/commit/54d76f9d3e85ca9f9f5ac6b0857475d63a3fffa0) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock interaction keeps its reply state, its original response and discord.js's errors whatever a test sets its answers to do.
+
+  - **A test's own value.** An answer given a value with `mockResolvedValue`, `mockResolvedValueOnce` or `mockImplementation` now replies or defers as a real one would: `reply`, `deferReply`, `followUp`, `editReply`, `showModal`, `update` and `deferUpdate`. `getResponse(interaction).state` then reads `'replied'` or `'deferred'` where it read `'unanswered'`. One that rejects still changes nothing.
+    - A second answer after such an answer, which discord.js refuses, still runs in default mode, with a warning.
+    - Under `useStrictMocks()` it is refused, as discord.js refuses it. The next major version (5.0) refuses it without the call.
+  - **The original response.** `fetchReply()` reads back what `reply()` or `update()` sent instead of an empty message. After `deleteReply()`, fetching, editing or deleting the original response rejects with 10008 (Unknown Message), as Discord answers. So does fetching it before any answer. Follow-ups stay reachable by their id: `editReply({ message: id })`, `fetchReply(id)` and `deleteReply(id)` act on the follow-up, where `editReply` edited the original before.
+  - **Flags.** `flags` given as an array, a name or a `MessageFlagsBitField` makes a reply ephemeral, as in discord.js; only a number did before. `null` flags are none. A bigint or an unknown name rejects with discord.js's RangeError, where a bigint read as ephemeral before.
+  - **Errors.** A second reply, an answer before any reply and a second autocomplete `respond()` throw discord.js's `DiscordjsError`, with the codes `InteractionAlreadyReplied` and `InteractionNotReplied`. They keep their messages, so a test matching the message as a string or a regex keeps passing. One comparing with `new Error(message)` sees the new name and code.
+
+- [#582](https://github.com/meocord/meocord/pull/582) [`3279286`](https://github.com/meocord/meocord/commit/327928614fc930583eb92025ff597b0ea4c946e1) Thanks [@l7aromeo](https://github.com/l7aromeo)! - meocord's mocks now work with each test runner's own mock functions and matchers.
+
+  - Under `useMockFn(jest.fn)`, a method of a `createMock()` double that has no implementation set returns `undefined`, as jest's mocks do. It no longer overflows the stack. Nested methods, and methods whose name starts with `_`, stay mocks as before.
+  - jest's call matchers, such as `toHaveBeenCalled`, read a `createMock()` member as a mock, whether or not `useMockFn` is set. They took it for a jasmine spy and failed with `Cannot read properties of undefined (reading 'map')`.
+    - To get this, a nested member named `calls` no longer makes `all` and `count` for itself: `x.y.calls.all` and `x.y.calls.count` read `undefined` until a test sets them.
+    - Every other name under it, such as `x.y.calls.foo`, is still a nested mock, and a `calls` member at the root, `x.calls.all`, is a mock as before.
+  - Without `useMockFn`, Vitest's `toHaveResolved`, `toHaveResolvedWith`, `toHaveResolvedTimes`, `toHaveLastResolvedWith`, `toHaveNthResolvedWith`, `toHaveBeenCalledBefore` and `toHaveBeenCalledAfter` work on meocord's own mocks. `mock` gains `settledResults`, `invocationCallOrder` and `contexts` for them. The new fields stay out of `mock`'s keys, so a test comparing `mock` as a whole sees the same shape. Call order is counted across meocord's own mocks, so compare two of meocord's mocks, or two of the runner's, rather than one of each.
+  - A meocord mock whose implementation returns a promise hands back a promise that settles the same way, not the same object. `expect(fn()).toBe(promise)` no longer holds; `toEqual`, `toHaveReturnedWith` and awaiting the result are unaffected. A property set on the given promise, such as a `cancel` method, isn't carried over.
+  - `useMockFn(mock.fn)` under node:test gives meocord's refusal, which says to leave meocord's own mock function in place, with node's error as its `cause`, instead of node's internal TypeError.
+
+- [#625](https://github.com/meocord/meocord/pull/625) [`99d9339`](https://github.com/meocord/meocord/commit/99d93399f4f4539c407bd9c529d5949a74d28c56) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Messages a mock sends or fetches are where they belong and hold what was sent:
+
+  - A message from a channel's `send()`, a message's `reply()` or `forward()`, or an interaction's `followUp()`, `editReply()` or `fetchReply()` holds the content, embeds and components of the call that made it. It is in the channel it was sent in and that channel's server. Before, it sat in a generated channel of a generated server, with a stub `content`.
+  - A message's `edit()` changes that message and resolves to it, where it resolved to a new one. `crosspost()` resolves to the message itself.
+  - A message fetched with `messages.fetch()` is in the channel it was fetched from, with an author other than the bot.
+  - A role made with `roles.create()` or fetched with `roles.fetch()` is in its server. A role, channel, thread or application command a manager's `create()` makes is in that manager's cache, as discord.js caches it. `bans.create()` resolves to the member, user or id it was given and caches nothing, as discord.js's does.
+
+  Under `useStrictMocks()`, a message the bot sends is its `client.user`'s, so its `editable` reads `true`. One sent in a DM is in that DM: `inGuild()` is `false`, and `guild` and `member` are `null`. In default mode these keep today's values and warn once when read: the author of a message the bot sent, and the server of one sent in a DM. The next major version (5.0) reads them as strict mocks do.
+
+- [#623](https://github.com/meocord/meocord/pull/623) [`46e974b`](https://github.com/meocord/meocord/commit/46e974bf74ed0f2601a95f2dc5dd8d641882d63c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock message context menu's target is its `targetMessage`, and `targetId` reads that message's id. Without a `targetMessage`, the menu gets a generated id and a message made for it, as a user context menu already did. That message is in the menu's channel and its server, or in the user's DM channel for a menu used in a DM. Setting `targetMessage` after the mock is made moves `targetId` with it, and setting `targetId` makes a message for the new id. A `targetMessage` with no id gets a generated one. If a `targetId` is given that differs from the `targetMessage`'s id, `useStrictMocks()` refuses it, naming both. In default mode it warns once and reads the message's id.
+
+  A user or an attachment made with `createMockInteraction(User)` or `createMockInteraction(Attachment)` has a snowflake `id`, from the same count as every other mock's. Before, the id was a stub that stringified to `[object Object]` for every one of them: two users shared a cooldown key, a mention read `<@[object Object]>`, and `createModalFields` keyed uploads by a stub. A user made this way gets its creation time the same way `createMockUser()`'s does: the time the mock was made under `useStrictMocks()`, and its id's time, with a warning, in default mode.
+
+- [#593](https://github.com/meocord/meocord/pull/593) [`449bfd4`](https://github.com/meocord/meocord/commit/449bfd43cc8018642272c6b8424be6f261fff65a) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `respond().original.components` is typed as the message's top-level components, `readonly APIMessageTopLevelComponent[]`, rather than `readonly unknown[]`, so a handler can hand them back to `send()`, `editReply()` or a builder without a cast, as it already can the `embeds` beside them. Reading them compiles as before. A cast to an unrelated type, such as `Record<string, unknown>[]`, now fails to compile; drop it. Code that builds its own `ResponseState`, such as a test double, with `unknown[]` components in `original` must type them as Discord's `APIMessageTopLevelComponent[]`.
+
+- [#576](https://github.com/meocord/meocord/pull/576) [`9cf754f`](https://github.com/meocord/meocord/commit/9cf754f3774d1f14d7f6d77f5ee5934cb336725c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A customId pattern that repeats a param name, such as `card/{id}/{id}`, or starts one with a digit, such as `card/{1}`, is refused in words that name the param: `Invalid pattern "card/{id}/{id}": {id} appears twice; give each param its own name.` These patterns were already refused, with the regular expression engine's error and the compiled regex in place of the pattern, so only the message changes, for `@Command` and `route()` alike.
+
+- [#574](https://github.com/meocord/meocord/pull/574) [`793df0f`](https://github.com/meocord/meocord/commit/793df0fa332062db648a84d819215c640a3323d0) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A command, an option or a modal field named like a member of `Object.prototype`, such as `constructor`, `__proto__` or `toString`, now routes like any other name. Declaring `@Command('constructor', …)` used to throw `metas.findIndex is not a function`, and an undeclared command of such a name, say one left registered, failed with an error log instead of "Command not found!". An option or a modal field named `__proto__` now reaches the handler as an own param, and a customId param named `constructor` is no longer reported as colliding with a field that doesn't exist. Nothing to change in your code.
+
+- [#614](https://github.com/meocord/meocord/pull/614) [`f1346ae`](https://github.com/meocord/meocord/commit/f1346ae8c13c6e02f5d4be791cbea5ca2cb101f3) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `createMockInteraction`'s types now refuse a `channel` beside a raw member (`createMockRawMember()`), as the mock already did when built. A raw member is from a server the bot isn't in, where discord.js caches no channel. That covers a server's channel, `channel: null`, a DM channel, and a channel beside `guild: null`. These calls compiled and then threw "leave the channel out" at runtime. `{ guildId, member: createMockRawMember() }` still gives a raw-server interaction.
+
+- [#624](https://github.com/meocord/meocord/pull/624) [`405004f`](https://github.com/meocord/meocord/commit/405004f3c7ef1107efb9a1e99bb1ba69a9bc71ca) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A service whose `onReady` is still running when the bot stops, through `app.stop()` or a signal, now gets its `onShutdown` once that `onReady` finishes, so what it opened, such as a connection pool, is closed. Shutdown waits for it within the same `shutdownTimeout`, leaving the `onShutdown` hooks their reserve. An `onReady` still running then is named in a warning, and shutdown goes on without it. An `onReady` that calls `app.stop()` itself isn't waited for.
+
+  A testing module's `close()` during `init({ ready: true })` waits for the `onReady` hooks within its `shutdownTimeout` in the same way, warning about one that never settles rather than hanging, and an `onReady` that calls `close()` no longer waits for itself.
+
+- [#601](https://github.com/meocord/meocord/pull/601) [`d368e8d`](https://github.com/meocord/meocord/commit/d368e8d9b5db3d9ad3a51f9d9e96407d34943e36) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Command registration keeps in step with what Discord holds:
+
+  - A development start no longer skips a scope as unchanged when the commands were removed, changed or registered again since, from this checkout or another: it checks the scope with one listing first, and sends again when any command's version differs from what it last sent. A scope that `clearOther` cleared, or that a production run wrote, from the same checkout is sent again without the check. Before, only `--force-register` brought such commands back.
+  - `meocord register --guild` with a blank guild, as an unset `--guild "$DEV_GUILD_ID"` gives, stops with an error and exits 1, where it registered to `commands.guilds` or globally. That matches what `commands.guilds` already does for an unset id.
+  - The warning about commands left in another scope says why they are kept during a development-guild run, instead of advising `commands.clearOther`, which doesn't apply there.
+  - The registered-commands table lists only subcommands and subcommand groups under Sub-commands, not a command's plain options.
+
+- [#572](https://github.com/meocord/meocord/pull/572) [`dc7cdb9`](https://github.com/meocord/meocord/commit/dc7cdb9a69cabd363938cfdc0047c0d85fd4acac) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Under process sharding, a call to every shard now reaches each one for any shard count: `ShardContext.broadcastEval`, and discord.js's `client.shard.broadcastEval()` and `client.shard.fetchClientValues()`. They were refused with "Shards are still being spawned." unless the bot ran exactly 4 shards. Nothing to change in your bot.
+
+- [#619](https://github.com/meocord/meocord/pull/619) [`3517d1a`](https://github.com/meocord/meocord/commit/3517d1a312c47781fc8565bb3f1f8e76d8ee73ff) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A process that loads meocord both as an ES module and through `require()`, such as an ES module bot with a CommonJS helper, a jest CommonJS `setupFiles` beside ES module specs, or `node --require ./setup.cjs`, now behaves as one:
+
+  - `UserError`, `GuardDeniedError`, `ValidationError` and meocord's other errors from either build are answered as what they are, and `instanceof` holds across the two. An app's own subclass still matches only its own instances.
+  - A handler's `@UseTheme` theme, the app's translator for meocord's own texts, and its presenter apply whichever build answers.
+  - `respond()` keeps one answer for an interaction, so a `send()` after a `delete()` from the other build follows up rather than editing the deleted reply, and `getResponse()` reads a mock's answers whichever build made the mock or answered it.
+  - `useStrictMocks()` and `useMockFn()` called in a setup file in one format apply to mocks made in the other, and the two never give two mocks one id.
+
+  The two builds share this state only within one installed version. It now outlasts `vi.resetModules()`, `jest.resetModules()` and jest's `resetModules` config, where it was made afresh: mock ids keep counting, and `useStrictMocks()` and `useMockFn()` called in a setup file stay in effect for every test.
+
+- [#587](https://github.com/meocord/meocord/pull/587) [`f0a9ff3`](https://github.com/meocord/meocord/commit/f0a9ff3ffac1835466b1913d9305c730b1a3a23f) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Shutdown now waits for the calls under way before the `onShutdown` hooks, in every bot, and stops taking events first:
+
+  - A handler that awaits `app.stop()`, as an owner-only shutdown command does, no longer holds the shutdown up until `shutdownTimeout`. It isn't waited for.
+  - No interaction, message, reaction or `@On`/`@Once` event starts a call once shutdown has begun, and an `@On`/`@Once` handler already running is waited for, as a dispatched call is. Before, a bot whose cooldown store has no `onShutdown` kept dispatching while its hooks ran.
+  - An `@On('error')` handler keeps receiving the client's errors until the client is destroyed.
+  - `shutdownTimeout` still bounds the whole shutdown. The calls are waited for no longer than the timeout less a reserve kept for the hooks: a quarter of it, at least 1 second and never more than half. A call still running then is named in a warning, and the hooks run in the time left.
+
+  A `stop()` while the bot starts now waits for the providers being made, at most `shutdownTimeout`, and makes nothing more after it, so no service is constructed once the bot has shut down. A factory still pending after `shutdownTimeout` is named in a warning. `MeoCordTestingModule.close()` during `init()` likewise waits for the providers `init()` is making, and closes them.
+
+- [#616](https://github.com/meocord/meocord/pull/616) [`8ea2acf`](https://github.com/meocord/meocord/commit/8ea2acffa07cd061e2c9df7682bb125a5339af59) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `overrideGuard`, `overrideInterceptor` and `overrideFilter` replace a stage that is also a provider. A guard, interceptor or filter listed in `providers`, the app's or the testing module's, made every call fail with `Ambiguous bindings found for service` once it was overridden. Now the stub stands in for it, and wins over an `overrideProvider` of the same class. It runs the `onReady` and `onShutdown` a provider would; a stage applied only with `@UseGuard`, `@UseInterceptor` or `@UseFilter` runs none, as on the bot.
+
+  `compile()` also checks each stub for its stage's method, `canActivate`, `intercept` or `catch`, on the stub or its prototype. Under `useStrictMocks()`, a stub without it is refused with `overrideGuard(G).useValue(…) has no canActivate method.` By default, `compile()` warns with the same words, once per stub and method, and builds the module, so a test that never reaches the stage passes as before. See [Testing](https://meocord.dev/docs/4.2/testing).
+
+- [#604](https://github.com/meocord/meocord/pull/604) [`f30b621`](https://github.com/meocord/meocord/commit/f30b6210a2233b1eacf01f7471799d2cc175a515) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A theme emoji may be the England, Scotland or Wales flag, as theming documents for flags, where the bot stopped at startup calling it "not an emoji".
+
+- [#606](https://github.com/meocord/meocord/pull/606) [`e0d3300`](https://github.com/meocord/meocord/commit/e0d3300fb200ec38691fea457f633c0dbf63bc3d) Thanks [@l7aromeo](https://github.com/l7aromeo)! - The warning for a `themeFor` result the theme can't use shows each value as other log lines show outside text: in double quotes, with control characters and line breaks escaped, and cut short after 200 characters. A role name in it is escaped too. A malformed saved value no longer spans several lines. The startup refusal of a theme written in code reads as before.
+
+- [#592](https://github.com/meocord/meocord/pull/592) [`b0bcb45`](https://github.com/meocord/meocord/commit/b0bcb45bc3332354da71072b56f80522cb3979d0) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `meocord.config.ts` and the build read `tsconfig.json`'s `paths` as `tsc` does, whatever TypeScript version the project uses: paths inherited through `extends`, paths relative to `baseUrl`, and `${configDir}` in `paths`, `include`, `exclude` and `files`. A config that imports through such a path now loads, rather than failing with "Cannot find module", and a `${configDir}` path no longer breaks the build.
+
+- [#586](https://github.com/meocord/meocord/pull/586) [`6fe54a9`](https://github.com/meocord/meocord/commit/6fe54a9fb075288f7a9ed7f711f86000f21dbb45) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A `UserError`, `GuardDeniedError` or `ValidationError` whose message is empty, or longer than Discord takes, is answered as the user's own outcome again, instead of failing as a bot fault with the generic danger-coloured answer and two error logs. The message is fitted before any presenter sees it, your own included:
+
+  - at most 4096 characters for an embed and 4000 for a Components V2 Text Display, title line included, cut to end in `…`;
+  - an empty or whitespace-only message becomes MeoCord's generic error text.
+
+  A message command's plain-text reply is cut to 2000 characters, its warning emoji included. `PresentedError.message` documents the limit; a presenter that writes the message as its text needs no change.
+
+- [#488](https://github.com/meocord/meocord/pull/488) [`b29a23c`](https://github.com/meocord/meocord/commit/b29a23c63b1aff1d029b9582b59ea359947666a4) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A `UserError` thrown from a message command or an `@On` message event is answered with a reply that pings no one its text mentions, as MeoCord's other replies to messages already do. Users, roles, `@everyone` and `@here` in the error's message are shown as written. Nothing changes for a bot whose error messages hold no mentions.
+
 ## 4.2.0
 
 ### Minor Changes
