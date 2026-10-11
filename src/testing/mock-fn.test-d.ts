@@ -18,5 +18,9 @@ describe('a mock function', () => {
     expectTypeOf(double.mockReturnValue).parameter(0).toBeAny()
     expectTypeOf(double.mockResolvedValue).parameter(0).toBeAny()
     expectTypeOf(double.mock.calls[0][0]).toBeAny()
+    expectTypeOf(double.mock.results[0].value).toBeAny()
+    double.mockImplementation((text: string) => text.length)
+    // @ts-expect-error an implementation is a function
+    double.mockImplementation(42)
   })
 })
