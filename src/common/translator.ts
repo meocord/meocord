@@ -451,19 +451,29 @@ const PLURAL_CATEGORIES: ReadonlySet<string> = new Set<PluralCategory>(['zero', 
 export const isPluralShape = (value: unknown): value is Partial<Record<PluralCategory, unknown>> =>
   typeof value === 'object' && value !== null && Object.keys(value).length > 0 && Object.keys(value).every(key => PLURAL_CATEGORIES.has(key))
 
-/**
- * A message by its dotted key, or undefined when the catalog lacks it or the key names a group. A plural without an
- * `other` form reads as missing, so a translation that left it out falls back to the next catalog.
- */
-export function lookup(catalog: CatalogShape | undefined, key: string): string | PluralMessage | undefined {
+/** The value at a dotted key's path, or undefined where the path ends early. */
+function valueAt(catalog: CatalogShape | undefined, key: string): unknown {
   let current: unknown = catalog
   for (const part of key.split('.')) {
     if (typeof current !== 'object' || current === null) return undefined
     current = (current as Record<string, unknown>)[part]
   }
+  return current
+}
+
+/**
+ * A message by its dotted key, or undefined when the catalog lacks it or the key names a group. `reference`, the
+ * default catalog for a translation, decides whether an object is a plural or a group, so a translation that keeps
+ * only a group's `other` message isn't read as a plural; where the reference lacks the key, the object's own keys
+ * decide. A plural without an `other` form reads as missing, so a translation that left it out falls back to the next
+ * catalog.
+ */
+export function lookup(catalog: CatalogShape | undefined, key: string, reference: CatalogShape | undefined = catalog): string | PluralMessage | undefined {
+  const current = valueAt(catalog, key)
   if (typeof current === 'string') return current
-  if (isPluralShape(current) && typeof current.other === 'string') return current as PluralMessage
-  return undefined
+  if (!isPluralShape(current) || typeof current.other !== 'string') return undefined
+  const shape = reference === catalog ? current : valueAt(reference, key)
+  return shape === undefined || isPluralShape(shape) ? (current as PluralMessage) : undefined
 }
 
 const plurals = new Map<string, Intl.PluralRules>()
@@ -551,7 +561,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
 
   private translate(requested: string | undefined, key: string, params: Record<string, unknown> = {}): string {
     for (const locale of this[LOCALE_CHAIN](requested)) {
-      const message = lookup(this.catalogs[locale], key)
+      const message = lookup(this.catalogs[locale], key, this.catalogs[this.defaultLocale])
       if (message === undefined) continue
       // An empty translation, as tools export an untranslated string, counts as missing: Discord refuses an empty reply
       const text = pluralForm({ message, locale }, params.count)
@@ -594,7 +604,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     const localized: Partial<Record<Locale, string>> = {}
     for (const locale of this.locales) {
       if (locale === this.defaultLocale) continue
-      const message = lookup(this.catalogs[locale], key)
+      const message = lookup(this.catalogs[locale], key, this.catalogs[this.defaultLocale])
       // A translation with a {param} is left out, as Discord would show it as written, and so is an empty one
       if (typeof message === 'string' && message !== '' && placeholderNames(message).length === 0) {
         localized[locale] = fillPlaceholders(message, (_name, whole) => whole)

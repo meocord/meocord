@@ -60,6 +60,15 @@ describe('expectCompleteCatalog', () => {
     expect(() => expectCompleteCatalog(t)).toThrow('The catalogs are incomplete:\n  ru: missing reasons.offTopic')
   })
 
+  it("reads a translation by the default catalog's shapes, so one that keeps only a group's `other` lacks the rest", () => {
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { grp: { other: 'Other', label: 'Label' } }, ru: { grp: { other: 'Другое' } } },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(/^The catalogs are incomplete:\n {2}ru: missing grp\.label$/)
+  })
+
   it("names a key named like an object's built-in member that a locale lacks", () => {
     const t = createTranslator({ default: 'en-US', locales: { 'en-US': { constructor: 'Build', toString: 'Text' }, fr: {} } as never })
 

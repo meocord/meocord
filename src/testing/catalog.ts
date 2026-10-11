@@ -3,13 +3,19 @@ import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 interface Leaf { key: string; plural: boolean }
 
-/** Every message key of a catalog, and whether it is a plural. */
-function leaves(catalog: CatalogShape, prefix = ''): Leaf[] {
+/**
+ * Every message key of a catalog, and whether it is a plural. `reference` decides whether an object is a plural or a
+ * group, as the translator reads a translation by the default catalog's shapes; where it lacks a key, the object's own
+ * keys decide.
+ */
+function leaves(catalog: CatalogShape, prefix = '', reference: unknown = catalog): Leaf[] {
   return Object.entries(catalog).flatMap(([name, value]) => {
     const key = `${prefix}${name}`
     if (typeof value === 'string') return [{ key, plural: false }]
-    if (isPluralShape(value)) return [{ key, plural: true }]
-    return leaves(value as CatalogShape, `${key}.`)
+    const shape = typeof reference === 'object' && reference !== null && Object.hasOwn(reference, name) ? (reference as Record<string, unknown>)[name] : undefined
+    const plural = typeof shape === 'object' && shape !== null ? isPluralShape(shape) : isPluralShape(value)
+    if (plural) return [{ key, plural: true }]
+    return leaves(value as CatalogShape, `${key}.`, shape)
   })
 }
 
@@ -53,8 +59,10 @@ function strayParams(translation: unknown, original: unknown): string[] {
  * Russian, a translation of another shape than the default's, a text for a plural or a plural for a text, and each
  * `{param}` a translation uses that the message it translates doesn't take. An empty translation, `''`, counts as
  * lacking, as the translator reads it as missing. It reads the catalogs' own strings, so it checks the params of a
- * catalog from a plain variable or a JSON file too, which the compiler can't. An object counts as a plural only when
- * its every key is a plural category, so a group with an `other` key is a group.
+ * catalog from a plain variable or a JSON file too, which the compiler can't. An object in the default catalog counts as
+ * a plural only when its every key is a plural category, so a group with an `other` key is a group, and a translation
+ * is read by the default catalog's shapes, as the translator reads it: one that keeps only a group's `other` message
+ * lacks the group's other messages.
  *
  * @remarks
  * MeoCord's own texts, a catalog's `meocord` group, fall back to English by design, so only a key MeoCord lacks, and
@@ -125,7 +133,7 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
     if (options.meocord && !locale.startsWith('en-')) {
       for (const key of MEOCORD_KEYS) if (at(catalog, key) === undefined || at(catalog, key) === '') problems.push(`missing ${key}`)
     }
-    for (const { key } of leaves(catalog)) {
+    for (const { key } of leaves(catalog, '', defaultCatalog)) {
       if (isMeoCordKey(key)) {
         if (!MEOCORD_KEYS.has(key)) problems.push(`${key} is not one of MeoCord's texts`)
         else {
