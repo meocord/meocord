@@ -292,11 +292,15 @@ describe('a key with no message, in development', () => {
   it("reads a translation by the default catalog's shapes, so one that keeps only a group's `other` is a group", () => {
     const own = createTranslator({
       default: 'en-US',
-      locales: { 'en-US': { grp: { other: 'Other', label: 'Label' }, hi: 'Hi' }, ru: { grp: { other: 'Другое' }, hi: { other: 'Привет' } } },
+      locales: {
+        'en-US': { grp: { other: 'Other', label: 'Label' }, hi: 'Hi' },
+        ru: { grp: { other: 'Другое' }, hi: { other: 'Привет' }, extra: { other: 'Ещё' } },
+      },
     } as never) as unknown as { locale: (locale: string) => (key: string) => string }
     const ru = own.locale('ru')
 
-    expect([ru('grp'), ru('grp.other'), ru('grp.label'), ru('hi')]).toEqual(['grp', 'Другое', 'Label', 'Hi'])
+    // A key the default lacks is read by its own shape: `extra` is a plural
+    expect([ru('grp'), ru('grp.other'), ru('grp.label'), ru('hi'), ru('extra')]).toEqual(['grp', 'Другое', 'Label', 'Hi', 'Ещё'])
     expect(warned).toEqual(['"grp" names a group of messages, not one, so the key is shown in its place.'])
   })
 })

@@ -56,7 +56,7 @@ function strayParams(translation: unknown, original: unknown): string[] {
  *
  * Use it in a test for a team that wants no fallback in production. It reports the messages a locale lacks, the
  * messages the default catalog doesn't have, the plural forms a language needs but a plural lacks, such as `few` for
- * Russian, a translation of another shape than the default's, a text for a plural or a plural for a text, and each
+ * Russian, a translation of another shape than the default's, a text for a plural or a group, or a plural for a text, and each
  * `{param}` a translation uses that the message it translates doesn't take. An empty translation, `''`, counts as
  * lacking, as the translator reads it as missing. It reads the catalogs' own strings, so it checks the params of a
  * catalog from a plain variable or a JSON file too, which the compiler can't. An object in the default catalog counts as
@@ -141,7 +141,11 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
           const stray = strayParams(at(catalog, key), english)
           for (const name of stray) problems.push(`${key} takes no {${name}}: MeoCord's English is "${shown(english)}"`)
         }
-      } else if (!referenceKeys.has(key)) problems.push(`${key} is not in the default catalog`)
+      } else if (!referenceKeys.has(key)) {
+        // A text where the default has a group: the key is the default's, in another shape
+        const original = at(defaultCatalog, key)
+        problems.push(typeof original === 'object' && original !== null ? `${key} should be a group, as the default is` : `${key} is not in the default catalog`)
+      }
     }
 
     if (problems.length > 0) gaps.push(`  ${locale}: ${problems.join('; ')}`)

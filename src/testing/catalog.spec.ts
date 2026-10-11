@@ -69,6 +69,14 @@ describe('expectCompleteCatalog', () => {
     expect(() => expectCompleteCatalog(t)).toThrow(/^The catalogs are incomplete:\n {2}ru: missing grp\.label$/)
   })
 
+  it('names a text given where the default has a group as of the wrong shape', () => {
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { grp: { other: 'Other', label: 'Label' } }, ru: { grp: 'Группа' } } })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(
+      /^The catalogs are incomplete:\n {2}ru: missing grp\.other; missing grp\.label; grp should be a group, as the default is$/,
+    )
+  })
+
   it("names a key named like an object's built-in member that a locale lacks", () => {
     const t = createTranslator({ default: 'en-US', locales: { 'en-US': { constructor: 'Build', toString: 'Text' }, fr: {} } as never })
 
