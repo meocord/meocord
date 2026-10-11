@@ -410,4 +410,65 @@ describe('splitReply', () => {
     expect(splitReply('b'.repeat(4100)).map(part => part.length)).toEqual([2000, 2000, 100])
     expect(splitReply('one\ntwo')).toEqual(['one\ntwo'])
   })
+
+  it.each([
+    ['an emoji', '😀'],
+    ['a flag', '🇯🇵'],
+    ['a joined emoji', '👩‍💻'],
+    ['a letter with a combining accent', 'e\u0301'],
+  ])('cuts a long line before %s at the limit, never through it', (_label, character) => {
+    const parts = splitReply(`${'a'.repeat(1999)}${character}b`)
+
+    expect(parts).toEqual(['a'.repeat(1999), `${character}b`])
+  })
+
+  it('cuts a single character longer than a message between code points', () => {
+    const parts = splitReply(`e${'\u0301'.repeat(2500)}`)
+
+    expect(parts.map(part => part.length)).toEqual([2000, 501])
+    // Variation selectors are astral, so the limit falls inside a surrogate pair: the cut moves before it
+    const astral = splitReply(`a${'\u{E0100}'.repeat(1500)}`)
+    expect(astral.map(part => part.length)).toEqual([1999, 1002])
+    expect(astral.join('')).toBe(`a${'\u{E0100}'.repeat(1500)}`)
+  })
+
+  it('leaves out a message of only whitespace', () => {
+    expect(splitReply(`${'x'.repeat(1990)}\n${'y'.repeat(9)}\n   \n`)).toEqual([`${'x'.repeat(1990)}\n${'y'.repeat(9)}`])
+    expect(splitReply('  \n\n ')).toEqual([])
+  })
+})
+
+describe('a long help reply', () => {
+  it('is sent as messages Discord shows as written', async () => {
+    let text = ''
+    class Help {
+      loading() {
+        return { text: '…' }
+      }
+      error() {
+        return { text: 'Oops' }
+      }
+      messageHelp() {
+        return text
+      }
+    }
+    @Controller()
+    class Tools {
+      @MessageHandler('ping')
+      ping() {}
+    }
+    @MeoCord({ controllers: [Tools], messages: { prefix: '!', help: true }, presenter: Help, clientOptions: { intents: [] } })
+    class App {}
+    const module = MeoCordTestingModule.fromApp(App).compile()
+
+    const ask = async (written: string) => {
+      text = written
+      const message = createMockMessage({ content: '!help' })
+      await module.dispatch(message)
+      return replies(message)
+    }
+
+    expect(await ask(`${'a'.repeat(1999)}😀b`)).toEqual(['a'.repeat(1999), '😀b'])
+    expect(await ask(`${'x'.repeat(1990)}\n${'y'.repeat(9)}\n   \n`)).toEqual([`${'x'.repeat(1990)}\n${'y'.repeat(9)}`])
+  })
 })
