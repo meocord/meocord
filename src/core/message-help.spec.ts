@@ -401,6 +401,32 @@ describe('the built-in help in the testing module', () => {
     expect(message.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Usage:\n!config get <key>\n!config set <key> <value…>' }))
     expect(resolveRoute(HelpApp, { content: '!help' })).toBeUndefined()
   })
+
+  it("lists the controllers' commands, not a service's, before the module has dispatched as after", async () => {
+    @Service()
+    class Stats {
+      @MessageHandler('stats', { description: 'Shows the stats.' })
+      stats() {}
+    }
+    @MeoCord({ controllers: [Moderation], services: [Stats], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class StatsApp {}
+    const modules = [
+      MeoCordTestingModule.fromApp(StatsApp).compile(),
+      MeoCordTestingModule.create({ app: StatsApp, controllers: [Moderation] }).compile(),
+    ]
+
+    for (const module of modules) {
+      const listed = async () => {
+        const help = await module.get(HandlerRegistry).messageHelp(createMockMessage({ content: '!help' }))
+        return help.kind === 'list' ? help.commands.map(entry => entry.command) : help.kind
+      }
+      const before = await listed()
+      await module.dispatch(createMockMessage({ content: '!stats' }))
+
+      expect(before).toEqual(['config get', 'config set', 'mute', 'purge'])
+      expect(await listed()).toEqual(before)
+    }
+  })
 })
 
 describe('splitReply', () => {

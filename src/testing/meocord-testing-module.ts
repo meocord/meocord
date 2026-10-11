@@ -1067,7 +1067,9 @@ export class TestingModuleBuilder {
         // Bound first, as in the app, so a class that injects it gets this instance
         const appClasses: (new (...args: any[]) => unknown)[] = []
         const translator = () => (container.isBound(Translator) ? container.get(Translator) : undefined)
-        container.bind(HandlerRegistry).toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app), translator))
+        container
+          .bind(HandlerRegistry)
+          .toConstantValue(new HandlerRegistry(appClasses, messagesOf(this.options.app), translator, this.options.controllers ?? []))
         // A testing module runs as one process, so a cross-shard call runs once, here
         container.bind(ShardContext).toConstantValue(
           new ShardContext(

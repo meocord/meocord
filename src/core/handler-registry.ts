@@ -324,19 +324,22 @@ export function shareMessageRoutes(registry: HandlerRegistry, routes: readonly M
  */
 export class HandlerRegistry {
   private entries?: HandlerEntry[]
-  /** Built from `classes` for a registry no dispatcher shares its routes with. */
+  /** Built from the controllers for a registry no dispatcher shares its routes with yet. */
   private messageRoutes?: MessageRoute[]
 
   /**
-   * @param classes - The app's classes to read handlers from. The factory fills the list
-   *   once the app is bound; entries are read on the first {@link list}.
+   * @param classes - The app's classes to read handlers from, controllers and services alike. The factory fills the
+   *   list once the app is bound; entries are read on the first {@link list}.
    * @param messages - The app's `messages` options, whose `caseSensitive` message entries' `matches` follows.
    * @param translator - The app's translator, read when {@link messageHelp} words its labels; none for English.
+   * @param controllers - The app's controllers, the classes dispatch routes messages to, which {@link messageHelp}
+   *   lists; `classes` when not given.
    */
   constructor(
     private readonly classes: readonly HandlerClass[],
     private readonly messages: MessageCommandOptions = {},
     private readonly translator: () => Translator<any> | undefined = () => undefined,
+    private readonly controllers: readonly HandlerClass[] = classes,
   ) {}
 
   /**
@@ -376,7 +379,8 @@ export class HandlerRegistry {
    * ```
    */
   async messageHelp(message: Message, query?: string): Promise<MessageHelp> {
-    const routes = dispatchedRoutes.get(this) ?? (this.messageRoutes ??= buildMessageRoutes([...this.classes], this.messages))
+    // Until a dispatcher shares its table, the same one built from the same controllers, so help lists what dispatch reaches
+    const routes = dispatchedRoutes.get(this) ?? (this.messageRoutes ??= buildMessageRoutes([...this.controllers], this.messages))
     const starts = await messageStarts(this.messages, message, message.client?.user?.id)
     const text = (message.content ?? '').trim()
     const rest = afterStart(text, starts.prefixes.filter(prefix => prefix !== ''), starts.mention, this.messages.caseSensitive ?? false)
