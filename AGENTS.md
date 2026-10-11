@@ -108,8 +108,11 @@ The pre-commit hook runs `bun run lint`. Do not bypass it for code changes.
 ### Code
 
 - TypeScript, ESM, strict. Match the surrounding code's naming, idiom and comment density.
-- Bun is repository tooling only. Shipped code (`src/`, templates) uses only APIs Node also has — no
-  `Bun.*`, `bun:*` or Bun-only `import.meta` properties; ESLint rejects them in `src/`.
+- Bun is repository tooling only: shipped code (`src/`, templates) uses only APIs Node also has.
+- No magic values: a value whose meaning the code doesn't spell out (a Discord limit or error code,
+  a timeout, a cache key, a pattern, a colour, a flag) is a named constant, defined once beside what
+  it governs and imported where it's used. Use discord.js's own constant where it has one. Plain `0`
+  and `1`, indexes, and a spec's expected values stay literal.
 - Keep public types free of internal shapes (no `regex`, `specificity` or metadata maps).
 - New behaviour needs tests; a bug fix needs a test that fails without the fix. Prefer building
   real decorated controllers over mocking the framework.
