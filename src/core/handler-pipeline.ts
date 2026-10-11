@@ -511,7 +511,9 @@ async function runPipeline(
     }
     if (!(await runGuards(guards, { container, controller, methodName, args, type, currentArgs, denial }))) {
       outcome = 'denied'
-      await response?.abandon()
+      // Without @Defer too, so a denied component is acknowledged rather than left to fail
+      const denied = response ?? (type === 'interaction' && first?.isRepliable?.() ? responseOf(first as Parameters<typeof responseOf>[0]) : undefined)
+      await denied?.abandon()
       return { ran: false }
     }
     if (options.fetchArgs) {
