@@ -833,9 +833,12 @@ export function matchMessageSubcommands(
   return found.length > 0 ? found : undefined
 }
 
-/** Whether a message has text a handler could take; dispatch runs no handler for one without. */
-export function hasMessageText(content: string | null | undefined): boolean {
-  return Boolean(content?.trim())
+/**
+ * Whether a message has text a handler could take; dispatch runs no handler for one without. Content that isn't a
+ * string, as a mock's placeholder without strict mocks, is no text.
+ */
+export function hasMessageText(content: unknown): boolean {
+  return typeof content === 'string' && content.trim() !== ''
 }
 
 /**
