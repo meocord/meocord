@@ -7,3 +7,4 @@ A mock guild's `emojis`, `stickers`, `scheduledEvents`, `autoModerationRules` an
 - `create()` resolves to a mock emoji, sticker, scheduled event or AutoMod rule in the guild, and caches it, as discord.js does.
 - `invites.create(channel)` resolves to an invite for that channel in the guild, keyed by its `code`, and caches nothing, as discord.js does.
 - `fetch(id)` resolves to the cached item, or makes and caches one; a list fetch resolves to an empty collection.
+- Each item is named, and what discord.js formats from it computes: an emoji's mention (`String(emoji)`) and `identifier`, and a scheduled event's and an invite's `url`.
