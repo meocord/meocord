@@ -47,3 +47,25 @@ export function hasEphemeral(flags: number | undefined): boolean {
 export function flagNames(flags: number): string[] {
   return new MessageFlagsBitField(flags).toArray()
 }
+
+/** Each call as a warning names it, its article included. */
+const STEP_NAMES: Record<ResponseStep, string> = {
+  deferReply: 'a deferred reply',
+  reply: 'a reply',
+  update: 'an update',
+  edit: 'an edit',
+  followUp: 'a follow-up',
+}
+
+/** What an update or an edit does with `Ephemeral` instead, and how to answer only the member. */
+const PRIVATE_HINT: Partial<Record<ResponseStep, string>> = {
+  update: 'An update changes the message the member clicked, for everyone; to answer only them, use respond(interaction).followUp() with MessageFlags.Ephemeral.',
+  edit: 'An edit keeps the message as public or private as it was; to answer only the member, use respond(interaction).followUp() with MessageFlags.Ephemeral.',
+}
+
+/** The development warning for the flags a call dropped, with how to answer privately when `Ephemeral` is one of them. */
+export function droppedFlagsWarning(step: ResponseStep, dropped: number): string {
+  const text = `Dropped flags ${flagNames(dropped).join(', ')}, which ${STEP_NAMES[step]} cannot take.`
+  const hint = hasEphemeral(dropped) ? PRIVATE_HINT[step] : undefined
+  return hint ? `${text} ${hint}` : text
+}
