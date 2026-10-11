@@ -147,6 +147,19 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
     async fails() {
       throw new Error('boom')
     }
+
+    @loaded.Autocomplete('forgetsChoices')
+    async forgetsChoices() {}
+
+    @loaded.Autocomplete('answersChoices')
+    async answersChoices(interaction: any) {
+      await interaction.respond([])
+    }
+
+    @loaded.Autocomplete('failsChoices')
+    async failsChoices() {
+      throw new Error('boom')
+    }
   }
 
   @loaded.MeoCord({ controllers: [Shop], clientOptions: { intents: [] }, ...(warnUnanswered === undefined ? {} : { warnUnanswered }) })
@@ -155,8 +168,12 @@ async function startApp(loaded: Loaded, warnUnanswered?: boolean) {
   const app = loaded.MeoCordFactory.create(App)
   await app.start()
   const [dispatch] = clients[0].listeners('interactionCreate') as ((interaction: unknown) => Promise<void>)[]
-  return (commandName: string) =>
-    dispatch(loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName }))
+  return (commandName: string, kind: 'slash' | 'autocomplete' = 'slash') =>
+    dispatch(
+      kind === 'slash'
+        ? loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName })
+        : loaded.createMockInteraction(loaded.discord.AutocompleteInteraction, { commandName }),
+    )
 }
 
 const unanswered = () => warned.filter(message => /^Shop\.\w+(:| finished without answering| deferred its interaction)/.test(message))
@@ -181,6 +198,19 @@ describe('the warning for an interaction left unanswered', () => {
     expect(unanswered()).toEqual([
       expect.stringMatching(/^Shop\.forgets finished without answering its interaction/),
       expect.stringMatching(/^Shop\.defers deferred its interaction and never followed up/),
+    ])
+  })
+
+  it('names, once, an autocomplete handler that returned without answering, and not one that answered or threw', async () => {
+    process.env.NODE_ENV = 'development'
+    const run = await startApp(await load())
+
+    for (const command of ['forgetsChoices', 'forgetsChoices', 'answersChoices', 'failsChoices']) await run(command, 'autocomplete')
+
+    expect(unanswered()).toEqual([
+      'Shop.forgetsChoices finished without answering its autocomplete, so the user saw its options fail to load. Answer ' +
+        'it with interaction.respond(choices) within 3 seconds. Shown once per handler; @MeoCord({ warnUnanswered: ' +
+        'false }) turns it off.',
     ])
   })
 
@@ -247,6 +277,7 @@ describe('the warning for an interaction left unanswered', () => {
     process.env.NODE_ENV = 'development'
     const quiet = await startApp(await load(), false)
     await quiet('forgets')
+    await quiet('forgetsChoices', 'autocomplete')
     expect(unanswered()).toEqual([])
 
     vi.restoreAllMocks()

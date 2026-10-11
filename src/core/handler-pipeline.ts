@@ -327,6 +327,14 @@ export interface AdmittedCall {
   checkCooldowns(): Promise<void>
 }
 
+/** A call that ended without an error and left its interaction or autocomplete unanswered, or deferred without a follow-up. */
+export interface Unanswered {
+  type: 'interaction' | 'autocomplete'
+  phase: 'unanswered' | 'deferred'
+  /** The interceptor that returned before the handler finished, if one did, and whether the handler had started by then. */
+  returnedBy?: { interceptor: InterceptorClass; handlerStarted: boolean }
+}
+
 /**
  * How a caller runs a call through the pipeline: its fallback, the argument steps around the guards, its context type,
  * and what the observers and the unanswered warning are told.
@@ -355,12 +363,8 @@ export interface RunOptions {
   awaitObservers?: boolean
   /** When dispatch received the call, from `performance.now()`, when it started before the pipeline. */
   startedAt?: number
-  /**
-   * Told when a call ended without an error and left its interaction unanswered, or deferred without a
-   * follow-up: with the interceptor that returned before the handler finished, if one did, and whether the
-   * handler had started by then.
-   */
-  onUnanswered?: (phase: 'unanswered' | 'deferred', returnedBy?: { interceptor: InterceptorClass; handlerStarted: boolean }) => void
+  /** Told when a call ended without an error and left its interaction or autocomplete unanswered. */
+  onUnanswered?: (unanswered: Unanswered) => void
 }
 
 /**
@@ -546,11 +550,11 @@ async function runPipeline(
     return { ran, error }
   } finally {
     await response?.release()
-    if (options.onUnanswered && (ran || returnedEarly) && outcome === 'ran' && type === 'interaction') {
+    if (options.onUnanswered && (ran || returnedEarly) && outcome === 'ran' && (type === 'interaction' || type === 'autocomplete')) {
       const phase = responsePhaseOf(contextOf())
       // The handler is to blame only once it has finished; until then, the interceptor that ended the call is
-      const blamed = !finished && returnedEarly ? { interceptor: returnedEarly, handlerStarted: ran } : undefined
-      if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered(phase, blamed)
+      const returnedBy = !finished && returnedEarly ? { interceptor: returnedEarly, handlerStarted: ran } : undefined
+      if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered({ type, phase, returnedBy })
     }
     if (options.awaitObservers) await starting
     // After the answer and the release, so the duration covers the whole call
