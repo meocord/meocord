@@ -38,7 +38,15 @@ import {
   type ReactionEvent,
   type StandardSchemaV1,
 } from '@src/interface/index.js'
-import { createChatInputOptions, createMockInteraction, createModalFields, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
+import {
+  createChatInputOptions,
+  createMockInteraction,
+  createMockMessage,
+  createMockUser,
+  createModalFields,
+  inspectHandler,
+  MeoCordTestingModule,
+} from '@src/testing/index.js'
 
 /** What the observers were told, in order: which observer, which handler, and the result. */
 const told: { observer: string; handler: string | undefined; type: string; result: DispatchResult }[] = []
@@ -491,5 +499,57 @@ describe('onStart', () => {
     await expect(traced.invoke(TracedController, 'traced', slash())).resolves.toEqual({ ran: true })
 
     expect(order).toEqual(['start traced', 'guard', 'handler', 'broken settled', 'settled traced ran paired:true'])
+  })
+})
+
+describe('when a dispatched call started', () => {
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+  const timed: { handler: string | undefined; startedAt: number; durationMs: number }[] = []
+
+  @Observer()
+  class Timing implements DispatchObserver {
+    onSettled(context: ExecutionContext, { startedAt, durationMs }: DispatchResult) {
+      timed.push({ handler: context.getHandler()?.name, startedAt, durationMs })
+    }
+  }
+
+  @Controller()
+  class Chat {
+    @MessageHandler()
+    async first(_message: Message) {
+      await sleep(40)
+    }
+
+    @MessageHandler()
+    async second(_message: Message) {}
+
+    @ReactionHandler('⭐')
+    async star(_reaction: MessageReaction, _event: ReactionEvent) {
+      await sleep(40)
+    }
+
+    @ReactionHandler()
+    async any(_reaction: MessageReaction, _event: ReactionEvent) {}
+  }
+
+  beforeEach(() => void (timed.length = 0))
+  const timing = () => MeoCordTestingModule.create({ controllers: [Chat], observers: [Timing] }).compile()
+
+  // A listener that waits behind another one reports the wait: one start for the message, timed from its arrival
+  it("gives every handler of a message the message's arrival, so a later one's duration includes the wait before it", async () => {
+    await timing().dispatch(createMockMessage({ content: 'hello' }))
+
+    expect(timed.map(({ handler }) => handler)).toEqual(['first', 'second'])
+    expect(timed[1].startedAt).toBe(timed[0].startedAt)
+    expect(timed[1].durationMs).toBeGreaterThanOrEqual(35)
+  })
+
+  it("gives every handler of a reaction the reaction's arrival, as a message's", async () => {
+    const reaction = createMockInteraction(MessageReaction, { emoji: { name: '⭐' }, message: createMockMessage() } as never)
+    await timing().dispatch(reaction, { user: createMockUser() })
+
+    expect(timed.map(({ handler }) => handler)).toEqual(['star', 'any'])
+    expect(timed[1].startedAt).toBe(timed[0].startedAt)
+    expect(timed[1].durationMs).toBeGreaterThanOrEqual(35)
   })
 })
