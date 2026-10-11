@@ -17,6 +17,8 @@ import {
   type MessageFlagsResolvable,
   type GuildBasedChannel,
   ApplicationCommandManager,
+  AutoModerationRule,
+  AutoModerationRuleManager,
   VoiceChannel,
   ApplicationCommandOptionType,
   ApplicationCommandType,
@@ -48,6 +50,13 @@ import {
   Guild,
   GuildBan,
   GuildBanManager,
+  GuildEmoji,
+  GuildEmojiManager,
+  GuildInviteManager,
+  GuildScheduledEvent,
+  GuildScheduledEventManager,
+  GuildStickerManager,
+  Invite,
   GuildChannelManager,
   GuildMember,
   GuildMemberManager,
@@ -90,6 +99,7 @@ import {
   MediaChannel,
   NewsChannel,
   SnowflakeUtil,
+  Sticker,
   type AutocompleteInteraction,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
@@ -495,7 +505,19 @@ const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: o
   [ApplicationCommandManager, id => createMockInteraction(ApplicationCommand, id ? { id } : {})],
   [ChannelManager, id => createMockChannel(TextChannel, id ? { id } : {})],
   [GuildChannelManager, (id, manager) => createMockChannel(TextChannel, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
+  [GuildEmojiManager, (id, manager) => itemInGuild(GuildEmoji, { id: id ?? nextSnowflake() }, manager)],
+  [GuildStickerManager, (id, manager) => itemInGuild(Sticker, { id: id ?? nextSnowflake() }, manager)],
+  [GuildScheduledEventManager, (id, manager) => itemInGuild(GuildScheduledEvent, { id: id ?? nextSnowflake() }, manager)],
+  [AutoModerationRuleManager, (id, manager) => itemInGuild(AutoModerationRule, { id: id ?? nextSnowflake() }, manager)],
+  // An invite is keyed by its code, as discord.js caches and fetches one
+  [GuildInviteManager, (code, manager) => itemInGuild(Invite, { code: code ?? BigInt(nextSnowflake()).toString(36) }, manager)],
 ]
+
+/** A mock of `Class` with `props`, in the manager's guild, by the guild and its id, when the manager has one. */
+function itemInGuild(Class: object, props: object, manager: object): object {
+  const guild = guildOf(manager)
+  return createMockInteraction(Class as never, { ...props, ...(guild ? { guild, guildId: guild.id } : {}) } as never)
+}
 
 const returnsPromise = (key: string, method: (...args: unknown[]) => unknown) =>
   method.constructor.name === 'AsyncFunction' ||
@@ -564,6 +586,15 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
         if (user instanceof GuildMember) return user
         if (user instanceof User) return (receiver() as GuildBanManager).guild.members.resolve(user) ?? user
         return typeof user === 'string' ? user : (user as { id?: string } | undefined)?.id
+      })
+    }
+    // An invite is made for the channel given, in its guild, and cached nowhere, as discord.js's create does
+    if (item && key === 'create' && target instanceof GuildInviteManager) {
+      return createMockFn(async (channel?: unknown) => {
+        const invite = item(undefined, receiver()) as Record<string, unknown>
+        const channelId = typeof channel === 'string' ? channel : (channel as { id?: string } | undefined)?.id
+        const found = channel instanceof BaseChannel ? channel : channelId ? (cacheOf(guildOf(receiver())?.channels)?.get(channelId) ?? null) : null
+        return Object.assign(invite, { channel: found, channelId: channelId ?? null })
       })
     }
     // Every other manager here caches what its create() makes, as discord.js's does; check a manager's create when
@@ -1786,6 +1817,11 @@ const HOLDS: readonly (readonly [object, object])[] = [
   [ReactionManager.prototype, MessageReaction],
   [ReactionUserManager.prototype, User],
   [PresenceManager.prototype, Presence],
+  [GuildEmojiManager.prototype, GuildEmoji],
+  [GuildStickerManager.prototype, Sticker],
+  [GuildScheduledEventManager.prototype, GuildScheduledEvent],
+  [AutoModerationRuleManager.prototype, AutoModerationRule],
+  [GuildInviteManager.prototype, Invite],
 ]
 
 /**
@@ -1821,7 +1857,8 @@ export function ownedManager(prototype: object, owner: Record<string, object>): 
 }
 
 /**
- * Creates a mock {@link Guild}, with the `members`, `channels`, `roles` and `bans` managers ready to stub.
+ * Creates a mock {@link Guild}, with its `members`, `channels`, `roles`, `bans`, `emojis`, `stickers`, `scheduledEvents`,
+ * `autoModerationRules` and `invites` managers ready to stub.
  *
  * Use it for the server a message or an interaction came from, with the members, roles and channels a handler looks
  * up in it.
@@ -1831,9 +1868,11 @@ export function ownedManager(prototype: object, owner: Record<string, object>): 
  *
  * @remarks
  * A manager's `fetch(id)` resolves to its cached item with that id, as discord.js looks there first, or to a new one it
- * caches under that id: a member or channel in this guild, a role with that id, or a ban. `members.fetch({ user: ids })`
- * resolves to a collection of each of those members, found or made the same way; `create()` and `edit()` resolve to a
- * mock of its item, and a list fetch to an empty collection. Members, roles and channels given are put in
+ * caches under that id: a member, channel, emoji, sticker, scheduled event or AutoMod rule in this guild, a role with
+ * that id, a ban, or an invite with that code. `members.fetch({ user: ids })` resolves to a collection of each of those
+ * members, found or made the same way; `create()` and `edit()` resolve to a mock of its item, which `create()` caches
+ * as discord.js does, but for an invite, made for the channel given and cached nowhere; a list fetch resolves to an
+ * empty collection. Members, roles and channels given are put in
  * their managers' caches, where dispatch looks first when it resolves a message's typed params; a member
  * {@link createMockMember} made without a server is in this one. Its `roles.everyone` is the role given with the
  * guild's id, or else an @everyone role of its own at position 0 with no permissions, in `roles.cache` as Discord has
@@ -1866,7 +1905,7 @@ export function createMockGuild(overrides: MockGuildOverrides = {}): DeepMocked<
   instance.members = managerWith(GuildMemberManager.prototype, overrides.members as never)
   instance.channels = managerWith(GuildChannelManager.prototype, overrides.channels as never)
   instance.roles = guildRoleManager(instance.id as string, overrides.roles)
-  instance.bans = managerWith(GuildBanManager.prototype, undefined)
+  for (const [key, Manager] of GUILD_MANAGERS) instance[key] = managerWith(Manager.prototype, undefined)
 
   const guild = stubDeep(instance) as DeepMocked<Guild>
   settleGuild(instance, guild)
@@ -2493,7 +2532,7 @@ function createMockGuildForMessage(id?: string): object {
   guild.members = managerWith(GuildMemberManager.prototype, undefined)
   guild.channels = managerWith(GuildChannelManager.prototype, undefined)
   guild.roles = guildRoleManager(guild.id as string, undefined)
-  guild.bans = managerWith(GuildBanManager.prototype, undefined)
+  for (const [key, Manager] of GUILD_MANAGERS) guild[key] = managerWith(Manager.prototype, undefined)
   const proxy = stubDeep(guild)
   settleGuild(guild, proxy)
   return proxy
@@ -2521,9 +2560,19 @@ export function heldChannelOf(interaction: object, guild: Guild): unknown {
   })
 }
 
+// A guild's managers beside members, channels and roles, each empty, of its discord.js class
+const GUILD_MANAGERS = [
+  ['bans', GuildBanManager],
+  ['emojis', GuildEmojiManager],
+  ['stickers', GuildStickerManager],
+  ['scheduledEvents', GuildScheduledEventManager],
+  ['autoModerationRules', AutoModerationRuleManager],
+  ['invites', GuildInviteManager],
+] as const
+
 /** Gives a guild's managers the guild, as discord.js's do, so what they fetch or make is in it. */
 function homeManagers(instance: Record<string, unknown>, guild: object): void {
-  for (const key of ['members', 'channels', 'roles', 'bans']) (instance[key] as Record<string, unknown>).guild = guild
+  for (const key of ['members', 'channels', 'roles', ...GUILD_MANAGERS.map(([key]) => key)]) (instance[key] as Record<string, unknown>).guild = guild
 }
 
 /**
