@@ -1108,7 +1108,8 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
     Object.defineProperty(instance, 'ephemeral', {
       get: () => {
-        // A read once a test answered the interaction itself, as MeoCord's own reads are then, reads the same in both modes
+        // Quiet once a test answered the interaction itself: MeoCord then reads ephemeral only for truthiness, where false
+        // and null act alike
         if (!ephemeralDecided && !strict && !answeredOutside()) {
           warnPlaceholder(
             mockLogger,
