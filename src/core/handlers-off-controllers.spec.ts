@@ -1,8 +1,9 @@
 import { type Message, type MessageReaction } from 'discord.js'
 import { vi } from 'vitest'
+import { ExecutionContext } from '@src/common/index.js'
 import { Logger } from '@src/common/logger.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { Autocomplete, Command, Controller, MeoCord, MessageHandler, On, ReactionHandler, Service } from '@src/decorator/index.js'
+import { Autocomplete, Command, Controller, Guard, MeoCord, MessageHandler, On, ReactionHandler, Service, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { MeoCordTestingModule } from '@src/testing/index.js'
@@ -115,6 +116,77 @@ describe('handlers on a class that is not a controller', () => {
     create({ services: [statsService()] })
 
     expect(offControllers() !== undefined).toBe(warns)
+  })
+
+  /** An app with a `@MessageHandler` on a class only a guard injects, made once or for each call, or on a `useClass`. */
+  const appWith = (kind: 'stage-only' | 'per-call' | 'useClass') => {
+    @Service()
+    class Ledger {
+      @MessageHandler('ledger')
+      ledger(_message: Message) {}
+    }
+    @Service()
+    class Audit {
+      constructor(readonly context: ExecutionContext) {}
+      @MessageHandler('audit')
+      audit(_message: Message) {}
+    }
+    class Store {}
+    @Guard()
+    class Gate {
+      constructor(readonly by: Ledger) {}
+      canActivate() {
+        return true
+      }
+    }
+    @Guard()
+    class PerCallGate {
+      constructor(readonly by: Audit) {}
+      canActivate() {
+        return true
+      }
+    }
+    @Controller()
+    class Guarded {
+      @Command('ping', CommandType.SLASH)
+      @UseGuard(Gate)
+      ping() {}
+    }
+    @Controller()
+    class GuardedPerCall {
+      @Command('ping', CommandType.SLASH)
+      @UseGuard(PerCallGate)
+      ping() {}
+    }
+    @Controller()
+    class Plain {
+      @Command('ping', CommandType.SLASH)
+      ping() {}
+    }
+    const controllers = { 'stage-only': Guarded, 'per-call': GuardedPerCall, useClass: Plain }
+    @MeoCord({
+      controllers: [controllers[kind]],
+      providers: kind === 'useClass' ? [{ provide: Store, useClass: Ledger }] : [],
+      clientOptions: { intents: [] },
+    })
+    class App {}
+    return { App, named: kind === 'per-call' ? "  Audit.audit: @MessageHandler('audit')" : "  Ledger.ledger: @MessageHandler('ledger')" }
+  }
+
+  it.each([
+    ['a service only a guard injects', 'stage-only'],
+    ['a class made for each call, as it injects ExecutionContext', 'per-call'],
+    ["a provider's useClass under another token", 'useClass'],
+  ] as const)('are named on %s, by the bot and the testing module alike', (_on, kind) => {
+    const { App, named } = appWith(kind)
+
+    MeoCordFactory.create(App)
+    const bot = offControllers()
+    warned = []
+    MeoCordTestingModule.fromApp(App).compile()
+
+    expect(bot).toContain(named)
+    expect(offControllers()).toBe(bot)
   })
 
   it('are named in the testing module too', () => {

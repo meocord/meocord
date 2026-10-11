@@ -26,7 +26,6 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import {
   assertProvided,
   assertProvidedServices,
-  reachableClasses,
   bindProvider,
   bindsOwnToken,
   isClassProvider,
@@ -224,20 +223,24 @@ export class MeoCordFactory {
     })
     // A themeFor class is bound on its own, as the cooldown store is, and resolved like a service
     const themeResolver = themeResolverClass(options.themeFor)
-    // The app's classes and every class they inject, which the container binds
-    const roots = [
-      ...options.controllers,
-      ...(options.services ?? []),
-      ...(themeResolver ? [themeResolver] : []),
-      ...(options.cooldownStore ? [options.cooldownStore] : []),
-      ...appObservers(target as object),
-    ]
+    // Every class the app runs, its stages and presenter and what they inject included
+    const stages = appStages(target as object)
+    const runs = startupClasses({
+      controllers: options.controllers,
+      services: options.services ?? [],
+      providers,
+      stages,
+      presenter: options.presenter,
+      cooldownStore: options.cooldownStore,
+      themeFor: options.themeFor,
+      observers: appObservers(target as object),
+    })
     // A shard's manager runs the same checks, so a sharded bot warns once
     if (!shard) {
       warnUnregisteredCommands(options.controllers)
       warnInheritedRoutes(options.controllers)
       warnOverlappingPatterns(options.controllers)
-      warnHandlersOffControllers(options.controllers, reachableClasses(roots, providers))
+      warnHandlersOffControllers(options.controllers, runs.classes)
       const developmentEnv = bunDevelopmentValues()
       if (developmentEnv.keys.length > 0) {
         this.logger.warn(bunDevelopmentWarning(developmentEnv))
@@ -261,19 +264,8 @@ export class MeoCordFactory {
 
     // The checks of what the app binds and runs report every error each finds, and the first is thrown
     return collectStartupErrors(() => {
-    // Every class the app runs, its stages and presenter included, checked before binding, where inversify would
-    // otherwise fail first with an error about compiler options, or a guard only at its first call
-    const stages = appStages(target as object)
-    const runs = startupClasses({
-      controllers: options.controllers,
-      services: options.services ?? [],
-      providers,
-      stages,
-      presenter: options.presenter,
-      cooldownStore: options.cooldownStore,
-      themeFor: options.themeFor,
-      observers: appObservers(target as object),
-    })
+    // Every class the app runs checked before binding, where inversify would otherwise fail first with an error about
+    // compiler options, or a guard only at its first call
     assertStartupClasses(runs, { translator: options.i18n !== undefined || providers.has(Translator) })
     // Outside a built application, the kept errors of the stages and other classes the app's classes reach
     if (!isBuiltApplication()) declaredErrorsOf(runs.classes).forEach(startupError)
