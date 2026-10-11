@@ -884,8 +884,8 @@ const optionError = (code: DiscordjsErrorCodes, ...args: unknown[]): DiscordjsTy
 // In discord.js's error codes, though missing from its typings
 const INVALID_CHANNEL_TYPE = 'CommandInteractionOptionInvalidChannelType' as DiscordjsErrorCodes
 
-/** The entity options of a mock options resolver, by name and id, for one given to an autocomplete. */
-const optionEntities = new WeakMap<object, [name: string, id: unknown][]>()
+/** The names of a mock options resolver's entity options, for one given to an autocomplete. */
+const optionEntities = new WeakMap<object, string[]>()
 
 /** The resolvers whose entity options a warning has named. */
 const warnedEntities = new WeakSet<object>()
@@ -904,12 +904,13 @@ const ownOptions = (interaction: object, options: unknown): void => {
   const entities = optionEntities.get(options)
   if (!entities?.length || strictMocks() || warnedEntities.has(options) || !ownedByAutocomplete(options)) return
   warnedEntities.add(options)
-  const [first] = entities as [[string, unknown], ...[string, unknown][]]
-  const names = entities.map(([name]) => `"${name}"`).join(', ')
+  const names = entities.map(name => `"${name}"`).join(', ')
+  const many = entities.length > 1
   mockLogger.warn(
-    `The autocomplete option${entities.length > 1 ? 's' : ''} ${names} ${entities.length > 1 ? 'hold resolved objects' : 'holds a resolved object'} here, ` +
-      'where Discord sends an autocomplete only their ids, so a bot\'s handler gets the id and getUser() and the like return null. ' +
-      `Give the id, such as '${String(first[1])}', or call useStrictMocks() to have the mock read it so.`,
+    `The autocomplete option${many ? 's' : ''} ${names} ${many ? 'hold resolved objects' : 'holds a resolved object'} here, where Discord ` +
+      `sends an autocomplete only ${many ? 'their ids' : 'its id'}, so a bot's handler gets the id and getUser() and the like return null. ` +
+      `Call useStrictMocks(), which reads ${many ? 'them as their ids' : 'it as its id'}, as Discord sends ${many ? 'them' : 'it'}. A bare id string reads as ` +
+      'a string option.',
   )
 }
 
@@ -3576,6 +3577,6 @@ export function createChatInputOptions<Cached extends CacheType = any>(
 
   const resolver = stubDeep(base)
   const entities = Object.entries(values).filter(([name, value]) => name !== focused && typeof value === 'object' && value !== null)
-  optionEntities.set(resolver, entities.map(([name, value]) => [name, (value as { id?: unknown }).id]))
+  optionEntities.set(resolver, entities.map(([name]) => name))
   return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
 }

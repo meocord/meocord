@@ -96,8 +96,8 @@ describe('an autocomplete, by default', () => {
     expect(seen?.who).toBe(values.who)
     expect(warned.filter(line => line.includes('autocomplete option'))).toEqual([
       'The autocomplete options "who", "member", "role", "where", "file" hold resolved objects here, where Discord sends an ' +
-        "autocomplete only their ids, so a bot's handler gets the id and getUser() and the like return null. Give the id, such " +
-        "as '777', or call useStrictMocks() to have the mock read it so.",
+        "autocomplete only their ids, so a bot's handler gets the id and getUser() and the like return null. Call " +
+        'useStrictMocks(), which reads them as their ids, as Discord sends them. A bare id string reads as a string option.',
     ])
   })
 
