@@ -226,7 +226,8 @@ function commandBlock(entry: MessageHelpEntry, render: Render): string {
     .join('\n')
 }
 
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+// Built on first use, for a line longer than a message
+let graphemes: Intl.Segmenter | undefined
 
 /**
  * Where a line longer than one message is cut: after the last character a reader sees as one, such as an emoji, a flag
@@ -234,6 +235,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
  */
 function fittingCut(piece: string): number {
   let cut = 0
+  graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   for (const { index, segment } of graphemes.segment(piece)) {
     if (index + segment.length > MAX_REPLY_LENGTH) break
     cut = index + segment.length
