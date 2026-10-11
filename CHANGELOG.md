@@ -1,5 +1,63 @@
 # meocord
 
+## 4.2.2
+
+### Patch Changes
+
+- [#658](https://github.com/meocord/meocord/pull/658) [`e67cd51`](https://github.com/meocord/meocord/commit/e67cd51a6fdef4a21f1db6541e54b2bb421fbeb1) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A button, select menu or message modal whose guard returns `false` is now acknowledged invisibly, with or without `@Defer`, so the user no longer sees "This interaction failed". The call still reports `ran: false`, and observers still see the outcome `'denied'`. A command, and a modal opened by a command, are left as they were: their only acknowledgement is a reply of their own.
+
+  A test that expects `getResponse(interaction).calls` to be `[]` after a denied click now sees `['deferUpdate']`, as a test of a handler with `@Defer` already did.
+
+  A guard that answers the click itself before returning `false` should await that answer. A reply still on its way when the guard returns races the acknowledgement, and Discord refuses whichever comes second, possibly the reply.
+
+  An app with both a route and a collector for one customId, where the guard returns `false` so the collector answers the click, should leave the click to one of them. Otherwise the two acknowledgements race, and the collector's can fail with "already acknowledged".
+
+- [#653](https://github.com/meocord/meocord/pull/653) [`fcd7cbf`](https://github.com/meocord/meocord/commit/fcd7cbf703618541ff3f42497254cfa33b729939) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `warnUnanswered` now names an `@Autocomplete` handler that returns without calling `interaction.respond()`, as it names any other handler that leaves its interaction unanswered. The user sees the autocomplete options fail to load in that case. The warning is shown once per handler: under `meocord start --dev`, and in tests whose app sets `warnUnanswered: true`. `@MeoCord({ warnUnanswered: false })` turns it off. Nothing about the answer itself changes.
+
+- [#656](https://github.com/meocord/meocord/pull/656) [`b951297`](https://github.com/meocord/meocord/commit/b9512974067160eddb0029a69e52ff228ba36e76) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `bindTheme`'s documentation now says that a bound function runs in the whole theme of the call that bound it, the server's and user's themes included. Every later call, such as another member's click on a collector, is answered in the starting member's theme. Its example comment said "the handler's theme", which left that out. Nothing about the behaviour changes.
+
+- [#652](https://github.com/meocord/meocord/pull/652) [`f8369b6`](https://github.com/meocord/meocord/commit/f8369b6e556ab317331ca70a14a093a0dbc4af2d) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A catalog group whose keys include `other`, such as `reasons: { spam: 'Spam', other: 'Other' }`, is read as a group, as the types and `expectCompleteCatalog` read it. Reading the group's own key, `t('reasons')`, shows the key, and in development logs the warning, as any other group does, where it showed the `other` text. Only untyped code, such as code reading a JSON catalog, can make that call; to show the text, read `t('reasons.other')`. A plural is an object whose every key is a plural category, and a translation's plural without an `other` form still falls back to the next catalog.
+
+- [#659](https://github.com/meocord/meocord/pull/659) [`e9d25a4`](https://github.com/meocord/meocord/commit/e9d25a4bd27bf1e3adaa0506c1b165e8fe6ff20c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - The built-in `help` reply over 2,000 characters is now split into messages Discord shows as written:
+
+  - A line longer than a message is cut after the last whole character that fits. An emoji, a flag, a joined emoji or a letter with its accent is no longer split across two messages.
+  - A message that would be only whitespace isn't sent. Discord refused it as empty, and the rest of the reply was lost with it.
+
+  A help text with no long line and no blank stretch at a cut is split as before.
+
+- [#665](https://github.com/meocord/meocord/pull/665) [`1a224e8`](https://github.com/meocord/meocord/commit/1a224e89d747b1dc0a29858f5bae8969d8657091) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Under `useStrictMocks()`, a mock interaction is marked `replied`, `deferred` or `responded` once its answer resolves, as discord.js marks it after Discord takes the answer, rather than when the answer is called. Code that doesn't await an answer now fails in a test as it would on a bot:
+
+  - an `editReply()`, `followUp()` or `deleteReply()` made before the first answer resolves rejects with `InteractionNotReplied`;
+  - a second answer sent while the first is in flight passes discord.js's check and is refused with Discord's 40060, unless the first one failed;
+  - `replied`, `deferred`, `responded` and `ephemeral` read in the same run as an un-awaited answer are as before it.
+
+  This catches overlaps within one synchronous run of the test's code. A mock answer resolves on the next microtask, so an answer still in flight across an `await`, as a guard's `void interaction.reply()` followed by `return false` is on a bot, isn't caught.
+
+  In both modes, an answer that fails no longer undoes an answer made after it. A test could make the first of two un-awaited replies reject, and the interaction then read as unanswered though the second reply went through; it now reads as answered by the second. A failed answer's change is undone once every change after it is undone too, so an interaction whose answers all fail still reads as unanswered.
+
+  In default mode the flags are still set at the call. The first time an interaction does what a bot would refuse, an edit or a second answer while its first is in flight, a warning says what the bot would do. In the next major version (5.0), every mock interaction marks its answers when they resolve, as strict mocks do now.
+
+- [#663](https://github.com/meocord/meocord/pull/663) [`3894f77`](https://github.com/meocord/meocord/commit/3894f77b099bc2bb82bed37b43944f9e6dc09feb) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Under `useStrictMocks()`, a mock interaction's `ephemeral` is `null` until `reply()` or `deferReply()` decides it, as discord.js has it; `update()` and `deferUpdate()` leave it `null`. In default mode it still reads `false` before an answer, and a test reading it there logs a warning once. MeoCord's own reads while it answers log nothing. The next major version (5.0) reads `null` without the call.
+
+- [#651](https://github.com/meocord/meocord/pull/651) [`8a56464`](https://github.com/meocord/meocord/commit/8a56464a42c47bddc3959bddc0748a710f656ffd) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock guild's `emojis`, `stickers`, `scheduledEvents`, `autoModerationRules` and `invites` are managers, in both modes, as on a message's guild. Before, calling `create()`, `fetch()` or `cache.get()` on one threw a `TypeError`.
+
+  - `create()` resolves to a mock emoji, sticker, scheduled event or AutoMod rule in the guild, and caches it, as discord.js does.
+  - `invites.create(channel)` resolves to an invite for that channel in the guild, keyed by its `code`, and caches nothing, as discord.js does.
+  - `fetch(id)` resolves to the cached item, or makes and caches one; a list fetch resolves to an empty collection.
+  - Each item is named, and what discord.js formats from it computes: an emoji's mention (`String(emoji)`) and `identifier`, and a scheduled event's and an invite's `url`.
+
+- [#657](https://github.com/meocord/meocord/pull/657) [`8d1d3fc`](https://github.com/meocord/meocord/commit/8d1d3fc6eb0d4f59139ffc3033b1c416a507f804) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `MockedFunction`'s and `MockInstance`'s documentation says what their types check: calling a mock is checked against the function it mocks, and the values its mock API takes and records, such as `mockResolvedValue`'s and each of `mock.calls`' arguments, are not, for any function. A partial fake such as `guild.members.fetch.mockResolvedValue({ id })` type-checks. Types are unchanged.
+
+- [#654](https://github.com/meocord/meocord/pull/654) [`1cc5a4f`](https://github.com/meocord/meocord/commit/1cc5a4fd2243ff00be9ae3d89b389f11df3b337c) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Wherever MeoCord takes a class and is given something else, it now refuses the value and names where it was given, instead of crashing with an empty `TypeError` or reporting "This is a bug in MeoCord". TypeScript already rejects these values, so the refusal matters for plain JavaScript, `any` and casts.
+
+  - **`@MeoCord`'s `presenter`, `cooldownStore`, `controllers` and `services`** refuse an object or a function that isn't a class where the app is declared, for example `App: @MeoCord({ presenter }) takes a class implementing ResponsePresenter, not an object.`
+  - **A service listed by a string or symbol token** that no provider provides is refused as the app is created, naming the token.
+  - **Stage entries** given to `@UseGuard`, `@UseInterceptor`, `@UseFilter`, `@UsePipe` and `@MeoCord({ guards, interceptors, filters })` refuse an arrow function, a method, an async function or a generator function: "a function is not a class". A `function` declaration still works as a class.
+  - **`@Catch`** warns about an arrow function, as it already does for any other value that isn't a class, and treats it as matching no error. Before this fix, every call whose error reached that filter rejected with a `TypeError` from `instanceof`. A bound error class still matches.
+  - **A testing module** refuses a controller or an observer that isn't a class, and reports the refusal together with the other startup errors. After `reportAllStartupErrors()`, `fromApp()` on an app whose `@MeoCord` was refused throws the reason, not "is not a @MeoCord app".
+
+  A bot that started before starts unchanged.
+
 ## 4.2.1
 
 ### Patch Changes
