@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
-import { refuse, startupError } from '@src/util/refusal.util.js'
+import { collectStartupErrors, isRefusal, refuse, startupError, startupErrorsOf } from '@src/util/refusal.util.js'
 import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
@@ -238,15 +238,38 @@ export function prepareHandlerStages(container: Container, controllers: readonly
 
   for (const controller of controllers) {
     const prototype = controller.prototype as object
-    for (const method of handlerMethods(prototype)) {
-      const kind = handlerDefer(prototype, method) ? nonInteractionHandler(prototype, method) : undefined
-      if (kind) { startupError(deferMisuseError(controller.name, method, kind)); continue }
-      for (const entry of handlerInterceptors(prototype, method)) prepareInterceptor(container, entry)
-      for (const entry of handlerFilterLevels(prototype, method, []).flat()) prepareFilter(container, entry)
-      for (const { entry } of handlerInputStages(prototype, method).pipes) preparePipe(container, entry)
-    }
+    for (const method of handlerMethods(prototype)) prepareHandler(container, controller, method)
     assertInputStagesOnInteractions(controller, prototype)
   }
+}
+
+/**
+ * Prepares one `@On` or `@Once` handler of a class the app reaches only as something it makes, as
+ * {@link prepareHandlerStages} prepares a controller's.
+ *
+ * @returns The errors a controller's handler would be refused with; none when the handler is ready to run.
+ */
+export function prepareEventHandler(container: Container, cls: new (...args: any[]) => unknown, method: string): readonly Error[] {
+  try {
+    collectStartupErrors(() => {
+      prepareHandler(container, cls, method)
+      assertInputStages(cls, cls.prototype as object, method, 'event')
+    })
+    return []
+  } catch (error) {
+    if (!isRefusal(error)) throw error
+    return startupErrorsOf(error)
+  }
+}
+
+/** Binds what one handler's interceptors, filters and pipes need, refusing `@Defer` where it cannot apply. */
+function prepareHandler(container: Container, controller: new (...args: any[]) => unknown, method: string): void {
+  const prototype = controller.prototype as object
+  const kind = handlerDefer(prototype, method) ? nonInteractionHandler(prototype, method) : undefined
+  if (kind) return startupError(deferMisuseError(controller.name, method, kind))
+  for (const entry of handlerInterceptors(prototype, method)) prepareInterceptor(container, entry)
+  for (const entry of handlerFilterLevels(prototype, method, []).flat()) prepareFilter(container, entry)
+  for (const { entry } of handlerInputStages(prototype, method).pipes) preparePipe(container, entry)
 }
 
 /** Records the app's theme for the handlers of `controllers`, once the startup checks have passed: it makes the theme cache. */
@@ -296,25 +319,27 @@ function assertInputStagesOnInteractions(controller: new (...args: any[]) => unk
     ...getAutocompleteHandlers(prototype).map(handler => [handler.methodName, 'autocomplete'] as [string, string]),
     ...getEventHandlers(prototype).map(handler => [handler.method, 'event'] as [string, string]),
   ]
-  for (const [method, kind] of others) {
-    const { schema, pipes } = handlerInputStages(prototype, method)
-    const handler =
-      kind === 'message'
-        ? 'a message handler without a pattern'
-        : `${kind === 'autocomplete' || kind === 'event' ? 'an' : 'a'} ${kind} handler`
-    if (schema || pipes.length > 0) {
-      startupError(new Error(
-        `${controller.name}.${method}: @Validate and @UsePipe are for interaction and patterned message handlers, ` +
-          `whose options, customId params, modal fields and pattern params they check, and this is ${handler}.`,
-      ))
-      continue
-    }
-    // A controller's own @Cooldown skips these handlers; one on the method itself is a mistake.
-    if (kind !== 'message' && methodCooldowns(prototype, method).length > 0) {
-      startupError(new Error(
-        `${controller.name}.${method}: @Cooldown is for interaction and message handlers, and this is ${handler}.`,
-      ))
-    }
+  for (const [method, kind] of others) assertInputStages(controller, prototype, method, kind)
+}
+
+/** Refuses `@Validate` and `@UsePipe` on one handler of `kind` with no params to check, and `@Cooldown` where it never counts. */
+function assertInputStages(controller: new (...args: any[]) => unknown, prototype: object, method: string, kind: string): void {
+  const { schema, pipes } = handlerInputStages(prototype, method)
+  const handler =
+    kind === 'message'
+      ? 'a message handler without a pattern'
+      : `${kind === 'autocomplete' || kind === 'event' ? 'an' : 'a'} ${kind} handler`
+  if (schema || pipes.length > 0) {
+    return startupError(new Error(
+      `${controller.name}.${method}: @Validate and @UsePipe are for interaction and patterned message handlers, ` +
+        `whose options, customId params, modal fields and pattern params they check, and this is ${handler}.`,
+    ))
+  }
+  // A controller's own @Cooldown skips these handlers; one on the method itself is a mistake.
+  if (kind !== 'message' && methodCooldowns(prototype, method).length > 0) {
+    startupError(new Error(
+      `${controller.name}.${method}: @Cooldown is for interaction and message handlers, and this is ${handler}.`,
+    ))
   }
 }
 

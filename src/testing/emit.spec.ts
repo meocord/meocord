@@ -1,6 +1,6 @@
 import { type GuildMember } from 'discord.js'
 import { vi } from 'vitest'
-import { Controller, Guard, MeoCord, On, Once, Service, UseGuard } from '@src/decorator/index.js'
+import { Controller, Guard, Inject, MeoCord, MessageHandler, On, Once, Service, UseGuard } from '@src/decorator/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { createMock, MeoCordTestingModule } from '@src/testing/index.js'
 import { GuardDeniedError, UserError } from '@src/common/index.js'
@@ -52,6 +52,64 @@ describe('TestingModule.emit', () => {
 
     expect(ran).toBe(4)
     expect(greeted.sort()).toEqual(['audit 42', 'members 42', 'standalone 42', 'welcome 42'])
+  })
+
+  it('runs the handlers on a service only a stage injects, a class provided under another token and a provided value, once per instance', async () => {
+    const heard: string[] = []
+
+    @Service()
+    class StageOnly {
+      @On('guildMemberAdd')
+      joined() {
+        heard.push('StageOnly')
+      }
+    }
+
+    @Guard()
+    class NeedsStageOnly implements GuardInterface {
+      constructor(@Inject(StageOnly) readonly dependency: StageOnly) {}
+      canActivate() {
+        return true
+      }
+    }
+
+    @Controller()
+    @UseGuard(NeedsStageOnly)
+    class Guarded {
+      @MessageHandler('ping')
+      ping() {}
+    }
+
+    abstract class Weather {}
+    @Service()
+    class OpenMeteo extends Weather {
+      @On('guildMemberAdd')
+      joined() {
+        heard.push('OpenMeteo')
+      }
+    }
+
+    class Given {
+      @On('guildMemberAdd')
+      joined() {
+        heard.push('Given')
+      }
+    }
+
+    const given = new Given()
+    const module = MeoCordTestingModule.create({
+      controllers: [Guarded],
+      providers: [
+        { provide: Weather, useClass: OpenMeteo },
+        { provide: 'given', useValue: given },
+        { provide: 'again', useFactory: () => given },
+      ],
+    }).compile()
+
+    const { ran } = await module.emit('guildMemberAdd', createMock<GuildMember>({ id: '42' }))
+
+    expect(ran).toBe(3)
+    expect(heard.sort()).toEqual(['Given', 'OpenMeteo', 'StageOnly'])
   })
 
   it('runs an @Once handler for the first event only', async () => {

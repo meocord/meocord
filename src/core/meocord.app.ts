@@ -27,7 +27,6 @@ import { claimCooldownNotice, claimStoreDownNotice } from '@src/core/cooldown-ru
 
 
 import { stageClass, stageTypes } from '@src/core/stage-scope.js'
-import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import {
   eventRequirements,
   messageHandlerRequirements,
@@ -35,7 +34,8 @@ import {
   REACTION_HANDLER_REQUIREMENTS,
   type RequiringHandler,
 } from '@src/core/event-requirements.js'
-import { classUnits, type LifecycleUnit } from '@src/core/lifecycle-order.js'
+import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
+import { type EventSource } from '@src/core/event-sources.js'
 import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
 import { type LifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { RunningCalls } from '@src/core/running-calls.js'
@@ -63,7 +63,6 @@ import { escapeForLog } from '@src/util/user-text.util.js'
 /** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
 export const SLOW_READY_HOOK_MS = 10_000
 
-type LifecycleClass = new (...args: any[]) => any
 
 /** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
 const runningApps = new Set<() => Promise<boolean>>()
@@ -152,7 +151,8 @@ export class MeoCordApp implements MeoCordApplication {
     private readonly discordClient: Client,
     private discordToken: string,
     private activities?: ActivityOptions[],
-    private readonly lifecycleClasses: LifecycleClass[] = [],
+    /** The instances whose `@On` and `@Once` handlers run, read once the providers are made. */
+    private readonly eventSources: () => readonly EventSource[] = () => [],
     shutdownTimeout?: number,
     private readonly startup?: (control: StartupControl) => Promise<void>,
     lifecycleUnits?: LifecycleUnit[],
@@ -163,7 +163,7 @@ export class MeoCordApp implements MeoCordApplication {
   ) {
     // First, so nothing logged from here on, before login or after, prints it
     hideInLogs(discordToken)
-    this.lifecycleUnits = lifecycleUnits ?? classUnits(container, lifecycleClasses)
+    this.lifecycleUnits = lifecycleUnits ?? []
     this.bot = this.discordClient
     // Built now, so a pattern that cannot be read or two that match the same messages or customIds stop the bot as it
     // is created, before start() attaches anything
@@ -393,9 +393,10 @@ export class MeoCordApp implements MeoCordApplication {
     // discord.js drops a reaction in a DM channel it has not cached; this fetches the channel and delivers it
     deliverUncachedDmReactions(this.bot, this.logger)
 
-    this.attachEventHandlers()
-    this.warnAboutMissingRequirements()
-    this.noteGlobalStagesOnEvents()
+    const sources = this.eventSources()
+    this.attachEventHandlers(sources)
+    this.warnAboutMissingRequirements(sources)
+    this.noteGlobalStagesOnEvents(sources)
   }
 
   /** Logs the bot in, setting the exit code when that fails and clearing it when a later attempt succeeds. */
@@ -518,19 +519,19 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Adds a client listener for every `@On` and `@Once` handler on the app's controllers and services, each event run on
-   * the class's one instance from the container. Each call is isolated: an error is logged against the event and the
-   * handler, and the next listener still runs.
+   * Adds a client listener for every `@On` and `@Once` handler on each instance whose lifecycle hooks run, in lifecycle
+   * order, each event run on the instance the container holds. Each call is isolated: an error is logged against the
+   * event and the handler, and the next listener still runs.
    */
-  private attachEventHandlers(): void {
-    for (const lifecycleClass of this.lifecycleClasses) {
-      for (const { event, method, once } of getEventHandlers(lifecycleClass.prototype)) {
-        const logError = (error: unknown) =>
-          this.logger.error(`Error handling event "${event}" in ${lifecycleClass.name}.${method}:`, error)
+  private attachEventHandlers(sources: readonly EventSource[]): void {
+    for (const source of sources) {
+      const { name } = source.cls
+      for (const { event, method, once } of source.handlers) {
+        const logError = (error: unknown) => this.logger.error(`Error handling event "${event}" in ${name}.${method}:`, error)
         // An error no filter handles is logged, with the handler. A guard denying an event only filters which
         // events the handler takes, and a UserError is meant for the sender of the event's message, if it has one
         const fallback: Fallback = async (error, context) => {
-          const where = `event "${event}" in ${lifecycleClass.name}.${method}`
+          const where = `event "${event}" in ${name}.${method}`
           if (error instanceof GuardDeniedError) this.logger.debug(`Denied ${where}: ${escapeForLog(error.message)}`)
           else if (error instanceof UserError) {
             this.logger.debug(`Refused ${where}: ${escapeForLog(error.message)}`)
@@ -540,13 +541,13 @@ export class MeoCordApp implements MeoCordApplication {
           } else logError(error)
           return undefined
         }
-        const label = `@${once ? 'Once' : 'On'}('${event}') in ${lifecycleClass.name}.${method}`
+        const label = `@${once ? 'Once' : 'On'}('${event}') in ${name}.${method}`
         // A call, as a dispatched one is, which shutdown waits for
         const listener = (...args: unknown[]) =>
           this.calls.run(label, async () => {
             try {
-              const instance = this.container.get(lifecycleClass)
-              await runHandler(this.container, instance, method, args, { fallback, type: 'event' })
+              const instance = source.resolve()
+              if (instance) await runHandler(this.container, instance, method, args, { fallback, type: 'event' })
             } catch (error) {
               // Only resolving the instance can fail here; the pipeline hands every other error to the fallback
               logError(error)
@@ -562,8 +563,8 @@ export class MeoCordApp implements MeoCordApplication {
    * Says, once per stage, which global guards and interceptors declare no `types` and so also run
    * before `@On` and `@Once` handlers, when the app has any.
    */
-  private noteGlobalStagesOnEvents(): void {
-    if (!this.lifecycleClasses.some(cls => getEventHandlers(cls.prototype).length > 0)) return
+  private noteGlobalStagesOnEvents(sources: readonly EventSource[]): void {
+    if (sources.length === 0) return
 
     const { guards, interceptors } = globalStagesOf(this.container)
     for (const [label, decorator, entries] of [
@@ -584,29 +585,26 @@ export class MeoCordApp implements MeoCordApplication {
    * Warns about handlers whose events the client options will not deliver, once per missing intent or partial. Only a
    * controller's message and reaction handlers are counted, as only those run.
    */
-  private warnAboutMissingRequirements(): void {
+  private warnAboutMissingRequirements(sources: readonly EventSource[]): void {
     const options = this.bot.options
     if (!options?.intents) return
 
-    const controllers = new Set<object>(this.controllerClasses)
     const handlers: RequiringHandler[] = []
-    for (const lifecycleClass of this.lifecycleClasses) {
-      const prototype = lifecycleClass.prototype
-      for (const { event, method, once } of getEventHandlers(prototype)) {
-        handlers.push({
-          label: `@${once ? 'Once' : 'On'}('${event}') in ${lifecycleClass.name}.${method}`,
-          requirements: eventRequirements(event),
-        })
+    for (const { cls, handlers: events } of sources) {
+      for (const { event, method, once } of events) {
+        handlers.push({ label: `@${once ? 'Once' : 'On'}('${event}') in ${cls.name}.${method}`, requirements: eventRequirements(event) })
       }
-      if (!controllers.has(lifecycleClass)) continue
+    }
+    for (const controller of this.controllerClasses) {
+      const prototype = controller.prototype as object
       for (const handler of getMessageHandlers(prototype)) {
         handlers.push({
-          label: `${messageDecorator(handler.pattern)} in ${lifecycleClass.name}.${handler.method}`,
+          label: `${messageDecorator(handler.pattern)} in ${controller.name}.${handler.method}`,
           requirements: messageHandlerRequirements(handler, this.messageOptions ?? {}),
         })
       }
       for (const { emoji, method } of getReactionHandlers(prototype)) {
-        handlers.push({ label: `${reactionDecorator(emoji)} in ${lifecycleClass.name}.${method}`, requirements: REACTION_HANDLER_REQUIREMENTS })
+        handlers.push({ label: `${reactionDecorator(emoji)} in ${controller.name}.${method}`, requirements: REACTION_HANDLER_REQUIREMENTS })
       }
     }
 

@@ -8,7 +8,7 @@ import {
   getMessageHandlers,
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
-import { getEventHandlers } from '@src/decorator/event.decorator.js'
+import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
 import { CommandType } from '@src/enum/index.js'
 import { type MessageCommandOptions, type MessageHandlerOptions, type MessageHelp, type MessageScope } from '@src/interface/index.js'
 import {
@@ -286,6 +286,22 @@ function messageCommand(
 /** The message routes the app's dispatcher reads, by the app's registry, so its help and dispatch read one table. */
 const dispatchedRoutes = new WeakMap<HandlerRegistry, readonly MessageRoute[]>()
 
+/** What every entry has: its class and method, and the metadata on them. */
+function entryBase(controller: HandlerClass, method: string): HandlerEntryBase {
+  const context = new HandlerExecutionContext({ controller, methodName: method, args: [] })
+  return { controller, method, get: context.get.bind(context), getAll: context.getAll.bind(context) } as HandlerEntryBase
+}
+
+const lateEventSources = new WeakMap<HandlerRegistry, readonly { cls: HandlerClass; handlers: readonly EventHandlerMetadata[] }[]>()
+
+/**
+ * Has `registry` list the `@On` and `@Once` handlers that run on `sources`, the instances the app attaches them for,
+ * where they are on a class it does not list already.
+ */
+export function listEventSources(registry: HandlerRegistry, sources: readonly { cls: HandlerClass; handlers: readonly EventHandlerMetadata[] }[]): void {
+  lateEventSources.set(registry, sources)
+}
+
 /** Has `registry` work out message help from `routes`, the table the app's dispatcher routes messages with. */
 export function shareMessageRoutes(registry: HandlerRegistry, routes: readonly MessageRoute[]): void {
   dispatchedRoutes.set(registry, routes)
@@ -415,15 +431,7 @@ export class HandlerRegistry {
     const entries: HandlerEntry[] = []
     for (const controller of this.classes) {
       const prototype = controller.prototype as object
-      const base = (method: string) => {
-        const context = new HandlerExecutionContext({ controller, methodName: method, args: [] })
-        return {
-          controller,
-          method,
-          get: context.get.bind(context),
-          getAll: context.getAll.bind(context),
-        } as HandlerEntryBase
-      }
+      const base = (method: string) => entryBase(controller, method)
 
       for (const [name, metas] of Object.entries(getCommandMap(prototype) ?? {})) {
         for (const { methodName, type, builder } of metas) {
@@ -451,6 +459,13 @@ export class HandlerRegistry {
       for (const { event, method, once } of getEventHandlers(prototype)) {
         entries.push({ ...base(method), kind: 'event', name: event, once })
       }
+    }
+    // The classes the app reaches only as something it makes, listed once each, with the handlers that run on them
+    const listed = new Set<unknown>(this.classes)
+    for (const { cls, handlers } of lateEventSources.get(this) ?? []) {
+      if (listed.has(cls)) continue
+      listed.add(cls)
+      for (const { event, method, once } of handlers) entries.push({ ...entryBase(cls, method), kind: 'event', name: event, once })
     }
     return entries
   }
