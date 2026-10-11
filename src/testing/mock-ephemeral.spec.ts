@@ -79,6 +79,18 @@ describe("a mock interaction's ephemeral, in default mode", () => {
     expect(warned).toEqual([])
   })
 
+  it("says nothing for MeoCord's reads once a test answers the interaction itself, and warns on a read after update()", async () => {
+    const answered = slash()
+    answered.replied = true
+    await respond(answered).delete()
+    expect(warned).toEqual([])
+
+    const updated = click()
+    await updated.update({ content: 'u' })
+    void updated.ephemeral
+    expect(warned).toEqual([expect.stringMatching(/^ButtonInteraction\.ephemeral reads a placeholder/)])
+  })
+
   it("says nothing for MeoCord's own reads while it answers", async () => {
     const deferred = slash()
     await deferred.deferReply({ flags: MessageFlags.Ephemeral })
