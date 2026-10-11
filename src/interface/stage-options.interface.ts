@@ -11,8 +11,11 @@ import { type InferSchemaOutput, type StandardSchemaV1 } from './standard-schema
 export interface GuardOptions {
   /**
    * The context types the guard runs for, as `ExecutionContext.getType()` reports them; it is skipped for
-   * any other call. A subclass inherits them unless it declares its own. A global guard also runs before
-   * `@On` handlers, so one that reads an interaction declares `['interaction']`.
+   * any other call. An autocomplete is its own type, `'autocomplete'`, so a guard limited to `'interaction'`
+   * doesn't run before `@Autocomplete` handlers. A subclass inherits them unless it declares its own. A global
+   * guard also runs before `@On` handlers, so one that reads an interaction declares `['interaction']`, or
+   * `['interaction', 'autocomplete']` to run before autocomplete handlers too. A guard that runs before an
+   * autocomplete answers nothing there: return `false` to show no choices.
    *
    * @defaultValue every type
    */
