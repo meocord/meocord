@@ -776,10 +776,12 @@ export const RESPONSE_LOG: unique symbol = Symbol.for(sharedName('responseLog'))
 type Behaviour = (...args: any[]) => any
 
 /**
- * What an answer does to the interaction's reply state, before its behaviour runs: it throws to refuse the answer, or
- * makes the change, and returns how to undo it should the behaviour fail. `byTest` says a test set the behaviour.
+ * What an answer does to the interaction's reply state once it is called, before its behaviour runs: it throws to
+ * refuse the answer, or returns how to undo what it changed should the behaviour fail, what to change once the
+ * behaviour resolves, as Discord has then taken the answer, and what to note once it settles either way. `byTest` says
+ * a test set the behaviour.
  */
-type AnswerGate = (args: unknown[], byTest: boolean) => () => void
+type AnswerGate = (args: unknown[], byTest: boolean) => { undo?: () => void; land?: () => void; settle?: () => void }
 
 /**
  * A mock of an answer method, `impl` its behaviour, that records each call in `log` as it is made, with what it sent
@@ -799,24 +801,36 @@ function recordedMock(method: ResponseCall['method'], impl: Behaviour, log: Resp
       const call: ResponseCall = { method, payload: sent }
       stampCall(call)
       log.push(call)
-      let undo: (() => void) | undefined
+      let gated: ReturnType<AnswerGate> | undefined
       try {
-        // Before the behaviour, as discord.js changes the state at once: a second answer made without awaiting is refused
-        if (gate) undo = gate(args, byTest)
+        // Before the behaviour, as discord.js checks the state before it sends an answer
+        if (gate) gated = gate(args, byTest)
       } catch (error) {
         call.error = error
         return Promise.reject(error)
       }
       const failed = (error: unknown) => {
-        undo?.()
+        gated?.settle?.()
+        gated?.undo?.()
         call.error = error
         throw error
+      }
+      // Once the behaviour resolves, as discord.js changes the state once Discord has taken the answer
+      const landed = (value: unknown) => {
+        gated?.settle?.()
+        try {
+          gated?.land?.()
+        } catch (error) {
+          call.error = error
+          throw error
+        }
+        return value
       }
       try {
         const result: unknown = Reflect.apply(behaviour, this, args)
         // Recorded and passed on, so a rejection nobody awaits is unhandled in the test, as it is on a bot
-        if (result instanceof Promise) return result.then(undefined, failed)
-        return result
+        if (result instanceof Promise) return result.then(landed, failed)
+        return landed(result)
       } catch (error) {
         return failed(error)
       }
@@ -941,7 +955,10 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * collections of what it picks, each empty unless given. Other data Discord always sends reads as Discord sends it,
  * such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName` or `customId`, is
  * the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports
- * every answer the interaction got. Every method is a mock function, and one that returns a promise in discord.js
+ * every answer the interaction got. Under `useStrictMocks()` an answer marks the interaction `replied` or `deferred`
+ * once it resolves, as discord.js does after Discord takes it: an edit or follow-up made before then rejects with
+ * `InteractionNotReplied`, and a second answer sent while the first is in flight is refused with Discord's 40060. In
+ * default mode the mark is made at the call, with a warning where a bot would fail. Every method is a mock function, and one that returns a promise in discord.js
  * resolves. What the mock computes for itself, such as `memberPermissions` and `appPermissions`, calls none of them and
  * caches nothing, so a stub a test sets stays for its own code.
  *
@@ -1210,10 +1227,34 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       }
     }
 
-    /** A first answer: refused once the interaction has one, else it replies or defers. */
+    // The first answers called and not yet settled, oldest first, for default mode to warn where a bot would differ
+    const unsettled: string[] = []
+    // Default mode warns once per interaction where code that doesn't await an answer would fail on a bot
+    let inFlightWarned = false
+    const warnInFlight = (text: string) => {
+      if (inFlightWarned) return
+      inFlightWarned = true
+      mockLogger.warn(text)
+    }
+
+    /**
+     * A first answer: refused once the interaction has one, else it replies or defers. Under strict mocks the change
+     * waits for the answer to land, as discord.js makes it once the request resolves, so one sent while another is in
+     * flight passes discord.js's check and Discord refuses it with 40060 if the other landed first. Default mode makes
+     * the change at once.
+     */
     const first = (method: string, kind: 'replied' | 'deferred', then: (args: unknown[]) => void): AnswerGate =>
       (args, byTest) => {
-        if (answered()) refuse(method, alreadyReplied(), byTest)
+        if (answered()) {
+          if (unsettled.length > 0) {
+            warnInFlight(
+              `${method}() was called while ${unsettled[0]}() had not resolved; on a bot discord.js sends it, and Discord ` +
+                `refuses it with 40060 ("Interaction has already been acknowledged") once the first lands. Await ` +
+                `${unsettled[0]}() before answering again, or call useStrictMocks() to have the mock answer as Discord does.`,
+            )
+          }
+          refuse(method, alreadyReplied(), byTest)
+        }
         // Read first: flags discord.js refuses throw before anything changes; reply() and deferReply() decide
         // ephemeral, as discord.js's do, and update() and deferUpdate() leave it
         const flagged = method === 'reply' || method === 'deferReply' ? hasEphemeralFlag(args[0]) : undefined
@@ -1228,13 +1269,30 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
           undo()
           throw error
         }
-        return undo
+        if (strict) {
+          const land = snapshot()
+          undo()
+          return {
+            land: () => {
+              if (answered()) throw createDiscordError(40060, 'Interaction has already been acknowledged.')
+              land()
+            },
+          }
+        }
+        unsettled.push(method)
+        return { undo, settle: () => void unsettled.splice(unsettled.indexOf(method), 1) }
       }
 
     /** A later answer: refused before the interaction has one. */
     const later = (method: string, then: (args: unknown[]) => void): AnswerGate =>
       (args, byTest) => {
         if (!answered()) refuse(method, notYetReplied(method), byTest)
+        if (unsettled.length > 0) {
+          warnInFlight(
+            `${unsettled[0]}() had not resolved when ${method}() was called; on a bot this throws InteractionNotReplied. ` +
+              `Await ${unsettled[0]}() first, or call useStrictMocks() to have the mock refuse it now.`,
+          )
+        }
         const undo = snapshot()
         try {
           then(args)
@@ -1242,7 +1300,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
           undo()
           throw error
         }
-        return undo
+        return { undo }
       }
 
     /** The id an edit, fetch or delete names, `undefined` for the original response. */
@@ -1369,14 +1427,37 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
   // it before answering would decide the window was already closed.
   if (instance.type === InteractionType.ApplicationCommandAutocomplete) {
     instance.responded = false
+    // Under strict mocks responded is set once respond() lands, as discord.js sets it once the request resolves, and a
+    // second one sent while the first is in flight is refused by Discord with 40060; default mode sets it at once
+    let respondsInFlight = 0
+    let respondWarned = false
     stubs.set(
       'respond',
       createMockFn(async (choices?: unknown) => {
-        if (instance.responded) throw discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
+        if (instance.responded) {
+          if (respondsInFlight > 0 && !respondWarned) {
+            respondWarned = true
+            mockLogger.warn(
+              'respond() was called while respond() had not resolved; on a bot discord.js sends it, and Discord refuses ' +
+                'it with 40060 ("Interaction has already been acknowledged") once the first lands. Await respond() ' +
+                'before responding again, or call useStrictMocks() to have the mock respond as Discord does.',
+            )
+          }
+          throw discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
+        }
         // Discord refuses a list longer than its limit, and the menu shows nothing
         if (Array.isArray(choices) && choices.length > MAX_AUTOCOMPLETE_CHOICES) {
           throw createDiscordError(50035, `Invalid Form Body\ndata.choices[BASE_TYPE_MAX_LENGTH]: Must be ${MAX_AUTOCOMPLETE_CHOICES} or fewer in length.`)
         }
+        respondsInFlight++
+        if (!strictMocks()) instance.responded = true
+        try {
+          await undefined
+        } finally {
+          respondsInFlight--
+        }
+        if (!strictMocks()) return
+        if (instance.responded) throw createDiscordError(40060, 'Interaction has already been acknowledged.')
         instance.responded = true
       }),
     )
