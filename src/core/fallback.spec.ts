@@ -392,6 +392,21 @@ describe('the fallback on a message a guard or validation refuses', () => {
     expect(reply.deleted).toBe(false)
   })
 
+  // The limit is 2147483647 ms: 2147483.5 seconds fits it and is deleted when it ends, 2147483.648 doesn't and is kept
+  it.each([
+    [2_147_483.5, true],
+    [2_147_483.648, false],
+  ])('deletes a usage reply after %s seconds only if a timer can wait that long: %s', async (seconds, deleted) => {
+    vi.useFakeTimers()
+    const message = Object.assign(createMockMessage(), { content: '!ban x' })
+
+    await createFallback(createLogger(), () => ({ deleteUsageRepliesAfter: seconds }))(new GuardDeniedError('No.'), contextFor('ban', message))
+    const reply = await (vi.mocked(message.reply).mock.results[0]?.value as Promise<{ deleted: boolean }>)
+    await vi.advanceTimersByTimeAsync(Math.ceil(seconds * 1_000))
+
+    expect(reply.deleted).toBe(deleted)
+  })
+
   it.each(['everything', 'watch'])(
     'answers nothing when a guard refuses a message listener, %s, as its guard filters messages rather than answers a command',
     async methodName => {

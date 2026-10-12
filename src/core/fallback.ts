@@ -24,7 +24,7 @@ import {
   withSendableFiles,
 } from '@src/common/response/presenter.js'
 import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
-import { MAX_TIMER_SECONDS } from '@src/util/timer-limit.util.js'
+import { timerKeepsSeconds } from '@src/util/timer-limit.util.js'
 
 /** The app's message options the fallback's replies to messages follow. */
 type MessageReplyOptions = Pick<MessageCommandOptions, 'deleteUsageRepliesAfter' | 'replyEmoji' | 'dmOnError' | 'dmOnCooldown'>
@@ -324,7 +324,7 @@ async function sendUsage(message: Message, body: PresentedReply, seconds: number
   try {
     const reply = await sendReply(body, drawn => message.reply({ ...drawn, allowedMentions: { repliedUser: false, parse: [] } }))
     // Longer than a timer can wait keeps it, as 0 does; the timer would fire at once
-    if (seconds > 0 && seconds <= MAX_TIMER_SECONDS) {
+    if (seconds > 0 && timerKeepsSeconds(seconds)) {
       setTimeout(() => {
         reply.delete().catch(failure => logFailedSend(logger, 'delete a reply to a command', failure))
       }, seconds * 1000).unref?.()

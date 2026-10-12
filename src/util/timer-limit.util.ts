@@ -1,8 +1,13 @@
 /** The longest delay a timer keeps: 2^31 - 1 ms, about 24.8 days. Node fires a longer one at once. */
 export const MAX_TIMER_MS = 2_147_483_647
 
-/** The most whole seconds a timer keeps, for an option given in seconds. */
-export const MAX_TIMER_SECONDS = Math.floor(MAX_TIMER_MS / 1000)
+const MS_PER_SECOND = 1_000
+
+/** The most whole seconds a timer keeps, as a message about an option given in seconds names the limit. */
+export const MAX_TIMER_SECONDS = Math.floor(MAX_TIMER_MS / MS_PER_SECOND)
+
+/** Whether a timer keeps a delay given in seconds, a fraction of a second included. */
+export const timerKeepsSeconds = (seconds: number): boolean => seconds * MS_PER_SECOND <= MAX_TIMER_MS
 
 /** A value as a refusal quotes it: a number as itself, `Infinity` and `NaN` included, a string in quotes. */
 function quoted(value: unknown): string {
