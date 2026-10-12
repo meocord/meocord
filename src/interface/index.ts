@@ -1411,7 +1411,11 @@ export interface CommandBuilderOptions {
    * empty after dropping blank ids is not registered at all, rather than falling back to global. Under a
    * development server, it goes there with every other command.
    *
-   * @defaultValue the configured scope
+   * A builder that extends another and gives no `guilds` inherits its base's, with a warning when it is decorated: declare
+   * `guilds` on the subclass to keep them. The next major version (5.0) registers such a builder's command in the
+   * configured scope.
+   *
+   * @defaultValue the configured scope, or the guilds of the builder it extends
    */
   guilds?: (string | undefined)[]
 }

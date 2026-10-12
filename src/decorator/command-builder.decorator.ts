@@ -4,6 +4,17 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { type CommandBuilderOptions } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
 import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
+import { Logger } from '@src/common/logger.js'
+
+const logger = new Logger('CommandBuilder')
+
+/** The nearest base class of `target` that gives `guilds`, which `target` inherits when it gives none. */
+function guildsBase(target: object): { name: string } | undefined {
+  for (let base = Object.getPrototypeOf(target); base && base !== Function.prototype; base = Object.getPrototypeOf(base)) {
+    if (Reflect.hasOwnMetadata(META.builderGuilds, base)) return base
+  }
+  return undefined
+}
 
 /**
  * Marks a class as a command's builder, which describes the command MeoCord registers with Discord.
@@ -47,5 +58,14 @@ export function CommandBuilder<T extends BuildableCommandType>(commandType: T, o
     )
 
     if (options.guilds) Reflect.defineMetadata(META.builderGuilds, [...options.guilds], target)
+    else {
+      const base = guildsBase(target)
+      if (base) {
+        logger.warn(
+          `${target.name} gives no guilds and inherits ${base.name}'s; declare guilds on ${target.name} to keep them. ` +
+            'The next major version (5.0) registers it in the configured scope.',
+        )
+      }
+    }
   })
 }
