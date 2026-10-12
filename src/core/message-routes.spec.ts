@@ -1,4 +1,7 @@
+import { vi } from 'vitest'
 import { Controller, MessageHandler } from '@src/decorator/index.js'
+import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { buildMessageRoutes, matchMessageCommand, matchMessageRoute, parseMessagePattern, type MessageStarts } from '@src/core/message-routes.js'
 
 const RAW: MessageStarts = { prefixes: [''] }
@@ -286,6 +289,64 @@ describe('message route ranking', () => {
     expect(() => buildMessageRoutes([First, Second])).toThrow(
       /First\.roll: "roll \{sides\}" and "ROLL \{count\}" in Second\.alsoRoll match the same messages/,
     )
+  })
+
+  // A required and an optional param in one position both take a word there, so the two can answer the same messages
+  describe('two patterns that differ only in which params are optional', () => {
+    @Controller()
+    class Plain {
+      @MessageHandler('a {x} {y?}')
+      plain() {}
+    }
+    @Controller()
+    class Typed {
+      @MessageHandler('a {x:int?} {y:int?}')
+      typed() {}
+    }
+
+    afterEach(() => {
+      forgetDeprecationWarnings()
+      vi.restoreAllMocks()
+    })
+
+    it('warn, naming both and the one that runs', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      buildMessageRoutes([Typed, Plain])
+
+      expect(warn.mock.calls).toEqual([
+        [
+          'Plain.plain: "a {x} {y?}" and "a {x:int?} {y:int?}" in Typed.typed can take the same messages, as one takes a word where ' +
+            'the other has an optional param; Plain.plain answers those. Change one pattern, or give one its own prefix. ' +
+            'The next major version (5.0) stops the bot at startup for these.',
+        ],
+      ])
+    })
+
+    it('run the one with the required param, whatever the controllers\' order', () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      expect([[Plain, Typed], [Typed, Plain]].map(order => matchMessageRoute(buildMessageRoutes(order), 'a 5', RAW)?.route.method)).toEqual([
+        'plain',
+        'plain',
+      ])
+    })
+  })
+
+  it('leaves two patterns alone that take different messages', () => {
+    @Controller()
+    class Words {
+      @MessageHandler('a {x} {y}')
+      both() {}
+
+      @MessageHandler('b {x:int?}')
+      maybe() {}
+    }
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+    expect(buildMessageRoutes([Words]).map(route => route.method).sort()).toEqual(['both', 'maybe'])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   it('keeps one route for a handler declared under two spellings of one pattern', () => {
