@@ -27,9 +27,9 @@ type Implementation<T> = { fn(...args: CallArgs<T>): CallResult<T> }['fn']
  * @see {@link MockState}
  */
 export interface MockResult<T = unknown> {
-  /** `'return'` when the call returned, `'throw'` when it threw. */
-  type: 'return' | 'throw'
-  /** What the call returned, or the error it threw. */
+  /** `'return'` when the call returned, `'throw'` when it threw, `'incomplete'` while it is still running. */
+  type: 'return' | 'throw' | 'incomplete'
+  /** What the call returned, or the error it threw; `undefined` while it is incomplete. */
   value: T
 }
 
@@ -418,7 +418,10 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
     instances.push(this)
     contexts.push(this)
     invocationCallOrder.push(++mocks.invocationOrder)
-    // Updated in place as the call settles, so a promise's outcome shows once it resolves or rejects
+    // Recorded as the call starts, so each call's results sit at its own index however calls nest, and filled in as it
+    // ends: a promise's outcome shows in settledResults once it resolves or rejects
+    const result: MockResult<any> = { type: 'incomplete', value: undefined }
+    results.push(result)
     const settled: MockSettledResult = { type: 'incomplete', value: undefined }
     settledResults.push(settled)
 
@@ -455,7 +458,7 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
       Object.assign(settled, { type: 'rejected', value: err })
       throw err
     } finally {
-      results.push({ type, value })
+      Object.assign(result, { type, value })
     }
   } as MockedFunction<T>
 

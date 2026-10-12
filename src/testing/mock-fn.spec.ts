@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { clearAllMocks, createMockFn, isMockFunction, resetAllMocks } from './mock-fn.js'
+import { clearAllMocks, createMockFn, isMockFunction, type MockedFunction, resetAllMocks } from './mock-fn.js'
 import { createMockClient, createMockInteraction } from './mock-interaction.js'
 import { ButtonInteraction } from 'discord.js'
 
@@ -170,6 +170,36 @@ describe('createMockFn', () => {
 
       expect(() => mock()).toThrow('boom')
       expect(mock.mock.results[0].type).toBe('throw')
+    })
+
+    // jest and Vitest record a result as each call starts, so results[i] is calls[i]'s however calls nest
+    it("records each call's result at the call's own index, a re-entrant call's included, as jest and Vitest do", () => {
+      let seen: number | undefined
+      const countdown: MockedFunction<(n: number) => number> = createMockFn((n: number): number => {
+        seen ??= countdown.mock.results.length
+        return n > 0 ? countdown(n - 1) + 10 : 0
+      })
+
+      countdown(2)
+
+      expect(countdown.mock.results.map(result => result.value)).toEqual([20, 10, 0])
+      expect(countdown).toHaveNthReturnedWith(1, 20)
+      expect(seen).toBe(1)
+    })
+
+    it('reads a call still running as incomplete', () => {
+      let during: unknown
+      const fn: MockedFunction<() => string> = createMockFn(() => {
+        during = { ...fn.mock.results[0] }
+        return 'done'
+      })
+
+      fn()
+
+      expect([during, fn.mock.results[0]]).toEqual([
+        { type: 'incomplete', value: undefined },
+        { type: 'return', value: 'done' },
+      ])
     })
 
     it('is recognised as a mock by both isMockFunction implementations', () => {
