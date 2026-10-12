@@ -55,7 +55,7 @@ export interface MeoCordOptions<
   F extends readonly unknown[] = readonly unknown[],
 > {
   /** Controllers to register: their classes. */
-  controllers: (new (...args: any[]) => any)[]
+  controllers: (abstract new (...args: any[]) => any)[]
 
   /**
    * Options for the discord.js `Client`, such as its intents and partials. The shards it runs as are set in
