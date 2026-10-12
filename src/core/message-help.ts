@@ -50,10 +50,11 @@ export function matchHelpRequest(
   const text = content.trim()
   const rest = afterStart(text, starts.prefixes.filter(prefix => prefix !== ''), starts.mention, caseSensitive)
   if (!rest) return undefined
-  const [first] = splitWords(rest)
+  const [first, second] = splitWords(rest)
   const key = (word: string) => (caseSensitive ? word : word.toLowerCase())
   if (!first || !words.some(word => key(word) === key(first.value))) return undefined
-  return { start: text.slice(0, text.length - rest.length), query: rest.slice(first.value.length).trim() }
+  // From where the next word starts, as the help word may have been written in quotes
+  return { start: text.slice(0, text.length - rest.length), query: second ? rest.slice(second.start).trim() : '' }
 }
 
 /** The start a caller would type a route with here: its own prefix, a mention, or the start the help message used. */
