@@ -23,15 +23,20 @@ export function number(word: string, whole: boolean): number | undefined {
 /** `yes`, `no`, `true`, `false`, `on` or `off`, in any case, as a boolean. */
 export const bool = (word: string): boolean | undefined => BOOLEANS[word.toLowerCase()]
 
-/** A length of time written as amounts and units, such as `90s`, `2h30m` or `1.5d`, in milliseconds. */
+/**
+ * A length of time written as amounts and units, such as `90s`, `2h30m` or `1.5d`, in milliseconds: `undefined` for one
+ * too long to add up.
+ */
 export function duration(word: string): number | undefined {
   // Sticky: each part starts where the last ended, so the scan stops at the first that doesn't and reads each part once
   const parts = word.toLowerCase().match(/(\d+(?:\.\d+)?)(ms|s|m|h|d|w)/gy)
   if (!parts || parts.join('') !== word.toLowerCase()) return undefined
-  return parts.reduce((total, part) => {
+  const total = parts.reduce((sum, part) => {
     const [, amount, unit] = /^(\d+(?:\.\d+)?)(ms|s|m|h|d|w)$/.exec(part)!
-    return total + Number(amount) * UNIT_MS[unit]!
+    return sum + Number(amount) * UNIT_MS[unit]!
   }, 0)
+  // Too long to add up, as number() refuses a value past the largest number
+  return Number.isFinite(total) ? total : undefined
 }
 
 /** The largest snowflake: Discord's IDs are unsigned 64-bit integers. */
