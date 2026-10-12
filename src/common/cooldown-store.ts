@@ -24,7 +24,8 @@ export interface CooldownVerdict {
    * With a refusal, when the next call is allowed, as a Unix timestamp in milliseconds on the store's own clock. Every
    * refusal in one wait gives the same one, so `messages.dmOnCooldown` tells one wait from the next by it, across
    * processes and however late the answer arrives. The built-in stores give it; a store without it is told apart by
-   * `retryAfterMs` and the bot's clock instead.
+   * `retryAfterMs` and the bot's clock instead. Their `consume` gives it as a non-enumerable property, so its verdict
+   * compares and serialises as `allowed` and `retryAfterMs`.
    */
   retryTimestamp?: number
 }
@@ -61,6 +62,16 @@ export interface CooldownBatchVerdict extends CooldownVerdict {
 /** `verdict` with `release` added as a non-enumerable property, as the built-in stores give it. */
 export function withRelease(verdict: CooldownBatchVerdict, release: () => Promise<void>): CooldownBatchVerdict {
   return Object.defineProperty(verdict, 'release', { value: release, enumerable: false, configurable: true })
+}
+
+/**
+ * A batch verdict for one key, as the built-in stores' `consume` gives it: `allowed` and `retryAfterMs`, with a
+ * refusal's `retryTimestamp` added as a non-enumerable property.
+ */
+export function singleVerdict({ allowed, retryAfterMs, retryTimestamp }: CooldownVerdict): CooldownVerdict {
+  const verdict: CooldownVerdict = { allowed, retryAfterMs }
+  if (retryTimestamp === undefined) return verdict
+  return Object.defineProperty(verdict, 'retryTimestamp', { value: retryTimestamp, enumerable: false, configurable: true })
 }
 
 /**
@@ -125,7 +136,9 @@ export abstract class CooldownStore {
   async consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
     for (const [index, { key, limit }] of entries.entries()) {
       const verdict = await this.consume(key, limit)
-      if (!verdict.allowed) return { ...verdict, blocked: index }
+      // By name, as a built-in store's consume gives the wait's end non-enumerable, which a spread leaves out
+      const { retryTimestamp } = verdict
+      if (!verdict.allowed) return { ...verdict, blocked: index, ...(retryTimestamp !== undefined && { retryTimestamp }) }
     }
     return { allowed: true, retryAfterMs: 0 }
   }
@@ -282,8 +295,7 @@ export class MemoryCooldownStore extends CooldownStore {
   private sweeper?: ReturnType<typeof setInterval>
 
   async consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
-    const { allowed, retryAfterMs } = await this.consumeMany([{ key, limit }])
-    return { allowed, retryAfterMs }
+    return singleVerdict(await this.consumeMany([{ key, limit }]))
   }
 
   /**
