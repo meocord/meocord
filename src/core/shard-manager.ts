@@ -108,7 +108,10 @@ export class ShardManager implements MeoCordApplication {
       return this.exit(1)
     }
     this.logger.log('Starting shards in separate processes...')
-    if (!(await this.register())) return this.exitForLogin()
+    const registered = await this.register()
+    // A stop that came while it waited ends the start here: nothing after it asks Discord, spawns, listens or exits
+    if (this.stopping) return
+    if (!registered) return this.exitForLogin()
 
     process.on('SIGINT', () => void this.stopAndExit())
     process.on('SIGTERM', () => void this.stopAndExit())
@@ -120,6 +123,7 @@ export class ShardManager implements MeoCordApplication {
       const shards = config.sharding?.shards ?? 'auto'
       total = shards === 'auto' ? await (this.options.recommendedShardCount ?? fetchRecommendedShardCount)(token) : shards
     } catch (error) {
+      if (this.stopping) return
       if (isRefusedToken(error)) {
         this.logger.error(tokenMessage(token))
         this.logger.debug('Asking for the shard count failed:', error)
@@ -128,6 +132,7 @@ export class ShardManager implements MeoCordApplication {
       }
       return this.exitForLogin()
     }
+    if (this.stopping) return
 
     const manager = (this.options.createManager ?? ((path, opts) => new ShardingManager(path, opts)))(file, {
       token,
@@ -166,6 +171,8 @@ export class ShardManager implements MeoCordApplication {
     try {
       const rest = this.options.createRest?.(token) ?? new REST().setToken(token)
       const applicationId = ((await rest.get(Routes.currentApplication())) as { id: string }).id
+      // Stopped while it asked: the commands are left as they are
+      if (this.stopping) return true
       await registerCommands({
         rest,
         applicationId,

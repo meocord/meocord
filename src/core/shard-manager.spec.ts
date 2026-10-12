@@ -79,7 +79,13 @@ class FakeShard extends EventEmitter {
 }
 
 function setup(
-  overrides: { shards?: number | 'auto'; token?: string; shutdownTimeout?: number; recommendedShardCount?: () => Promise<number> } = {},
+  overrides: {
+    shards?: number | 'auto'
+    token?: string
+    shutdownTimeout?: number
+    recommendedShardCount?: () => Promise<number>
+    getApplication?: () => Promise<unknown>
+  } = {},
 ) {
   const shards: FakeShard[] = []
   let managerArgs: [string, ShardingManagerOptions] | undefined
@@ -107,7 +113,7 @@ function setup(
       } as unknown as ShardingManager
     },
     createRest: () => ({
-      get: async () => ({ id: 'app-1' }),
+      get: overrides.getApplication ?? (async () => ({ id: 'app-1' })),
       put: async (_route, { body }) => {
         puts.push(body)
         return []
@@ -362,6 +368,51 @@ describe('ShardManager', () => {
 
     expect(shards).toHaveLength(1)
     expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  // stop() while start() waits on Discord: the start ends there, and nothing after it runs
+  describe('when stopped while it starts', () => {
+    function gate<T>() {
+      let open!: (value: T) => void
+      return { promise: new Promise<T>(resolve => (open = resolve)), open }
+    }
+
+    it('stops while reading the application: no commands registered, no shard count, manager, signal listeners or exit', async () => {
+      const application = gate<unknown>()
+      const count = vi.fn(async () => 3)
+      const { manager, exit, puts, managerArgs } = setup({ shards: 'auto', getApplication: () => application.promise, recommendedShardCount: count })
+      const listeners = process.listenerCount('SIGINT')
+
+      const starting = manager.start()
+      await manager.stop()
+      application.open({ id: 'app-1' })
+      await starting
+
+      expect(puts).toEqual([])
+      expect(count).not.toHaveBeenCalled()
+      expect(managerArgs()).toBeUndefined()
+      expect(process.listenerCount('SIGINT')).toBe(listeners)
+      expect(exit).not.toHaveBeenCalled()
+    })
+
+    it('stops after asking for the shard count, whatever the answer: no manager and no exit', async () => {
+      for (const answer of ['count', 'failure'] as const) {
+        const shardCount = gate<number>()
+        const { manager, exit, managerArgs } = setup({
+          shards: 'auto',
+          recommendedShardCount: () => (answer === 'count' ? shardCount.promise : shardCount.promise.then(() => Promise.reject(new Error('network down')))),
+        })
+
+        const starting = manager.start()
+        await vi.waitFor(() => expect(process.listenerCount('SIGINT')).toBeGreaterThan(0))
+        await manager.stop()
+        shardCount.open(3)
+        await starting
+
+        expect(managerArgs()).toBeUndefined()
+        expect(exit).not.toHaveBeenCalled()
+      }
+    })
   })
 
   it('exits 0 at once when stopped before any shard was spawned', async () => {
