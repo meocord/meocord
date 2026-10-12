@@ -70,6 +70,16 @@ describe('typed message params', () => {
     )
   })
 
+  // Too long to add up to a number of milliseconds, so it is no length of time, as Infinity is no number
+  it('names a duration word too long to add up as not a length of time', async () => {
+    const route = routeOf('remind {after:duration}')
+    const { message } = guildMessage()
+
+    const error = await usageError(resolveMessageParams(route, { after: '9'.repeat(400) + 's' }, message, '!', undefined))
+
+    expect(error.issues.map(issue => [issue.param, issue.message.endsWith('is not a valid length of time, such as 10m')])).toEqual([['after', true]])
+  })
+
   it("uses an app's own type, and its label in the issue", async () => {
     const color: MessageParamType<number> = {
       label: 'hex colour',
