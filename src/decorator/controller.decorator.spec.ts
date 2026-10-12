@@ -252,6 +252,11 @@ describe('@Command', () => {
       ['an empty route, once', route(''), 'the pattern is empty'],
       ['101 characters of text', 'x'.repeat(101), 'its shortest is 101 characters'],
       ['99 characters and a param', `${'y'.repeat(99)}/{id}`, 'its shortest is 101 characters'],
+      // Each typed param counts the shortest value its type takes: a uuid is 36 characters
+      ['three uuids', 'q/{a:uuid}/{b:uuid}/{c:uuid}', 'its shortest is 112 characters'],
+      ['a snowflake, at least 17 digits, after 84 characters', `${'s'.repeat(83)}/{id:snowflake}`, 'its shortest is 101 characters'],
+      ['a choice, at least its shortest word, after 99 characters', `${'c'.repeat(98)}/{m:on|off}`, 'its shortest is 101 characters'],
+      ['a bool, at least 2 characters, after 99 characters', `${'b'.repeat(98)}/{on:bool}`, 'its shortest is 101 characters'],
     ])('is warned about, naming the handler: %s', (_, name, length) => {
       expect(warned(name)).toEqual([said(String(name), length)])
     })
@@ -261,6 +266,8 @@ describe('@Command', () => {
       ['98 characters and a param', `${'y'.repeat(98)}/{id}`],
       ['an empty segment', 'a//{x}'],
       ['a trailing separator', 'b/'],
+      ['two uuids and a short literal', 'q/{a:uuid}/{b:uuid}'],
+      ['a bool, at least 2 characters, after 98', `${'b'.repeat(97)}/{on:bool}`],
     ])('is not warned about when a customId can match: %s', (_, pattern) => {
       expect(warned(pattern)).toEqual([])
     })

@@ -30,7 +30,7 @@ import { wrapsMethod } from '@src/util/method-wrapper.util.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
-import { choicesOf, isSegmentType, lookupTable, parseSegment } from '@src/core/scalar-types.js'
+import { choicesOf, isSegmentType, lookupTable, parseSegment, shortestSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
 import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
@@ -540,8 +540,9 @@ export function createRegexFromPattern(pattern: string): {
     params: params.length,
     typed: Object.values(types).reduce((sum, type) => sum + (choicesOf(type) ? 4 : type === 'bool' ? 3 : type === 'int' ? 2 : 1), 0),
   })
-  // Each param takes at least one character
-  return { regex, params, types: lookupTable(types), specificity, shortest: literalLength + params.length }
+  // Each param takes at least the shortest value of its type
+  const shortest = literalLength + params.reduce((sum, param) => sum + shortestSegment(types[param] ?? 'string'), 0)
+  return { regex, params, types: lookupTable(types), specificity, shortest }
 }
 
 /** Why a `{name:type}` cannot type a customId segment, which holds text the bot wrote, with no message to read. */
