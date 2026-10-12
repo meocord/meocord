@@ -42,6 +42,7 @@ import { RunningCalls } from '@src/core/running-calls.js'
 import { type StartupControl } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { stopRequests } from '@src/util/stop-request.util.js'
+import { shared, sharedKey } from '@src/util/shared-state.util.js'
 import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
@@ -64,11 +65,26 @@ import { escapeForLog } from '@src/util/user-text.util.js'
 export const SLOW_READY_HOOK_MS = 10_000
 
 
-/** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
-const runningApps = new Set<() => Promise<boolean>>()
-const stopRequest = stopRequests()
-let signalHandlersInstalled = false
-let shuttingDown: Promise<void> | undefined
+/** Where both builds of this version keep the process's shutdown, as {@link shared} names it. */
+const SHUTDOWN_STATE = 'processShutdown'
+
+/**
+ * The process's one shutdown, kept by both builds of this version, so a process that loads both has one pair of signal
+ * listeners and one shutdown, which stops the apps either build started.
+ */
+const processShutdown = shared(SHUTDOWN_STATE, () => ({
+  /** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
+  runningApps: new Set<() => Promise<boolean>>(),
+  stopRequest: stopRequests(),
+  signalHandlersInstalled: false,
+  shuttingDown: undefined as Promise<void> | undefined,
+}))
+const { runningApps } = processShutdown
+
+/** Forgets the process's shutdown, for specs that load the modules afresh as a new process would. */
+export function forgetShutdownState(): void {
+  Reflect.deleteProperty(globalThis, sharedKey(SHUTDOWN_STATE))
+}
 
 /**
  * Shuts every started app down and exits, with the code set when the shutdown began or 0, and 1 if an app failed to
@@ -76,7 +92,7 @@ let shuttingDown: Promise<void> | undefined
  * same request; one after it forces exit 1, except in a shard, whose manager forces it.
  */
 export async function shutdownAndExit(shard: boolean): Promise<void> {
-  const request = stopRequest()
+  const request = processShutdown.stopRequest()
   if (request !== 'first') {
     // A shard hears Ctrl+C both directly and from its manager, which owns forcing it; so it waits
     if (request === 'duplicate' || shard) return
@@ -88,14 +104,14 @@ export async function shutdownAndExit(shard: boolean): Promise<void> {
 
 /** The one shutdown of the process, however many ask for it: a stop request joins one already under way. */
 function shutDown(): Promise<void> {
-  shuttingDown ??= (async () => {
+  processShutdown.shuttingDown ??= (async () => {
     // A clean stop keeps a code already set, such as the 1 a failed login set, so a supervisor still sees it. Read as
     // the shutdown begins: a code main.ts sets as it hears of the stop is the stop's, not a failure.
     const exitCode = Number(process.exitCode ?? 0) || 0
     const closed = await Promise.all([...runningApps].map(close => close()))
     process.exit(closed.every(Boolean) ? exitCode : 1)
   })()
-  return shuttingDown
+  return processShutdown.shuttingDown
 }
 
 /** The errors {@link stoppedBeforeOnline} made, which end a start without being its failure. */
@@ -111,8 +127,8 @@ function stoppedBeforeOnline(): Error {
 
 /** One pair of signal listeners for the process, however many apps it starts, for the role the first decided. */
 function installSignalHandlers(shard: boolean): void {
-  if (signalHandlersInstalled) return
-  signalHandlersInstalled = true
+  if (processShutdown.signalHandlersInstalled) return
+  processShutdown.signalHandlersInstalled = true
   process.on('SIGINT', () => void shutdownAndExit(shard))
   process.on('SIGTERM', () => void shutdownAndExit(shard))
   // How `meocord start --dev` stops the application to restart it, a signal being no graceful stop on Windows. It is
