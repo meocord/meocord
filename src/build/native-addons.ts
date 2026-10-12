@@ -1,6 +1,7 @@
-import { cpSync, existsSync, readdirSync, readFileSync, realpathSync } from 'fs'
+import { cpSync, existsSync, readdirSync, realpathSync } from 'fs'
 import path from 'path'
 import { type BuildPlatform, currentPlatform } from '@src/util/platform.util.js'
+import { readJsonFile } from '@src/util/json.util.js'
 
 /**
  * The package a resolved module file belongs to, and the directory it was installed in.
@@ -103,7 +104,7 @@ function resolvePackageDir(name: string, from: string, root: string): string | u
 /** A package's declared dependencies, runtime and optional, or none if it cannot be read. */
 function readDependencies(dir: string): { dependencies: string[]; optional: string[] } {
   try {
-    const pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))
+    const pkg = readJsonFile(path.join(dir, 'package.json'))
     return { dependencies: Object.keys(pkg.dependencies ?? {}), optional: Object.keys(pkg.optionalDependencies ?? {}) }
   } catch {
     return { dependencies: [], optional: [] }
@@ -241,7 +242,7 @@ function allowedBy(field: unknown, value: string): boolean {
 export function isBuiltFor(dir: string, platform: BuildPlatform): boolean {
   let pkg: { os?: unknown; cpu?: unknown; libc?: unknown }
   try {
-    pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))
+    pkg = readJsonFile(path.join(dir, 'package.json'))
   } catch {
     return true
   }

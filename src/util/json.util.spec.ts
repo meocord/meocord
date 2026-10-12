@@ -1,4 +1,7 @@
-import { parseJsonc, stripJsonc } from '@src/util/json.util.js'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { parseJsonc, readJsonFile, stripJsonc } from '@src/util/json.util.js'
 
 describe('parseJsonc', () => {
   it('reads line and block comments', () => {
@@ -34,7 +37,29 @@ describe('parseJsonc', () => {
     expect(stripJsonc(input)).toBe(input)
   })
 
+  // As a Windows editor saves a file, and as tsc reads it
+  it('reads text that starts with a byte order mark', () => {
+    expect(parseJsonc('\uFEFF{ "strict": true, // on\n }')).toEqual({ strict: true })
+  })
+
   it('still rejects text that is not JSON once comments are gone', () => {
     expect(() => parseJsonc('{ key: 1 }')).toThrow()
+  })
+})
+
+describe('readJsonFile', () => {
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'meocord-json-'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reads a file saved with a byte order mark, as Node reads a package.json', () => {
+    const file = path.join(dir, 'package.json')
+    writeFileSync(file, '\uFEFF{"name":"x","dependencies":{"meocord":"*"}}')
+
+    expect(readJsonFile(file)).toEqual({ name: 'x', dependencies: { meocord: '*' } })
   })
 })

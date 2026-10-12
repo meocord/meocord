@@ -259,6 +259,15 @@ describe('prepareModifiedTsConfig', () => {
     expect(written.compilerOptions).toEqual({ strict: true })
   })
 
+  it('reads a tsconfig.json saved with a byte order mark, as tsc does', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(`\uFEFF${JSON.stringify({ compilerOptions: { strict: true } })}` as any)
+
+    prepareModifiedTsConfig()
+
+    expect(JSON.parse(mockWriteFileSync.mock.calls[0][1] as string).compilerOptions).toEqual({ strict: true })
+  })
+
   // Rewriting the project's tsconfig.json would drop the user's comments
   it("never writes the project's tsconfig.json, however it is formatted", () => {
     mockExistsSync.mockReturnValue(true)
