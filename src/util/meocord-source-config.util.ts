@@ -12,7 +12,7 @@ import { projectPaths } from '@src/util/tsconfig-paths.util.js'
 export function loadMeoCordSourceConfig(): MeoCordConfig | undefined {
   const result = readMeoCordSourceConfig()
   if ('error' in result) {
-    console.error(`[MeoCord] Failed to load config: ${result.error}`)
+    console.error(result.file === 'tsconfig.json' ? `[MeoCord] Failed to read tsconfig.json: ${result.error}` : `[MeoCord] Failed to load config: ${result.error}`)
     return undefined
   }
   return result.config
@@ -22,14 +22,22 @@ export function loadMeoCordSourceConfig(): MeoCordConfig | undefined {
  * Loads `meocord.config.ts` from source, reporting a failure instead of logging it, for the CLI to stop
  * on. jiti's message names the file, line and column of a syntax error.
  *
- * @returns The config (undefined when the file does not exist), or the reason it could not be loaded.
+ * @returns The config (undefined when the file does not exist), or the reason it could not be loaded, naming
+ *   `tsconfig.json` as the file at fault when it was that file, whose `paths` the config is loaded with.
  */
-export function readMeoCordSourceConfig(): { config: MeoCordConfig | undefined } | { error: string } {
+export function readMeoCordSourceConfig(): { config: MeoCordConfig | undefined } | { error: string; file?: 'tsconfig.json' } {
   const configPath = path.resolve(process.cwd(), 'meocord.config.ts')
   if (!existsSync(configPath)) return { config: undefined }
 
+  // Read first, so a tsconfig.json that can't be read is reported as its own, not as the config failing to load
+  let aliases: Record<string, string>
   try {
-    const aliases = jitiAliases(projectPaths() ?? {})
+    aliases = jitiAliases(projectPaths() ?? {})
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error), file: 'tsconfig.json' }
+  }
+
+  try {
 
     // The module as written, so an ES module with no default export is told apart from a CommonJS one
     const jiti = createJiti(import.meta.url, {

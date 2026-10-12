@@ -66,3 +66,15 @@ describe('the frame a load error names, on Windows', () => {
   })
 })
 
+
+// The config is loaded with tsconfig.json's paths, so that file is read first, and a fault in it is its own
+describe('a tsconfig.json that cannot be read', () => {
+  it('is reported as tsconfig.json, with why', () => {
+    writeFileSync(path.join(project, 'tsconfig.json'), JSON.stringify({ extends: '@tsconfig/missing/tsconfig.json' }))
+
+    expect(load("export default { discordToken: 'abc' }\n")).toEqual({
+      error: expect.stringContaining('@tsconfig/missing/tsconfig.json'),
+      file: 'tsconfig.json',
+    })
+  })
+})

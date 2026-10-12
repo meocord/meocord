@@ -243,6 +243,22 @@ describe('compileAndValidateConfig', () => {
     consoleSpy.mockRestore()
   })
 
+  it('exits, naming tsconfig.json rather than the config, when tsconfig.json cannot be read', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadSourceConfig.mockReturnValue({ error: "File '@tsconfig/missing/tsconfig.json' not found.", file: 'tsconfig.json' })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await compileAndValidateConfig()
+
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "tsconfig.json could not be read, so nothing was built or started:\n  File '@tsconfig/missing/tsconfig.json' not found.",
+    )
+    exitSpy.mockRestore()
+    consoleSpy.mockRestore()
+  })
+
   it('exits, listing every problem, when options have the wrong type', async () => {
     mockExistsSync.mockReturnValue(true)
     mockReadSourceConfig.mockReturnValue({ config: { discordToken: 't', sharding: { mode: 'bogus' }, shutdownTimeout: 'soon' } })
