@@ -3,6 +3,7 @@ import { type Client } from 'discord.js'
 import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
+import { forgetShutdownState } from '@src/core/meocord.app.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { log: [] as unknown[][], error: [] as unknown[][] } }))
 
@@ -20,9 +21,10 @@ vi.mock('@src/common/index.js', async importOriginal => ({
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'token' }) }))
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
-/** Fresh modules per test: the running apps and the one shutdown of the process live at module level. */
+/** Fresh modules and a forgotten shutdown per test, as a new process has: the running apps and the shutdown are process-wide. */
 async function load() {
   vi.resetModules()
+  forgetShutdownState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')

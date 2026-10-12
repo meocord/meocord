@@ -7,6 +7,7 @@ import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { type FakeDiscord, startFakeDiscord } from '../../scripts/lib/fake-discord.js'
+import { forgetShutdownState } from '@src/core/meocord.app.js'
 
 const { logged, config } = vi.hoisted(() => ({
   logged: { log: [] as unknown[][], error: [] as unknown[][], warn: [] as unknown[][] },
@@ -33,11 +34,12 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
 /**
- * Fresh modules per test: shutdown state and the signal listeners live at module level, as they do
- * in a real process, so each test starts from a process that has shut nothing down yet.
+ * Fresh modules and a forgotten shutdown per test: the shutdown state and the signal listeners are process-wide, as
+ * they are in a real process, so each test starts from a process that has shut nothing down yet.
  */
 async function load() {
   vi.resetModules()
+  forgetShutdownState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')

@@ -7,6 +7,7 @@ import type * as ShardManagerModule from '@src/core/shard-manager.js'
 import type * as ShardContextModule from '@src/core/shard-context.js'
 import { type MeoCordConfig, type OnReady, type ReadyInfo } from '@src/interface/index.js'
 import { CommandType } from '@src/enum/index.js'
+import { forgetShutdownState } from '@src/core/meocord.app.js'
 
 const { logged, config, channel } = vi.hoisted(() => ({
   channel: { closed: false },
@@ -32,9 +33,10 @@ vi.mock('@src/util/sharding-mode.util.js', async importOriginal => ({
   managerGone: () => channel.closed,
 }))
 
-/** Fresh modules per test, as shutdown state and signal listeners live at module level. */
+/** Fresh modules and a forgotten shutdown per test, as the shutdown state and signal listeners are process-wide. */
 async function load() {
   vi.resetModules()
+  forgetShutdownState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
