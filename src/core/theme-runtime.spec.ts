@@ -336,24 +336,38 @@ describe('apps in one process', () => {
   const themeScopes = (run: { mock: { calls: unknown[][] } }) =>
     run.mock.calls.filter(([store]) => typeof store === 'object' && store !== null && 'theme' in store)
 
-  it('enters no scope for an app with no @UseTheme and no theme of its own', async () => {
+  it('enters no scope for an app that owns the theme read outside calls, with no @UseTheme and no theme of its own', async () => {
+    const owner = await MeoCordTestingModule.create({ controllers: [Plain] }).compile().init({ ready: true })
+    const run = vi.spyOn(AsyncLocalStorage.prototype, 'run')
+
+    await owner.invoke(Plain, 'plain', press('plain'))
+
+    expect(seen).toEqual([DEFAULT_THEME.colors.primary])
+    expect(themeScopes(run)).toEqual([])
+    await owner.close()
+  })
+
+  it('enters a scope for each call of an app that does not own the theme read outside calls', async () => {
     const run = vi.spyOn(AsyncLocalStorage.prototype, 'run')
 
     await MeoCordTestingModule.create({ controllers: [Plain] }).compile().invoke(Plain, 'plain', press('plain'))
 
     expect(seen).toEqual([DEFAULT_THEME.colors.primary])
-    expect(themeScopes(run)).toEqual([])
+    expect(themeScopes(run)).toHaveLength(1)
   })
 
-  it('enters no scope for an app theme that sets nothing', async () => {
+  it('enters no scope for an app theme that sets nothing, when the app owns the theme read outside calls', async () => {
     const run = vi.spyOn(AsyncLocalStorage.prototype, 'run')
     for (const theme of [{}, { colors: {} }, { colors: { primary: undefined } }]) {
       @MeoCord({ controllers: [Plain], clientOptions: { intents: [] }, theme })
       class Empty {}
-      await MeoCordTestingModule.create({ app: Empty, controllers: [Plain] }).compile().invoke(Plain, 'plain', press('plain'))
+      const owner = await MeoCordTestingModule.create({ app: Empty, controllers: [Plain] }).compile().init({ ready: true })
+      run.mockClear()
+      await owner.invoke(Plain, 'plain', press('plain'))
+      expect(themeScopes(run)).toEqual([])
+      await owner.close()
     }
 
-    expect(themeScopes(run)).toEqual([])
     expect(seen).toEqual([DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.primary])
   })
 

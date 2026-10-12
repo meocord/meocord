@@ -108,11 +108,6 @@ export function ambientThemeVersion(): number {
   return ambientVersion
 }
 
-/** Whether some app's theme is the one read outside a call. */
-export function hasAmbientTheme(): boolean {
-  return ambient !== undefined
-}
-
 /**
  * Makes an app's theme the one read outside a call, when no other app has: a bot runs one app, and code it runs
  * outside a handler, such as a scheduled job, then reads that app's theme. A second app in the same process keeps

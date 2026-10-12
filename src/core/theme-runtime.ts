@@ -15,7 +15,6 @@ import {
   ambientThemeVersion,
   claimAmbientTheme,
   defaultTheme,
-  hasAmbientTheme,
   mergeTheme,
   ownsAmbientTheme,
   releaseAmbientTheme,
@@ -106,14 +105,13 @@ function current(container: Container): AppThemes | undefined {
 
 /**
  * Decides whether the app's calls need a scope, again whenever the layers beneath it or the app read outside a call
- * change. They do when the handlers can differ in theme. Otherwise a call reads the theme outside a call, so it
- * needs one unless that is its own theme: when the app owns it, or when no app does and the app's theme is MeoCord's
- * defaults.
+ * change. They do when the handlers can differ in theme. Otherwise a call reads the theme outside a call, so it needs
+ * one unless its app owns that theme: another app may claim it while the call runs, and the call keeps the theme it
+ * started with.
  */
 function rescope(container: Container, themes: AppThemes): void {
   themes.ambientVersion = ambientThemeVersion()
-  const readsOwnTheme = ownsAmbientTheme(container) || (!hasAmbientTheme() && themes.app === defaultTheme())
-  themes.scoped = themes.varies || !readsOwnTheme ? themes.app : undefined
+  themes.scoped = themes.varies || !ownsAmbientTheme(container) ? themes.app : undefined
 }
 
 /** The app's theme: MeoCord's defaults and the app's `@MeoCord({ theme })`, or the defaults for a container with none. */
