@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { AutocompleteInteraction, ButtonInteraction, type Message, SlashCommandBuilder } from 'discord.js'
+import { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, type Message, ModalSubmitInteraction, SlashCommandBuilder } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { Command, CommandBuilder, Controller, MessageHandler } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
@@ -98,6 +98,52 @@ describe('a @Command handler called with another kind of interaction', () => {
     expect(() => (new Stats().stats as (interaction: unknown) => void)(createMockInteraction(ButtonInteraction))).toThrow(
       "Stats.stats: @Command('stats', StatsBuilder) takes a ChatInputCommandInteraction, not a ButtonInteraction.",
     )
+  })
+
+  // One method may answer routes of several interaction types: each runs it with its own interaction
+  describe('on a method with @Commands of two interaction types', () => {
+    class Stats {
+      ran: string[] = []
+
+      @Command('stats', CommandType.SLASH)
+      @Command('stats/refresh', CommandType.BUTTON)
+      stats(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+        this.ran.push(interaction.constructor.name)
+      }
+    }
+
+    it('runs it with an interaction of either', () => {
+      const stats = new Stats()
+
+      stats.stats(createMockInteraction(ChatInputCommandInteraction))
+      stats.stats(createMockInteraction(ButtonInteraction))
+
+      expect(stats.ran).toEqual(['ChatInputCommandInteraction', 'ButtonInteraction'])
+    })
+
+    it('is dispatched each of its routes, as the bot dispatches them', async () => {
+      const heard: string[] = []
+      @Controller()
+      class Routed {
+        @Command('stats', CommandType.SLASH)
+        @Command('stats/refresh', CommandType.BUTTON)
+        stats(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+          heard.push(interaction.constructor.name)
+        }
+      }
+      const module = MeoCordTestingModule.create({ controllers: [Routed] }).compile()
+
+      await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'stats' }))
+      await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'stats/refresh' }))
+
+      expect(heard).toEqual(['ChatInputCommandInteraction', 'ButtonInteraction'])
+    })
+
+    it('refuses an interaction of neither, naming both', () => {
+      expect(() => (new Stats().stats as (interaction: unknown) => void)(createMockInteraction(ModalSubmitInteraction))).toThrow(
+        'Stats.stats: its @Command routes take a ButtonInteraction or a ChatInputCommandInteraction, not a ModalSubmitInteraction.',
+      )
+    })
   })
 
   it('puts the article a class name takes before it, and names an unknown type an interaction', () => {

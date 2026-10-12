@@ -45,6 +45,12 @@ function givenInstead(value: unknown): string {
 
 const logger = new Logger('Command')
 
+/** The interaction types a method's `@Command` routes declare, each once. */
+function routeTypesOf(prototype: object, method: string): CommandType[] {
+  const metas = Object.values(getCommandMap(prototype) ?? {}).flat()
+  return [...new Set(metas.filter(meta => meta.methodName === method).map(meta => meta.type))]
+}
+
 /**
  * The class's own handler list, started from a copy of the inherited one, so a subclass's
  * handlers never land in its base class's metadata.
@@ -747,10 +753,15 @@ export function Command<
     // Wrap original method for interaction type validation
     const declaredAs = typeof builderOrType === 'function' ? builderOrType.name : `CommandType.${builderOrType}`
     const checked: NonNullable<typeof _descriptor.value> = function (this: unknown, interaction, params) {
-      if (!matchesCommandType(commandType, interaction)) {
+      // Every type the method's routes declare: each @Command wraps it, so one alone would refuse the others' interactions
+      const types = routeTypesOf(target, propertyKey)
+      if (!types.some(type => matchesCommandType(type, interaction))) {
         throw new Error(
-          `${target.constructor.name}.${propertyKey}: @Command('${commandName}', ${declaredAs}) takes ` +
-            `${interactionClassName(commandType)}${givenInstead(interaction)}.`,
+          types.length <= 1
+            ? `${target.constructor.name}.${propertyKey}: @Command('${commandName}', ${declaredAs}) takes ` +
+                `${interactionClassName(commandType)}${givenInstead(interaction)}.`
+            : `${target.constructor.name}.${propertyKey}: its @Command routes take ${types.map(interactionClassName).join(' or ')}` +
+                `${givenInstead(interaction)}.`,
         )
       }
 
