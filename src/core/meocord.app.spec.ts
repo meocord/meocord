@@ -1256,12 +1256,12 @@ describe('MeoCordApp', () => {
     it('survives a failing controller on messageCreate', async () => {
       await startWithBrokenContainer()
 
-      const message = { author: { bot: false }, content: 'hello' }
+      const message = createMockMessage({ content: 'hello' })
 
       await expect(mockClient.listenersFor('messageCreate')[0](message)).resolves.toBeUndefined()
 
       const error = vi.mocked(Logger).mock.results[0]?.value.error
-      expect(error).toHaveBeenCalledWith(expect.stringContaining('messageCreate'), expect.any(Error))
+      expect(error).toHaveBeenCalledWith('Error handling message "hello":', expect.any(Error))
     })
 
     // A reaction arrives for messages the bot can no longer read -- deleted, or in a
