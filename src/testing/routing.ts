@@ -190,7 +190,7 @@ export function resolveRoute(
       const inServer = matchMessageRoute(routes, input.content, { ...starts, inGuild: true })
       const named = (route: MessageRoute) => `${route.controllerClass.name}.${String(route.method)}`
       if (strictMocks()) matched = inServer && fitsScope(inServer.route.scope, true) ? inServer : undefined
-      else if (matched && inServer && matched.route !== inServer.route) {
+      else if (matched && inServer && matched.route !== inServer.route && !fitsScope(matched.route.scope, true)) {
         warnOnce(
           logger,
           `resolveRoute resolved a message without dm to ${named(matched.route)}, which works in a DM alone, where dispatch runs ` +
