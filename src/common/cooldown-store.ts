@@ -1,3 +1,5 @@
+import { sharedKey } from '@src/util/shared-state.util.js'
+
 /**
  * How many calls a cooldown allows, and in how long a window.
  *
@@ -147,6 +149,16 @@ export abstract class CooldownStore {
     return Promise.resolve({ allowed: true, retryAfterMs: 0 })
   }
 }
+
+// CooldownStore's own consumeMany and peekMany carry a mark both builds share, so a check can tell a store's
+// override from either build's default, as a store that extends one build's class can be checked by the other's
+const DEFAULT_BATCH_METHOD = sharedKey('cooldown-store:default-batch-method')
+for (const method of [CooldownStore.prototype.consumeMany, CooldownStore.prototype.peekMany]) {
+  Object.defineProperty(method, DEFAULT_BATCH_METHOD, { value: true })
+}
+
+/** Whether `method` is CooldownStore's own consumeMany or peekMany, from either build of this version. */
+export const isDefaultBatchMethod = (method: unknown): boolean => typeof method === 'function' && DEFAULT_BATCH_METHOD in method
 
 /**
  * Of several refusals, the one a caller waits on: the call runs only once every entry allows it, so the
