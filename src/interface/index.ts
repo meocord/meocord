@@ -103,10 +103,11 @@ export interface MeoCordApplication {
    * every shard would meet, MeoCord refusing the app or Discord refusing the login for good (an invalid token, or
    * intents it disallows or does not know), the manager logs why, stops every shard and exits 1 instead.
    *
-   * @returns A promise that resolves once the bot is logged in, or every shard has been spawned.
-   * @throws For a bot in one process, the error of a provider's factory that failed, or the login
-   *   error, such as an invalid token. A start that `stop()` ends rejects, and so does a start of an app already
-   *   stopped.
+   * @returns A promise that resolves once the bot is logged in, or every shard has been spawned. With process
+   *   sharding, it also resolves when `stop()` ends the start, which then spawns no more shards.
+   * @throws For a bot in one process, the error of a provider's factory that failed, or the login error, such as an
+   *   invalid token; it also rejects when `stop()` ends the start. In either mode, a start of an app already stopped
+   *   rejects.
    */
   start(): Promise<void>
 
