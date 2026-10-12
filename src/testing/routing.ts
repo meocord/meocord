@@ -11,6 +11,7 @@ import { buildMessageRoutes, fitsScope, matchMessageRoute, staticMessageStarts }
 import { needsGuild } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
+import { describeValue } from '@src/util/value.util.js'
 
 /**
  * The command types routed by a `customId` pattern: buttons, select menus and modals.
@@ -102,8 +103,24 @@ export interface RouteConflict {
   runs: string
 }
 
+/** Why an app import reads `undefined`, for its refusal. */
+const CIRCULAR_IMPORT_HINT = ' An app import that reads undefined is often a circular import.'
+/** Why an app is an object, for its refusal. */
+const MODULE_HINT = ' An object here is often a module namespace, as `import * as App` gives: pass the class it exports.'
+
+/** An app that isn't a class, as its refusal names it: the value, and its likely cause where there is one. */
+export function notAClass(app: unknown): { name: string; hint: string } {
+  const hint = app === undefined ? CIRCULAR_IMPORT_HINT : typeof app === 'object' && app !== null ? MODULE_HINT : ''
+  return { name: describeValue(app), hint }
+}
+
 /** The options `@MeoCord` declares on an application class. */
 function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions } {
+  // An app that isn't a class at all, as a circular import gives, has no metadata to read
+  if (typeof app !== 'function') {
+    const { name, hint } = notAClass(app)
+    throw new TypeError(`${name} is not decorated with @MeoCord().${hint}`)
+  }
   const options = Reflect.getMetadata(META.appOptions, app) as { controllers?: ControllerClass[]; messages?: MessageCommandOptions } | undefined
   if (!options) throw new TypeError(`${app.name || 'The given class'} is not decorated with @MeoCord().`)
   return options

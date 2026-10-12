@@ -97,6 +97,7 @@ import {
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
 import { getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { strictMocks } from './strict-mocks.js'
+import { notAClass } from './routing.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -1425,6 +1426,11 @@ export class MeoCordTestingModule {
    * ```
    */
   static fromApp(app: new (...args: any[]) => unknown, options: FromAppOptions = {}): TestingModuleBuilder {
+    // An app that isn't a class at all, as a circular import gives, has no metadata to read
+    if (typeof app !== 'function') {
+      const { name, hint } = notAClass(app)
+      throw new TypeError(`${name} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.${hint}`)
+    }
     const appOptions = Reflect.getMetadata(META.appOptions, app) as
       | {
           controllers: (new (...args: any[]) => any)[]

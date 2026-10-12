@@ -12,6 +12,7 @@ import { type DispatchResult } from '@src/interface/index.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
 import { createMockClient, createMockInteraction } from './mock-interaction.js'
 import { getResponse } from './response.js'
+import { findRouteConflicts, resolveRoute } from './routing.js'
 
 interface Database {
   count(): Promise<number>
@@ -222,6 +223,25 @@ describe('MeoCordTestingModule.fromApp', () => {
     class NotAnApp {}
 
     expect(() => MeoCordTestingModule.fromApp(NotAnApp)).toThrow('NotAnApp is not a @MeoCord app: fromApp takes the class @MeoCord decorates.')
+  })
+
+  // An app import that isn't a class is named, with its likely cause, rather than met with a TypeError naming nothing
+  it.each([
+    ['undefined, as a circular import reads', async () => undefined, 'undefined', ' An app import that reads undefined is often a circular import.'],
+    ['null', async () => null, 'null', ''],
+    [
+      'a module namespace, as `import * as App` gives',
+      async () => import('./snowflake.js'),
+      'an object',
+      ' An object here is often a module namespace, as `import * as App` gives: pass the class it exports.',
+    ],
+  ])('refuses an app that is %s, naming it, as resolveRoute and findRouteConflicts do', async (_, given, name, hint) => {
+    const app = (await given()) as unknown as new () => unknown
+
+    expect(() => MeoCordTestingModule.fromApp(app)).toThrow(`${name} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.${hint}`)
+    for (const read of [() => findRouteConflicts(app), () => resolveRoute(app, { type: CommandType.BUTTON, customId: 'x' })]) {
+      expect(read).toThrow(`${name} is not decorated with @MeoCord().${hint}`)
+    }
   })
 })
 
