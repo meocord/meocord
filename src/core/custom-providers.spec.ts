@@ -5,7 +5,7 @@ import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as CommonModule from '@src/common/index.js'
 import { type OnReady, type OnShutdown, type Provider } from '@src/interface/index.js'
-import { forgetShutdownState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/meocord.app.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { error: [] as unknown[][] } }))
 
@@ -27,7 +27,7 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 /** Fresh modules per test, as a new process would have. */
 async function load() {
   vi.resetModules()
-  forgetShutdownState()
+  forgetProcessState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')

@@ -3,7 +3,7 @@ import { type Client } from 'discord.js'
 import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
-import { forgetShutdownState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/meocord.app.js'
 
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -43,7 +43,7 @@ describe('a process that loads both builds', () => {
   let signalListeners: NodeJS.SignalsListener[]
 
   beforeEach(async () => {
-    forgetShutdownState()
+    forgetProcessState()
     exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     const discord = await import('discord.js')
     vi.spyOn(discord.Client.prototype, 'login').mockResolvedValue('token')
@@ -87,5 +87,19 @@ describe('a process that loads both builds', () => {
 
     expect(destroyed).toHaveLength(2)
     expect(exit.mock.calls).toEqual([[0]])
+  })
+
+  it("clears the exit code one build's failed login set once an app of the other logs in", async () => {
+    const discord = await import('discord.js')
+    vi.mocked(discord.Client.prototype.login).mockRejectedValueOnce(new Error('gateway unreachable (stand-in)'))
+    process.exitCode = undefined
+    const first = await loadBuild()
+    const second = await loadBuild()
+
+    await expect(startApp(first)).rejects.toThrow('gateway unreachable')
+    expect(process.exitCode).toBe(1)
+    await startApp(second)
+
+    expect(process.exitCode).toBe(0)
   })
 })
