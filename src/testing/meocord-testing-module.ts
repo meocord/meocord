@@ -458,13 +458,11 @@ export class TestingModule {
     const failures: { name: string; error: unknown }[] = []
     const failed = (unit: LifecycleUnit, error: unknown) => failures.push({ name: unit.name, error })
     // No warning for a hook whose dependency failed: the test sees the dependency's own error
-    // What close() shuts down is what was constructed, so the entries the runner records are not kept
     await runReadyHooks(
       this.container,
       this.lifecycle,
       client,
       { primary },
-      [],
       { resolveFailed: failed, hookFailed: failed },
       { runOnReady: this.readyPass.runOnReady },
     )

@@ -6,7 +6,7 @@ import {
   REST,
   Routes,
 } from 'discord.js'
-import { type Container } from 'inversify'
+import { type Container, type ServiceIdentifier } from 'inversify'
 import { type EventEmitter } from 'node:events'
 import { Logger } from '@src/common/index.js'
 import { hideInLogs } from '@src/common/logger.js'
@@ -37,7 +37,7 @@ import {
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { type EventSource } from '@src/core/event-sources.js'
 import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
-import { type LifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import { type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { RunningCalls } from '@src/core/running-calls.js'
 import { type StartupControl } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
@@ -105,6 +105,18 @@ function stoppedBeforeOnline(): Error {
   return error
 }
 
+/** What the app's starts make, which a stop or a failed start shuts down, and how a failed start is undone. */
+export interface StartAttempt {
+  /** The tokens of the lifecycle units the container has constructed. */
+  readonly constructed: Set<unknown>
+  /** The tokens of values the app gave as they are, which exist before any start, so a failed one leaves them open. */
+  readonly given: ReadonlySet<unknown>
+  /** Marks where a start begins, so a failed one can drop what it made. */
+  begin(): void
+  /** Drops what the start since `begin()` made, so a retry makes it afresh. */
+  drop(): void
+}
+
 /** One pair of signal listeners for the process, however many apps it starts, for the role the first decided. */
 function installSignalHandlers(shard: boolean): void {
   if (processState.signalHandlersInstalled) return
@@ -162,6 +174,8 @@ export class MeoCordApp implements MeoCordApplication {
     warnUnanswered = false,
     /** Whether a manager spawned this process, as `MeoCordFactory.create` decided before anything could change it. */
     private readonly shard = false,
+    /** What each start makes; without one, as an app built by hand in a spec, nothing is shut down before ready. */
+    private readonly attempt?: StartAttempt,
   ) {
     // First, so nothing logged from here on, before login or after, prints it
     hideInLogs(discordToken)
@@ -195,8 +209,8 @@ export class MeoCordApp implements MeoCordApplication {
   /** How long shutdown waits for the `onShutdown` hooks, from `shutdownTimeout` in the config. */
   private readonly shutdownTimeout: number
 
-  /** The resolved instances whose hooks ran at ready, so shutdown calls the same ones; `undefined` before ready. */
-  private lifecycleEntries?: LifecycleEntry[]
+  /** The tokens of the units whose `onReady` the ready pass has settled, or found they have none. */
+  private readonly readySettled = new Set<unknown>()
 
   /**
    * Closes the app once, however many stops and signals ask: whether the client was destroyed cleanly. The app stays
@@ -258,10 +272,13 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.stopped) throw new Error('This app was stopped; use MeoCordFactory.create to make a new one.')
     if (this.online) return
     this.starting ??= this.startOnce()
-      .catch(error => {
+      .catch(async error => {
         // A failed start leaves the running apps, so a signal later stops only the apps that run; a stopped start stays
         // until its close settles
-        if (!this.closing) runningApps.delete(this.close)
+        if (!this.closing) {
+          runningApps.delete(this.close)
+          await this.undoStart()
+        }
         // A shard ends, for its manager to restart, or to stop all if told it is fatal; a stopped start is the stop's
         if (this.shard && !this.closing) endFailedShard(error)
         throw error
@@ -284,11 +301,35 @@ export class MeoCordApp implements MeoCordApplication {
     if (!(await this.close()) && !process.exitCode) process.exitCode = 1
   }
 
+  /**
+   * Shuts down what a failed start made, by the rule a stop follows, and drops it from the container, so the process
+   * holds nothing of it open and a retry makes it afresh.
+   */
+  private async undoStart(): Promise<void> {
+    if (!this.attempt || !this.made && this.attempt.constructed.size === 0) return
+    const { given } = this.attempt
+    const entries = this.shutdownEntries().filter(({ token }) => !given.has(token))
+    this.attempt.constructed.clear()
+    this.readySettled.clear()
+    this.attempt.drop()
+    this.made = false
+    // Nothing came online, so no call runs and no listener needs removing
+    await runShutdownSequence(this.container, () => entries, {
+      drainCalls: () => this.calls.settled(),
+      timeoutMs: this.shutdownTimeout,
+      hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
+      warn: message => this.logger.warn(message),
+    })
+  }
+
   /** The `start()` under way, which a concurrent call waits for. */
   private starting?: Promise<void>
 
-  /** Whether the providers, services and event handlers are set up, which a retry after a failed login reuses. */
-  private prepared = false
+  /** Whether this start's providers and services are made; a failed start drops them, so a retry makes them again. */
+  private made = false
+
+  /** Whether the Discord event handlers are attached, once for the app: they resolve what they run as each event comes. */
+  private attached = false
 
   /** Whether the bot logged in, after which `start()` has nothing to do. */
   private online = false
@@ -303,7 +344,8 @@ export class MeoCordApp implements MeoCordApplication {
     // A bot runs one app, whose theme code outside any call reads, its providers' factories included; claimed for
     // each start, as a failed one gives it up
     claimAmbientAppTheme(this.container)
-    if (!this.prepared) {
+    if (!this.made) {
+      this.attempt?.begin()
       // Kept while it runs, so a stop meanwhile waits for it
       this.preparing = this.prepare()
       try {
@@ -311,7 +353,11 @@ export class MeoCordApp implements MeoCordApplication {
       } finally {
         this.preparing = undefined
       }
-      this.prepared = true
+      this.made = true
+    }
+    if (!this.attached) {
+      this.attachHandlers()
+      this.attached = true
     }
     if (this.loginFailed) {
       warnDeprecatedBehaviour(this.logger, 'Retrying start() after a failed login', 'rejects', 'MeoCordFactory.create to make a new app')
@@ -329,7 +375,7 @@ export class MeoCordApp implements MeoCordApplication {
   /** The provider factory the startup awaits, by its token's name, for a stop that outlasts it to name. */
   private pendingProvider?: string
 
-  /** Makes the provided values and listed services, and attaches the Discord event handlers. */
+  /** Makes the provided values and listed services. */
   private async prepare(): Promise<void> {
     // Every provided value is made before anything that injects it is resolved, and before login
     if (this.startup) {
@@ -353,7 +399,10 @@ export class MeoCordApp implements MeoCordApplication {
       this.storeReady = Promise.withResolvers<void>()
       waitForCooldownStore(this.container, this.storeReady.promise)
     }
+  }
 
+  /** Attaches the Discord event handlers. */
+  private attachHandlers(): void {
     this.bot.on('clientReady', readyClient =>
       this.runListener('clientReady', async () => {
         // Only for activities the app listed: without them, a status it sets itself stays as it set it
@@ -623,14 +672,11 @@ export class MeoCordApp implements MeoCordApplication {
    * whose dependencies failed. Once shutdown begins, no further hook starts.
    */
   private async runReadyHooks(client: Client<true>): Promise<void> {
-    const entries: LifecycleEntry[] = []
-    this.lifecycleEntries = entries
     await this.readyPass.run(() => runReadyHooks(
       this.container,
       this.lifecycleUnits,
       client,
       { primary: client.shard ? client.shard.ids.includes(0) : true },
-      entries,
       {
         resolveFailed: (unit, error) => this.logger.error(`Could not resolve ${unit.name} to run its lifecycle hooks:`, error),
         hookFailed: (unit, error) => this.logger.error(`onReady failed in ${unit.name}:`, error),
@@ -642,7 +688,10 @@ export class MeoCordApp implements MeoCordApplication {
       {
         stopped: () => this.closing,
         slowAfterMs: SLOW_READY_HOOK_MS,
-        settled: unit => unit.cooldownStore && this.storeReady?.resolve(),
+        settled: unit => {
+          this.readySettled.add(unit.token)
+          if (unit.cooldownStore) this.storeReady?.resolve()
+        },
         runOnReady: this.readyPass.runOnReady,
       },
     ))
@@ -650,10 +699,31 @@ export class MeoCordApp implements MeoCordApplication {
     this.storeReady?.resolve()
   }
 
+  /**
+   * The units a shutdown closes: each one the container constructed whose `onReady`, and that of every unit it depends
+   * on, has settled or doesn't exist, in dependency order. A unit whose `onReady` never ran gets no `onShutdown`, so a
+   * hook that undoes `onReady` never runs without it, and neither does anything that depends on it.
+   */
+  private shutdownEntries(): LifecycleEntry[] {
+    const units = new Set(this.lifecycleUnits.map(({ token }) => token))
+    const closes = new Set<unknown>()
+    const entries: LifecycleEntry[] = []
+    for (const unit of this.lifecycleUnits) {
+      if (!this.attempt?.constructed.has(unit.token)) continue
+      // Already made, so this returns the instance; a provided value may be anything, null included
+      const instance = (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}
+      const ready = typeof instance.onReady !== 'function' || this.readySettled.has(unit.token)
+      if (!ready || unit.dependencies.some(dependency => units.has(dependency) && !closes.has(dependency))) continue
+      closes.add(unit.token)
+      entries.push(lifecycleEntry(unit, instance))
+    }
+    return entries
+  }
+
   /** Runs the `onShutdown` hooks through the shutdown sequence, within the configured `shutdownTimeout`. */
   private async runShutdownHooks(): Promise<void> {
-    // Read once the onReady in progress settled; a login that failed never ran onReady, so there is no onShutdown to undo
-    await runShutdownSequence(this.container, () => this.lifecycleEntries ?? [], {
+    // Read once the onReady in progress settled
+    await runShutdownSequence(this.container, () => this.shutdownEntries(), {
       // No new call starts once the listeners are gone; an error the client emits meanwhile still has its listeners
       drainCalls: () => {
         const emitter: EventEmitter = this.bot
@@ -714,11 +784,13 @@ export class MeoCordApp implements MeoCordApplication {
     // So nothing is made after the bot has shut down; a factory that fails meanwhile is a failure of the stop too
     const startupFailed = this.preparing !== undefined && (await this.waitForStartup(this.preparing))
 
-    // Nothing came online, so there are no hooks to undo; the listeners go first, so none of them runs
+    // Nothing came online, so no onReady ran; the listeners go first, so none of them runs, then what the start made
+    // without an onReady to wait for shuts down
     if (this.abortLogin) {
       this.logger.log('The bot was still logging in, so it stops without coming online')
       this.bot.removeAllListeners()
       this.abortLogin()
+      await this.runShutdownHooks()
       this.logger.log('Bot has shut down')
       return true
     }

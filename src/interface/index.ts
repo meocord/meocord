@@ -119,7 +119,8 @@ export interface MeoCordApplication {
    * not waited for.
    *
    * A stop while the bot starts ends that start: it waits for the providers being made, at most `shutdownTimeout`, and
-   * nothing more is made after it. A call after the first waits for it, and a stopped app does not start again.
+   * nothing more is made after it. What the start made is shut down by the rule {@link OnShutdown} gives. A call after
+   * the first waits for it, and a stopped app does not start again.
    *
    * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged, and sets
    *   `process.exitCode` to 1 unless another code is already set.
@@ -202,16 +203,22 @@ export interface OnReady {
  * Implement it to stop what {@link OnReady} started: timers, open connections, writes still buffered.
  *
  * @remarks
- * Called when the bot stops, on SIGINT or SIGTERM or through `app.stop()`, before the client is destroyed, and only
- * if `onReady` hooks ran. Hooks run one at a time in reverse dependency order, so a service stops before the services
- * it injects. The whole sequence is limited by `shutdownTimeout` in `meocord.config.ts`; shutdown then goes on
- * whether or not it finished. A hook that throws is logged and the next one still runs.
+ * Called when the bot stops, on SIGINT or SIGTERM or through `app.stop()`, before the client is destroyed, and when
+ * its start fails. Hooks run one at a time in reverse dependency order, so a service stops before the services it
+ * injects. The whole sequence is limited by `shutdownTimeout` in `meocord.config.ts`; shutdown then goes on whether or
+ * not it finished. A hook that throws is logged and the next one still runs.
  *
- * It runs only for a class whose `onReady` has finished, or that has none. A stop while the ready hooks
- * are running waits for the `onReady` in progress, within `shutdownTimeout`, then shuts that class down too;
- * those not reached yet are skipped, and no further `onReady` starts. An `onReady` still running once only the
- * hooks' share of the timeout is left is named in a warning and skipped. An `onReady` that threw counts as
+ * It runs for each class and provided value the bot has made whose `onReady`, and that of everything it depends on,
+ * has finished or doesn't exist. So a provided value with no `onReady`, such as a connection pool, is closed on any
+ * stop once it is made, one during startup included, while a class whose `onReady` never ran is not shut down, nor is
+ * anything that depends on it. A stop while the ready hooks are running waits for the `onReady` in progress, within
+ * `shutdownTimeout`, then shuts that class down too, and no further `onReady` starts. An `onReady` still running once
+ * only the hooks' share of the timeout is left is named in a warning and skipped. An `onReady` that threw counts as
  * finished, so its partial setup is cleaned up.
+ *
+ * A start that fails, because a provider's factory or the login failed, shuts down what it made by the same rule, so
+ * the process can end with its exit code. A value the app gave with `useValue` is left open, and a retry of `start()`
+ * makes the rest again.
  *
  * @example
  * ```ts
