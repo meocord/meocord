@@ -96,6 +96,10 @@ type JsonObject<T> = {
  *
  * A `BigInt` cannot be written, so it is `never`.
  *
+ * An object arrives with its own enumerable fields only. A class's getters are left out, yet stay in this type, as
+ * TypeScript can't tell a getter from a field: return a plain object, or give the class a `toJSON`, for a value
+ * with getters.
+ *
  * @typeParam T - The value before it is sent.
  * @group Types
  * @see {@link ShardContext.call}
@@ -229,11 +233,11 @@ export class ShardContext {
    *
    * With process sharding that is one result per shard; with one process, a single result listing every
    * shard. The arguments and the result pass as JSON in every mode, one process and tests included, so a
-   * `Date` arrives as a string and a `Map` as `{}` wherever it runs, and a value JSON cannot carry, such as a
-   * `BigInt`, fails the call. A method whose params JSON would change, such as one taking a `Date`, cannot be called:
-   * the argument is refused, naming what to declare instead. An `undefined` argument arrives as `undefined`. A process
-   * that throws, lacks the service, or does not answer within 10 seconds gives an error result instead of failing the
-   * others.
+   * `Date` arrives as a string, a `Map` as `{}` and a class instance as its own fields, without its getters, wherever
+   * it runs, and a value JSON cannot carry, such as a `BigInt`, fails the call. A method whose params JSON would
+   * change, such as one taking a `Date`, cannot be called: the argument is refused, naming what to declare instead. An
+   * `undefined` argument arrives as `undefined`. A process that throws, lacks the service, or does not answer within
+   * 10 seconds gives an error result instead of failing the others.
    *
    * @param service - The controller, the service, or a class a provider stands in for; each process resolves its own
    *   instance.
