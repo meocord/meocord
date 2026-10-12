@@ -263,6 +263,9 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.online) return
     this.starting ??= this.startOnce()
       .catch(error => {
+        // A failed start leaves the running apps, so a signal later stops only the apps that run; a stopped start stays
+        // until its close settles
+        if (!this.closing) runningApps.delete(this.close)
         // A shard ends, for its manager to restart, or to stop all if told it is fatal; a stopped start is the stop's
         if (this.shard && !this.closing) endFailedShard(error)
         throw error
@@ -416,7 +419,6 @@ export class MeoCordApp implements MeoCordApplication {
       await Promise.race([login, stopped])
     } catch (error) {
       if (this.closing) throw error
-      runningApps.delete(this.close)
       // A bot that never came online is not the app whose theme is read outside calls
       releaseAmbientAppTheme(this.container)
       const fatal = fatalLoginCode(error)
