@@ -2883,14 +2883,15 @@ function mentionsOf(content: string | undefined, client: unknown, guild: unknown
           ]),
         )
       : null,
+    // Full mocks, as the gateway delivers them: a role of the server, and a channel with its managers and overwrites
     roles: new Collection(
-      guildCaches ? roles.map(id => [id, cached(guildCaches.roles, id, () => stubDeep(Object.assign(Object.create(Role.prototype), { id, guild })))]) : [],
+      guildCaches ? roles.map(id => [id, cached(guildCaches.roles, id, () => createMockInteraction(Role, { id, guild } as never) as Role)]) : [],
     ),
     channels: new Collection(
       channels.map(id => [
         id,
         cached(guildCaches ? guildCaches.channels : cacheOf((client as Client).channels), id, () =>
-          stubDeep(Object.assign(Object.create(TextChannel.prototype), { id, guild })),
+          createMockChannel(TextChannel, (guild ? { id, guild } : { id }) as never),
         ),
       ]),
     ),

@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { vi } from 'vitest'
-import { Client, type GuildMember, type Message, type User } from 'discord.js'
+import { Client, Collection, type GuildMember, type Message, PermissionsBitField, Role, TextChannel, type User } from 'discord.js'
 import { Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
@@ -28,6 +28,22 @@ describe('createMockMessage caches', () => {
     expect([...message.mentions.members!.keys()]).toEqual([USER, OTHER])
     expect([...message.mentions.roles.keys()]).toEqual([ROLE])
     expect([...message.mentions.channels.keys()]).toEqual([CHANNEL])
+  })
+
+  it('makes a mentioned channel and role full mocks of the server, so their permissions and managers work', () => {
+    const guild = createMockGuild()
+    const message = createMockMessage({ content: `!lock <@&${ROLE}> <#${CHANNEL}>`, guild })
+    const channel = message.mentions.channels.first() as TextChannel
+    const role = message.mentions.roles.first()!
+
+    expect(channel).toBeInstanceOf(TextChannel)
+    expect(channel.guild).toBe(guild)
+    expect(channel.permissionsFor(guild.members.me!)).toBeInstanceOf(PermissionsBitField)
+    expect(channel.messages.cache).toBeInstanceOf(Collection)
+    expect(channel.permissionOverwrites.cache).toBeInstanceOf(Collection)
+    expect(role).toBeInstanceOf(Role)
+    expect(role.guild).toBe(guild)
+    expect(typeof role.position).toBe('number')
   })
 
   it('caches a mentioned user but no member in a DM', () => {
