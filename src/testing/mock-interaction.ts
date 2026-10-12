@@ -1989,6 +1989,7 @@ export interface MockGuildOverrides {
 const HOLDS: readonly (readonly [object, object])[] = [
   [GuildMemberManager.prototype, GuildMember],
   [RoleManager.prototype, Role],
+  [GuildMemberRoleManager.prototype, Role],
   [GuildChannelManager.prototype, GuildChannel],
   [UserManager.prototype, User],
   [ChannelManager.prototype, BaseChannel],
@@ -2010,6 +2011,10 @@ const HOLDS: readonly (readonly [object, object])[] = [
   [GuildInviteManager.prototype, Invite],
 ]
 
+/** What a manager of `prototype` holds, as discord.js's resolve() checks an item against. */
+const holdsOf = (prototype: object): object | undefined =>
+  HOLDS.find(([Manager]) => Manager === prototype || Object.prototype.isPrototypeOf.call(Manager, prototype))?.[1]
+
 /**
  * A manager whose `cache` is a real collection of `items`, by id, empty without them, and whose methods are stubs but
  * for `resolve` and `resolveId`, which read the cache. Its `client` is the one its guild or channel has.
@@ -2020,7 +2025,7 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
   Object.defineProperty(manager, 'cache', { value: cache, writable: true })
   // The same collection where discord.js's own methods read it past a subclass's `cache`, as `super.cache` does
   Object.defineProperty(manager, '_cache', { value: cache, writable: true })
-  const holds = HOLDS.find(([Manager]) => Manager === prototype || Object.prototype.isPrototypeOf.call(Manager, prototype))?.[1]
+  const holds = holdsOf(prototype)
   if (holds) Object.defineProperty(manager, 'holds', { value: holds })
   let own: unknown
   Object.defineProperty(manager, 'client', {
@@ -2244,9 +2249,13 @@ export function memberRoles(member: object, roles: readonly Role[]): GuildMember
         : (entry as Role),
     )
   const manager = Object.create(GuildMemberRoleManager.prototype) as Record<string, unknown>
+  // Its member's server and client, as discord.js's constructor sets them, and what it holds, so resolve() reads it
   Object.defineProperties(manager, {
     cache: { get: cache },
     member: { value: member },
+    guild: { get: () => (member as GuildMember).guild },
+    client: { get: () => (member as GuildMember).client },
+    holds: { value: holdsOf(GuildMemberRoleManager.prototype) },
     highest: { get: highest },
   })
   manager.add = createMockFn(async (value: unknown) => {
