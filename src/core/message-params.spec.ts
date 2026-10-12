@@ -4,7 +4,7 @@ import { MessageUsageError } from '@src/common/errors.js'
 import { type MessageParamType } from '@src/interface/index.js'
 import { buildMessageRoutes, matchMessageRoute, type MessageRoute } from '@src/core/message-routes.js'
 import { fitsParamType, missingParams, resolveMessageParams, usageOf } from '@src/core/message-params.js'
-import { createMockGuild, createMockMessage } from '@src/testing/index.js'
+import { createMockGuild, createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
 
 const ID = (n: number) => String(100_000_000_000_000_000n + BigInt(n))
 
@@ -162,6 +162,44 @@ describe('typed message params', () => {
     for (const r of [`<@&${ID(10)}>`, ID(10), 'moderator']) {
       expect(await resolveMessageParams(route, { r, c: `<#${ID(20)}>` }, message, '!', undefined)).toEqual({ r: role, c: channel })
     }
+  })
+
+  it('finds a role by name when it ends the pattern, and only by mention or ID when another optional param follows', async () => {
+    const role = { id: ID(11), name: 'Mods' } as unknown as Role
+    const ran: [string, object][] = []
+
+    @Controller()
+    class Roles {
+      @MessageHandler('one {r:role?}')
+      one(_message: unknown, params: { r?: Role }) {
+        ran.push(['one', params])
+      }
+
+      @MessageHandler('grant {r:role}')
+      grant(_message: unknown, params: { r: Role }) {
+        ran.push(['grant', params])
+      }
+
+      @MessageHandler('tail {r:role?} {n:int?}')
+      tail(_message: unknown, params: { r?: Role; n?: number }) {
+        ran.push(['tail', params])
+      }
+    }
+
+    @MeoCord({ controllers: [Roles], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class App {}
+
+    const module = MeoCordTestingModule.fromApp(App).compile()
+    for (const content of ['!one Mods', '!grant mods', `!tail <@&${ID(11)}> 3`, `!tail ${ID(11)}`, '!tail Mods 3', '!tail Mods']) {
+      await module.dispatch(createMockMessage({ content, guild: createMockGuild({ roles: [role] }) }))
+    }
+
+    expect(ran).toEqual([
+      ['one', { r: role }],
+      ['grant', { r: role }],
+      ['tail', { r: role, n: 3 }],
+      ['tail', { r: role }],
+    ])
   })
 
   it('resolves a user from the client cache, or fetches it', async () => {

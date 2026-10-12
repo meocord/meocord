@@ -921,7 +921,10 @@ export interface MessageParamTypes {
   member: GuildMember
   /** A user, by mention or ID. */
   user: User
-  /** A role of the message's server, by mention, ID or name. */
+  /**
+   * A role of the message's server, by mention, ID or name; an optional one that another optional param follows
+   * takes a mention or an ID only.
+   */
   role: Role
   /** A channel of the message's server, by mention or ID. */
   channel: GuildBasedChannel
