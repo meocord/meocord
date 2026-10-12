@@ -40,11 +40,11 @@ export function bunDevelopmentValues(
   const productionFiles = envFiles('production')
   // In Bun's order, a later file winning, as the config's dotenv also settles them
   const production: Record<string, string> = Object.assign({}, ...productionFiles.map(file => read(root, file)))
-  const development = new Map<string, { value: string; file: string }>()
-  for (const file of envFiles(env.NODE_ENV).filter(file => !productionFiles.includes(file))) {
-    for (const [key, value] of Object.entries(read(root, file))) development.set(key, { value, file })
-  }
-  const loaded = [...development].filter(([key, { value }]) => env[key] === value && production[key] !== value)
+  const files = envFiles(env.NODE_ENV)
+  // Listed file by file, in Bun's order
+  const loaded = [...bunLoadedValues(env, root, files)]
+    .filter(([key, { value, file }]) => !productionFiles.includes(file) && env[key] === value && production[key] !== value)
+    .sort(([, a], [, b]) => files.indexOf(a.file) - files.indexOf(b.file))
   if (loaded.length === 0) return none
   return { files: [...new Set(loaded.map(([, { file }]) => file))].sort(), keys: loaded.map(([key]) => key), nodeEnv: env.NODE_ENV }
 }
@@ -64,13 +64,73 @@ export function bunDevelopmentWarning({ files, keys, nodeEnv }: BunEnvValues): s
  * Bun replaces a variable already set, so an inherited copy would keep a value a file no longer holds; the bot reads the
  * files itself as it starts. A variable the shell sets to another value is kept.
  */
-export function inheritedEnvironment(env: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
+export function inheritedEnvironment(
+  env: NodeJS.ProcessEnv,
+  root: string,
+  bun = process.versions.bun !== undefined,
+): NodeJS.ProcessEnv {
+  const files = envFiles(env.NODE_ENV)
   const fromFiles = new Map<string, Set<string>>()
-  for (const file of envFiles(env.NODE_ENV)) {
-    for (const [key, value] of Object.entries(read(root, file))) fromFiles.set(key, (fromFiles.get(key) ?? new Set()).add(value))
-  }
+  const add = (key: string, value: string) => fromFiles.set(key, (fromFiles.get(key) ?? new Set()).add(value))
+  // As dotenv sets them, and, when the CLI runs on Bun, as Bun set them before any code ran
+  for (const file of files) for (const [key, value] of Object.entries(read(root, file))) add(key, value)
+  if (bun) for (const [key, { value }] of bunLoadedValues(env, root, files)) add(key, value)
   return Object.fromEntries(Object.entries(env).filter(([key, value]) => value === undefined || !fromFiles.get(key)?.has(value)))
 }
+
+/**
+ * The value Bun gives each variable the .env files set, and the file it comes from: Bun loads them before any code
+ * runs, the file that wins in `files` first, sets only a variable not already set, and expands `$NAME`, `${NAME}` and
+ * `${NAME:-default}` line by line from what is set so far, a later line of the same file giving its text as written.
+ * A variable the shell set keeps the shell's value, which `env` holds, so it differs from the one given here.
+ */
+function bunLoadedValues(env: NodeJS.ProcessEnv, root: string, files: string[]): Map<string, { value: string; file: string }> {
+  // Each variable's first line in Bun's order: the one Bun loads it from
+  const lines: { key: string; text: string; file: string; own: Record<string, string> }[] = []
+  const first = new Map<string, number>()
+  for (const file of [...files].reverse()) {
+    const own = read(root, file)
+    for (const [key, text] of Object.entries(own)) {
+      if (!first.has(key)) first.set(key, lines.length)
+      lines.push({ key, text, file, own })
+    }
+  }
+  const values = new Map<number, string>()
+  const fromShell = new Map<string, boolean>()
+  // A variable the shell set holds a value its line doesn't give; one its own line refers to back counts as from it
+  const shellSet = (key: string): boolean => {
+    if (!fromShell.has(key)) {
+      fromShell.set(key, false)
+      fromShell.set(key, env[key] !== undefined && env[key] !== valueAt(first.get(key)!))
+    }
+    return fromShell.get(key)!
+  }
+  const valueAt = (index: number): string => {
+    if (!values.has(index)) {
+      const { text, file, own } = lines[index]
+      const lookup = (name: string): string => {
+        const at = first.get(name)
+        if (at === undefined || shellSet(name) || at < index) return env[name] ?? ''
+        // Not loaded yet: its text as written in this file, or unset until a later file loads it
+        return lines[at].file === file ? own[name] : ''
+      }
+      values.set(index, expandAsBun(text, lookup))
+    }
+    return values.get(index)!
+  }
+  return new Map([...first].map(([key, index]) => [key, { value: valueAt(index), file: lines[index].file }]))
+}
+
+/** A `$NAME` or `${NAME}` reference, with `${NAME:-default}`'s default, or a `\$` Bun reads as a dollar sign. */
+const BUN_REFERENCE = /\\\$|\$\{([A-Za-z0-9_]+)(?::-([^}]*))?\}|\$([A-Za-z0-9_]+)/g
+
+/** A .env value as Bun expands it, each reference read through `lookup`; any other `$` stays as it is. */
+const expandAsBun = (text: string, lookup: (name: string) => string): string =>
+  text.replace(BUN_REFERENCE, (match, braced?: string, fallback?: string, bare?: string) => {
+    if (match === '\\$') return '$'
+    const value = lookup((braced ?? bare)!)
+    return fallback !== undefined && value === '' ? fallback : value
+  })
 
 /** A .env file's values, or none when it is not there to read. */
 function read(root: string, file: string): Record<string, string> {
