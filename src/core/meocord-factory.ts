@@ -179,8 +179,8 @@ export class MeoCordFactory {
     } catch (error) {
       // A shard ends, so its manager restarts it, or stops every shard for a refusal, which it logs
       if (shard) endFailedShard(error)
-      // Reported here in a built application, so it reads the same whether main.ts catches it or not; main.ts, or the
-      // report of an uncaught refusal, exits 1. A test or script gets the error as it is.
+      // Reported here in a built application, so it reads the same whether main.ts catches it or not. A test or script
+      // gets the error as it is.
       else if (isRefusal(error) && !isExplainedError(error)) {
         // Every startup error found together is logged, in a test too; a lone one is logged in a built application
         if (logStartupErrors(error, text => this.logger.error(text), 'the bot did not start')) markExplained(error)
@@ -188,6 +188,10 @@ export class MeoCordFactory {
           this.logger.error(describeRefusal(error, process.cwd()))
           markExplained(error)
         }
+      }
+      // A built bot that refuses its app exits 1, as one whose start fails does, whatever main.ts does with the error
+      if (!shard && isBuiltApplication() && isRefusal(error) && (process.exitCode === undefined || process.exitCode === 0)) {
+        process.exitCode = 1
       }
       throw error
     }
