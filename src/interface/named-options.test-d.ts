@@ -77,6 +77,16 @@ describe('named decorator options', () => {
     void [App, Extended, wrong]
   })
 
+  it('take controllers as classes, as @MeoCord does at runtime', () => {
+    class Ping {}
+    expectTypeOf<{ controllers: [typeof Ping] }>().toMatchTypeOf<Pick<MeoCordOptions, 'controllers'>>()
+    // @ts-expect-error a string names no controller class
+    expectTypeOf<{ controllers: ['PingController'] }>().toMatchTypeOf<Pick<MeoCordOptions, 'controllers'>>()
+    // @ts-expect-error a symbol names no controller class
+    expectTypeOf<{ controllers: [symbol] }>().toMatchTypeOf<Pick<MeoCordOptions, 'controllers'>>()
+    void Ping
+  })
+
   it("name an entry point builder's build() result", () => {
     expectTypeOf<PrimaryEntryPointCommandData>().toEqualTypeOf<CommandBuildResult<CommandType.PRIMARY_ENTRY_POINT>>()
   })
