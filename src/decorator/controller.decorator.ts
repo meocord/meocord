@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { type EventHandlerMetadata } from '@src/decorator/event.decorator.js'
 import {
   ApplicationCommandType,
   type AutocompleteInteraction,
@@ -101,7 +102,7 @@ export function getHandlerRoutes(prototype: object): HandlerRoute[] {
  * Adds a handler the class's own decorator declares. One it inherits for the same method and route is replaced where
  * it stands, so the class's own options apply and the routes keep their order.
  */
-function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (other: T) => boolean): void {
+export function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (other: T) => boolean): void {
   const handlers = ownHandlerList<T>(key, target)
   const inherited: T[] = Reflect.getMetadata(key, Object.getPrototypeOf(target) as object) ?? []
   const index = handlers.findIndex(other => inherited.includes(other) && sameRoute(other))
@@ -115,9 +116,12 @@ function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (ot
  * for it: what `@Controller({ inheritedRoutes: 'replace' })` does once the class's method decorators have run.
  */
 export function dropInheritedRoutes(prototype: object): void {
-  const redeclared = new Set(getDeclaredRoutes(prototype).map(route => route.method))
-  if (redeclared.size === 0) return
   const base = Object.getPrototypeOf(prototype) as object
+  // The class's own @On and @Once, those that are not entries it inherits, re-declare their methods too
+  const inheritedEvents: EventHandlerMetadata[] = Reflect.getMetadata(META.eventHandlers, base) ?? []
+  const ownEvents = ownHandlerList<EventHandlerMetadata>(META.eventHandlers, prototype).filter(entry => !inheritedEvents.includes(entry))
+  const redeclared = new Set([...getDeclaredRoutes(prototype).map(route => route.method), ...ownEvents.map(entry => entry.method)])
+  if (redeclared.size === 0) return
   // An entry the class takes from its base, for a method it re-declares
   const inheritedFor = (inherited: readonly unknown[], method: (entry: never) => string) => (entry: unknown) =>
     inherited.includes(entry) && redeclared.has(method(entry as never))
@@ -135,6 +139,7 @@ export function dropInheritedRoutes(prototype: object): void {
     [META.messageHandlers, (entry: MessageHandlerMetadata) => entry.method],
     [META.reactionHandlers, (entry: ReactionHandlerMetadata) => entry.method],
     [META.autocompleteHandlers, (entry: AutocompleteMeta) => entry.methodName],
+    [META.eventHandlers, (entry: EventHandlerMetadata) => entry.method],
   ]
   for (const [key, method] of lists) {
     const inherited: unknown[] = Reflect.getMetadata(key, base) ?? []
