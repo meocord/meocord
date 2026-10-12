@@ -9,6 +9,7 @@ import {
   MemoryCooldownStore,
   type RecordedCall,
   recordedOf,
+  singleVerdict,
   withRelease,
 } from '@src/common/cooldown-store.js'
 import { isShardMessage, type ShardMessage } from '@src/core/shard-messages.js'
@@ -97,8 +98,7 @@ export class ShardedCooldownStore extends CooldownStore {
    * @returns Whether this call was recorded, and if not, how long until one can be.
    */
   async consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
-    const { allowed, retryAfterMs } = await this.consumeMany([{ key, limit }])
-    return { allowed, retryAfterMs }
+    return singleVerdict(await this.consumeMany([{ key, limit }]))
   }
 
   /**

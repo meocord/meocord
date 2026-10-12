@@ -372,6 +372,32 @@ describe('dmOnCooldown', () => {
     expect([await sendAt(1_000, 0), await sendAt(2_000, 250)]).toEqual([1, 0])
   })
 
+  // A store of its own that keeps the default consumeMany and asks a built-in store's consume for each key
+  it('DMs once in a wait however late each answer comes back, with a store that delegates consume', async () => {
+    let lag = 0
+    class DelegatingStore extends CooldownStore {
+      private readonly memory = new MemoryCooldownStore()
+      async consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
+        const verdict = await this.memory.consume(key, limit)
+        if (!key.includes(':notice:')) vi.setSystemTime(Date.now() + lag)
+        return verdict
+      }
+    }
+    vi.useFakeTimers({ now: 0, toFake: ['Date'] })
+    const module = MeoCordTestingModule.create({ app: TellingApp, controllers: [Commands], providers: [{ provide: CooldownStore, useValue: new DelegatingStore() }] }).compile()
+    const sendAt = async (ms: number, late: number) => {
+      vi.setSystemTime(ms)
+      lag = late
+      const message = messageOf('!roll 6')
+      await module.dispatch(message)
+      return vi.mocked(message.author.send).mock.calls.length
+    }
+
+    await sendAt(0, 0)
+
+    expect([await sendAt(1_000, 0), await sendAt(2_000, 250)]).toEqual([1, 0])
+  })
+
   // A store of its own may answer only how long is left, so the wait's end is worked out on the bot's clock
   it('DMs once in a wait with a store that gives no end of the wait', async () => {
     class PlainStore extends MemoryCooldownStore {
