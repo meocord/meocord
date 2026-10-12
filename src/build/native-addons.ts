@@ -214,16 +214,21 @@ export function createNativeExternals(root: string): {
   return { externals, found }
 }
 
+/** The sole entry of an `os`, `cpu` or `libc` list that admits every value. */
+const ANY_PLATFORM = 'any'
+
 /**
- * Whether a value passes a package.json `os`, `cpu` or `libc` list, the way npm reads one: a `!`
- * entry excludes its value, and a list with plain entries admits only those.
+ * Whether a value passes a package.json `os`, `cpu` or `libc` field, the way npm reads one (npm-install-checks'
+ * `checkList`): a string is a list of one, `['any']` admits every value, a `!` entry excludes its value, and a list with
+ * plain entries admits only those.
  */
-function allowedBy(list: unknown, value: string): boolean {
-  if (!Array.isArray(list) || list.length === 0) return true
-  const entries = list.filter((entry): entry is string => typeof entry === 'string')
-  if (entries.includes(`!${value}`)) return false
-  const admitted = entries.filter(entry => !entry.startsWith('!'))
-  return admitted.length === 0 || admitted.includes(value)
+function allowedBy(field: unknown, value: string): boolean {
+  if (!field || (typeof field !== 'string' && !Array.isArray(field))) return true
+  const list = typeof field === 'string' ? [field] : field.filter((entry): entry is string => typeof entry === 'string')
+  if (list.length === 1 && list[0] === ANY_PLATFORM) return true
+  const excluded = list.filter(entry => entry.startsWith('!'))
+  if (excluded.includes(`!${value}`)) return false
+  return excluded.length === list.length || list.includes(value)
 }
 
 /**
