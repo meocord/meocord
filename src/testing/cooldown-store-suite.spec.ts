@@ -253,3 +253,22 @@ describe('testCooldownStore', { timeout: 30_000 }, () => {
     expect(names.every(name => name.startsWith('a store as a CooldownStore > '))).toBe(true)
   })
 })
+
+describe("a store that extends the other build's CooldownStore", () => {
+  // A process can load both builds, as a CommonJS store package tested in an ES module project does; a module copy of
+  // its own is the second build here
+  it('passes the suite implementing consume alone, as one that extends this build does', async () => {
+    vi.resetModules()
+    const other = await import('@src/common/cooldown-store.js')
+    expect(other.CooldownStore).not.toBe(CooldownStore)
+
+    class OnlyConsume extends other.CooldownStore {
+      private readonly counts = new MemoryCooldownStore()
+      consume(key: string, limit: CooldownLimit): Promise<CooldownVerdict> {
+        return this.counts.consume(key, limit)
+      }
+    }
+
+    expect(await failures(() => new OnlyConsume() as unknown as CooldownStore)).toEqual([])
+  })
+})

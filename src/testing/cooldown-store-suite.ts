@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { CooldownStore, type CooldownVerdict } from '@src/common/cooldown-store.js'
+import { type CooldownStore, type CooldownVerdict, isDefaultBatchMethod } from '@src/common/cooldown-store.js'
 
 /** The assertions the suite makes, which both Vitest's and Jest's `expect` provide. */
 interface Expectation {
@@ -320,10 +320,10 @@ export function testCooldownStore(
 
 /** Whether a store overrides `consumeMany`, as a store that counts a batch at once does. */
 function overridesConsumeMany(store: CooldownStore): boolean {
-  return store.consumeMany !== CooldownStore.prototype.consumeMany
+  return !isDefaultBatchMethod(store.consumeMany)
 }
 
 /** Whether a store overrides `peekMany`, as a store that can check a batch without recording it does. */
 function overridesPeekMany(store: CooldownStore): boolean {
-  return store.peekMany !== CooldownStore.prototype.peekMany
+  return !isDefaultBatchMethod(store.peekMany)
 }
