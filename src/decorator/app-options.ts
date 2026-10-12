@@ -165,10 +165,10 @@ export interface MeoCordOptions<
   /**
    * Themes by where a call comes from: `guild` for a server's, over the handler's, and `user` for a user's, over the
    * server's, in a server or a DM. Each returns part of a theme or `undefined`, at once or as a promise, and is looked
-   * up while `@Defer` acknowledges, before the guards. A result that is not a valid theme is left out, with a warning
-   * once per server or user; a resolver that fails or passes its timeout leaves its theme out of the call, logged once
-   * until it answers again. A class implementing {@link ThemeResolver} does the same with the app's services, resolved
-   * from its container.
+   * up while `@Defer` acknowledges, before the guards. A result that is not a valid theme, as is one that cannot be
+   * read, such as an object with a cycle or a getter that throws, is left out, with a warning once per server or user;
+   * a resolver that fails or passes its timeout leaves its theme out of the call, logged once until it answers again.
+   * A class implementing {@link ThemeResolver} does the same with the app's services, resolved from its container.
    */
   themeFor?: ThemeResolvers | (new (...args: any[]) => ThemeResolver)
 
