@@ -965,14 +965,15 @@ export interface EntityRef<T> {
   resolve(): Promise<T | undefined>
 }
 
-/** Splits a pattern into its words, at most 16 of them, so the checker's work stays small. */
-type PatternWords<S extends string, Acc extends string[] = []> = Acc['length'] extends 16
-  ? Acc
-  : S extends `${infer Word} ${infer Rest}`
-    ? PatternWords<Rest, Word extends '' ? Acc : [...Acc, Word]>
-    : S extends ''
-      ? Acc
-      : [...Acc, S]
+/**
+ * Splits a pattern into its words. Each word is one step of tail recursion, with the words found so far in `Acc`, so a
+ * pattern may hold about 1,000 of them.
+ */
+type PatternWords<S extends string, Acc extends string[] = []> = S extends `${infer Word} ${infer Rest}`
+  ? PatternWords<Rest, Word extends '' ? Acc : [...Acc, Word]>
+  : S extends ''
+    ? Acc
+    : [...Acc, S]
 
 /**
  * The value a param's type gives: a named type, or one of the words `a|b` lists. An app's type not declared

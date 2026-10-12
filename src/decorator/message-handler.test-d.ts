@@ -7,6 +7,24 @@ import { type MessageHandlerEntry } from '@src/core/index.js'
 /** Runs under `vitest --typecheck`: what `@MessageHandler` and `@MeoCord({ messages })` accept. */
 
 describe('@MessageHandler params', () => {
+  // Each flag counts as a word, so a command with many flags reaches 16 words soon
+  it('checks the params of a pattern longer than 16 words, past the sixteenth too', () => {
+    expectTypeOf<ParamsOf<'a b c d e f g h i j k l m n o p {last} {--loud}'>>().toEqualTypeOf<ParamsOf<'p {last} {--loud}'>>()
+    class Long {
+      @MessageHandler('a b c d e f g h i j k l m n o p {last}')
+      run(_message: Message, _params: { last: string }) {
+        return undefined
+      }
+
+      // @ts-expect-error the pattern gives last, not lsat
+      @MessageHandler('a b c d e f g h i j k l m n o p {last}')
+      misspelt(_message: Message, _params: { lsat: string }) {
+        return undefined
+      }
+    }
+    void Long
+  })
+
   it('passes a patterned handler its params as the second argument, typed by the handler', () => {
     class Dice {
       @MessageHandler('roll {sides} {note...?}')
