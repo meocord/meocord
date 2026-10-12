@@ -45,7 +45,7 @@ import { PLATFORM_MANIFEST, writePlatformManifest } from '@src/util/platform.uti
 import { loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { FORCE_REGISTER_ENV, REGISTER_GUILD_ENV, REGISTER_ONLY_ENV } from '@src/util/registration-mode.util.js'
+import { FORCE_REGISTER_ENV, REGISTER_GUILD_ENV, REGISTER_MODE_ENV, REGISTER_ONLY_ENV } from '@src/util/registration-mode.util.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -779,6 +779,8 @@ copies or substantial portions of the Software.
         ...this.inheritedEnv,
         // The mode the command set, development for --dev, so the bot's config and Bun read the same .env files as the CLI
         ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
+        // And where it registers, which a bundle can't read from NODE_ENV: bundleDependencies writes in the build's mode
+        [REGISTER_MODE_ENV]: process.env.NODE_ENV === 'development' ? 'development' : 'production',
         ...this.appEnv,
         ...(devRunner && { [DEV_RUNNER_ENV]: '1' }),
       },

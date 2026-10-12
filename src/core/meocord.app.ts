@@ -56,7 +56,7 @@ import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { deliverUncachedDmReactions } from '@src/core/dm-reactions.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
-import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV } from '@src/util/registration-mode.util.js'
+import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV, registersAsDevelopment } from '@src/util/registration-mode.util.js'
 import { shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { escapeForLog } from '@src/util/user-text.util.js'
 
@@ -476,7 +476,7 @@ export class MeoCordApp implements MeoCordApplication {
       controllerClasses: this.controllerClasses,
       logger: this.logger,
       config,
-      development: process.env.NODE_ENV === 'development',
+      development: registersAsDevelopment(),
       force: process.env[FORCE_REGISTER_ENV] === '1',
     })
   }
@@ -511,7 +511,7 @@ export class MeoCordApp implements MeoCordApplication {
       controllerClasses: this.controllerClasses,
       logger: this.logger,
       config: loadMeoCordConfig()?.commands,
-      development: process.env.NODE_ENV === 'development',
+      development: registersAsDevelopment(),
       onlyGuild: process.env[REGISTER_GUILD_ENV],
       force: true,
     })
