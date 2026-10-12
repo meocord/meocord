@@ -37,28 +37,41 @@ export function duration(word: string): number | undefined {
 /** The largest snowflake: Discord's IDs are unsigned 64-bit integers. */
 const MAX_SNOWFLAKE = 2n ** 64n - 1n
 
+/** The fewest and most digits a snowflake has, and the words of that many digits, with no leading zero. */
+const SNOWFLAKE_DIGITS = { min: 17, max: 20 }
+const SNOWFLAKE = new RegExp(`^[1-9]\\d{${SNOWFLAKE_DIGITS.min - 1},${SNOWFLAKE_DIGITS.max - 1}}$`)
+
 /**
  * A Discord ID, kept as its text: 17 to 20 digits, no leading zero, up to the largest 64-bit value. An ID's top 42 bits
  * are milliseconds since 2015-01-01, so every ID made from 2015-01-28 on has 17 digits or more, and none is a safe
  * integer.
  */
-export const snowflake = (word: string): string | undefined => (/^[1-9]\d{16,19}$/.test(word) && BigInt(word) <= MAX_SNOWFLAKE ? word : undefined)
+export const snowflake = (word: string): string | undefined => (SNOWFLAKE.test(word) && BigInt(word) <= MAX_SNOWFLAKE ? word : undefined)
+
+/** A UUID's canonical 8-4-4-4-12 form, 36 characters with its dashes. */
+const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
+const UUID_LENGTH = 36
 
 /** A UUID in its canonical 8-4-4-4-12 form, in either case, kept as written. */
-export const uuid = (word: string): string | undefined =>
-  /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(word) ? word : undefined
+export const uuid = (word: string): string | undefined => (UUID.test(word) ? word : undefined)
 
 /** The words a type such as `on|off` chooses from, or `undefined` for any other type. */
 export const choicesOf = (type: string): string[] | undefined => (type.includes('|') ? type.split('|') : undefined)
 
-/** The types a component's customId segment can take: each parsed from the segment alone, with no request. */
-const SEGMENT_TYPES: Readonly<Record<string, ((segment: string) => unknown) | undefined>> = lookupTable({
-  string: (segment: string) => segment,
-  int: (segment: string) => number(segment, true),
-  number: (segment: string) => number(segment, false),
-  bool,
-  snowflake,
-  uuid,
+/** The shortest segment of any type: one character. */
+const SHORTEST_SEGMENT = 1
+
+/**
+ * The types a component's customId segment can take: each parsed from the segment alone, with no request, and the
+ * fewest characters a segment of it has, which the check for a pattern no customId can match counts.
+ */
+const SEGMENT_TYPES: Readonly<Record<string, { parse: (segment: string) => unknown; shortest: number } | undefined>> = lookupTable({
+  string: { parse: (segment: string) => segment, shortest: SHORTEST_SEGMENT },
+  int: { parse: (segment: string) => number(segment, true), shortest: SHORTEST_SEGMENT },
+  number: { parse: (segment: string) => number(segment, false), shortest: SHORTEST_SEGMENT },
+  bool: { parse: bool, shortest: Math.min(...Object.keys(BOOLEANS).map(word => word.length)) },
+  snowflake: { parse: snowflake, shortest: SNOWFLAKE_DIGITS.min },
+  uuid: { parse: uuid, shortest: UUID_LENGTH },
 })
 
 /**
@@ -71,5 +84,12 @@ export const isSegmentType = (type: string): boolean => type in SEGMENT_TYPES ||
 export function parseSegment(type: string, segment: string): unknown {
   const choices = choicesOf(type)
   if (choices) return choices.includes(segment) ? segment : undefined
-  return SEGMENT_TYPES[type]!(segment)
+  return SEGMENT_TYPES[type]!.parse(segment)
+}
+
+/** The fewest characters a customId segment of `type` has: words to choose from count their shortest word. */
+export function shortestSegment(type: string): number {
+  const choices = choicesOf(type)
+  if (choices) return Math.min(...choices.map(word => word.length))
+  return SEGMENT_TYPES[type]?.shortest ?? SHORTEST_SEGMENT
 }
