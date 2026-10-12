@@ -14,7 +14,8 @@ const UNIT_MS: Readonly<Record<string, number | undefined>> = lookupTable({ ms: 
 
 /** A number written in full, `whole` for an integer: `undefined` for anything else. */
 export function number(word: string, whole: boolean): number | undefined {
-  if (!(whole ? /^[+-]?\d+$/ : /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i).test(word)) return undefined
+  // Each run of digits splits only one way, so refusing a word takes time linear in its length
+  if (!(whole ? /^[+-]?\d+$/ : /^[+-]?(\d+(?:\.\d*)?|\.\d+)(e[+-]?\d+)?$/i).test(word)) return undefined
   const value = Number(word)
   return Number.isFinite(value) && (!whole || Number.isSafeInteger(value)) ? value : undefined
 }
@@ -24,7 +25,8 @@ export const bool = (word: string): boolean | undefined => BOOLEANS[word.toLower
 
 /** A length of time written as amounts and units, such as `90s`, `2h30m` or `1.5d`, in milliseconds. */
 export function duration(word: string): number | undefined {
-  const parts = word.toLowerCase().match(/(\d+(?:\.\d+)?)(ms|s|m|h|d|w)/g)
+  // Sticky: each part starts where the last ended, so the scan stops at the first that doesn't and reads each part once
+  const parts = word.toLowerCase().match(/(\d+(?:\.\d+)?)(ms|s|m|h|d|w)/gy)
   if (!parts || parts.join('') !== word.toLowerCase()) return undefined
   return parts.reduce((total, part) => {
     const [, amount, unit] = /^(\d+(?:\.\d+)?)(ms|s|m|h|d|w)$/.exec(part)!
