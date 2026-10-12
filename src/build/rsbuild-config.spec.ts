@@ -240,4 +240,10 @@ describe('optional externals', () => {
     ])
     expect(optionalExternalConflicts(['supports-color'], ['@opentelemetry/api'])).toEqual([])
   })
+
+  // A `g` pattern's test resumes where its last match ended, so it would miss every other name
+  it('names each optional external a g or y pattern matches', () => {
+    expect(optionalExternalConflicts(['@node-rs/a', '@node-rs/b', '@node-rs/c'], [/^@node-rs\//g])).toEqual(['@node-rs/a', '@node-rs/b', '@node-rs/c'])
+    expect(optionalExternalConflicts(['@node-rs/a', '@node-rs/b'], [/^@node-rs\//y])).toEqual(['@node-rs/a', '@node-rs/b'])
+  })
 })

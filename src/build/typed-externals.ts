@@ -15,6 +15,21 @@ export function externalType(request: string, dependencyType: string | undefined
   return `${dependencyType === 'commonjs' ? 'node-commonjs' : 'import'} ${request}`
 }
 
+/**
+ * Whether a request matches an `externals` entry: a name it equals, or a pattern. A pattern is tested through a copy of
+ * its own, from the start of each request: with the `g` or `y` flag, `test` would otherwise resume where the last match
+ * ended and miss the next request for the same package. A `y` pattern still matches only at the start, as Rsbuild
+ * tests it.
+ */
+export function externalMatcher(entry: string | RegExp): (request: string) => boolean {
+  if (typeof entry === 'string') return request => request === entry
+  const pattern = new RegExp(entry)
+  return request => {
+    pattern.lastIndex = 0
+    return pattern.test(request)
+  }
+}
+
 /** Whether an external's result names its own type, as `node-commonjs zlib-sync` does. */
 const typed = (result: string) => /\s/.test(result)
 
@@ -25,7 +40,7 @@ const typed = (result: string) => /\s/.test(result)
 export function typeExternals(items: readonly ExternalItem[]): ExternalItem[] {
   return items.map(item => {
     if (typeof item === 'string' || item instanceof RegExp) {
-      const matches = (request: string) => (typeof item === 'string' ? request === item : item.test(request))
+      const matches = externalMatcher(item)
       return ((data: ExternalData, callback: ExternalCallback) => {
         const { request, dependencyType } = data
         if (request && matches(request)) return callback(null, externalType(request, dependencyType))
