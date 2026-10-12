@@ -216,7 +216,8 @@ export class ShardManager implements MeoCordApplication {
     const delay = Math.min(RESPAWN_BASE_MS * 2 ** state.attempts, RESPAWN_CAP_MS)
     state.attempts++
 
-    this.logger.warn(`Shard ${shard.id} exited with code ${child?.exitCode ?? 'unknown'}; restarting it in ${delay} ms.`)
+    const how = child?.signalCode ? `on ${child.signalCode}` : `with code ${child?.exitCode ?? 'unknown'}`
+    this.logger.warn(`Shard ${shard.id} exited ${how}; restarting it in ${delay} ms.`)
     state.timer = setTimeout(() => {
       state.timer = undefined
       if (!this.stopping && !this.fatal) void this.spawn(shard)

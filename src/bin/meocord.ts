@@ -5,6 +5,7 @@ import { createRsbuild, type Rspack } from '@rsbuild/core'
 import { createHash } from 'node:crypto'
 import { Logger } from '@src/common/index.js'
 import { spawn, ChildProcess } from 'node:child_process'
+import { constants as osConstants } from 'node:os'
 import { capitalize } from 'lodash-es'
 import wait from '@src/util/wait.util.js'
 import { GeneratorCLI } from '@src/bin/generator.js'
@@ -130,6 +131,9 @@ export const RELOAD_DEBOUNCE_MS = 300
 
 /** The name watch mode taps the compiler's hooks under. */
 const WATCH_HOOK_NAME = 'MeoCordWatch'
+
+/** What a shell adds to a signal's number for the exit code of a process that signal ended. */
+const SIGNAL_EXIT_BASE = 128
 
 /** A Command Line Interface (CLI) for managing the MeoCord application. */
 export class MeoCordCLI {
@@ -647,7 +651,7 @@ copies or substantial portions of the Software.
     this.appEnv[FORCE_REGISTER_ENV] = '1'
     if (guild) this.appEnv[REGISTER_GUILD_ENV] = guild
 
-    const child = this.spawnApp().on('exit', code => process.exit(code ?? 1))
+    const child = this.spawnApp().on('exit', (code, signal) => process.exit(this.exitCodeOf(code, signal, 1)))
     this.relayStopSignals(() => child)
   }
 
@@ -664,6 +668,7 @@ copies or substantial portions of the Software.
         const kind = request()
         if (kind === 'duplicate') return
         if (kind === 'first') stopping?.()
+        this.stopRelayed = true
 
         const child = app()
         if (!stillRunning(child)) {
@@ -680,6 +685,20 @@ copies or substantial portions of the Software.
         }
       })
     }
+  }
+
+  /** Whether the CLI has passed a stop signal on to the application, whose death by it is then the stop asked for. */
+  private stopRelayed = false
+
+  /**
+   * The code the CLI exits with once the application has: its own, or for one a signal ended that the CLI didn't pass
+   * on, 128 plus the signal's number, as a shell gives, so a bot killed from outside doesn't read as a clean exit.
+   * @param fallback - For an application that a stop the CLI passed on ended without a code.
+   */
+  private exitCodeOf(code: number | null, signal: NodeJS.Signals | null, fallback: number): number {
+    if (code !== null) return code
+    const number = signal ? osConstants.signals[signal] : undefined
+    return number !== undefined && !this.stopRelayed ? SIGNAL_EXIT_BASE + number : fallback
   }
 
   /** The running application, while a watch session owns one, including while it exits to be replaced. */
@@ -779,7 +798,7 @@ copies or substantial portions of the Software.
     const sourceMaps = this.runConfig()?.sourceMappedStacks !== false
     const { command, args } = buildAppCommand(this.runtime, this.mainJSPath, { sourceMaps })
 
-    return spawn(command, args, {
+    const child = spawn(command, args, {
       cwd: this.projectRoot,
       env: {
         ...this.inheritedEnv,
@@ -792,6 +811,16 @@ copies or substantial portions of the Software.
       },
       stdio: devRunner ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
     })
+    // A runtime that can't be started, such as a path that isn't there, is reported as an event, past any caller's try.
+    // So is a signal or a message the running application couldn't be sent; its exit, when it comes, still decides the code
+    child.on('error', error => {
+      if (child.pid !== undefined) {
+        return this.logger.error(`Could not signal or message the running application (process ${child.pid}): ${error.message}`)
+      }
+      this.logger.error(`Failed to start: ${command} could not be run: ${error.message}`)
+      process.exit(1)
+    })
+    return child
   }
 
   /**
@@ -952,8 +981,8 @@ copies or substantial portions of the Software.
 
       const start = this.spawnApp()
 
-      start.on('exit', code => {
-        process.exit(code ?? 0)
+      start.on('exit', (code, signal) => {
+        process.exit(this.exitCodeOf(code, signal, 0))
       })
       this.relayStopSignals(() => start)
     } catch (error) {

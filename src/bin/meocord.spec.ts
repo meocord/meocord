@@ -36,7 +36,7 @@ vi.mock('@src/util/meocord-config-loader.util.js', async importOriginal => {
 
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, watch, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { constants as osConstants, tmpdir } from 'node:os'
 import path from 'node:path'
 import { MeoCordCLI, RELOAD_DEBOUNCE_MS } from '@src/bin/meocord.js'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
@@ -174,6 +174,51 @@ describe('spawning the application', () => {
       expect(exitSpy).toHaveBeenCalledWith(0)
     })
 
+    // As a shell reports it: 128 plus the signal's number, so a supervisor sees the bot didn't stop cleanly
+    it('exits 128 plus the signal number when the application is killed by a signal it was not passed', async () => {
+      await new MeoCordCLI().startProd()
+      const child = spawnMock.mock.results.at(-1)?.value as { on: ReturnType<typeof vi.fn> }
+      const onExit = child.on.mock.calls.find(([event]) => event === 'exit')?.[1] as (code: number | null, signal: NodeJS.Signals | null) => void
+
+      onExit(null, 'SIGKILL')
+
+      expect(exitSpy).toHaveBeenCalledWith(128 + osConstants.signals.SIGKILL)
+    })
+
+    // A runtime path that isn't there makes spawn emit an error, which no try around it sees
+    it('says it failed to start, naming the runtime, and exits 1 when the runtime cannot be run', async () => {
+      process.env[RUNTIME_OVERRIDE_ENV] = '/no/such/runtime'
+      const cli = new MeoCordCLI()
+      await cli.startProd()
+      const child = spawnMock.mock.results.at(-1)?.value as { on: ReturnType<typeof vi.fn> }
+      const onError = child.on.mock.calls.find(([event]) => event === 'error')?.[1] as (error: Error) => void
+
+      onError(Object.assign(new Error('spawn /no/such/runtime ENOENT'), { code: 'ENOENT' }))
+
+      expect(exitSpy).toHaveBeenCalledWith(1)
+      expect((cli as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger.error).toHaveBeenCalledWith(
+        'Failed to start: /no/such/runtime could not be run: spawn /no/such/runtime ENOENT',
+      )
+    })
+
+    // A running process emits 'error' too, for a signal or a message it couldn't be sent; its exit decides the code
+    it('says it could not reach a running application, rather than that it failed to start, and exits on its exit', async () => {
+      const cli = new MeoCordCLI()
+      await cli.startProd()
+      const child = spawnMock.mock.results.at(-1)?.value as { on: ReturnType<typeof vi.fn>; pid?: number }
+      child.pid = 4242
+      const onError = child.on.mock.calls.find(([event]) => event === 'error')?.[1] as (error: Error) => void
+
+      onError(Object.assign(new Error('kill EPERM'), { code: 'EPERM' }))
+      onError(Object.assign(new Error('channel closed'), { code: 'ERR_IPC_CHANNEL_CLOSED' }))
+
+      expect(exitSpy).not.toHaveBeenCalled()
+      expect((cli as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger.error.mock.calls).toEqual([
+        ['Could not signal or message the running application (process 4242): kill EPERM'],
+        ['Could not signal or message the running application (process 4242): channel closed'],
+      ])
+    })
+
     describe('stop signals', () => {
       const listenersBefore = { SIGINT: 0, SIGTERM: 0 }
       beforeEach(() => {
@@ -216,6 +261,20 @@ describe('spawning the application', () => {
 
         expect(child.kill).toHaveBeenCalledTimes(process.platform === 'win32' ? 0 : 1)
         expect(exitSpy).not.toHaveBeenCalled()
+      })
+
+      // The stop it passed on is the one asked for, so the application dying of it is no failure
+      it.skipIf(process.platform === 'win32')('exits 0 when the application dies of the stop signal it passed on', async () => {
+        const { child, send } = await started()
+        const onExit = (child.on as ReturnType<typeof vi.fn>).mock.calls.find(([event]) => event === 'exit')?.[1] as (
+          code: number | null,
+          signal: NodeJS.Signals | null,
+        ) => void
+
+        send('SIGTERM')
+        onExit(null, 'SIGTERM')
+
+        expect(exitSpy).toHaveBeenCalledWith(0)
       })
 
       it('kills the application and exits 1 when a repeat after the window does not stop it', async () => {
@@ -263,6 +322,17 @@ describe('spawning the application', () => {
       vi.unstubAllEnvs()
 
       expect(registerEnv(lastSpawn().options.env)).toMatchObject({ MEOCORD_REGISTER_MODE: mode })
+    })
+
+    it('exits 128 plus the signal number when the application is killed by a signal, and its code otherwise', async () => {
+      await new MeoCordCLI().register()
+      const child = spawnMock.mock.results.at(-1)?.value as { on: ReturnType<typeof vi.fn> }
+      const onExit = child.on.mock.calls.find(([event]) => event === 'exit')?.[1] as (code: number | null, signal: NodeJS.Signals | null) => void
+
+      onExit(null, 'SIGKILL')
+      onExit(2, null)
+
+      expect(exitSpy.mock.calls).toEqual([[128 + osConstants.signals.SIGKILL], [2]])
     })
 
     it('passes the guild it is given', async () => {
