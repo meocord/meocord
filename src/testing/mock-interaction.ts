@@ -283,9 +283,11 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
       const stub: StubValue =
         typeof protoValue === 'function'
           ? isRealMethod(target, key)
-            ? createMockFn((...args: unknown[]) => quietly(target, key, () => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args)))
+            ? createMockFn((...args: unknown[]) =>
+                lacksServer(target, key, proxy) ? undefined : quietly(target, key, () => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args)),
+              )
             : methodStub(target, key, protoValue as (...args: unknown[]) => unknown, () => proxy)
-          : stubDeep({})
+          : autoStub()
       stubs.set(key, stub)
       return stub
     },
@@ -322,6 +324,36 @@ const REAL_METHODS = new Map<object, ReadonlySet<string>>([
 
 // What strict mocks also run for real: a thread's permissions are its parent channel's, as discord.js reads them
 const STRICT_REAL_METHODS = new Map<object, ReadonlySet<string>>([[ThreadChannel.prototype, new Set(['permissionsFor'])]])
+
+// A channel's permission methods, each of which reads the channel's server
+const SERVER_PERMISSION_METHODS = new Set(['permissionsFor', 'overwritesFor', 'memberPermissions', 'rolePermissions'])
+
+// The stubs a mock makes for what a test never gave it, as opposed to anything a test passes or sets
+const autoStubs = new WeakSet<object>()
+function autoStub(): object {
+  const stub = stubDeep({})
+  autoStubs.add(stub)
+  return stub
+}
+
+/**
+ * Whether a channel's permission method has no server to read: in default mode a channel made without one holds the
+ * mock's own stub for it, so the method returns `undefined`, as a thread's does, and says so once. A server the test
+ * gave, of whatever class, is read as it is. Strict mocks give the channel one.
+ */
+function lacksServer(target: object, key: string, channel: object): boolean {
+  if (strictMocks() || !(target instanceof GuildChannel) || !SERVER_PERMISSION_METHODS.has(key)) return false
+  const guild = readPlaceQuietly(() => (channel as { guild?: unknown }).guild)
+  if (typeof guild !== 'object' || guild === null || !autoStubs.has(guild)) return false
+  const name = (Object.getPrototypeOf(target) as { constructor: { name: string } }).constructor.name
+  warnPlaceholder(
+    mockLogger,
+    `${name}.${key}`,
+    'the mock gives the channel a server and computes it',
+    `Give the channel a guild, such as createMockChannel(${name}, { guild }), or call useStrictMocks() to have the mock compute it now.`,
+  )
+  return true
+}
 
 function isRealMethod(target: object, key: string): boolean {
   for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
