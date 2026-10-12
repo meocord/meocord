@@ -12,7 +12,7 @@ import { assertObservers } from '@src/core/observer-runner.js'
 import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { copyLayer } from '@src/core/theme-scope.js'
 import { deprecatedOnMethod, refuse, declaring } from '@src/util/refusal.util.js'
-import { MAX_TIMER_SECONDS, timeoutProblem } from '@src/util/timer-limit.util.js'
+import { MAX_TIMER_SECONDS, timeoutProblem, timerKeepsSeconds } from '@src/util/timer-limit.util.js'
 import { Logger } from '@src/common/logger.js'
 import { describeValue, isConstructor } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
@@ -41,7 +41,7 @@ function assertMessageOptions(appName: string, messages: MessageCommandOptions |
   if (deleteUsageRepliesAfter !== undefined && !(typeof deleteUsageRepliesAfter === 'number' && deleteUsageRepliesAfter >= 0 && Number.isFinite(deleteUsageRepliesAfter))) {
     throw refuse(new TypeError(`${appName}: @MeoCord({ messages: { deleteUsageRepliesAfter } }) takes a number of seconds, or 0 to keep usage replies.`))
   }
-  if (deleteUsageRepliesAfter !== undefined && deleteUsageRepliesAfter > MAX_TIMER_SECONDS) {
+  if (deleteUsageRepliesAfter !== undefined && !timerKeepsSeconds(deleteUsageRepliesAfter)) {
     logger.warn(
       `${appName}: @MeoCord({ messages: { deleteUsageRepliesAfter } }) is ${deleteUsageRepliesAfter} seconds, longer than a timer ` +
         `can wait (${MAX_TIMER_SECONDS}), so usage replies are kept. The next major version (5.0) refuses it.`,

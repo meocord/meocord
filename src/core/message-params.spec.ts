@@ -372,6 +372,19 @@ describe('typed patterns at startup', () => {
     expect(declare({ deleteUsageRepliesAfter: 0, types: { color: { parse: () => 1 } } })).not.toThrow()
   })
 
+  // Compared in milliseconds with the timer's 2147483647, so a fraction of a second just under it is no warning
+  it.each([
+    [2_147_483.5, false],
+    [2_147_483.648, true],
+  ])('warns about a usage reply time of %s seconds: %s', (seconds, warns) => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+    MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { deleteUsageRepliesAfter: seconds } })(class Edge {})
+
+    expect(warn.mock.calls.flat().join(' ').includes(`Edge: @MeoCord({ messages: { deleteUsageRepliesAfter } }) is ${seconds} seconds`)).toBe(warns)
+    warn.mockRestore()
+  })
+
   it('warns that a usage reply time beyond what a timer can wait keeps the reply', () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
     const thirtyDays = 30 * 24 * 60 * 60
