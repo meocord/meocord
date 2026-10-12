@@ -51,9 +51,10 @@ const ENGLISH = 'en-US' as Locale
 /**
  * The message a text is in for `locale`, and whether it is the app's: the app's catalogs down the locale's chain, with
  * MeoCord's English as the English catalog. An English request reads it after the app's English catalogs and before a
- * default in another language; any other request reads it last.
+ * default in another language; any other request reads it last. A message whose form for `count` is empty, as tools
+ * export an untranslated string, counts as missing, as it does for the app's own texts.
  */
-function findText(translator: Translator<any> | undefined, locale: TextLocale, key: string): (FoundMessage & { own: boolean }) | undefined {
+function findText(translator: Translator<any> | undefined, locale: TextLocale, key: string, count: unknown): (FoundMessage & { own: boolean }) | undefined {
   const english = () => {
     const message = lookup(MEOCORD_MESSAGES, key)
     return message === undefined ? undefined : { message, locale: ENGLISH, own: false }
@@ -64,7 +65,7 @@ function findText(translator: Translator<any> | undefined, locale: TextLocale, k
     const beforeDefault = englishFirst && served === translator.defaultLocale ? english() : undefined
     if (beforeDefault) return beforeDefault
     const message = lookup(translator[CATALOGS][served], key)
-    if (message !== undefined) return { message, locale: served, own: true }
+    if (message !== undefined && pluralForm({ message, locale: served }, count) !== '') return { message, locale: served, own: true }
   }
   return english()
 }
@@ -84,9 +85,9 @@ function orListIn(locale: string, items: readonly string[]): string {
  * nothing in zh-CN and with a space in ja.
  */
 export function renderText(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): string {
-  const found = findText(translator, locale, text.key)
-  if (!found) return text.fallback ?? text.key
   const params = text.params ?? {}
+  const found = findText(translator, locale, text.key, params.count)
+  if (!found) return text.fallback ?? text.key
   return fillPlaceholders(pluralForm(found, params.count), (name, whole) => {
     if (!Object.hasOwn(params, name)) return whole
     const value = params[name]
