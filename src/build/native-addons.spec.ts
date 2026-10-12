@@ -522,6 +522,18 @@ describe('copyPackagesInto', () => {
       })
     }
 
+    // Saved with a byte order mark, as a Windows editor writes one: Node still reads it, so its os field still counts
+    it("reads a platform package's manifest saved with a byte order mark", () => {
+      installBothLibcBuilds()
+      const musl = path.join(root, 'node_modules', '@img', 'sharp-linuxmusl-x64', 'package.json')
+      writeFileSync(musl, `\uFEFF${readFileSync(musl, 'utf8')}`)
+      const out = path.join(root, 'dist')
+
+      const copied = copyPackagesInto(new Map([['sharp', path.join(root, 'node_modules', 'sharp')]]), root, out, glibc)
+
+      expect(copied.sort()).toEqual(['@img/sharp-linux-x64', 'sharp'])
+    })
+
     it('leaves out an installed build for the other C library', () => {
       installBothLibcBuilds()
       const out = path.join(root, 'dist')

@@ -213,6 +213,26 @@ describe('ensureReady', () => {
     consoleSpy.mockRestore()
   })
 
+  // A package.json saved with a byte order mark, as a Windows editor writes one, which Node and npm read
+  it('reads a package.json saved with a byte order mark', async () => {
+    mockFindModulePackageDir.mockReturnValue('/some/path/meocord')
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockImplementation((p: unknown) =>
+      String(p).replaceAll('\\', '/').includes('/some/path/meocord')
+        ? JSON.stringify({ name: 'meocord' })
+        : `\uFEFF${JSON.stringify({ dependencies: { meocord: '^1.0.0' } })}`,
+    )
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await ensureReady()
+
+    expect(consoleSpy).not.toHaveBeenCalled()
+    expect(exitSpy).not.toHaveBeenCalled()
+    exitSpy.mockRestore()
+    consoleSpy.mockRestore()
+  })
+
   it('resolves without exit when all checks pass', async () => {
     mockFindModulePackageDir.mockReturnValue('/some/path/meocord')
     mockExistsSync.mockReturnValue(true)

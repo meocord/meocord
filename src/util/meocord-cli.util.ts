@@ -4,6 +4,7 @@ import { findModulePackageDir } from '@src/util/common.util.js'
 import path from 'node:path'
 import fs from 'node:fs'
 import wait from '@src/util/wait.util.js'
+import { readJsonFile } from '@src/util/json.util.js'
 import chalk from 'chalk'
 
 export function configureCommandHelp(command: Command) {
@@ -127,11 +128,11 @@ export async function ensureReady() {
     }
 
     // Read and parse the root package.json
-    const { dependencies } = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'))
+    const { dependencies } = readJsonFile(packageJsonPath)
 
     // Read and parse the MeoCord package.json
     const internalPackageJsonPath = path.join(meocordPath, 'package.json')
-    const { name: internalPackageName } = JSON.parse(fs.readFileSync(internalPackageJsonPath, 'utf-8'))
+    const { name: internalPackageName } = readJsonFile(internalPackageJsonPath)
 
     // Validate that MeoCord is listed as a dependency in the root package.json
     if (!dependencies?.[internalPackageName]) {

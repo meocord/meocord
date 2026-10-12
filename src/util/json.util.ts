@@ -1,3 +1,11 @@
+import { readFileSync } from 'node:fs'
+
+/** The byte order mark an editor may write at the start of a UTF-8 file, which `JSON.parse` refuses. */
+const BYTE_ORDER_MARK = '\uFEFF'
+
+/** The text without a leading byte order mark, as Node and tsc read a JSON file. */
+const withoutByteOrderMark = (text: string): string => (text.startsWith(BYTE_ORDER_MARK) ? text.slice(BYTE_ORDER_MARK.length) : text)
+
 /**
  * Removes the comments and trailing commas `tsconfig.json` allows, leaving strings untouched, so an
  * `https://` URL or a `/*` glob inside one survives.
@@ -40,7 +48,12 @@ export function stripJsonc(text: string): string {
   return result
 }
 
-/** Parses JSON with the comments and trailing commas `tsconfig.json` allows. */
+/** Parses JSON with the comments and trailing commas `tsconfig.json` allows, and a leading byte order mark. */
 export function parseJsonc<T = any>(text: string): T {
-  return JSON.parse(stripJsonc(text)) as T
+  return JSON.parse(stripJsonc(withoutByteOrderMark(text))) as T
+}
+
+/** Reads a JSON file, such as a `package.json`, as Node reads one: UTF-8, with a leading byte order mark ignored. */
+export function readJsonFile<T = any>(file: string): T {
+  return JSON.parse(withoutByteOrderMark(readFileSync(file, 'utf8'))) as T
 }
