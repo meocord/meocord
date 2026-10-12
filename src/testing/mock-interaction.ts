@@ -52,6 +52,7 @@ import {
   GuildBanManager,
   GuildEmoji,
   GuildEmojiManager,
+  GuildEmojiRoleManager,
   GuildInviteManager,
   GuildScheduledEvent,
   GuildScheduledEventManager,
@@ -422,28 +423,54 @@ function clientOf(target: object): unknown {
 // methodStub — what an auto-stubbed discord.js method returns
 // ---------------------------------------------------------------------------
 
-// discord.js methods not declared `async` that still return a promise; `set*` setters are matched by name
+// discord.js methods not declared `async` that still return a promise; `set*` setters are matched by name.
+// mock-promise-methods.spec checks this list against discord.js's typings
 const PROMISE_METHODS = new Set([
+  'awaitMessageComponent',
+  'awaitMessages',
+  'awaitReactions',
   'ban',
+  'bulkBan',
   'clone',
+  'create',
   'createDM',
   'createInvite',
+  'createStageInstance',
+  'createWebhook',
+  'delete',
+  'deleteDM',
   'disableCommunicationUntil',
+  'disconnect',
   'edit',
   'fetch',
+  'fetchAuthor',
   'fetchFlags',
   'fetchInvites',
   'fetchMe',
   'fetchReply',
+  'fetchSubscribers',
+  'fetchUser',
+  'fetchVoters',
   'fetchWebhooks',
   'fetchWidget',
   'forward',
+  'kick',
   'pin',
+  'rawFetchGuildActiveThreads',
   'removeAttachments',
   'suppressEmbeds',
   'timeout',
+  'unban',
   'unpin',
 ])
+
+// Methods that return a promise on one class only, as their name is synchronous on another: a role manager's set, and
+// a scheduled event's setStatus, where a client user's setStatus applies at once
+const PROMISE_METHODS_OF: [{ prototype: object }, ReadonlySet<string>][] = [
+  [GuildEmojiRoleManager, new Set(['set'])],
+  [GuildMemberRoleManager, new Set(['set'])],
+  [GuildScheduledEvent, new Set(['setStatus'])],
+]
 
 // The client user's presence setters, which apply at once and return the presence
 const SYNC_SETTERS = new Set(['setActivity', 'setAFK', 'setPresence', 'setStatus'])
@@ -460,7 +487,10 @@ const MESSAGE_METHODS = new Set([
 ])
 
 // Methods of a structure that resolve to the structure itself, as discord.js patches and returns it
-const SELF_METHODS = new Set(['ban', 'delete', 'disableCommunicationUntil', 'edit', 'fetch', 'pin', 'timeout', 'unpin'])
+const SELF_METHODS = new Set(['ban', 'delete', 'disableCommunicationUntil', 'edit', 'fetch', 'kick', 'pin', 'timeout', 'unpin'])
+
+// Collectors that resolve to what they collected: nothing, for a mock no one answers
+const COLLECTING_METHODS = new Set(['awaitMessages', 'awaitReactions'])
 
 // The DM channel of each user, made once, as Discord keeps one per user
 const dmChannels = new WeakMap<object, object>()
@@ -519,9 +549,11 @@ function itemInGuild(Class: object, props: object, manager: object): object {
   return createMockInteraction(Class as never, { ...props, ...(guild ? { guild, guildId: guild.id } : {}) } as never)
 }
 
-const returnsPromise = (key: string, method: (...args: unknown[]) => unknown) =>
+/** Whether a discord.js method on `target` returns a promise: an async one, or one the lists above name. */
+export const returnsPromise = (target: object, key: string, method: (...args: unknown[]) => unknown): boolean =>
   method.constructor.name === 'AsyncFunction' ||
   PROMISE_METHODS.has(key) ||
+  PROMISE_METHODS_OF.some(([Class, keys]) => keys.has(key) && Class.prototype.isPrototypeOf(target)) ||
   (/^set[A-Z]/.test(key) && !SYNC_SETTERS.has(key))
 
 // The ids a fetch asks for: an id, a discord.js object, or options naming one or several, such as `{ user: id }` or
@@ -547,13 +579,14 @@ function fetchedIds(args: unknown[]): string | string[] | undefined {
 
 /**
  * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
- * `createDM` to the user's DM channel, `send` and its kin to a message, a manager's `fetch`, `create` and `edit` to its
- * item (a collection of each for a fetch of several, an empty one for a list fetch), a structure's own `edit`, `fetch`,
- * `delete`, `ban`, `pin`, `unpin`, `timeout`, `disableCommunicationUntil` and setters to the structure, and the rest to
- * `undefined`. Any other method returns `undefined`.
+ * `createDM` to the user's DM channel, `send` and its kin to a message, `awaitMessages` and `awaitReactions` to an
+ * empty collection, a manager's `fetch`, `create` and `edit` to its item (a collection of each for a fetch of several,
+ * an empty one for a list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `kick`, `pin`, `unpin`, `timeout`,
+ * `disableCommunicationUntil` and setters to the structure, and the rest to `undefined`. Any other method returns
+ * `undefined`.
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
-  if (!returnsPromise(key, method)) return createMockFn()
+  if (!returnsPromise(target, key, method)) return createMockFn()
   // A member's DMs go through its user, and a user's through its one DM channel, as discord.js sends them
   if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
     return createMockFn(async (...args: unknown[]) => ((receiver() as GuildMember).user[key] as (...args: unknown[]) => unknown)(...args))
@@ -567,6 +600,7 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
     return createMockFn(async (options?: unknown) => sentMessage(sent(options, false), receiver()))
   }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
+  if (COLLECTING_METHODS.has(key)) return createMockFn(async () => new Collection())
   if (target instanceof BaseManager) {
     const item = MANAGER_ITEMS.find(([Manager]) => Manager.prototype.isPrototypeOf(target))?.[1]
     // A fetch of one item finds it in the cache first, as discord.js does, and caches one it makes; a fetch of
