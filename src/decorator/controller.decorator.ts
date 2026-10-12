@@ -323,12 +323,13 @@ export function MessageHandler<
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
   return declaring(function (target: object, propertyKey: string) {
     refuseOnClass('@MessageHandler', target, propertyKey)
-    // An empty pattern means every message, as no pattern does
-    if (pattern === '') {
-      warnDeprecatedBehaviour(logger, `@MessageHandler('') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
+    // An empty pattern, or one of spaces alone, means every message, as no pattern does
+    const blank = pattern !== undefined && pattern.trim() === ''
+    if (blank) {
+      warnDeprecatedBehaviour(logger, `@MessageHandler('${pattern}') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
     }
     const method = propertyKey.toString()
-    const declared = { pattern: pattern || undefined, method, options }
+    const declared = { pattern: blank ? undefined : pattern, method, options }
     addOwnHandler<MessageHandlerMetadata>(META.messageHandlers, target, declared, other => other.method === method && other.pattern === declared.pattern)
     declareRoute(target, messageRoute(method, declared.pattern))
   })
