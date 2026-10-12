@@ -1225,8 +1225,13 @@ export interface MeoCordConfig {
   rsbuild?: (config: RsbuildConfig) => RsbuildConfig | undefined
   /**
    * Makes stack traces name your source files, lines and columns, from the source map the build writes
-   * beside `dist/main.js`. Under Node, `meocord start` passes `--enable-source-maps`; under Bun, or Node
-   * started without the flag, the bundle maps each stack through `Error.prepareStackTrace` itself.
+   * beside `dist/main.js`. Under Node, `meocord start` passes `--enable-source-maps`; started without the
+   * flag, the bundle maps each stack through `Error.prepareStackTrace` itself. Either way every trace Node
+   * prints is mapped.
+   *
+   * Under Bun, the bundle maps `error.stack`, and so each trace MeoCord's `Logger` prints. What Bun prints
+   * itself, for an uncaught error, an unhandled rejection or `console.error(error)` before `error.stack` is
+   * read, keeps the bundle's positions.
    *
    * Set `false` for an error tracker that applies uploaded source maps to the bundle's positions, or a
    * source mapper of your own.
