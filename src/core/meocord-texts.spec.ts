@@ -236,6 +236,22 @@ describe("MeoCord's own texts for an interaction", () => {
     expect(answer(broken)).toMatchObject({ title: 'Aduh!', description: 'Terjadi kesalahan.' })
   })
 
+  // As translation tools export a string nobody has translated yet
+  it("answers in MeoCord's English where the user's catalog leaves a text empty", async () => {
+    const fr = { types: { color: 'couleur hex' }, meocord: { fallback: { notFound: '', error: '' }, presenter: { errorTitle: '' } } }
+    @MeoCord({ controllers: [Commands], messages: { types: { color } }, i18n: createTranslator({ default: 'en-US', locales: { 'en-US': enUS, fr } }), clientOptions: { intents: [] } })
+    class Untranslated {}
+    const module = MeoCordTestingModule.create({ app: Untranslated, controllers: [Commands] }).compile()
+    const lost = createMockInteraction(ButtonInteraction, { customId: 'nowhere', locale: 'fr' as never })
+    const broken = createMockInteraction(ChatInputCommandInteraction, { commandName: 'broken', locale: 'fr' as never })
+
+    await module.dispatch(lost)
+    await module.dispatch(broken).catch(() => undefined)
+
+    expect(answer(lost)).toMatchObject({ title: 'Oops!', description: 'Command not found!' })
+    expect(answer(broken)).toMatchObject({ title: 'Oops!', description: 'An error occurred while executing the command.' })
+  })
+
   it("gives HandlerRegistry.messageHelp's param labels in the server's language", async () => {
     const registry = compile().get(HandlerRegistry)
     const help = await registry.messageHelp(createMockMessage({ content: '!help roll', guild: serverIn('id') as never }), 'roll')
