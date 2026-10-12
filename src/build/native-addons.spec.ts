@@ -6,6 +6,7 @@ import {
   bundledModuleFiles,
   copyPackagesInto,
   installedPackages,
+  isBuiltFor,
   createNativeExternals,
   findBundledNativeAddons,
   packageFromPath,
@@ -621,5 +622,32 @@ describe('copyPackagesInto', () => {
     ])
 
     expect(copyPackagesInto(packages, root, path.join(root, 'dist')).sort()).toEqual(['a', 'b', 'shared'])
+  })
+})
+
+describe('isBuiltFor', () => {
+  const linux = { platform: 'linux', arch: 'x64', libc: 'glibc' } as const
+
+  // Each answer is npm-install-checks' own, from its checkPlatform
+  it.each([
+    ['a string naming another platform', { os: 'win32' }, false],
+    ['a string naming this one', { os: 'linux' }, true],
+    ["['any']", { os: ['any'] }, true],
+    ["['any'] beside an exclusion of this platform", { os: ['any', '!linux'] }, false],
+    ['an exclusion of another platform', { os: ['!win32'] }, true],
+    ['an exclusion of this platform', { os: ['!linux'] }, false],
+    ['an empty list', { os: [] }, true],
+    ['an empty string', { os: '' }, true],
+    ['this platform, also excluded', { os: ['linux', '!linux'] }, false],
+    ["['any'] for cpu", { cpu: ['any'] }, true],
+    ['a string excluding this cpu', { cpu: '!x64' }, false],
+    ['a string naming this C library', { libc: 'glibc' }, true],
+    ['a string naming another C library', { libc: 'musl' }, false],
+  ])('reads %s as npm does', (_, fields, expected) => {
+    const dir = path.join(root, 'node_modules', 'addon')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'addon', version: '1.0.0', ...fields }))
+
+    expect(isBuiltFor(dir, linux)).toBe(expected)
   })
 })
