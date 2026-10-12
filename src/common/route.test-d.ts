@@ -41,6 +41,8 @@ describe('route', () => {
     expectTypeOf<RouteParams<'x/{café}'>>().toEqualTypeOf<never>()
     expectTypeOf<RouteParams<'x/{a b}/{id}'>>().toEqualTypeOf<'id'>()
     expectTypeOf<RouteParams<'x/{{id}}'>>().toEqualTypeOf<'id'>()
+    // A type holds no `/`, which ends the segment, so `{id:a/b}` is text too
+    expectTypeOf<RouteParams<'x/{id:a/b}'>>().toEqualTypeOf<never>()
     expectTypeOf<RouteParams<'x/{id}/{page:int}'>>().toEqualTypeOf<'id' | 'page'>()
     expectTypeOf(route('x/{café}').build()).toEqualTypeOf<string>()
     // @ts-expect-error {café} is no param
