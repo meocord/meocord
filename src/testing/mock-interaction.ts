@@ -558,8 +558,9 @@ const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: o
   [RoleManager, (id, manager) => createMockInteraction(Role, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
   [GuildBanManager, () => createMockInteraction(GuildBan)],
   // A message fetched from a channel is in it, and another user's
-  [GuildMessageManager, (id, manager) => createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
-  [DMMessageManager, (id, manager) => createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
+  // A message made in the channel is the one fetched by its id, as Discord has it
+  [GuildMessageManager, (id, manager) => madeIn(manager, id) ?? createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
+  [DMMessageManager, (id, manager) => madeIn(manager, id) ?? createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
   [GuildTextThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [GuildForumThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
   [ThreadMemberManager, () => createMockInteraction(ThreadMember)],
@@ -2134,12 +2135,19 @@ const holdsOf = (prototype: object): object | undefined =>
 
 /**
  * A manager whose `cache` is a real collection of `items`, by id, empty without them, and whose methods are stubs but
- * for `resolve` and `resolveId`, which read the cache. Its `client` is the one its guild or channel has.
+ * for `resolve` and `resolveId`, which read the cache. Its `client` is the one its guild or channel has. `onCacheRead`,
+ * when given, runs on each read of `cache`, before it is returned.
  */
-function managerWith(prototype: object, items: readonly { id: string; user?: { id: string } }[] | undefined): object {
+function managerWith(prototype: object, items: readonly { id: string; user?: { id: string } }[] | undefined, onCacheRead?: () => void): object {
   const manager = Object.create(prototype) as Record<string, unknown>
   const cache = new Collection((items ?? []).map(item => [String(item.id ?? item.user?.id), item]))
-  Object.defineProperty(manager, 'cache', { value: cache, writable: true })
+  if (onCacheRead) {
+    let current: unknown = cache
+    Object.defineProperty(manager, 'cache', {
+      get: () => (onCacheRead(), current),
+      set: (value: unknown) => void (current = value),
+    })
+  } else Object.defineProperty(manager, 'cache', { value: cache, writable: true })
   // The same collection where discord.js's own methods read it past a subclass's `cache`, as `super.cache` does
   Object.defineProperty(manager, '_cache', { value: cache, writable: true })
   const holds = holdsOf(prototype)
@@ -2155,6 +2163,46 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
     configurable: true,
   })
   return stubDeep(manager)
+}
+
+// Set while the mock reads a manager's cache itself
+let readingOwnCache = 0
+// The messages made in each channel, by its messages manager, for a fetch to find and strict mocks to cache
+const messagesMade = new WeakMap<object, Map<string, object>>()
+const madeIn = (manager: object, id: string | undefined): object | undefined => (id === undefined ? undefined : messagesMade.get(manager)?.get(id))
+// The message managers whose cache read has warned
+const uncachedWarned = new WeakSet<object>()
+
+/**
+ * A channel's empty messages manager. Default mode caches none of the messages made in the channel, where strict mocks
+ * and discord.js cache each, so a test's first read of the cache warns once while one of them is missing from it.
+ */
+function messageManager(prototype: object): object {
+  const manager: object = managerWith(prototype, undefined, () => {
+    const made = messagesMade.get(manager)
+    if (readingOwnCache > 0 || !made || strictMocks() || uncachedWarned.has(manager)) return
+    // Read as the mock's own, so this check doesn't call itself
+    const cache = cacheOf(manager)
+    if (![...made.values()].some(each => !cache?.has((each as { id: string }).id))) return
+    uncachedWarned.add(manager)
+    mockLogger.warn(
+      `${(prototype as { constructor: { name: string } }).constructor.name}.cache here lacks messages made in its channel, where ` +
+        'discord.js caches each message as it arrives and each one the bot sends; in the next major version (5.0) the mock caches ' +
+        'them. Fetch the message, or call useStrictMocks() to have them cached now.',
+    )
+  })
+  return manager
+}
+
+/** Notes a message made in a channel, and caches it there under strict mocks, as discord.js caches what arrives. */
+function noteMadeIn(channel: unknown, message: { id: string }): void {
+  if (!(channel instanceof BaseChannel)) return
+  const manager = Reflect.getOwnPropertyDescriptor(channel, 'messages')?.value as object | undefined
+  const cache = manager && cacheOf(manager)
+  if (!manager || !cache) return
+  if (!messagesMade.has(manager)) messagesMade.set(manager, new Map())
+  messagesMade.get(manager)!.set(message.id, message)
+  if (strictMocks()) cache.set(message.id, message)
 }
 
 /** An empty manager of `prototype` that `owner` names its own, such as `{ message }` for a message's reactions. */
@@ -2268,7 +2316,7 @@ export function createMockChannel<T extends BaseChannel>(
 
   // Text and announcement channels: messages, and threads made in the channel
   if (is(TextChannel) || is(NewsChannel)) {
-    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.messages = messageManager(GuildMessageManager.prototype)
     instance.threads = managerWith(GuildTextThreadManager.prototype, undefined)
   }
   // Forum and media channels hold posts, each a thread started with its first message
@@ -2278,15 +2326,15 @@ export function createMockChannel<T extends BaseChannel>(
   }
   // Voice and stage channels carry a text chat of their own, and a bitrate, which discord.js tells them apart by
   if (is(BaseGuildVoiceChannel)) {
-    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.messages = messageManager(GuildMessageManager.prototype)
     instance.bitrate = 64_000
     instance.userLimit = 0
   }
   if (is(DMChannel)) {
-    instance.messages = managerWith(DMMessageManager.prototype, undefined)
+    instance.messages = messageManager(DMMessageManager.prototype)
   }
   if (is(ThreadChannel)) {
-    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.messages = messageManager(GuildMessageManager.prototype)
     instance.members = managerWith(ThreadMemberManager.prototype, undefined)
   }
   // A server's channel has its overwrites, none until a test puts some in the cache, which its permissions read
@@ -2967,8 +3015,14 @@ function mentionedIds(content: string | undefined): { users: string[]; roles: st
 
 /** A cache's collection, or undefined for a stub a test put in place of the manager. */
 const cacheOf = (manager: unknown): Collection<string, unknown> | undefined => {
-  const cache = (manager as { cache?: unknown } | undefined)?.cache
-  return cache instanceof Collection ? (cache as Collection<string, unknown>) : undefined
+  // The mock's own read, which a message cache's warning leaves to the test's reads
+  readingOwnCache++
+  try {
+    const cache = (manager as { cache?: unknown } | undefined)?.cache
+    return cache instanceof Collection ? (cache as Collection<string, unknown>) : undefined
+  } finally {
+    readingOwnCache--
+  }
 }
 
 /** The cached item under `id`, put there by `make` when the cache lacks it. */
@@ -3335,6 +3389,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
 
   if (sentBy) warnOnSentReads(instance, stubs, sentBy)
   const message = stubDeep(instance, stubs) as MockMessage
+  if (channel) noteMadeIn(channel, message as unknown as { id: string })
   return message
 }
 
