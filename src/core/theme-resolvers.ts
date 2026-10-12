@@ -2,6 +2,7 @@ import { Logger } from '@src/common/logger.js'
 import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@src/interface/index.js'
 import { themeProblems } from '@src/core/theme-validation.js'
 import { copyLayer, outsideThemeScope } from '@src/core/theme-scope.js'
+import { quoteForLog } from '@src/util/user-text.util.js'
 
 /** How long a resolver's result is kept, in seconds, unless `themeCache.ttlSeconds` says otherwise. */
 export const DEFAULT_THEME_TTL_SECONDS = 300
@@ -160,14 +161,22 @@ class ResolverCache {
   }
 
   /**
-   * A result as a layer: copied, then checked; one with problems is left out, with a warning once per id when `report`.
-   * `null`, as a database gives for a missing row, is no theme, as `undefined` is.
+   * A result as a layer: copied, then checked; one with problems, or that throws as it is read, is left out, with a
+   * warning once per id when `report`. `null`, as a database gives for a missing row, is no theme, as `undefined` is.
    */
   private accept(id: string, result: unknown, report: boolean): ThemeOverride | undefined {
     if (result === undefined || result === null) return undefined
-    const layer = copyLayer(result) as ThemeOverride
-    // A value from the app's data, such as a user's saved choice, shown as a log line shows outside text
-    const problems = themeProblems(layer, `themeFor.${this.kind} for ${this.kind} ${id}`, { forLog: true })
+    const where = `themeFor.${this.kind} for ${this.kind} ${id}`
+    let layer: ThemeOverride | undefined
+    let problems: string[]
+    try {
+      layer = copyLayer(result) as ThemeOverride
+      // A value from the app's data, such as a user's saved choice, shown as a log line shows outside text
+      problems = themeProblems(layer, where, { forLog: true })
+    } catch (error) {
+      // A cycle overflows the copy, and a getter may throw: the result is left out as one with problems is
+      problems = [`${where}: theme cannot be read: ${quoteForLog(String((error as Error)?.message ?? error))}`]
+    }
     if (problems.length === 0) {
       if (report) this.warned.delete(id)
       return layer

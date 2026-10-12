@@ -656,6 +656,49 @@ describe('a result whose value cannot be used', () => {
     expect(warn.mock.calls.map(([text]) => String(text).split('\n').length)).toEqual([2, 2])
   })
 
+  // A cycle overflows the copy, and a row object from a database driver may throw as it is read
+  it('is left out when it throws as it is read, warned about once, and later calls run with the app\'s theme', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    let readable = false
+    const cyclic = () => {
+      const theme = { colors: { primary: '#000051' } } as { colors: Record<string, unknown> }
+      theme.colors.self = [theme.colors]
+      return theme as ThemeOverride
+    }
+    const throwing = (): ThemeOverride => ({
+      colors: {
+        get info(): `#${string}` {
+          throw new Error('row closed')
+        },
+      },
+    })
+    const guild = vi.fn(() => (readable ? colour('#000052') : cyclic()))
+    const user = vi.fn((): ThemeOverride => (readable ? { colors: { info: '#000053' } } : throwing()))
+    const module = moduleWith({ guild, user }, { themeCache: { ttlSeconds: 1 } })
+    const handlers = () => seen.filter(entry => (entry as string[])[0] === 'handler').map(entry => (entry as string[]).slice(1, 3))
+
+    // Two calls at once share each lookup, and both run; a later one is served the left-out result, not refused
+    await Promise.all([module.invoke(Panel, 'panel', press('panel')), module.invoke(Panel, 'panel', press('panel'))])
+    await module.invoke(Panel, 'panel', press('panel'))
+    const asked = [guild.mock.calls.length, user.mock.calls.length]
+    readable = true
+    vi.advanceTimersByTime(1_001)
+    await module.invoke(Panel, 'panel', press('panel'))
+
+    expect(asked).toEqual([1, 1])
+    expect(handlers()).toEqual([
+      [DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info],
+      [DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info],
+      [DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info],
+      ['#000052', '#000053'],
+    ])
+    expect(warn.mock.calls.map(([text]) => String(text).split('\n'))).toEqual([
+      [expect.stringMatching(new RegExp(`^themeFor\\.guild for guild ${GUILD}: theme cannot be read: "Maximum call stack size exceeded`)), expect.any(String)],
+      [`themeFor.user for user ${USER}: theme cannot be read: "row closed"`, 'Calls from this user use the theme without it until the result changes.'],
+    ])
+  })
+
   it('keeps the startup refusal of a theme written in code as it reads', () => {
     expect(() => {
       @MeoCord({ controllers: [], clientOptions: { intents: [] }, theme: { emojis: { success: 'x' } } })
