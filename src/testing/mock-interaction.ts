@@ -526,15 +526,45 @@ const COLLECTING_METHODS = new Set(['awaitMessages', 'awaitReactions'])
 
 // The DM channel of each user, made once, as Discord keeps one per user
 const dmChannels = new WeakMap<object, object>()
+/**
+ * A user's one DM channel: its recipient is the user, and it is the user's `dmChannel`. Under strict mocks its client
+ * is the user's; default mode keeps a client of its own, and a test's `createDM()` warns once.
+ */
 function dmChannelOf(user: object): object {
   let channel = dmChannels.get(user)
   if (!channel) {
-    channel = createMockChannel(DMChannel)
-    // A getter in discord.js, so set through the mock, which defines it
-    ;(channel as Record<string, unknown>).recipientId = (user as User).id
+    const made = createMockChannel(DMChannel) as unknown as Record<string, unknown>
+    // Getters in discord.js, so set through the mock, which defines them
+    made.recipientId = (user as User).id
+    if (user instanceof User) {
+      // Not enumerated, so a DM channel's own keys, and a user's, stay those a test may compare
+      const place = (target: object, key: string, value: unknown) => Object.defineProperty(target, key, { value, writable: true, configurable: true })
+      place(made, 'recipient', user)
+      place(user, 'dmChannel', made)
+      if (strictMocks() && user.client instanceof Client) place(made, 'client', user.client)
+    }
+    channel = made
     dmChannels.set(user, channel)
   }
   return channel
+}
+
+// What default mode's user manager DMs do apart from discord.js's, warned of once each
+const USER_MANAGER_DM_WARNINGS = {
+  createDM:
+    'UserManager.createDM() here gives every user the same DM channel; under useStrictMocks() each user has their own, ' +
+    'as Discord keeps one per user.',
+  send:
+    "UserManager.send() here resolves to a message that doesn't hold what was sent; under useStrictMocks() it sends " +
+    "through the user's DM channel, as discord.js does.",
+}
+
+/** A user made for a manager, on the manager's client, as discord.js makes one. */
+function userOf(manager: object, id: string | undefined): User {
+  const user = createMockUser(id ? { id } : {})
+  const client = (manager as { client?: unknown }).client
+  if (client instanceof Client) Object.defineProperty(user, 'client', { value: client, writable: true, configurable: true })
+  return user as unknown as User
 }
 
 /** The guild a manager belongs to, when it is a mock guild's. */
@@ -623,7 +653,35 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
     return createMockFn(async (...args: unknown[]) => ((receiver() as GuildMember).user[key] as (...args: unknown[]) => unknown)(...args))
   }
-  if (key === 'createDM') return createMockFn(async () => dmChannelOf(receiver()))
+  // Under strict mocks a user manager's DMs go to the user named, its cached one or one made and cached, as discord.js
+  // resolves it; default mode keeps one DM channel for the manager and a send that resolves to an empty message
+  if (target instanceof UserManager && (key === 'createDM' || key === 'send')) {
+    return createMockFn(async (user: unknown, ...args: unknown[]) => {
+      if (!strictMocks()) {
+        warnOnce(mockLogger, USER_MANAGER_DM_WARNINGS[key])
+        return key === 'createDM' ? dmChannelOf(receiver()) : createMockMessage()
+      }
+      const named = user instanceof GuildMember ? user.user : user
+      const id = typeof named === 'string' ? named : (named as { id?: string } | undefined)?.id
+      const resolved = (named instanceof User ? named : cached(cacheOf(receiver()), id ?? nextSnowflake(), () => userOf(receiver(), id))) as User
+      return key === 'createDM' ? resolved.createDM() : (resolved.send as (...rest: unknown[]) => unknown)(...args)
+    })
+  }
+  if (key === 'createDM') {
+    return createMockFn(async () => {
+      const user = receiver()
+      const channel = dmChannelOf(user) as { client?: unknown }
+      // Warned at the call, so the mock's own reads of a DM interaction's channel stay quiet
+      if (user instanceof User && user.client instanceof Client && channel.client !== user.client) {
+        warnOnce(
+          mockLogger,
+          "A mock user's DM channel here has a client of its own, not the user's; under useStrictMocks() it shares the " +
+            "user's client.",
+        )
+      }
+      return channel
+    })
+  }
   if (key === 'send' && target instanceof User) {
     return createMockFn(async (...args: unknown[]) => ((await (receiver() as User).createDM()).send as (...args: unknown[]) => unknown)(...args))
   }
