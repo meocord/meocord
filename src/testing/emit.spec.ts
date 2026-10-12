@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 import { Controller, Guard, Inject, MeoCord, MessageHandler, On, Once, Service, UseGuard } from '@src/decorator/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { createMock, MeoCordTestingModule } from '@src/testing/index.js'
-import { GuardDeniedError, UserError } from '@src/common/index.js'
+import { GuardDeniedError, MemoryCooldownStore, UserError } from '@src/common/index.js'
 
 describe('TestingModule.emit', () => {
   it('runs the handlers on controllers, class providers and their dependencies', async () => {
@@ -132,6 +132,29 @@ describe('TestingModule.emit', () => {
     const runs = [await module.emit('guildMemberAdd', createMock<GuildMember>()), await module.emit('guildMemberAdd', createMock<GuildMember>())]
 
     expect([runs.map(({ ran }) => ran), heard]).toEqual([[1, 0], ['first']])
+  })
+
+  // No event reaches the cooldown store, so neither does one through a factory that returns the store's instance
+  it("runs no handler on the cooldown store when a factory returns the store's instance", async () => {
+    const heard: string[] = []
+    class Store extends MemoryCooldownStore {
+      @On('guildMemberAdd')
+      joined() {
+        heard.push('store')
+      }
+    }
+    @MeoCord({
+      controllers: [],
+      cooldownStore: Store,
+      providers: [{ provide: 'alias', useFactory: (store: Store) => store, inject: [Store] }],
+      clientOptions: { intents: [] },
+    })
+    class App {}
+
+    const module = await MeoCordTestingModule.fromApp(App).compile().init()
+    const { ran } = await module.emit('guildMemberAdd', createMock<GuildMember>())
+
+    expect([ran, heard]).toEqual([0, []])
   })
 
   it('runs an @Once handler for the first event only', async () => {

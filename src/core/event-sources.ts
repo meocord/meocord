@@ -29,11 +29,12 @@ export function eventSources(
   prepared: readonly AnyClass[],
   warn: (text: string) => void,
 ): EventSource[] {
-  // The tokens of each class the container makes, bound as itself or given as a provider's `useClass`
+  // The tokens of each class the container makes, bound as itself or given as a provider's `useClass`, the cooldown
+  // store's included: no event reaches it, nor its instance through a factory
   const classTokens = new Map<AnyClass, unknown[]>()
-  for (const { token, cooldownStore } of units) {
+  for (const { token } of units) {
     const provider = providers.get(token)
-    if (cooldownStore || (provider && !isClassProvider(provider)) || (!provider && !isAppClassToken(token))) continue
+    if ((provider && !isClassProvider(provider)) || (!provider && !isAppClassToken(token))) continue
     const cls = (provider ? provider.useClass : token) as AnyClass
     classTokens.set(cls, [...(classTokens.get(cls) ?? []), token])
   }
