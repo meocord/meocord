@@ -65,6 +65,21 @@ describe('createMockMember', () => {
     expect([...member.roles.cache.keys()]).toEqual([member.guild.id, low.id])
   })
 
+  it("resolves a role it holds, given the role or its id, in its member's server", () => {
+    const moderator = role([], 2)
+    const guild = createMockGuild({ roles: [moderator] })
+    const member = createMockMember({ guild, roles: [moderator] })
+
+    expect([member.roles.resolve(moderator), member.roles.resolve(moderator.id), member.roles.resolveId(moderator)]).toEqual([
+      moderator,
+      moderator,
+      moderator.id,
+    ])
+    expect(member.roles.resolve('100000000000000999')).toBeNull()
+    expect(member.roles.guild).toBe(guild)
+    expect(member.roles.client).toBe(member.client)
+  })
+
   it('is the member of an interaction from its user in its server, roles and permissions included', () => {
     const user = createMockUser()
     const guild = createMockGuild({ members: [createMockMember({ user, roles: [role([PermissionFlagsBits.ManageGuild])] })] })
