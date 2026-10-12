@@ -1,14 +1,18 @@
 import { vi } from 'vitest'
 import {
+  ChannelType,
   ChatInputCommandInteraction,
   Client,
+  type ClientEvents,
   type ClientOptions,
+  GatewayDispatchEvents,
   GatewayIntentBits,
   type GuildMember,
   type PartialGuildMember,
   Message,
   MessageReaction,
   Partials,
+  Status,
 } from 'discord.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
@@ -1078,6 +1082,127 @@ describe('gateway event handlers', () => {
       )
 
       expect(logged.warn).toEqual([])
+    })
+
+    describe('events about objects the bot has not cached', () => {
+      const GUILD = '300000000000000001'
+      const CHANNEL = '300000000000000002'
+      const MESSAGE = '300000000000000003'
+      const SCHEDULED_EVENT = '300000000000000004'
+      const ana = { id: '300000000000000005', username: 'ana', discriminator: '0', bot: false, avatar: null, global_name: null }
+      const intents = [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildMessagePolls,
+        GatewayIntentBits.GuildScheduledEvents,
+      ]
+      const pollVote = { user_id: ana.id, channel_id: CHANNEL, guild_id: GUILD, message_id: MESSAGE, answer_id: 1 }
+      const scheduledEventUser = { guild_id: GUILD, guild_scheduled_event_id: SCHEDULED_EVENT, user_id: ana.id }
+      const memberUpdate = { guild_id: GUILD, user: ana, roles: [], nick: 'Ana', joined_at: new Date(0).toISOString() }
+      const cases: { event: keyof ClientEvents; t: GatewayDispatchEvents; d: object; partials: Partials[] }[] = [
+        {
+          event: 'messageReactionRemoveEmoji',
+          t: GatewayDispatchEvents.MessageReactionRemoveEmoji,
+          d: { channel_id: CHANNEL, guild_id: GUILD, message_id: MESSAGE, emoji: { id: null, name: '👍' } },
+          partials: [Partials.Message, Partials.Reaction],
+        },
+        {
+          event: 'guildMemberRemove',
+          t: GatewayDispatchEvents.GuildMemberRemove,
+          d: { guild_id: GUILD, user: ana },
+          partials: [Partials.GuildMember],
+        },
+        { event: 'guildMemberUpdate', t: GatewayDispatchEvents.GuildMemberUpdate, d: memberUpdate, partials: [Partials.GuildMember] },
+        {
+          event: 'messagePollVoteAdd',
+          t: GatewayDispatchEvents.MessagePollVoteAdd,
+          d: pollVote,
+          partials: [Partials.Message, Partials.Poll, Partials.PollAnswer],
+        },
+        {
+          event: 'messagePollVoteRemove',
+          t: GatewayDispatchEvents.MessagePollVoteRemove,
+          d: pollVote,
+          partials: [Partials.Message, Partials.Poll, Partials.PollAnswer],
+        },
+        {
+          event: 'guildScheduledEventUserAdd',
+          t: GatewayDispatchEvents.GuildScheduledEventUserAdd,
+          d: scheduledEventUser,
+          partials: [Partials.User],
+        },
+        {
+          event: 'guildScheduledEventUserRemove',
+          t: GatewayDispatchEvents.GuildScheduledEventUserRemove,
+          d: scheduledEventUser,
+          partials: [Partials.User],
+        },
+      ]
+
+      /**
+       * Starts an app with one `@On(event)` handler, gives its client a guild with a channel and a scheduled event
+       * and nothing else, and hands discord.js the packet. Resolves to the warnings and whether the handler ran.
+       */
+      async function deliver(
+        { event, t, d }: Omit<(typeof cases)[number], 'partials'>,
+        partials: Partials[],
+      ): Promise<{ warnings: string[]; handled: boolean }> {
+        let handled = false
+        @Controller()
+        class Listener {
+          @On(event)
+          handle() {
+            handled = true
+          }
+        }
+        logged.warn.length = 0
+        const client = await startApp({ controllers: [Listener] }, { intents, partials })
+        const warnings = logged.warn.map(args => String(args[0]))
+
+        // As a logged-in client is: ready, and knowing its own user
+        ;(client.ws as unknown as { status: Status }).status = Status.Ready
+        ;(client as unknown as { user: { id: string } }).user = { id: '300000000000000006' }
+        client.guilds['_add']({
+          id: GUILD,
+          name: 'Guild',
+          channels: [{ id: CHANNEL, type: ChannelType.GuildText, name: 'general' }],
+          guild_scheduled_events: [{ id: SCHEDULED_EVENT, guild_id: GUILD, name: 'Meetup' }],
+        })
+        const emitted = vi.spyOn(client, 'emit')
+        const shard = { status: Status.Ready }
+        ;(client.ws as unknown as { handlePacket(packet: object, shard: object): void }).handlePacket({ op: 0, s: 1, t, d }, shard)
+
+        if (emitted.mock.calls.some(([name]) => name === event)) await vi.waitFor(() => expect(handled).toBe(true))
+        return { warnings, handled }
+      }
+
+      const warning = (partial: Partials, event: string) =>
+        `Partials.${Partials[partial]} is not in clientOptions.partials, so @On('${event}') in Listener.handle will miss ` +
+        ([Partials.GuildMember, Partials.Poll, Partials.PollAnswer].includes(partial)
+          ? 'events about members or polls the bot has not cached, such as members who joined before it started.'
+          : 'events about messages, reactions or users the bot has not cached, such as messages sent before it started.')
+
+      it.each(cases)('warns about each partial $event needs, which discord.js delivers it only with', async testCase => {
+        const { event, partials } = testCase
+
+        expect(await deliver(testCase, [])).toEqual({ warnings: partials.map(partial => warning(partial, event)), handled: false })
+        for (const left of partials) {
+          const others = partials.filter(partial => partial !== left)
+          expect(await deliver(testCase, others)).toEqual({ warnings: [warning(left, event)], handled: false })
+        }
+        expect(await deliver(testCase, partials)).toEqual({ warnings: [], handled: true })
+      })
+
+      // discord.js adds the member from the packet whether or not it was cached
+      it('asks guildMemberAdd for the GuildMembers intent only', async () => {
+        const join = { guild_id: GUILD, user: ana, roles: [], joined_at: new Date(0).toISOString() }
+
+        expect(await deliver({ event: 'guildMemberAdd', t: GatewayDispatchEvents.GuildMemberAdd, d: join }, [])).toEqual({
+          warnings: [],
+          handled: true,
+        })
+      })
     })
   })
 })
