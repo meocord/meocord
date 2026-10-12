@@ -36,6 +36,7 @@ import {
   bundledModuleFiles,
   copyPackagesInto,
   createNativeExternals,
+  otherCopiesWarning,
   findBundledNativeAddons,
   installedPackages,
   type NativePackage,
@@ -528,6 +529,9 @@ copies or substantial portions of the Software.
         // A safety net behind the externals function: a native addon that still reached the
         // bundle would run on this machine -- through its node_modules -- and fail in production.
         assertNoBundledNativeAddons(findBundledNativeAddons(bundledFiles, this.projectRoot))
+        for (const [name, others] of natives.otherCopies) {
+          this.logger.warn(otherCopiesWarning(name, natives.found.get(name)!.dir, others, this.projectRoot))
+        }
         this.packDependencies(meocordConfig, natives.found)
       } else if (!meocordConfig?.bundleDependencies) {
         this.removePackedOutputs()
