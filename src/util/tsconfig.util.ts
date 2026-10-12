@@ -1,26 +1,8 @@
 import path from 'path'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'fs'
 import { hostname, tmpdir } from 'os'
-import { createRequire } from 'module'
 import { parseJsonc } from '@src/util/json.util.js'
-import { projectPaths } from '@src/util/tsconfig-paths.util.js'
-
-/**
- * An `extends` made to work from another directory: a relative path made absolute, and a package
- * resolved from the project's `node_modules`, or kept as it is when it cannot be found there.
- */
-function resolveExtends(value: string | string[], cwd: string): string | string[] {
-  const projectRequire = createRequire(path.join(cwd, 'tsconfig.json'))
-  const resolve = (entry: string) => {
-    if (entry.startsWith('.') || path.isAbsolute(entry)) return path.resolve(cwd, entry)
-    try {
-      return projectRequire.resolve(entry)
-    } catch {
-      return entry
-    }
-  }
-  return Array.isArray(value) ? value.map(resolve) : resolve(value)
-}
+import { resolutionTsconfig } from '@src/util/tsconfig-paths.util.js'
 
 // The directory this process writes its copies in, and how many it has written there
 let copiesDir: string | undefined
@@ -94,9 +76,9 @@ function copiesDirectory(): string {
 }
 
 /**
- * Writes a copy of the project's tsconfig.json for the bundler and returns its path: comments and trailing commas
- * removed, paths made absolute (`paths` as {@link projectPaths} reads them), `noEmit` dropped. One file per call in this
- * process's directory, removed at exit; the project's file is never written.
+ * Writes a copy of the project's tsconfig.json for the bundler and returns its path. The copy is for module resolution
+ * only: what {@link resolutionTsconfig} gives, with no `extends`, and the project's own references. One file per call
+ * in this process's directory, removed at exit; the project's file is never written.
  * @throws When `tsconfig.json` is missing or cannot be parsed.
  */
 export function prepareModifiedTsConfig(): string {
@@ -120,42 +102,18 @@ export function prepareModifiedTsConfig(): string {
     )
   }
 
-  // The copy lives in the temp directory, so every path in it is made absolute from the project
+  // The copy lives in the temp directory and is for module resolution alone: what the bundler resolves with, every path
+  // absolute and no `extends` left, since the bundler's own lookup of one can't read a Windows absolute path
   const cwd = process.cwd()
-  if (parsedConfig?.extends) parsedConfig.extends = resolveExtends(parsedConfig.extends, cwd)
-  // `${configDir}` is the project, which the copy's own directory would otherwise stand for
-  for (const key of ['include', 'exclude', 'files']) {
-    if (Array.isArray(parsedConfig?.[key])) {
-      parsedConfig[key] = parsedConfig[key].map((p: string) => path.resolve(cwd, p.replaceAll('${configDir}', cwd)))
-    }
+  const copy: Record<string, unknown> = { ...resolutionTsconfig(cwd) }
+  // Project references, which tsc reads from this file alone and resolves from the project, `${configDir}` as written
+  if (Array.isArray(parsedConfig?.references)) {
+    copy.references = parsedConfig.references.map((reference: { path?: unknown }) =>
+      typeof reference?.path === 'string' ? { ...reference, path: path.resolve(cwd, reference.path) } : reference,
+    )
   }
-
-  // Process compilerOptions
-  if (parsedConfig?.compilerOptions) {
-    const pathOptions = ['outDir', 'rootDir', 'baseUrl', 'tsBuildInfoFile']
-
-    // Convert relative paths to absolute paths in `compilerOptions`
-    pathOptions.forEach(option => {
-      if (parsedConfig.compilerOptions[option]) {
-        parsedConfig.compilerOptions[option] = path.resolve(process.cwd(), parsedConfig.compilerOptions[option])
-      }
-    })
-
-    if (Array.isArray(parsedConfig.compilerOptions.typeRoots)) {
-      parsedConfig.compilerOptions.typeRoots = parsedConfig.compilerOptions.typeRoots.map((p: string) => path.resolve(cwd, p))
-    }
-
-    // Remove `noEmit` option if it exists
-    if ('noEmit' in parsedConfig.compilerOptions) {
-      delete parsedConfig.compilerOptions.noEmit
-    }
-  }
-
-  // The paths as tsc reads them, inherited ones included, written absolute so the copy in the temp directory keeps them
-  const paths = projectPaths(cwd)
-  if (paths) (parsedConfig.compilerOptions ??= {}).paths = paths
 
   const tempTsConfigPath = path.join(copiesDirectory(), `modified-tsconfig-${++copies}.json`)
-  writeFileSync(tempTsConfigPath, JSON.stringify(parsedConfig, null, 2))
+  writeFileSync(tempTsConfigPath, JSON.stringify(copy, null, 2))
   return tempTsConfigPath
 }

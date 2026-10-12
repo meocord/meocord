@@ -138,6 +138,10 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
         if (externals && !options.requireable) chain.externals(typeExternals(Array.isArray(externals) ? externals : [externals]))
         // Says a missing package a dependency only probes for is harmless, and how to silence it
         chain.plugin('meocord-optional-probes').use(OptionalProbesPlugin)
+        // Project references off, where Rsbuild sets 'auto': with them, Rspack resolves the root project's own files
+        // without its paths and baseUrl, which tsc applies, so a bot that references another project couldn't build. A
+        // file inside a referenced project then resolves through the root config's paths, not its own
+        if (chain.resolve.get('tsConfig')) chain.resolve.tsConfig({ configFile: tsconfigPath })
       },
       swc: {
         jsc: {

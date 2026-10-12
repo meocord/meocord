@@ -112,3 +112,120 @@ describe('tsconfig paths, read as tsc reads them', () => {
     expect(jitiAliases(paths)).toEqual(aliases)
   })
 })
+
+// The bundler reads the copy from the temp directory, so it has to name what tsc would from the project
+describe("the build's tsconfig copy, read as tsc reads the project's", () => {
+  const copyOf = (dir: string) => JSON.parse(readFileSync(inProject(dir, () => prepareModifiedTsConfig()), 'utf8'))
+  const preset = { 'node_modules/@tsconfig/preset/package.json': { name: '@tsconfig/preset', version: '1.0.0' } }
+
+  // Each preset declares a paths alias, which the copy carries resolved from the file that declares it
+  const alias = { compilerOptions: { paths: { '@preset/*': ['./lib/*'] } } }
+  it.each([
+    ['a package, as its tsconfig.json', '@tsconfig/preset', {}, 'node_modules/@tsconfig/preset/tsconfig.json'],
+    ["a package, as the file its package.json's tsconfig names", '@tsconfig/preset', { tsconfig: 'base.json' }, 'node_modules/@tsconfig/preset/base.json'],
+    ['a file in a package, .json added', '@tsconfig/preset/strict', {}, 'node_modules/@tsconfig/preset/strict.json'],
+    // As @total-typescript/tsconfig maps its subpaths
+    ['a subpath its exports map to another file', '@tsconfig/preset/bundler/dom/app', { exports: { './bundler/dom/app': './bundler/dom.json' } }, 'node_modules/@tsconfig/preset/bundler/dom.json'],
+    ['a subpath its exports map to a file in a folder of that name', '@tsconfig/preset/tsc', { exports: { './tsc': './tsc/dom/app.json' } }, 'node_modules/@tsconfig/preset/tsc/dom/app.json'],
+  ])('extends %s, not the file its main names, and writes no extends', (_, extendsValue, manifest, file) => {
+    const dir = project({
+      'tsconfig.json': { extends: extendsValue },
+      'node_modules/@tsconfig/preset/package.json': { name: '@tsconfig/preset', version: '1.0.0', main: 'index.js', ...manifest },
+      [file]: alias,
+    })
+
+    const copy = copyOf(dir)
+
+    expect(copy.extends).toBeUndefined()
+    expect(copy.compilerOptions.paths).toEqual({ '@preset/*': [path.join(dir, path.dirname(file), 'lib', '*')] })
+  })
+
+  // tsc reads references from this file alone, leaving ${configDir} in them as written
+  it('names each project reference from the project, as tsc does', () => {
+    const dir = project({ 'tsconfig.json': { references: [{ path: './tsconfig.tools.json' }, { path: '${configDir}/packages/a' }] } })
+
+    expect(copyOf(dir).references).toEqual([{ path: path.join(dir, 'tsconfig.tools.json') }, { path: path.join(dir, '${configDir}', 'packages', 'a') }])
+  })
+
+  // Its own and an extended file's, ${configDir} as the project and a relative one from the file that declares it
+  it('makes baseUrl and the file lists absolute as tsc resolves them, through extends and ${configDir}', () => {
+    const dir = project({
+      'tsconfig.json': { extends: './config/tsconfig.base.json', compilerOptions: { baseUrl: '${configDir}/src' }, files: ['./src/main.ts'] },
+      'config/tsconfig.base.json': { include: ['${configDir}/src'], exclude: ['../src/skip'] },
+    })
+
+    const copy = copyOf(dir)
+
+    expect(copy.compilerOptions).toEqual({ baseUrl: path.join(dir, 'src') })
+    expect(copy.files).toEqual([path.join(dir, 'src', 'main.ts')])
+    expect(copy.include).toEqual([path.join(dir, 'src')])
+    expect(copy.exclude).toEqual([path.join(dir, 'src', 'skip')])
+  })
+
+  // The bundler resolves with these alone; another option, which get-tsconfig may infer as an older TypeScript would,
+  // could only mislead whatever else read the copy
+  it('writes no compiler option but baseUrl and paths', () => {
+    const dir = project({
+      'tsconfig.json': { extends: './config/tsconfig.base.json', compilerOptions: { target: 'es2022', strict: true, outDir: './dist' } },
+      'config/tsconfig.base.json': { compilerOptions: { module: 'nodenext', baseUrl: '../src', paths: { '@src/*': ['*'] }, rootDir: '../src' } },
+    })
+
+    expect(Object.keys(copyOf(dir).compilerOptions).sort()).toEqual(['baseUrl', 'paths'])
+  })
+
+  async function builds(dir: string): Promise<string> {
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(dir)
+    try {
+      const config = createRsbuildConfig({ mode: 'development', entry: path.join(dir, 'src', 'main.ts') })
+      const rsbuild = await createRsbuild({ cwd: dir, config: { ...config, performance: { printFileSize: false } } })
+      await rsbuild.build()
+    } finally {
+      cwd.mockRestore()
+    }
+    return readFileSync(path.join(dir, 'dist', 'main.js'), 'utf8')
+  }
+
+  it('builds an application that extends a package with no main and imports from a ${configDir} baseUrl', async () => {
+    const dir = project({
+      'tsconfig.json': { extends: '@tsconfig/preset', compilerOptions: { baseUrl: '${configDir}/src' } },
+      ...preset,
+      'node_modules/@tsconfig/preset/tsconfig.json': { compilerOptions: { experimentalDecorators: true } },
+    })
+    mkdirSync(path.join(dir, 'src', 'lib'))
+    writeFileSync(path.join(dir, 'src', 'lib', 'thing.ts'), "export const thing = 'from lib'\n")
+    writeFileSync(path.join(dir, 'src', 'main.ts'), "import { thing } from 'lib/thing'\nconsole.log(thing)\n")
+
+    expect(await builds(dir)).toContain('from lib')
+  }, 60_000)
+
+  // The copy names no extends: Rspack reads one that isn't relative or starting with '/' as a package, so a Windows
+  // absolute path, as a copy in the temp directory would carry, was never found
+  it('builds an application whose tsconfig.json extends a file beside it and a package, with paths from each', async () => {
+    const dir = project({
+      'tsconfig.json': { extends: ['./config/tsconfig.base.json', '@tsconfig/preset'] },
+      'config/tsconfig.base.json': { compilerOptions: { paths: { '@src/*': ['../src/*'] } } },
+      ...preset,
+      'node_modules/@tsconfig/preset/tsconfig.json': { compilerOptions: { paths: { '@src/*': ['../../../src/*'], '@preset/*': ['./lib/*'] } } },
+    })
+    mkdirSync(path.join(dir, 'node_modules', '@tsconfig', 'preset', 'lib'))
+    writeFileSync(path.join(dir, 'node_modules', '@tsconfig', 'preset', 'lib', 'shared.ts'), "export const shared = 'from @preset'\n")
+    writeFileSync(
+      path.join(dir, 'src', 'main.ts'),
+      "import { token } from '@src/config/settings'\nimport { shared } from '@preset/shared'\nconsole.log(token, shared)\n",
+    )
+
+    const bundle = await builds(dir)
+
+    expect(bundle).toContain('from @src')
+    expect(bundle).toContain('from @preset')
+  }, 60_000)
+
+  it('builds an application whose tsconfig.json references another project', async () => {
+    const dir = project({
+      'tsconfig.json': { compilerOptions: { paths: { '@src/*': ['./src/*'] } }, references: [{ path: './tsconfig.tools.json' }] },
+      'tsconfig.tools.json': { compilerOptions: { composite: true }, include: ['tools'] },
+    })
+
+    expect(await builds(dir)).toContain('from @src')
+  }, 60_000)
+})
