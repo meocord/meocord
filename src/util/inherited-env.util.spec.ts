@@ -49,6 +49,47 @@ describe('inheritedEnvironment', () => {
   it('keeps everything when there is no .env', () => {
     expect(inheritedEnvironment({ A: '1' }, root)).toEqual({ A: '1' })
   })
+
+  // When the CLI runs on Bun, the values Bun expanded as it loaded the files, each as measured on Bun 1.4.3
+  describe('on Bun', () => {
+    it('leaves out a value Bun expanded, and keeps one the shell set to another value', () => {
+      writeFileSync(path.join(root, '.env'), 'HOST=localhost\nURL=http://$HOST:3000\nAPI=${HOST}/api\n')
+
+      expect(inheritedEnvironment({ HOST: 'localhost', URL: 'http://localhost:3000', API: 'example.com/api' }, root, true)).toEqual({
+        API: 'example.com/api',
+      })
+    })
+
+    it.each([
+      ['an earlier line, as Bun set it', 'A=a\nB=$A-b\nC=$B-c\n', { A: 'a', B: 'a-b', C: 'a-b-c' }],
+      ['a later line, as written', 'J=$K-j\nK=$A-k\nA=a\n', { J: '$A-k-j', K: 'a-k', A: 'a' }],
+      ['an unset variable, as empty', 'E=x-$NOPE-y\n', { E: 'x--y' }],
+      ["${NAME:-default}'s default for an unset one", 'D=${NOPE:-fallback}\n', { D: 'fallback' }],
+      ['an escaped dollar sign, as one', 'F=costs \\$5\n', { F: 'costs $5' }],
+      ['a dollar sign before no name, as itself', 'G=a$ $$A\nA=a\n', { G: 'a$ $a', A: 'a' }],
+      ['a variable the shell set', 'S=$SHELL_VALUE/x\n', { SHELL_VALUE: 'shell', S: 'shell/x' }],
+      ['a later line the shell set, as the shell set it', 'S=$SHELL_VALUE-x\nSHELL_VALUE=file\n', { SHELL_VALUE: 'shell', S: 'shell-x' }],
+    ])('expands a reference to %s', (_, file, env) => {
+      writeFileSync(path.join(root, '.env'), file)
+
+      expect(inheritedEnvironment(env, root, true)).toEqual('SHELL_VALUE' in env ? { SHELL_VALUE: 'shell' } : {})
+    })
+
+    // Bun loads the file that wins first, so a reference to a variable only a later-loaded file sets is empty
+    it('expands a reference across files in the order Bun loads them', () => {
+      writeFileSync(path.join(root, '.env'), 'HOST=localhost\nFROM_LOCAL=$LOCAL-x\n')
+      writeFileSync(path.join(root, '.env.local'), 'LOCAL=l\nNEEDS_HOST=at-$HOST\n')
+
+      expect(inheritedEnvironment({ HOST: 'localhost', FROM_LOCAL: 'l-x', LOCAL: 'l', NEEDS_HOST: 'at-' }, root, true)).toEqual({})
+    })
+
+    it('expands nothing when the CLI runs on Node, where dotenv sets the text as written', () => {
+      writeFileSync(path.join(root, '.env'), 'HOST=localhost\nURL=http://$HOST:3000\n')
+
+      expect(inheritedEnvironment({ HOST: 'localhost', URL: 'http://localhost:3000' }, root, false)).toEqual({ URL: 'http://localhost:3000' })
+      expect(inheritedEnvironment({ HOST: 'localhost', URL: 'http://$HOST:3000' }, root, false)).toEqual({})
+    })
+  })
 })
 
 describe('bunDevelopmentValues', () => {
@@ -92,6 +133,13 @@ describe('bunDevelopmentValues', () => {
     ;(globalThis as Record<symbol, unknown>)[BUILD_MODE_KEY] = mode
 
     expect(bunDevelopmentValues(env, root, bun)).toMatchObject({ files: [], keys: [] })
+  })
+
+  it('names a variable a development file gave a value Bun expanded', () => {
+    writeFileSync(path.join(root, '.env.development'), 'HOST=dev.local\nURL=http://$HOST:3000\n')
+    rmSync(path.join(root, '.env.development.local'))
+
+    expect(bunDevelopmentValues({ HOST: 'dev.local', URL: 'http://dev.local:3000' }, root, true)).toMatchObject({ keys: ['HOST', 'URL'] })
   })
 
   it('is empty when the development files agree with the production ones', () => {
