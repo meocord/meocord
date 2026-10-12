@@ -40,7 +40,7 @@ const { describeRefusal } = await import('@src/util/refusal.util.js')
 
 /** A shard as the manager uses it: spawn, send, kill, and the events discord.js emits. */
 class FakeShard extends EventEmitter {
-  process: { exitCode: number | null } | null = null
+  process: { exitCode: number | null; signalCode: NodeJS.Signals | null } | null = null
   sent: unknown[] = []
   spawns = 0
   /** What a new shard's first spawn does, for a test to set. */
@@ -54,7 +54,7 @@ class FakeShard extends EventEmitter {
 
   async spawn() {
     this.spawns++
-    this.process = { exitCode: null }
+    this.process = { exitCode: null, signalCode: null }
     if (this.outcome === 'die') {
       this.die(1)
       throw Object.assign(new Error(`Shard ${this.id}'s process exited before its Client became ready.`), { code: 'ShardingReadyDied' })
@@ -62,9 +62,9 @@ class FakeShard extends EventEmitter {
     return this.process
   }
 
-  die(code: number | null) {
+  die(code: number | null, signal: NodeJS.Signals | null = null) {
     const child = this.process
-    if (child) child.exitCode = code
+    if (child) Object.assign(child, { exitCode: code, signalCode: signal })
     this.emit('death', child)
     this.process = null
   }
@@ -265,6 +265,17 @@ describe('ShardManager', () => {
     clock.now += RESPAWN_RESET_MS
     shard.die(1)
     expect(logged.warn.at(-1)).toContain(`restarting it in ${RESPAWN_BASE_MS} ms`)
+  })
+
+  // A shard a signal ended has no exit code; the signal is what says why
+  it('names the signal a shard was killed by', async () => {
+    vi.useFakeTimers()
+    const { manager, shards } = setup({ shards: 1 })
+    await manager.start()
+
+    shards[0].die(null, 'SIGKILL')
+
+    expect(logged.warn.at(-1)).toBe(`Shard 0 exited on SIGKILL; restarting it in ${RESPAWN_BASE_MS} ms.`)
   })
 
   it('catches a shard that dies before becoming ready, and restarts it', async () => {
