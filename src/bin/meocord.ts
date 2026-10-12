@@ -125,6 +125,12 @@ export function appDirectoryName(appName: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
+/** How long watch mode waits after the last save to a file it reloads from before reloading. */
+export const RELOAD_DEBOUNCE_MS = 300
+
+/** The name watch mode taps the compiler's hooks under. */
+const WATCH_HOOK_NAME = 'MeoCordWatch'
+
 /** A Command Line Interface (CLI) for managing the MeoCord application. */
 export class MeoCordCLI {
   private readonly appName = 'MeoCord'
@@ -792,27 +798,38 @@ copies or substantial portions of the Software.
       this.clearScreen()
       this.logger.log('Starting watch mode...')
       await this.compileConfig({ mode: 'development' })
-      let isRunning = false
       let watching: { close: () => Promise<void> } | undefined
+      // Settles once the running build has emitted, whatever its errors; a reload waits for it before replacing the build
+      let built: Promise<void> = Promise.resolve()
 
       // The new bundler is made, its plugins set up and its config resolved, before the running build is closed: a
       // config whose rsbuild hook or plugin throws leaves that build watching the sources, and the bot it started running
       const watch = async () => {
-        const { rsbuild, meocordConfig } = await this.createBundler('development')
+        const { rsbuild } = await this.createBundler('development')
         await rsbuild.initConfigs({ action: 'build' })
 
         // Runs after every rebuild, which is where the application is restarted. A rebuild that fails reports its own
         // errors, emits nothing, and leaves the running bot alone rather than replacing it with a broken build.
+        let emitted!: () => void
+        const firstBuild = new Promise<void>(resolve => (emitted = resolve))
         rsbuild.onAfterBuild(({ stats }) => {
-          isRunning = true
+          emitted()
           if (stats?.hasErrors()) return
-          if (!meocordConfig?.bundleDependencies) this.removePackedOutputs()
+          // A watch build packs nothing, so a previous build's packed copies would shadow the project's packages
+          this.removePackedOutputs()
           this.latestBuild = stats ? emittedDigest(stats) : undefined
           this.restartApp(this.latestBuild)
+        })
+        // A compile that fails outright never reaches onAfterBuild, so it settles the wait too: a later save still reloads
+        rsbuild.onAfterCreateCompiler(({ compiler }) => {
+          for (const each of 'compilers' in compiler ? compiler.compilers : [compiler]) {
+            each.hooks.failed.tap(WATCH_HOOK_NAME, () => emitted())
+          }
         })
 
         await watching?.close()
         watching = await rsbuild.build({ watch: true })
+        built = firstBuild
       }
       await watch()
 
@@ -829,42 +846,57 @@ copies or substantial portions of the Software.
       let debounceWatcher: NodeJS.Timeout
       let changed = new Set<string>()
 
+      // One reload at a time, each taking every file changed since the last began
+      const reload = async () => {
+        const files = changed
+        changed = new Set()
+        if (this.stopping || files.size === 0) return
+        for (const file of files) this.logger.log(reloads[file])
+        if (!rebuilds(files)) return this.restartApp()
+        // A config that is refused, as at startup, or doesn't compile, say mid-edit, leaves the running bot and its build
+        // as they are
+        if (files.has('meocord.config.ts')) {
+          const checked = checkSourceConfig()
+          if ('problem' in checked) {
+            // One that doesn't load, say mid-edit, is reported as a failed compile is, and watching goes on
+            if (checked.loadError !== undefined) return this.logger.error(`Failed to compile meocord.config.ts: ${checked.loadError}`)
+            return reportConfigProblem(checked.problem)
+          }
+          if (!(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
+        }
+        // The new build restarts the bot, whatever its output: the config it was launched with has changed
+        this.launchedFrom = undefined
+        try {
+          await watch()
+        } catch (error) {
+          // As with a failed login: the bot keeps running, and saving the file again tries again
+          this.logger.error(
+            `Rebuilding failed: ${error instanceof Error ? error.message : String(error)}. The bot keeps running its last ` +
+              'build; save the file again to retry.',
+          )
+        }
+      }
+      let reloading = Promise.resolve()
+      // Whether a reload waits its turn: a later save joins it rather than queueing one of its own
+      let queued = false
+      const queueReload = () => {
+        if (queued) return
+        queued = true
+        reloading = reloading
+          .then(() => built)
+          .then(() => {
+            queued = false
+            return reload()
+          })
+          .catch(error => this.logger.error('Reloading failed:', error))
+      }
+
       // The folder rather than the files, so an editor that saves by replacing a file is still seen
       const fsWatcher = fs.watch(this.projectRoot, (_event, filename) => {
         if (!filename || !Object.hasOwn(reloads, filename)) return
         changed.add(filename)
         clearTimeout(debounceWatcher)
-        debounceWatcher = setTimeout(async () => {
-          if (!isRunning) return
-          const files = changed
-          changed = new Set()
-          for (const file of files) this.logger.log(reloads[file])
-          if (!rebuilds(files)) return this.restartApp()
-          // A config that is refused, as at startup, or doesn't compile, say mid-edit, leaves the running bot and its build
-          // as they are
-          if (files.has('meocord.config.ts')) {
-            const checked = checkSourceConfig()
-            if ('problem' in checked) {
-              // One that doesn't load, say mid-edit, is reported as a failed compile is, and watching goes on
-              if (checked.loadError !== undefined) return this.logger.error(`Failed to compile meocord.config.ts: ${checked.loadError}`)
-              return reportConfigProblem(checked.problem)
-            }
-            if (!(await this.compileConfig({ mode: 'development', exitOnFailure: false }))) return
-          }
-          isRunning = false
-          // The new build restarts the bot, whatever its output: the config it was launched with has changed
-          this.launchedFrom = undefined
-          try {
-            await watch()
-          } catch (error) {
-            // As with a failed login: the bot keeps running, and saving the file again tries again
-            isRunning = true
-            this.logger.error(
-              `Rebuilding failed: ${error instanceof Error ? error.message : String(error)}. The bot keeps running its last ` +
-                'build; save the file again to retry.',
-            )
-          }
-        }, 300)
+        debounceWatcher = setTimeout(queueReload, RELOAD_DEBOUNCE_MS)
       })
 
       const stopWatching = () => {

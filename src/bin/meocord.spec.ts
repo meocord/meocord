@@ -35,13 +35,16 @@ vi.mock('@src/util/meocord-config-loader.util.js', async importOriginal => {
 })
 
 import { spawn } from 'node:child_process'
-import { existsSync, watch } from 'node:fs'
-import { MeoCordCLI } from '@src/bin/meocord.js'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, watch, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { MeoCordCLI, RELOAD_DEBOUNCE_MS } from '@src/bin/meocord.js'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, FORCE_STOP_GRACE_MS, MAX_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
 import { namePathProblem, nextStepFor } from '@src/bin/generator.js'
 import { ControllerType } from '@src/enum/controller.enum.js'
 import { RUNTIME_OVERRIDE_ENV } from '@src/util/runtime.util.js'
+import { PLATFORM_MANIFEST } from '@src/util/platform.util.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 
 /** Stands in for the spawned application; `.on` is chained straight off `spawn`. */
@@ -329,7 +332,7 @@ describe('spawning the application', () => {
       vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
       vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
       vi.spyOn(cli, 'createBundler').mockResolvedValue({
-        rsbuild: { initConfigs: async () => [], onAfterBuild: () => {}, build: async () => ({ close: async () => {} }) },
+        rsbuild: { initConfigs: async () => [], onAfterCreateCompiler: () => {}, onAfterBuild: () => {}, build: async () => ({ close: async () => {} }) },
       })
       await cli.startDev()
     }
@@ -525,7 +528,7 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'relayStopSignals').mockImplementation((_app, stopping) => (stop = stopping))
         vi.spyOn(cli, 'compileConfig').mockResolvedValue(undefined)
         vi.spyOn(cli, 'createBundler').mockResolvedValue({
-          rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => (afterBuild = () => callback({})), build: async () => ({ close: async () => {} }) },
+          rsbuild: { initConfigs: async () => [], onAfterCreateCompiler: () => {}, onAfterBuild: (callback: (params: object) => void) => (afterBuild = () => callback({})), build: async () => ({ close: async () => {} }) },
         })
         await cli.startDev()
         afterBuild()
@@ -570,7 +573,7 @@ describe('spawning the application', () => {
       vi.spyOn(cli, 'createBundler').mockResolvedValue({
         rsbuild: {
           initConfigs: async () => [],
-          onAfterBuild: (callback: (params: object) => void) => (build = output => callback({ stats: statsOf(output) })),
+          onAfterCreateCompiler: () => {}, onAfterBuild: (callback: (params: object) => void) => (build = output => callback({ stats: statsOf(output) })),
           build: async () => ({ close: async () => {} }),
         },
       })
@@ -762,7 +765,7 @@ describe('spawning the application', () => {
           })
           const cli = devCli({
             bundler: async () => ({
-              rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
+              rsbuild: { initConfigs: async () => [], onAfterCreateCompiler: () => {}, onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: async () => {} }) },
             }),
           })
           const child = createChild() as ReturnType<typeof createChild> & { connected: boolean; send: ReturnType<typeof vi.fn> }
@@ -811,7 +814,7 @@ describe('spawning the application', () => {
         vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
         const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
         const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
-          rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: closeBuild }) },
+          rsbuild: { initConfigs: async () => [], onAfterCreateCompiler: () => {}, onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: closeBuild }) },
         }))
         await cli.startDev()
         const errors = vi.mocked((cli as unknown as { logger: { error: (text: string) => void } }).logger.error)
@@ -885,6 +888,131 @@ describe('spawning the application', () => {
         await new Promise(resolve => setTimeout(resolve, 400))
 
         expect(dev.createBundler).toHaveBeenCalledTimes(1)
+      })
+
+      // One reload at a time: a save during one is taken by the next, and each build is closed once, by the one after it
+      describe('when saves come while a reload runs', () => {
+        beforeEach(() => {
+          vi.useFakeTimers()
+        })
+
+        afterEach(() => {
+          vi.useRealTimers()
+        })
+
+        async function slowWatching(meocordConfig?: object) {
+          let listener: (event: string, filename: string | null) => void = () => {}
+          vi.mocked(watch).mockImplementationOnce(((_dir: string, callback: typeof listener) => {
+            listener = callback
+            return { close: vi.fn() }
+          }) as never)
+          const builds: { close: ReturnType<typeof vi.fn>; emit: () => void; fail: () => void }[] = []
+          const cli = new MeoCordCLI() as unknown as {
+            startDev: () => Promise<void>
+            clearScreen: () => void
+            relayStopSignals: () => void
+            compileConfig: (options: { mode: 'production' | 'development'; exitOnFailure?: boolean }) => Promise<boolean>
+            createBundler: () => Promise<unknown>
+          }
+          vi.spyOn(cli, 'clearScreen').mockImplementation(() => {})
+          vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
+          const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
+          const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => {
+            let afterBuild: (params: object) => void = () => {}
+            let failed: () => void = () => {}
+            return {
+              meocordConfig,
+              rsbuild: {
+                initConfigs: async () => [],
+                onAfterBuild: (callback: (params: object) => void) => (afterBuild = callback),
+                onAfterCreateCompiler: (callback: (params: object) => void) =>
+                  callback({ compiler: { hooks: { failed: { tap: (_name: string, fail: () => void) => (failed = fail) } } } }),
+                build: async () => {
+                  const build = { close: vi.fn(async () => {}), emit: () => afterBuild({}), fail: () => failed() }
+                  builds.push(build)
+                  return build
+                },
+              },
+            }
+          })
+          const started = cli.startDev()
+          await vi.waitFor(() => expect(builds).toHaveLength(1))
+          builds[0].emit()
+          await started
+          return { change: (filename: string) => listener('change', filename), compileConfig, createBundler, builds }
+        }
+
+        it('takes two saves during one reload in exactly one more, closing every build but the last once', async () => {
+          const dev = await slowWatching()
+          let compiled!: (value: boolean) => void
+          dev.compileConfig.mockImplementationOnce(() => new Promise<boolean>(resolve => (compiled = resolve)))
+
+          dev.change('meocord.config.ts')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+          expect(dev.compileConfig).toHaveBeenCalledTimes(2)
+          dev.change('tsconfig.json')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+          dev.change('tsconfig.json')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+          // Neither save starts a reload beside the one still compiling the config
+          expect(dev.createBundler).toHaveBeenCalledTimes(1)
+          compiled(true)
+
+          await vi.waitFor(() => expect(dev.builds).toHaveLength(2))
+          dev.builds[1].emit()
+          await vi.waitFor(() => expect(dev.builds).toHaveLength(3))
+          dev.builds[2].emit()
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+
+          expect(dev.createBundler).toHaveBeenCalledTimes(3)
+          expect(dev.builds.map(build => build.close.mock.calls.length)).toEqual([1, 1, 0])
+        })
+
+        // A watch build packs nothing, so a self-contained build's copies left in dist would be what the bot loads
+        it('removes what a self-contained build packed into dist, with bundleDependencies on too', async () => {
+          const project = mkdtempSync(path.join(tmpdir(), 'meocord-watch-'))
+          vi.spyOn(process, 'cwd').mockReturnValue(project)
+          const dist = path.join(project, 'dist')
+          mkdirSync(path.join(dist, 'node_modules', 'left-pad'), { recursive: true })
+          writeFileSync(path.join(dist, 'package.json'), '{}')
+          writeFileSync(path.join(dist, PLATFORM_MANIFEST), '{}')
+          try {
+            await slowWatching({ bundleDependencies: true })
+
+            expect(readdirSync(dist)).toEqual([])
+          } finally {
+            rmSync(project, { recursive: true, force: true })
+          }
+        })
+
+        it('reloads from a save that comes while a rebuild runs, once that rebuild has emitted', async () => {
+          const dev = await slowWatching()
+
+          dev.change('tsconfig.json')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+          await vi.waitFor(() => expect(dev.builds).toHaveLength(2))
+          dev.change('tsconfig.json')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+          expect(dev.builds).toHaveLength(2)
+
+          dev.builds[1].emit()
+          await vi.waitFor(() => expect(dev.builds).toHaveLength(3))
+          expect(dev.builds.map(build => build.close.mock.calls.length)).toEqual([1, 1, 0])
+        })
+
+        // Rspack reports such a failure through the compiler's failed hook alone, never reaching onAfterBuild
+        it('reloads from a save after a rebuild that fails outright, before emitting anything', async () => {
+          const dev = await slowWatching()
+
+          dev.change('tsconfig.json')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+          await vi.waitFor(() => expect(dev.builds).toHaveLength(2))
+          dev.builds[1].fail()
+          dev.change('tsconfig.json')
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS)
+
+          await vi.waitFor(() => expect(dev.builds).toHaveLength(3))
+        })
       })
 
       it('keeps the running build when the changed config does not compile, and reloads once it does', async () => {
