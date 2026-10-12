@@ -38,8 +38,9 @@ export interface DispatchResult {
    */
   durationMs: number
   /**
-   * The guard class that denied the call, whether it returned `false` or threw `GuardDeniedError`.
-   * Only with the outcome `'denied'`, and not for a `GuardDeniedError` the handler threw itself.
+   * The guard class that denied the call, whether it returned `false` or threw `GuardDeniedError`. With the outcome
+   * `'denied'`, or `'error'` when the answer to a guard's `GuardDeniedError` failed to build; not for a
+   * `GuardDeniedError` the handler threw itself.
    */
   deniedBy?: abstract new (...args: any[]) => unknown
   /**

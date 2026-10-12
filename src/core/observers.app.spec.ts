@@ -5,7 +5,7 @@ import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as CommonModule from '@src/common/index.js'
 import type * as TestingModule from '@src/testing/index.js'
 import type * as EnumModule from '@src/enum/index.js'
-import { type DispatchResult } from '@src/interface/index.js'
+import { type DispatchResult, type ResponsePresenter } from '@src/interface/index.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { error: [] as unknown[][] } }))
 
@@ -37,8 +37,11 @@ async function load() {
 }
 type Loaded = Awaited<ReturnType<typeof load>>
 
-/** Starts an app from the factory, with a client that logs in without a network, and returns its dispatch. */
-async function startApp(loaded: Loaded, options: { controllers: any[]; observers: any[] }) {
+/** Starts an app from the factory, with a client that logs in without a network, and returns its dispatch and client. */
+async function startApp(
+  loaded: Loaded,
+  options: { controllers: any[]; observers: any[]; presenter?: new () => ResponsePresenter },
+) {
   const clients: Client[] = []
   vi.spyOn(loaded.discord.Client.prototype, 'login').mockImplementation(function (this: Client) {
     clients.push(this)
@@ -46,13 +49,19 @@ async function startApp(loaded: Loaded, options: { controllers: any[]; observers
   })
   vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
 
-  @loaded.MeoCord({ controllers: options.controllers, observers: options.observers, clientOptions: { intents: [] } })
+  @loaded.MeoCord({
+    controllers: options.controllers,
+    observers: options.observers,
+    presenter: options.presenter,
+    clientOptions: { intents: [] },
+  })
   class App {}
 
   const app = loaded.MeoCordFactory.create(App)
   await app.start()
   const [dispatch] = clients[0].listeners('interactionCreate') as ((interaction: unknown) => Promise<void>)[]
-  return dispatch
+  // Started, so the client is logged in
+  return Object.assign(dispatch, { client: clients[0] as Client<true> })
 }
 
 describe('observers at runtime', () => {
@@ -257,6 +266,57 @@ describe('observers at runtime', () => {
     await vi.waitFor(() => expect(told).toHaveLength(1))
     expect(told[0]).toMatchObject({ outcome: 'denied', error: expect.any(loaded.GuardDeniedError), handled: true })
     expect(told[0].durationMs).toBeGreaterThanOrEqual(25)
+  })
+
+  it("name the denying guard on an 'error' outcome when the answer to its GuardDeniedError fails to build", async () => {
+    const loaded = await load()
+    const told: DispatchResult[] = []
+
+    @loaded.Observer()
+    class AuditObserver {
+      onSettled(_context: unknown, result: DispatchResult) {
+        told.push(result)
+      }
+    }
+    @loaded.Guard()
+    class StaffOnly {
+      canActivate(): boolean {
+        throw new loaded.GuardDeniedError('Staff only.')
+      }
+    }
+    @loaded.Controller()
+    class ModController {
+      @loaded.Command('ban', loaded.CommandType.SLASH)
+      @loaded.UseGuard(StaffOnly)
+      async ban() {}
+    }
+    class BrokenPresenter implements ResponsePresenter {
+      loading() {
+        return { text: 'Working' }
+      }
+      error(): never {
+        throw new TypeError('presenter broke')
+      }
+    }
+
+    const dispatch = await startApp(loaded, {
+      controllers: [ModController],
+      observers: [AuditObserver],
+      presenter: BrokenPresenter,
+    })
+    const interaction = loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, {
+      commandName: 'ban',
+      options: loaded.createChatInputOptions({}),
+      // The presenter is the client's, so the interaction comes from the started bot's client
+      client: dispatch.client,
+    })
+
+    await dispatch(interaction)
+
+    await vi.waitFor(() => expect(told).toHaveLength(1))
+    expect(told[0]).toMatchObject({ outcome: 'error', deniedBy: StaffOnly, handled: false })
+    expect(told[0].error).toBeInstanceOf(TypeError)
+    expect((told[0].error as Error).message).toBe('presenter broke')
   })
 
   it('run their lifecycle hooks as services do: an exporter flushes on shutdown, before what it injects closes', async () => {
