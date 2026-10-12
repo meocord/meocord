@@ -676,7 +676,8 @@ export interface MessageCommandOptions {
   types?: Record<string, MessageParamType>
   /**
    * How long a reply showing a command's usage, or a guard's or validation's reason, stays before it is deleted, in
-   * seconds. `0` keeps it.
+   * seconds. `0` keeps it, and so does a time longer than a timer can wait, 2147483 seconds (about 24.8 days), which
+   * startup warns about.
    * @defaultValue `10`
    */
   deleteUsageRepliesAfter?: number
