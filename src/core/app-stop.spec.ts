@@ -157,6 +157,41 @@ describe('app.stop()', () => {
     expect(destroy).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    ['returns its value', () => ({ ready: true })],
+    ['returns a promise', async () => ({ ready: true })],
+    ['rejects', () => Promise.reject(new Error('connection refused'))],
+  ])('makes no provider after the one being made when the start is stopped, whose next factory %s', async (_case, next) => {
+    login('at once')
+    let release!: () => void
+    const held = new Promise<void>(resolve => (release = resolve))
+    const made: string[] = []
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    @MeoCord({
+      controllers: [Ping],
+      providers: [
+        { provide: 'slow', useFactory: async () => (await held, { connected: true }) },
+        { provide: 'next', useFactory: () => (made.push('next'), next()) },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class TwoProviders {}
+    const app = MeoCordFactory.create(TwoProviders)
+
+    const started = app.start()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const stopped = app.stop()
+    release()
+    await stopped
+    await expect(started).rejects.toThrow('The bot was stopped before it came online.')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    process.off('unhandledRejection', onUnhandled)
+
+    expect({ made, unhandled, exitCode: process.exitCode }).toEqual({ made: [], unhandled: [], exitCode })
+  })
+
   // Between the providers being made and the login beginning, there is a turn of the event loop a stop can take
   it('ends a start that a stop overtakes after its providers are made, before it logs in', async () => {
     const { destroy } = login('at once')

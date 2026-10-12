@@ -407,14 +407,18 @@ export class MeoCordFactory {
     const logger = this.logger
     let sources: EventSource[] | undefined
     const startup = async (control: StartupControl) => {
+      let made: boolean
       try {
-        await resolveProviders(container, providers, order, control)
+        made = await resolveProviders(container, providers, order, control)
       } catch (error) {
         logger.error(`${(error as Error).message}. The bot cannot start without it.`)
         logger.debug('Provider failure:', (error as Error).cause)
         markExplained(error)
         throw error
       }
+      // A stop came while the providers were being made: what follows resolves provided values, which would make the
+      // factories it left unmade
+      if (!made) return
       // Read once every provided value is made, and before anything the app makes could list its handlers
       if (!sources) {
         sources = eventSources(container, providers, lifecycle, appClasses, text => logger.warn(text))
