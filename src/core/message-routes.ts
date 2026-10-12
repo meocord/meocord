@@ -74,6 +74,65 @@ export const fitsScope = (scope: MessageScope, inGuild: boolean | undefined) => 
 
 const PARAM = /^\{(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\.\.\.)?(\?)?\}$/
 const FLAG = /^\{--(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\?)?\}$/
+/**
+ * A whole brace pair that PARAM or FLAG refused, read loosely to tell its name from its type: anything up to `:` or `}`,
+ * then the marks a param ends with, `...` and `?`, wherever they were written.
+ */
+const LOOSE_FLAG = /^\{--([^:}]*?)(?::([^}]*?))?(\.\.\.)?(\?)?\}$/
+const LOOSE_PARAM = /^\{([^:}]*?)(?::([^}]*?))?(\.\.\.)?(\?)?\}$/
+/** A name or type with marks after it, as one written out of order carries them. */
+const MARKED = /^(.*?)((?:\.\.\.|\?)+)$/
+/** A param's name, and a flag's, which also starts with a letter, as a message could not give it otherwise. */
+const PARAM_NAME = /^\w+$/
+const FLAG_NAME = /^[A-Za-z]\w*$/
+
+/** A param as its pattern writes it, which the grammar spells only one way. */
+const writtenParam = (token: ParamToken) => `{${token.param}${token.type ? `:${token.type}` : ''}${token.rest ? '...' : ''}${token.optional ? '?' : ''}}`
+/** A flag as its pattern writes it. */
+const writtenFlag = (flag: FlagToken) => `{--${flag.flag}${flag.type ? `:${flag.type}` : ''}${flag.optional ? '?' : ''}}`
+
+/**
+ * Why a word with a brace in it is no param or flag: text around its braces, or a whole pair whose name, type or marks
+ * the syntax doesn't take. Each names the rule broken, with the word mended as an example.
+ */
+function notAParam(word: string): string {
+  const flag = LOOSE_FLAG.exec(word)
+  if (flag) {
+    const [, name, type, rest] = flag
+    if (rest || word.includes('...')) {
+      return `"${word}" is not a flag: a flag doesn't take the rest of the message; a param does, such as {${mended(unmarked(name), 'param')}...}.`
+    }
+    if (unmarked(name) !== name || (type !== undefined && unmarked(type) !== type)) {
+      const typed = type === undefined ? '' : `:${unmarked(type)}`
+      return `"${word}" is not a flag: its ? goes last, as in {--${unmarked(name)}${typed}?}.`
+    }
+    if (!FLAG_NAME.test(name)) {
+      return `"${word}" is not a flag: a flag's name starts with a letter, then letters, digits or _, such as {--${mended(name, 'flag')}}.`
+    }
+    return `"${word}" is not a flag: a type is a name, or words to choose from joined by |, such as {--${name}:on|off}.`
+  }
+  const param = LOOSE_PARAM.exec(word)
+  if (param) {
+    const [, name, type] = param
+    if (unmarked(name) !== name || (type !== undefined && unmarked(type) !== type)) {
+      const typed = type === undefined ? '' : `:${unmarked(type)}`
+      const ordered = `{${unmarked(name)}${typed}${word.includes('...') ? '...' : ''}${word.includes('?') ? '?' : ''}}`
+      return `"${word}" is not a param: its marks go last, ... then ?, as in ${ordered}.`
+    }
+    if (!PARAM_NAME.test(name)) return `"${word}" is not a param: a param's name is ASCII letters, digits and _, such as {${mended(name, 'param')}}.`
+    return `"${word}" is not a param: a type is a name, or words to choose from joined by |, such as {${name}:on|off}.`
+  }
+  return `"${word}" is not a param: a param is a whole word, such as {name}, {name:type}, {name...}, {name?} or a flag, {--name}.`
+}
+
+/** A name or type without the marks written after it, `...` and `?`. */
+const unmarked = (text: string) => MARKED.exec(text)?.[1] ?? text
+
+/** A name with each character the syntax doesn't take as `_`, and a flag's led by a letter, for an example. */
+function mended(name: string, kind: 'param' | 'flag'): string {
+  const word = name.replace(/\W/g, '_') || kind
+  return kind === 'flag' && !/^[A-Za-z]/.test(word) ? `flag${word}` : word
+}
 
 /**
  * Reads a pattern into its words and flags. Throws for a pattern of flags alone, a param that is not a whole word, a
@@ -109,11 +168,7 @@ export function parseMessagePattern(pattern: string): MessagePattern {
   words.forEach((word, index) => {
     const match = PARAM.exec(word)
     if (!match) {
-      if (/[{}]/.test(word)) {
-        throw new Error(
-          `"${word}" is not a param: a param is a whole word, such as {name}, {name:type}, {name...}, {name?} or a flag, {--name}.`,
-        )
-      }
+      if (/[{}]/.test(word)) throw new Error(notAParam(word))
       tokens.push({ literal: word })
       return
     }
@@ -128,7 +183,7 @@ export function parseMessagePattern(pattern: string): MessagePattern {
     const next = tokens[index + 1]
     if (!('param' in token) || !token.optional || !next) return
     if (!('param' in next) || !next.optional) {
-      throw new Error(`{${token.param}?} is optional, so only optional params may follow it; "${'param' in next ? `{${next.param}}` : next.literal}" is not.`)
+      throw new Error(`${writtenParam(token)} is optional, so only optional params may follow it; "${'param' in next ? writtenParam(next) : next.literal}" is not.`)
     }
     if (token.type === undefined || token.type === 'string') {
       throw new Error(
@@ -362,7 +417,7 @@ function assertScope(scope: unknown, { tokens, flags }: MessagePattern): void {
   if (scope !== 'dm') return
   const param = tokens.find((token): token is ParamToken => 'param' in token && token.type !== undefined && isGuildType(token.type))
   const flag = flags.find(candidate => candidate.type !== undefined && isGuildType(candidate.type))
-  const shown = param ? `{${param.param}:${param.type}}` : flag && `{--${flag.flag}:${flag.type}}`
+  const shown = param ? writtenParam(param) : flag && writtenFlag(flag)
   if (shown) throw new Error(`scope is 'dm', but ${shown} is found only in a server.`)
 }
 
