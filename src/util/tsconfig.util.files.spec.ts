@@ -21,10 +21,9 @@ describe('prepareModifiedTsConfig on disk', () => {
   it("leaves the project's tsconfig.json byte for byte as it was", () => {
     const original = `{
   "$schema": "https://json.schemastore.org/tsconfig",
-  // Decorators need these two
+  // Imports resolve from src
   "compilerOptions": {
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true, /* metadata */
+    "baseUrl": "./src", /* as written */
   },
 }
 `
@@ -34,9 +33,6 @@ describe('prepareModifiedTsConfig on disk', () => {
     const copy = prepareModifiedTsConfig()
 
     expect(readFileSync(file, 'utf-8')).toBe(original)
-    expect(JSON.parse(readFileSync(copy, 'utf-8')).compilerOptions).toEqual({
-      experimentalDecorators: true,
-      emitDecoratorMetadata: true,
-    })
+    expect(JSON.parse(readFileSync(copy, 'utf-8')).compilerOptions).toEqual({ baseUrl: path.join(project, 'src') })
   })
 })

@@ -23,8 +23,8 @@ const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mo
   }
 })
 
-// get-tsconfig reads the real files, which these cases mock; its own cases are in tsconfig-paths.util.spec
-vi.mock('@src/util/tsconfig-paths.util.js', () => ({ projectPaths: () => undefined }))
+// get-tsconfig reads the real files, which these cases mock; what it gives is covered in tsconfig-paths.util.spec
+vi.mock('@src/util/tsconfig-paths.util.js', () => ({ resolutionTsconfig: () => ({ compilerOptions: {} }) }))
 
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
@@ -70,70 +70,6 @@ describe('prepareModifiedTsConfig', () => {
   it('throws when tsconfig.json does not exist', () => {
     mockExistsSync.mockReturnValue(false)
     expect(() => prepareModifiedTsConfig()).toThrow('tsconfig.json not found')
-  })
-
-  it('removes noEmit from compilerOptions', () => {
-    mockTsConfig({ compilerOptions: { noEmit: true, outDir: './dist' } })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.compilerOptions.noEmit).toBeUndefined()
-  })
-
-  it('converts relative outDir to an absolute path', () => {
-    mockTsConfig({ compilerOptions: { outDir: './dist' } })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(path.isAbsolute(written.compilerOptions.outDir)).toBe(true)
-  })
-
-  it('converts relative rootDir to an absolute path', () => {
-    mockTsConfig({ compilerOptions: { rootDir: '.' } })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(path.isAbsolute(written.compilerOptions.rootDir)).toBe(true)
-  })
-
-  // The copy lives in the temp directory, where a relative extends would name a file that is not there
-  it('makes a relative extends absolute, from the project', () => {
-    mockTsConfig({ extends: './tsconfig.base.json', compilerOptions: {} })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.extends).toBe(path.resolve(process.cwd(), 'tsconfig.base.json'))
-  })
-
-  it('makes each relative extends in a list absolute', () => {
-    mockTsConfig({ extends: ['./a.json', '../b.json'] })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.extends).toEqual([path.resolve(process.cwd(), 'a.json'), path.resolve(process.cwd(), '../b.json')])
-  })
-
-  it("resolves an extends naming a package from the project's node_modules", () => {
-    mockTsConfig({ extends: 'typescript/package.json' })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.extends).toBe(path.resolve(process.cwd(), 'node_modules', 'typescript', 'package.json'))
-  })
-
-  it('resolves relative files, without compilerOptions', () => {
-    mockTsConfig({ files: ['./src/main.ts'] })
-
-    prepareModifiedTsConfig()
-
-    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.files).toEqual([path.resolve(process.cwd(), 'src/main.ts')])
   })
 
   it('writes to the temp directory and returns that path', () => {
@@ -245,27 +181,23 @@ describe('prepareModifiedTsConfig', () => {
     mockExistsSync.mockReturnValue(true)
     mockReadFileSync.mockReturnValue(`{
   "$schema": "https://json.schemastore.org/tsconfig", // the editor's schema
-  "compilerOptions": {
-    /* kept strict */
-    "strict": true,
-    "noEmit": true,
-  },
+  /* the tools' own project */
+  "references": [{ "path": "./tools" },],
 }` as any)
 
     prepareModifiedTsConfig()
 
     const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string)
-    expect(written.$schema).toBe('https://json.schemastore.org/tsconfig')
-    expect(written.compilerOptions).toEqual({ strict: true })
+    expect(written.references).toEqual([{ path: path.resolve(process.cwd(), 'tools') }])
   })
 
   it('reads a tsconfig.json saved with a byte order mark, as tsc does', () => {
     mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(`\uFEFF${JSON.stringify({ compilerOptions: { strict: true } })}` as any)
+    mockReadFileSync.mockReturnValue(`\uFEFF${JSON.stringify({ references: [{ path: './tools' }] })}` as any)
 
     prepareModifiedTsConfig()
 
-    expect(JSON.parse(mockWriteFileSync.mock.calls[0][1] as string).compilerOptions).toEqual({ strict: true })
+    expect(JSON.parse(mockWriteFileSync.mock.calls[0][1] as string).references).toEqual([{ path: path.resolve(process.cwd(), 'tools') }])
   })
 
   // Rewriting the project's tsconfig.json would drop the user's comments
