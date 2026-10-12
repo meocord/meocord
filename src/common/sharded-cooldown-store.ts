@@ -144,8 +144,14 @@ export class ShardedCooldownStore extends CooldownStore {
       this.pending.set(id, {
         resolve: (verdict, recorded) => {
           settle()
-          // The manager's undo is the calls it recorded, sent back to it
-          const release = async () => channel.send({ meocord: 'cooldown-release', recorded: recorded ?? [] })
+          // The manager's undo is the calls it recorded, sent back once: it finds a call by key and time, so a second
+          // undo would take another call recorded in the same millisecond
+          let released = false
+          const release = async () => {
+            if (released) return
+            released = true
+            channel.send({ meocord: 'cooldown-release', recorded: recorded ?? [] })
+          }
           resolve(!peek && verdict.allowed && recorded ? withRelease(verdict, release) : verdict)
         },
         reject: error => (settle(), reject(error)),

@@ -46,6 +46,22 @@ describe('ShardedCooldownStore', () => {
     expect((await second.consume('shared', limit)).allowed).toBe(false)
   })
 
+  it('undoes a call once, however often its release is called', async () => {
+    // Two calls in one millisecond, which the manager tells apart only by the time each was recorded at
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1_000_000)
+    const store = shardedCooldownStoreOn(loopback())
+    const twice = [{ key: 'k', limit: { uses: 2, windowMs: 5_000 } }]
+    const first = await store.consumeMany(twice)
+    await store.consumeMany(twice)
+
+    await first.release?.()
+    await first.release?.()
+
+    expect((await store.consumeMany(twice)).allowed).toBe(true)
+    expect((await store.consumeMany(twice)).allowed).toBe(false)
+  })
+
   it('needs nothing injected, so @MeoCord({ cooldownStore }) can take it as it is', () => {
     expect(ShardedCooldownStore.length).toBe(0)
     expect(new ShardedCooldownStore()).toBeInstanceOf(CooldownStore)
