@@ -3,6 +3,7 @@ import {
   CHECKED_CONFIG_KEYS,
   CHECKED_SHARDING_KEYS,
   configProblems,
+  WEBPACK_HOOK_REFUSAL,
 } from '@src/util/meocord-config-validation.util.js'
 
 describe('configProblems', () => {
@@ -34,11 +35,11 @@ describe('configProblems', () => {
 
     expect(errors).toEqual([
       'discordToken must be a string (got 42)',
-      "sharding.mode must be 'internal' or 'process' (got 'bogus')",
+      "sharding.mode must be 'internal' or 'process' (got \"bogus\")",
       "sharding.shards must be 'auto' or a whole number of shards, 1 or more (got 0)",
-      "commands.guilds must be an array of guild ids (got 'one')",
-      "commands.register must be true or false (got 'yes')",
-      "optionalExternals must be an array of package names (got 'sharp')",
+      "commands.guilds must be an array of guild ids (got \"one\")",
+      "commands.register must be true or false (got \"yes\")",
+      "optionalExternals must be an array of package names (got \"sharp\")",
       'shutdownTimeout must be a number of milliseconds 0 or more, at most 2147478647 (got -1)',
       'rsbuild must be a function (got object)',
     ])
@@ -70,7 +71,7 @@ describe('configProblems', () => {
   it('checks logLevel against the levels', () => {
     expect(configProblems({ discordToken: 't', logLevel: 'warn' }).errors).toEqual([])
     expect(configProblems({ discordToken: 't', logLevel: 'verbose' }).errors).toEqual([
-      "logLevel must be 'debug' or 'log' or 'warn' or 'error' or 'silent' (got 'verbose')",
+      "logLevel must be 'debug' or 'log' or 'warn' or 'error' or 'silent' (got \"verbose\")",
     ])
   })
 
@@ -86,8 +87,31 @@ describe('configProblems', () => {
     expect(configProblems({ default: { discordToken: 7 } })).toEqual({ errors: [], warnings: ['default is not a MeoCord option, so it has no effect.'] })
   })
 
+  // Quoted as other messages quote user text, so a line break in a value can't read as another problem in the list
+  it('quotes a string value on one line, its line breaks escaped', () => {
+    expect(configProblems({ discordToken: 't', logLevel: 'warn\n  - sharding.mode must be fine' }).errors).toEqual([
+      `logLevel must be 'debug' or 'log' or 'warn' or 'error' or 'silent' (got "warn\\n  - sharding.mode must be fine")`,
+    ])
+  })
+
+  // The build refuses a webpack hook, so it's that error alone, not also an option said to have no effect
+  it('refuses a webpack hook, with the reason the build gives', () => {
+    expect(configProblems({ discordToken: 't', webpack: (config: unknown) => config })).toEqual({
+      errors: [WEBPACK_HOOK_REFUSAL],
+      warnings: [],
+    })
+  })
+
+  // A command that runs a build made before, such as register without --build, builds nothing for the hook to break
+  it('only warns about a webpack hook for a command that does not build', () => {
+    expect(configProblems({ discordToken: 't', webpack: (config: unknown) => config }, { building: false })).toEqual({
+      errors: [],
+      warnings: ['webpack is not a MeoCord option, so it has no effect.'],
+    })
+  })
+
   it('refuses a default export that is not an object', () => {
-    expect(configProblems('token').errors).toEqual(["it must export an object as its default export (got 'token')"])
+    expect(configProblems('token').errors).toEqual(["it must export an object as its default export (got \"token\")"])
   })
 
   // The shape is typed against MeoCordConfig, so an option added there without a check fails to compile; this

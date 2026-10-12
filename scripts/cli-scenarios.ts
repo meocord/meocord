@@ -939,11 +939,27 @@ const scenarios: Scenario[] = [
       code: 1,
       says: [
         'meocord.config.ts',
-        "sharding.mode must be 'internal' or 'process' (got 'bogus')",
+        'sharding.mode must be \'internal\' or \'process\' (got "bogus")',
         'commands.guilds must be an array of guild ids',
         'optionalExternals must be an array of package names',
       ],
       never: ['Building production version'],
+      leaves: ['dist/main.js'],
+    },
+  },
+  {
+    name: 'build refuses a leftover webpack hook once, as an error, not as an option with no effect',
+    tier: 'fast',
+    windows: true,
+    files: {
+      'meocord.config.ts': config("{ discordToken: 'x', webpack: (config: unknown) => config }"),
+      dist: null,
+    },
+    argv: ['build', '--prod'],
+    expect: {
+      code: 1,
+      says: ['still declares a `webpack` hook'],
+      never: ['webpack is not a MeoCord option', 'Building production version'],
       leaves: ['dist/main.js'],
     },
   },
