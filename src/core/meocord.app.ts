@@ -65,25 +65,29 @@ import { escapeForLog } from '@src/util/user-text.util.js'
 export const SLOW_READY_HOOK_MS = 10_000
 
 
-/** Where both builds of this version keep the process's shutdown, as {@link shared} names it. */
-const SHUTDOWN_STATE = 'processShutdown'
+/** Where both builds of this version keep the process's state, as {@link shared} names it. */
+const PROCESS_STATE = 'processState'
 
 /**
- * The process's one shutdown, kept by both builds of this version, so a process that loads both has one pair of signal
- * listeners and one shutdown, which stops the apps either build started.
+ * What the process's apps share, kept by both builds of this version, so a process that loads both has one pair of
+ * signal listeners and one shutdown, which stops the apps either build started, and one exit code a failed login set.
  */
-const processShutdown = shared(SHUTDOWN_STATE, () => ({
+const processState = shared(PROCESS_STATE, () => ({
   /** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
   runningApps: new Set<() => Promise<boolean>>(),
   stopRequest: stopRequests(),
   signalHandlersInstalled: false,
   shuttingDown: undefined as Promise<void> | undefined,
+  /** Whether a failed login set the process exit code, so a later successful one knows to clear it. */
+  failedLoginSetExitCode: false,
+  /** Whether `meocord start --dev` was told the bot could not log in, so a later login tells it the bot is online. */
+  toldDevRunnerLoginFailed: false,
 }))
-const { runningApps } = processShutdown
+const { runningApps } = processState
 
-/** Forgets the process's shutdown, for specs that load the modules afresh as a new process would. */
-export function forgetShutdownState(): void {
-  Reflect.deleteProperty(globalThis, sharedKey(SHUTDOWN_STATE))
+/** Forgets the process's state, for specs that load the modules afresh as a new process would. */
+export function forgetProcessState(): void {
+  Reflect.deleteProperty(globalThis, sharedKey(PROCESS_STATE))
 }
 
 /**
@@ -92,7 +96,7 @@ export function forgetShutdownState(): void {
  * same request; one after it forces exit 1, except in a shard, whose manager forces it.
  */
 export async function shutdownAndExit(shard: boolean): Promise<void> {
-  const request = processShutdown.stopRequest()
+  const request = processState.stopRequest()
   if (request !== 'first') {
     // A shard hears Ctrl+C both directly and from its manager, which owns forcing it; so it waits
     if (request === 'duplicate' || shard) return
@@ -104,14 +108,14 @@ export async function shutdownAndExit(shard: boolean): Promise<void> {
 
 /** The one shutdown of the process, however many ask for it: a stop request joins one already under way. */
 function shutDown(): Promise<void> {
-  processShutdown.shuttingDown ??= (async () => {
+  processState.shuttingDown ??= (async () => {
     // A clean stop keeps a code already set, such as the 1 a failed login set, so a supervisor still sees it. Read as
     // the shutdown begins: a code main.ts sets as it hears of the stop is the stop's, not a failure.
     const exitCode = Number(process.exitCode ?? 0) || 0
     const closed = await Promise.all([...runningApps].map(close => close()))
     process.exit(closed.every(Boolean) ? exitCode : 1)
   })()
-  return processShutdown.shuttingDown
+  return processState.shuttingDown
 }
 
 /** The errors {@link stoppedBeforeOnline} made, which end a start without being its failure. */
@@ -127,8 +131,8 @@ function stoppedBeforeOnline(): Error {
 
 /** One pair of signal listeners for the process, however many apps it starts, for the role the first decided. */
 function installSignalHandlers(shard: boolean): void {
-  if (processShutdown.signalHandlersInstalled) return
-  processShutdown.signalHandlersInstalled = true
+  if (processState.signalHandlersInstalled) return
+  processState.signalHandlersInstalled = true
   process.on('SIGINT', () => void shutdownAndExit(shard))
   process.on('SIGTERM', () => void shutdownAndExit(shard))
   // How `meocord start --dev` stops the application to restart it, a signal being no graceful stop on Windows. It is
@@ -269,12 +273,6 @@ export class MeoCordApp implements MeoCordApplication {
     }
   }
 
-  /** Whether a failed login set the process exit code, so a later successful one knows to clear it. */
-  private static failedLoginSetExitCode = false
-
-  /** Whether `meocord start --dev` was told the bot could not log in, so a later login tells it the bot is online. */
-  private static toldDevRunnerLoginFailed = false
-
   /**
    * Logs the bot in, as {@link MeoCordApplication.start} describes. The providers, services and event handlers are set
    * up once, or again after a provider's factory failed; a retry after a failed login reuses them.
@@ -365,7 +363,7 @@ export class MeoCordApp implements MeoCordApplication {
         releaseAmbientAppTheme(this.container)
         if (process.exitCode === undefined || process.exitCode === 0) {
           process.exitCode = 1
-          MeoCordApp.failedLoginSetExitCode = true
+          processState.failedLoginSetExitCode = true
         }
         throw error
       }
@@ -455,10 +453,10 @@ export class MeoCordApp implements MeoCordApplication {
       if (fatal) await reportFatalLogin(this.shard, fatal, explanation ?? (error instanceof Error ? error.message : String(error)))
       if (process.exitCode === undefined || process.exitCode === 0) {
         process.exitCode = 1
-        MeoCordApp.failedLoginSetExitCode = true
+        processState.failedLoginSetExitCode = true
       }
       await tellDevRunner({ meocord: 'login-failed' }, this.shard)
-      MeoCordApp.toldDevRunnerLoginFailed = true
+      processState.toldDevRunnerLoginFailed = true
       this.loginFailed = true
       throw error
     } finally {
@@ -467,12 +465,12 @@ export class MeoCordApp implements MeoCordApplication {
     // A shutdown that began as the login completed has the client to close; the bot is not reported online
     if (this.closing) throw stoppedBeforeOnline()
     // 0 rather than undefined, which Bun ignores
-    if (MeoCordApp.failedLoginSetExitCode && process.exitCode === 1) {
+    if (processState.failedLoginSetExitCode && process.exitCode === 1) {
       process.exitCode = 0
-      MeoCordApp.failedLoginSetExitCode = false
+      processState.failedLoginSetExitCode = false
     }
-    if (MeoCordApp.toldDevRunnerLoginFailed) {
-      MeoCordApp.toldDevRunnerLoginFailed = false
+    if (processState.toldDevRunnerLoginFailed) {
+      processState.toldDevRunnerLoginFailed = false
       await tellDevRunner({ meocord: 'online' }, this.shard)
     }
     this.online = true
