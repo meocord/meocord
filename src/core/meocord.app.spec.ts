@@ -1039,7 +1039,11 @@ describe('MeoCordApp', () => {
       return put
     }
 
-    it('sends the commands globally over the client\'s REST', async () => {
+    const notOnline =
+      'registerCommands() registers nothing before the bot is online, as Discord names the application at login. ' +
+      'The bot registers once it is online; to register without logging in, run `meocord register`.'
+
+    it('sends the commands globally over the client\'s REST, with no warning', async () => {
       const put = withRest()
       const app = new MeoCordApp([PingController] as any, createMockContainer() as any, mockClient as any, 't')
 
@@ -1048,6 +1052,18 @@ describe('MeoCordApp', () => {
       expect(put).toHaveBeenCalledWith('/applications/app-id/commands', {
         body: [{ name: 'ping', type: 1, description: 'Pong' }],
       })
+      expect(vi.mocked(Logger).mock.results[0]?.value.warn).not.toHaveBeenCalled()
+    })
+
+    it('registers from the ready listener without the warning a call before login gets', async () => {
+      const put = withRest()
+      const app = new MeoCordApp([PingController] as any, createMockContainer() as any, mockClient as any, 't')
+      await app.start()
+
+      await Promise.all(mockClient.listenersFor('clientReady').map(listener => listener()))
+
+      expect(put).toHaveBeenCalledOnce()
+      expect(vi.mocked(Logger).mock.results[0]?.value.warn).not.toHaveBeenCalledWith(notOnline)
     })
 
     it('constructs no controller to read the commands', async () => {
@@ -1092,14 +1108,17 @@ describe('MeoCordApp', () => {
       expect(put).not.toHaveBeenCalled()
     })
 
-    it('sends nothing before the application is known', async () => {
-      const put = withRest()
-      mockClient.application = null
+    it('says why it sends nothing before the bot is online, and resolves', async () => {
+      const rest = { get: vi.fn(), put: vi.fn(), post: vi.fn(), patch: vi.fn() }
+      Object.assign(mockClient, { application: null, rest })
       const app = new MeoCordApp([PingController] as any, createMockContainer() as any, mockClient as any, 't')
 
-      await app.registerCommands()
+      await expect(app.registerCommands()).resolves.toBeUndefined()
 
-      expect(put).not.toHaveBeenCalled()
+      const warn = vi.mocked(Logger).mock.results[0]?.value.warn
+      expect(warn).toHaveBeenCalledOnce()
+      expect(warn).toHaveBeenCalledWith(notOnline)
+      for (const method of Object.values(rest)) expect(method).not.toHaveBeenCalled()
     })
   })
 
