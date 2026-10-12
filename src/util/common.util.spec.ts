@@ -138,6 +138,32 @@ describe('validateRunConfig', () => {
     expect(mockReadSourceConfig).not.toHaveBeenCalled()
   })
 
+  // A compiled config can keep a webpack key beside a dist that still runs; only a build refuses the hook
+  it('warns, and goes on, about a webpack hook in the compiled config', async () => {
+    mockLoadCompiledConfig.mockReturnValue({ discordToken: 't', webpack: () => ({}) })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(validateRunConfig()).resolves.toMatchObject({ discordToken: 't' })
+
+    expect(exitSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('webpack is not a MeoCord option, so it has no effect.'))
+  })
+
+  it('warns, and goes on, about a webpack hook in meocord.config.ts when nothing was compiled', async () => {
+    mockLoadCompiledConfig.mockReturnValue(undefined)
+    mockCompiledProblem.mockReturnValue({ path: 'dist/meocord.config.mjs', missing: true })
+    mockExistsSync.mockReturnValue(true)
+    mockReadSourceConfig.mockReturnValue({ config: { discordToken: 't', webpack: () => ({}) } })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(validateRunConfig()).resolves.toMatchObject({ discordToken: 't' })
+
+    expect(exitSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('webpack is not a MeoCord option, so it has no effect.'))
+  })
+
   // A broken one is what the bot would run; meocord.config.ts would pass, and the bot would stop without saying why
   it('stops at a compiled config that fails to load, with why, rather than check meocord.config.ts', async () => {
     mockLoadCompiledConfig.mockReturnValue(undefined)

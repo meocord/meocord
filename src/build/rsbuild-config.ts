@@ -5,6 +5,7 @@ import { OptionalProbesPlugin } from '@src/build/optional-probes.js'
 import { RunnableBundlePlugin } from '@src/build/runnable-bundle.js'
 import { externalMatcher, typeExternals } from '@src/build/typed-externals.js'
 import { prepareModifiedTsConfig } from '@src/util/tsconfig.util.js'
+import { WEBPACK_HOOK_REFUSAL } from '@src/util/meocord-config-validation.util.js'
 
 /**
  * The module bundled ahead of the application's entry to load `dist/meocord.config.mjs` first. Shipped
@@ -241,10 +242,5 @@ export function createRsbuildConfig(options: RsbuildConfigOptions): RsbuildConfi
 export function assertNoWebpackHook(config: object | undefined): void {
   if ((config as Record<string, unknown> | undefined)?.webpack === undefined) return
 
-  throw new Error(
-    'meocord.config.ts still declares a `webpack` hook, which MeoCord no longer runs. ' +
-      'Rename it to `rsbuild` and reshape its body for Rsbuild: images, fonts, svg and media ' +
-      'need no rules any more, `output.filename` accepts a function for custom asset paths, ' +
-      'and raw rules go through `tools.rspack`. See the 4.0.0 release notes.',
-  )
+  throw new Error(WEBPACK_HOOK_REFUSAL)
 }

@@ -1,5 +1,13 @@
 import { type CommandRegistrationConfig, type MeoCordConfig, type ShardingConfig } from '@src/interface/index.js'
 import { shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
+import { quoteForLog } from '@src/util/user-text.util.js'
+
+/** Why a config that still declares a `webpack` hook, which MeoCord does not run, is refused. */
+export const WEBPACK_HOOK_REFUSAL =
+  'meocord.config.ts still declares a `webpack` hook, which MeoCord no longer runs. ' +
+  'Rename it to `rsbuild` and reshape its body for Rsbuild: images, fonts, svg and media ' +
+  'need no rules any more, `output.filename` accepts a function for custom asset paths, ' +
+  'and raw rules go through `tools.rspack`. See the 4.0.0 release notes.'
 
 /** What is wrong with a configuration: errors stop the command, warnings are only reported. */
 export interface ConfigProblems {
@@ -9,9 +17,10 @@ export interface ConfigProblems {
 
 type Check = (value: unknown, key: string) => string | undefined
 
+// A string as other messages quote user text, so a line break in it can't start a line of its own
 const describe = (value: unknown): string =>
   typeof value === 'string'
-    ? `'${value}'`
+    ? quoteForLog(value)
     : typeof value === 'number' || typeof value === 'boolean'
       ? String(value)
       : Array.isArray(value)
@@ -123,9 +132,11 @@ export const CHECKED_SHARDING_KEYS: readonly string[] = Object.keys(shardingShap
  * Checks a loaded configuration's shape, so a wrong type fails at once with what to fix instead of
  * surfacing later as an odd build or runtime error.
  *
+ * @param options.building - Whether the command builds, which refuses a `webpack` hook; one that only runs a build
+ *   made before is warned that the hook has no effect.
  * @returns Every error and warning found; the command should stop when there are errors.
  */
-export function configProblems(config: unknown): ConfigProblems {
+export function configProblems(config: unknown, { building = true }: { building?: boolean } = {}): ConfigProblems {
   const problems: ConfigProblems = { errors: [], warnings: [] }
   if (typeof config !== 'object' || config === null) {
     problems.errors.push(`it must export an object as its default export (got ${describe(config)})`)
@@ -134,6 +145,11 @@ export function configProblems(config: unknown): ConfigProblems {
 
   const shape = configShape(problems)
   for (const [name, value] of Object.entries(config)) {
+    // A webpack hook: a build refuses it, so there it's that error, not an option with no effect
+    if (name === 'webpack' && building) {
+      problems.errors.push(WEBPACK_HOOK_REFUSAL)
+      continue
+    }
     const check = shape[name as keyof MeoCordConfig]
     if (!check) {
       problems.warnings.push(`${name} is not a MeoCord option, so it has no effect.`)

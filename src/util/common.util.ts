@@ -26,10 +26,14 @@ export const findModulePackageDir = (moduleName: string, baseDir: string = proce
  * Loads `meocord.config.ts` and checks its shape, as a command that builds and a watch-mode reload both do, printing
  * the warnings for options it does not know.
  *
+ * @param options.building - Whether the command builds, which refuses a `webpack` hook; one that runs without building
+ *   only warns about it.
  * @returns The config, or the report of why it cannot be used: missing, failing to load, or with options of the wrong
  *   type, each of them listed. A config that fails to load also gives the reason alone, as `loadError`.
  */
-export function checkSourceConfig(): { config: MeoCordConfig | undefined } | { problem: string; loadError?: string } {
+export function checkSourceConfig({ building = true }: { building?: boolean } = {}):
+  | { config: MeoCordConfig | undefined }
+  | { problem: string; loadError?: string } {
   const meocordConfigPath = path.resolve(process.cwd(), 'meocord.config.ts')
   if (!fs.existsSync(meocordConfigPath)) return { problem: 'Configuration file "meocord.config.ts" is missing!' }
 
@@ -38,7 +42,7 @@ export function checkSourceConfig(): { config: MeoCordConfig | undefined } | { p
     return { problem: `meocord.config.ts could not be loaded, so nothing was built or started:\n  ${loaded.error}`, loadError: loaded.error }
   }
 
-  const problem = shapeProblem(loaded.config)
+  const problem = shapeProblem(loaded.config, building)
   return problem ? { problem } : { config: loaded.config }
 }
 
@@ -51,10 +55,11 @@ export function reportConfigProblem(problem: string): void {
  * Loads `meocord.config.ts` and checks its shape, exiting when it is missing, fails to load, or has
  * options of the wrong type; options it does not know are reported and left alone.
  *
+ * @param options.building - Whether the command builds, as {@link checkSourceConfig} takes it.
  * @returns The config, which a build compiles and the bot then runs with.
  */
-export async function compileAndValidateConfig(): Promise<MeoCordConfig | undefined> {
-  const checked = checkSourceConfig()
+export async function compileAndValidateConfig({ building = true }: { building?: boolean } = {}): Promise<MeoCordConfig | undefined> {
+  const checked = checkSourceConfig({ building })
   if ('problem' in checked) {
     reportConfigProblem(checked.problem)
     await wait(100)
@@ -83,21 +88,27 @@ export async function validateRunConfig(): Promise<MeoCordConfig | undefined> {
     process.exit(1)
     return
   }
-  return compileAndValidateConfig()
+  return compileAndValidateConfig({ building: false })
 }
 
-/** Exits with every problem when a configuration has options of the wrong type, and warns about unknown ones. */
+/**
+ * Exits with every problem when a configuration a command runs with, without building, has options of the wrong type,
+ * and warns about unknown ones.
+ */
 export async function assertConfigShape(config: unknown) {
-  const problem = shapeProblem(config)
+  const problem = shapeProblem(config, false)
   if (!problem) return
   console.error(chalk.red(problem))
   await wait(100)
   process.exit(1)
 }
 
-/** Every option of the wrong type in a configuration, as one report, or undefined; options it does not know are warned about. */
-function shapeProblem(config: unknown): string | undefined {
-  const { errors, warnings } = configProblems(config)
+/**
+ * Every option of the wrong type in a configuration, as one report, or undefined; options it does not know are warned
+ * about. A `webpack` hook is refused only for a command that builds, as the build refuses it.
+ */
+function shapeProblem(config: unknown, building = true): string | undefined {
+  const { errors, warnings } = configProblems(config, { building })
   for (const warning of warnings) console.warn(chalk.yellow(`meocord.config.ts: ${warning}`))
   if (errors.length === 0) return undefined
   return `meocord.config.ts has ${errors.length} problem(s):\n${errors.map(error => `  - ${error}`).join('\n')}`
