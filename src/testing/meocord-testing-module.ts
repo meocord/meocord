@@ -35,7 +35,7 @@ import {
   type RunOptions,
   runHandler,
 } from '@src/core/handler-pipeline.js'
-import { setPresenter } from '@src/common/response/presenter.js'
+import { clientPresenter, setPresenter } from '@src/common/response/presenter.js'
 import { autocompleteMismatch, commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
 import { buildComponentRoutes, type ComponentRoute } from '@src/core/component-routes.js'
 import { hasCustomId } from '@src/util/interaction.util.js'
@@ -50,9 +50,9 @@ import {
   type ThemeResolvers,
 } from '@src/interface/index.js'
 import { ThemeCache, type ThemeResolverClass, themeResolverClass } from '@src/core/theme-resolvers.js'
-import { claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import { appTheme, claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
-import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
+import { copyLayer, defaultTheme, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
 import {
@@ -611,10 +611,6 @@ export class TestingModule {
       }
     }
     this.checkArgumentCount(controller, methodName, instance[methodName], first, callArgs.length)
-    const presenter = appPresenterOf(this.container)
-    // A message command's errors are drawn by the app's presenter too, as an interaction's are
-    const client = first instanceof BaseInteraction || first instanceof Message ? first.client : undefined
-    if (presenter && client) setPresenter(client, presenter)
     this.registerClient(first)
     const { ran, error } = await this.track(runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
@@ -670,14 +666,46 @@ export class TestingModule {
   }
 
   /**
-   * Makes this module the app of the input's client, as the bot is of its own, so `respond()` outside any call,
-   * as in a collector's callback on that client, answers in this module's theme.
+   * Makes this module the app of the input's client, as the bot is of its own: its answers are drawn by this
+   * module's presenter, in its theme and language, `respond()` outside any call included, as in a collector's callback
+   * on that client. A module without a presenter clears the client's under strict mocks, so the default draws; default
+   * mode leaves another module's in place and warns once.
    */
   private registerClient(input: unknown): void {
     const client = (input as { client?: unknown } | undefined)?.client
     if (!client || typeof client !== 'object') return
+    const presenter = appPresenterOf(this.container)
+    if (presenter || strictMocks()) setPresenter(client, presenter)
+    else if (clientPresenter(client)) {
+      warnOnce(
+        new Logger('TestingModule'),
+        "A module without a presenter here answers with the presenter another module set on the same client; under " +
+          "useStrictMocks() this module's own presenter, or the default, is used.",
+      )
+    }
     registerClientTheme(client, this.container)
     registerClientTranslator(client, this.container.isBound(Translator) ? this.container.get(Translator) : undefined)
+  }
+
+  /**
+   * Makes this module the app of each event argument's client, as the bot is of its own, under strict mocks; default
+   * mode leaves the clients as they are and warns once where this module would draw answers otherwise.
+   */
+  private registerEventClients(args: readonly unknown[]): void {
+    const withClient = args.filter(arg => typeof (arg as { client?: unknown } | null)?.client === 'object')
+    if (withClient.length === 0) return
+    if (strictMocks()) {
+      for (const arg of withClient) this.registerClient(arg)
+      return
+    }
+    const ownTheme = appTheme(this.container) !== defaultTheme()
+    if (!appPresenterOf(this.container) && !this.container.isBound(Translator) && !ownTheme) return
+    warnOnce(
+      new Logger('TestingModule'),
+      "emit() here leaves the client's presenter, theme and translator as they were, where the bot draws the answers to " +
+        "an event with its app's; in the next major version (5.0) emit sets the module's on the client. Call " +
+        'useStrictMocks() to have it set them now.',
+    )
   }
 
   private builtComponentRoutes?: ComponentRoute[]
@@ -771,12 +799,8 @@ export class TestingModule {
       noteReactionDispatch(input)
       await this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action: options.action ?? ReactionHandlerAction.ADD }, record))
     } else if (input instanceof BaseInteraction) {
-      const presenter = appPresenterOf(this.container)
-      if (presenter) setPresenter(input.client, presenter)
       await this.track(dispatcher.interaction(input as Interaction, record))
     } else if (input instanceof Message) {
-      const presenter = appPresenterOf(this.container)
-      if (presenter) setPresenter(input.client, presenter)
       await this.track(dispatcher.message(input, record))
     } else {
       throw new TypeError('dispatch takes an interaction, a message, or a reaction with { user }.')
@@ -820,6 +844,7 @@ export class TestingModule {
   async emit<E extends keyof ClientEvents>(event: E, ...args: ClientEvents[E]): Promise<EmitResult> {
     this.warnIfClosed()
     await this.init()
+    this.registerEventClients(args)
     const calls: Promise<boolean>[] = []
     for (const [index, source] of (this.sources ?? []).entries()) {
       for (const handler of source.handlers) {
