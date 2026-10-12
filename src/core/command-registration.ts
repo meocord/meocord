@@ -28,6 +28,8 @@ export interface CollectedCommand {
   name: string
   body: { name?: unknown; type?: unknown; options?: unknown }
   guilds?: (string | undefined)[]
+  /** The name of the builder class it came from, for a message about its `guilds`. */
+  builder?: string
 }
 
 /** `global`, or the id of a guild. */
@@ -108,7 +110,11 @@ export function collectCommands(
         if (existing === undefined) {
           const name = typeof body.name === 'string' ? body.name : commandName
           unlocalizable.push(...localizationProblems(name, body))
-          byKey.set(key, { builderClass: builderClass ?? builder, command: { name, body, ...(guilds && { guilds }) } })
+          const builderName = (builderClass as { name?: unknown } | undefined)?.name
+          byKey.set(key, {
+            builderClass: builderClass ?? builder,
+            command: { name, body, ...(guilds && { guilds }), ...(typeof builderName === 'string' && builderName && { builder: builderName }) },
+          })
         } else if (existing.builderClass !== (builderClass ?? builder)) {
           // Refused when the app is created; kept for a caller that collects commands on its own, never thrown
           logger.warn(
@@ -176,6 +182,22 @@ const isEntryPoint = (command: CollectedCommand): boolean => command.body.type =
 const BLANK_GUILD = 'No commands were registered: the guild to register to is blank. Give a guild id, or leave it out to register where commands.* says.'
 
 /**
+ * Names every command whose builder lists guilds but no guild id, each with its builder, and says the run registers
+ * none of them yet still succeeds.
+ */
+function blankGuildsWarning(commands: CollectedCommand[]): string {
+  const one = commands.length === 1
+  const lines = commands.map(command => `  ${command.builder ? `${command.builder}: ` : ''}"${command.name}"`)
+  return (
+    `${commands.length} ${one ? 'command is' : 'commands are'} not registered: ${one ? 'its builder lists' : 'their builders list'} ` +
+    'no guild ids, as when the variable holding them is unset.\n' +
+    `${lines.join('\n')}\n` +
+    'Set the guild ids; a builder without guilds registers where commands.* says. `meocord register` still exits 0 for ' +
+    'these; the next major version (5.0) exits 1.'
+  )
+}
+
+/**
  * Where each command is sent: one bulk update per scope. A scope's update replaces everything the application has
  * there, so the default scope is included even when it ends up empty, unless `commands.guilds` lists no guild id.
  *
@@ -210,6 +232,7 @@ export function planTargets(commands: CollectedCommand[], options: TargetOptions
   for (const guild of defaultGuilds) add({ guild })
 
   const unregistered: string[] = []
+  const blankGuilds: CollectedCommand[] = []
   for (const command of commands) {
     if (isEntryPoint(command)) {
       if (command.guilds) {
@@ -219,7 +242,7 @@ export function planTargets(commands: CollectedCommand[], options: TargetOptions
     } else if (command.guilds) {
       const own = ids(command.guilds)
       // Falling back to the default scope could publish a staff-only command everywhere.
-      if (own.length === 0) logger.warn(`Command "${command.name}" lists no guild ids in its builder, so it is not registered.`)
+      if (own.length === 0) blankGuilds.push(command)
       for (const guild of own) add({ guild }, command)
     } else if (nowhere) {
       unregistered.push(`"${command.name}"`)
@@ -229,6 +252,8 @@ export function planTargets(commands: CollectedCommand[], options: TargetOptions
       for (const guild of defaultGuilds) add({ guild }, command)
     }
   }
+
+  if (blankGuilds.length > 0) logger.warn(blankGuildsWarning(blankGuilds))
 
   if (nowhere) {
     const outcome =

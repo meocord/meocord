@@ -326,7 +326,8 @@ describe('planTargets', () => {
     const logger = createLogger()
 
     expect(plan([{ name: 'ping' }, { name: 'ban', guilds: [undefined, ' '] }], undefined, false, logger)).toEqual([['global', ['ping']]])
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('"ban" lists no guild ids'))
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('1 command is not registered: its builder lists no guild ids'))
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('\n  Builder: "ban"\n'))
   })
 
   // `guilds: [process.env.GUILD_ID]` with the variable unset names guilds, just no ids
@@ -393,6 +394,14 @@ describe('registerCommands', () => {
     })
     return { rest, logger, run }
   }
+
+  // Until the next major version, a builder whose guilds are all blank is warned about, and the run still succeeds
+  it('sends the other commands and still reports success when a builder lists no guild ids', async () => {
+    const { rest, run } = register({ controllerClasses: [controllerWith([{ name: 'ping' }, { name: 'ban', guilds: [undefined] }])] })
+
+    await expect(run).resolves.toBe(true)
+    expect(sentTo(rest)).toEqual({ '/applications/app/commands': ['ping'] })
+  })
 
   it('sends one bulk update per scope, and reports success', async () => {
     const { rest, run } = register({ controllerClasses: [controllerWith([{ name: 'ping' }, { name: 'ban', guilds: ['staff'] }])] })
@@ -963,6 +972,24 @@ describe('registration, message by message', () => {
 
       expect(planTargets(commands, { development: false, onlyGuild: ' staff ' }, createLogger())[0].scope).toEqual({ guild: 'staff' })
       expect(planTargets(commands, { development: true, config: { developmentGuild: ' dev ' } }, createLogger())[0].scope).toEqual({ guild: 'dev' })
+    })
+
+    // `guilds: [process.env.STAFF_GUILD]` with the variable unset, in two builders: one warning, naming each
+    it('warns once about every builder whose guilds are all blank, naming it and its command', () => {
+      const logger = createLogger()
+      const commands = collectCommands([controllerWith([{ name: 'ping' }, { name: 'ban', guilds: [undefined] }, { name: 'audit', guilds: [' '] }])], createLogger())!
+
+      const targets = planTargets(commands, { development: false }, logger)
+
+      expect(targets.map(({ scope, commands }) => [scope, commands.map(command => command.name)])).toEqual([['global', ['ping']]])
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+      expect(logger.warn).toHaveBeenCalledWith(
+        '2 commands are not registered: their builders list no guild ids, as when the variable holding them is unset.\n' +
+          '  Builder: "ban"\n' +
+          '  Builder: "audit"\n' +
+          'Set the guild ids; a builder without guilds registers where commands.* says. `meocord register` still exits 0 for ' +
+          'these; the next major version (5.0) exits 1.',
+      )
     })
 
     it('warns only about a command whose builder lists no guild ids', () => {
