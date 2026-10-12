@@ -71,8 +71,25 @@ export function compiledConfigMessage(): string {
  */
 function fixedInConfig(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code
-  if (error instanceof SyntaxError || code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return true
+  if (unparsable(error) || code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') return true
   return typeof code === 'string' && code.startsWith('ERR_REQUIRE_')
+}
+
+/** The name of Bun's error for a module it could not parse; several of them come together in an AggregateError. */
+const BUN_PARSE_ERROR = 'BuildMessage'
+
+/**
+ * Whether a module could not be parsed, so none of its code ran: on Node, a SyntaxError thrown from compiling it, whose
+ * first frame is Node's own; on Bun, its parse error. A SyntaxError the config's code throws as it runs, from
+ * `JSON.parse` or `new RegExp` on an environment value, is not one.
+ */
+function unparsable(error: unknown): boolean {
+  const bunParseError = (each: unknown) => (each as { name?: unknown } | null)?.name === BUN_PARSE_ERROR
+  if (bunParseError(error)) return true
+  if (error instanceof AggregateError) return error.errors.length > 0 && error.errors.every(bunParseError)
+  if (!(error instanceof SyntaxError)) return false
+  const firstFrame = error.stack?.split('\n').find(line => line.trimStart().startsWith('at '))
+  return firstFrame === undefined || /[( ]node:/.test(firstFrame)
 }
 
 /**

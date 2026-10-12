@@ -98,6 +98,12 @@ describe('loadMeoCordConfig', () => {
   it.each([
     ['throws as it runs', `if (!process.env.MEOCORD_PROBE_FOO) throw new Error('FOO is required')\nexport default {}\n`, 'FOO is required. It threw as it loaded: check the environment it reads, such as its .env files.'],
     ['is not a module', 'export default {\n', 'Fix meocord.config.ts, then run `meocord build`.'],
+    // A SyntaxError its own code throws, which a rebuild would not mend
+    ['parses an environment value that is not JSON', `export default { guilds: JSON.parse(process.env.MEOCORD_PROBE_GUILDS ?? '["1",]') }\n`, 'It threw as it loaded: check the environment it reads, such as its .env files.'],
+    ['builds a pattern from an environment value that is not one', `export default { prefix: new RegExp(process.env.MEOCORD_PROBE_PREFIX ?? '(') }\n`, 'It threw as it loaded: check the environment it reads, such as its .env files.'],
+    // Bun's parse errors: one, or several together, which Bun throws as these
+    ['Bun could not parse', `const error = new Error('Expected "}" but found end of file')\nerror.name = 'BuildMessage'\nthrow error\n`, 'Fix meocord.config.ts, then run `meocord build`.'],
+    ['Bun found several faults in', `const each = message => Object.assign(new Error(message), { name: 'BuildMessage' })\nthrow new AggregateError([each('Expected identifier'), each('Expected "}"')], '2 errors building')\n`, 'Fix meocord.config.ts, then run `meocord build`.'],
   ])('advises on a compiled config that %s', async (_, source, advice) => {
     writeCompiledConfig(source)
     const failed = await freshLoader()
