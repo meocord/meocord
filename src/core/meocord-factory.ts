@@ -9,7 +9,7 @@ import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { warnOnce } from '@src/common/deprecation.js'
-import { missingTranslatorError, Translator } from '@src/common/translator.js'
+import { Translator } from '@src/common/translator.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
@@ -89,8 +89,7 @@ function bindDependencies(container: Container, cls: any, providers: ProviderMap
 
   // By constructor type or @inject token; an interface-typed parameter records Object, which is skipped
   for (const dep of injectedTokens(cls)) {
-    if (dep === Translator && !container.isBound(Translator)) startupError(missingTranslatorError(cls))
-    else if (isAppClassToken(dep)) bindDependencies(container, dep, providers)
+    if (isAppClassToken(dep)) bindDependencies(container, dep, providers)
   }
 }
 

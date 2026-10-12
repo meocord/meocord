@@ -21,7 +21,7 @@ import {
 import { ReactionHandlerAction } from '@src/enum/index.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
-import { missingTranslatorError, Translator } from '@src/common/translator.js'
+import { Translator } from '@src/common/translator.js'
 import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
 import {
   appPresenterOf,
@@ -1211,8 +1211,7 @@ export class TestingModuleBuilder {
 
           // By constructor type or @inject token, as the app binds them
           for (const dep of injectedTokens(cls)) {
-            if (dep === Translator && !container.isBound(Translator)) startupError(missingTranslatorError(cls))
-            else if (isAppClassToken(dep)) bindClass(dep)
+            if (isAppClassToken(dep)) bindClass(dep)
           }
         }
 
