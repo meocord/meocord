@@ -280,7 +280,7 @@ export class Dispatcher {
       if (matched) {
         const { route, params } = matched
         ;(interaction as Interaction & { dynamicParams: Record<string, RouteParamValue> }).dynamicParams = params
-        await this.executeCommand(this.getInstance(route.controllerClass), route.meta, interaction, call)
+        await this.executeCommand(route.controllerClass, route.meta, interaction, call)
         return
       }
     }
@@ -288,7 +288,7 @@ export class Dispatcher {
     // The same match a test's invoke checks a handler against, so the two cannot disagree
     const command = matchCommandRoute(this.controllerClasses, interaction)
     if (command) {
-      await this.executeCommand(this.getInstance(command.controllerClass), command.meta, interaction, call)
+      await this.executeCommand(command.controllerClass, command.meta, interaction, call)
       return
     }
 
@@ -336,20 +336,25 @@ export class Dispatcher {
     await observeUnclaimed(this.container, [interaction], this.runOptions(call))
   }
 
-  /** Handler and name pairs already warned about, so a collision warns once, not on every submit or selection. */
-  private readonly warnedCollisions = new Set<string>()
+  /**
+   * Method and name pairs already warned about, by controller class, so a collision warns once per handler, not on
+   * every submit or selection. Keyed by the class itself, so two controllers of one name stay apart.
+   */
+  private readonly warnedCollisions = new WeakMap<ControllerClass, Set<string>>()
 
   /** Warns, in development, that a modal field or select menu choice is hidden by a customId param of the same name. */
-  private warnCollisions(methodName: string, names: string[]): void {
+  private warnCollisions(controllerClass: ControllerClass, methodName: string, names: string[]): void {
     if (process.env.NODE_ENV !== 'development') return
 
+    let warned = this.warnedCollisions.get(controllerClass)
+    if (!warned) this.warnedCollisions.set(controllerClass, (warned = new Set()))
     for (const name of names) {
       const key = `${methodName}:${name}`
-      if (this.warnedCollisions.has(key)) continue
-      this.warnedCollisions.add(key)
+      if (warned.has(key)) continue
+      warned.add(key)
       this.logger.warn(
-        `"${name}" is both a customId param and a modal field or select menu choice of ${methodName}; the handler receives the customId ` +
-          `param. Rename one to receive both.`,
+        `"${name}" is both a customId param and a modal field or select menu choice of ${controllerClass.name}.${methodName}; the handler ` +
+          `receives the customId param. Rename one to receive both.`,
       )
     }
   }
@@ -359,11 +364,12 @@ export class Dispatcher {
    * component and a named slash command behave identically once the route is chosen.
    */
   private async executeCommand(
-    controllerInstance: Record<string, (...args: unknown[]) => Promise<void>>,
+    controllerClass: ControllerClass,
     commandMetadata: CommandMeta<string>,
     interaction: Interaction<CacheType>,
     call: Call,
   ): Promise<void> {
+    const controllerInstance = this.getInstance(controllerClass)
     const { methodName, type } = commandMetadata
 
     // No interaction-type check here: both callers pick the route with
@@ -373,7 +379,7 @@ export class Dispatcher {
 
     const routeParams = (interaction as Interaction & { dynamicParams?: Record<string, RouteParamValue> }).dynamicParams
     const { params, collisions } = handlerInput(interaction, routeParams)
-    this.warnCollisions(methodName, collisions)
+    this.warnCollisions(controllerClass, methodName, collisions)
 
     await this.invokeHandler(controllerInstance, methodName, [interaction, params], call)
   }
