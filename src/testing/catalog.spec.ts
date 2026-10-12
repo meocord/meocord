@@ -69,6 +69,30 @@ describe('expectCompleteCatalog', () => {
     expect(() => expectCompleteCatalog(t)).toThrow(/^The catalogs are incomplete:\n {2}ru: missing grp\.label$/)
   })
 
+  it('reports a null translation, as a tool exports an untranslated one, as missing, the translator falling back as for any', () => {
+    const id = JSON.parse('{ "greet": null, "bye": "Dah", "menu": null }')
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { greet: 'Hi', bye: 'Bye', menu: { open: 'Open', close: 'Close' } }, id } as never })
+
+    expect((t as unknown as { locale: (l: string) => (k: string) => string }).locale('id')('greet')).toBe('Hi')
+    expect(() => expectCompleteCatalog(t as never)).toThrow(/^The catalogs are incomplete:\n {2}id: missing greet; missing menu\.open; missing menu\.close$/)
+  })
+
+  it.each([
+    ['an empty', '""'],
+    ['a null', 'null'],
+  ])('reports %s translation the default lacks as not in the default catalog', (_, value) => {
+    const id = JSON.parse(`{ "greet": "Halo", "extra": ${value} }`)
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { greet: 'Hi' }, id } as never })
+
+    expect(() => expectCompleteCatalog(t as never)).toThrow(/^The catalogs are incomplete:\n {2}id: extra is not in the default catalog$/)
+  })
+
+  it('passes a number or a flag in the catalogs, which it reads no message from', () => {
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { greet: 'Hi', max: 5, beta: true }, id: { greet: 'Halo', max: 5 } } as never })
+
+    expect(() => expectCompleteCatalog(t as never)).not.toThrow()
+  })
+
   it('names a text given where the default has a group as of the wrong shape', () => {
     const t = createTranslator({ default: 'en-US', locales: { 'en-US': { grp: { other: 'Other', label: 'Label' } }, ru: { grp: 'Группа' } } })
 

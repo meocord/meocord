@@ -11,7 +11,8 @@ interface Leaf { key: string; plural: boolean }
 function leaves(catalog: CatalogShape, prefix = '', reference: unknown = catalog): Leaf[] {
   return Object.entries(catalog).flatMap(([name, value]) => {
     const key = `${prefix}${name}`
-    if (typeof value === 'string') return [{ key, plural: false }]
+    // A null message is one where it stands, which the checks below read as missing
+    if (typeof value === 'string' || value === null) return [{ key, plural: false }]
     const shape = typeof reference === 'object' && reference !== null && Object.hasOwn(reference, name) ? (reference as Record<string, unknown>)[name] : undefined
     const plural = typeof shape === 'object' && shape !== null ? isPluralShape(shape) : isPluralShape(value)
     if (plural) return [{ key, plural: true }]
@@ -21,6 +22,9 @@ function leaves(catalog: CatalogShape, prefix = '', reference: unknown = catalog
 
 /** A translation's text, which an empty string isn't: the translator reads `''` as missing, as tools export one untranslated. */
 const isText = (value: unknown): boolean => typeof value === 'string' && value !== ''
+
+/** A message the translator reads as missing: none, `null` or `''`, as tools export one untranslated. */
+const isMissing = (value: unknown): boolean => value === undefined || value === null || value === ''
 
 /** The value at a key's path, through own properties only, so `constructor` or `toString` is not read off a prototype. */
 function at(catalog: CatalogShape, key: string): unknown {
@@ -57,8 +61,8 @@ function strayParams(translation: unknown, original: unknown): string[] {
  * Use it in a test for a team that wants no fallback in production. It reports the messages a locale lacks, the
  * messages the default catalog doesn't have, the plural forms a language needs but a plural lacks, such as `few` for
  * Russian, a translation of another shape than the default's, a text for a plural or a group, or a plural for a text, and each
- * `{param}` a translation uses that the message it translates doesn't take. An empty translation, `''`, counts as
- * lacking, as the translator reads it as missing. It reads the catalogs' own strings, so it checks the params of a
+ * `{param}` a translation uses that the message it translates doesn't take. An empty translation, `''` or `null`, counts
+ * as lacking, as the translator reads it as missing. It reads the catalogs' own strings, so it checks the params of a
  * catalog from a plain variable or a JSON file too, which the compiler can't. An object in the default catalog counts as
  * a plural only when its every key is a plural category, so a group with an `other` key is a group, and a translation
  * is read by the default catalog's shapes, as the translator reads it: one that keeps only a group's `other` message
@@ -113,7 +117,7 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
 
     for (const { key, plural } of reference) {
       const message = at(catalog, key)
-      if (message === undefined || message === '') {
+      if (isMissing(message)) {
         problems.push(`missing ${key}`)
         continue
       }
@@ -131,9 +135,11 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
       for (const name of stray) problems.push(`${key} takes no {${name}}; the default is "${shown(original)}"`)
     }
     if (options.meocord && !locale.startsWith('en-')) {
-      for (const key of MEOCORD_KEYS) if (at(catalog, key) === undefined || at(catalog, key) === '') problems.push(`missing ${key}`)
+      for (const key of MEOCORD_KEYS) if (isMissing(at(catalog, key))) problems.push(`missing ${key}`)
     }
     for (const { key } of leaves(catalog, '', defaultCatalog)) {
+      // A message left out, as a null one is, that the default has is reported missing above, and is nothing extra
+      if (isMissing(at(catalog, key)) && at(defaultCatalog, key) !== undefined) continue
       if (isMeoCordKey(key)) {
         if (!MEOCORD_KEYS.has(key)) problems.push(`${key} is not one of MeoCord's texts`)
         else {
