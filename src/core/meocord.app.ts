@@ -457,12 +457,20 @@ export class MeoCordApp implements MeoCordApplication {
 
   /**
    * Registers the application's commands with Discord, where `meocord.config.ts`'s `commands` says. Runs once the bot
-   * is ready, except in a shard, whose manager registers. It never throws: a failure is logged and the bot stays
+   * is ready, except in a shard, whose manager registers. Called before the bot is online, it logs a warning and
+   * registers nothing, as the application comes from the login. It never throws: a failure is logged and the bot stays
    * online.
    */
   async registerCommands(): Promise<void> {
+    // discord.js sets the application when the gateway's READY arrives
     const applicationId = this.bot.application?.id
-    if (!applicationId) return
+    if (!applicationId) {
+      this.logger.warn(
+        'registerCommands() registers nothing before the bot is online, as Discord names the application at login. ' +
+          'The bot registers once it is online; to register without logging in, run `meocord register`.',
+      )
+      return
+    }
 
     const config = loadMeoCordConfig()?.commands
     if (config?.register === false) {

@@ -129,6 +129,10 @@ export interface MeoCordApplication {
   /**
    * Registers the application's commands with Discord, where `meocord.config.ts`'s `commands` says.
    * A failure is logged rather than thrown.
+   *
+   * For a bot in one process, it needs the bot online, as the application comes from the login; called earlier, it
+   * logs a warning and registers nothing. With process sharding, the manager registers over REST, before or after
+   * `start()`.
    */
   registerCommands(): Promise<void>
 }

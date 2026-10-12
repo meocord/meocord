@@ -96,6 +96,10 @@ async function startApp(): Promise<{ client: Client; ready: Promise<void> }> {
   app = MeoCordFactory.create(App)
   await app.start()
   const client = clients[0]
+  // Ready as discord.js makes it, with the application the commands register under
+  Object.defineProperty(client, 'application', { value: { id: '100000000000000001' }, configurable: true })
+  vi.spyOn(client.rest, 'get').mockResolvedValue([])
+  vi.spyOn(client.rest, 'put').mockResolvedValue([])
   const ready = Promise.all(client.listeners('clientReady').map(listener => (listener as (c: Client) => Promise<void>)(client)))
   return { client, ready: ready.then(() => undefined) }
 }

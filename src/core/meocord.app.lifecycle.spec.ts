@@ -577,6 +577,9 @@ describe('lifecycle hooks', () => {
       }
 
       const { client } = await startApp(loaded, { controllers: [], services: [Stuck] })
+      // Every warning is pinned, so the client is ready as discord.js makes it, with its application
+      registerThrough(client, () => Promise.resolve([]))
+      vi.spyOn(client.rest, 'get').mockResolvedValue([])
       await becomeReady(client)
       vi.useFakeTimers()
       const done = loaded.shutdownAndExit(false)
