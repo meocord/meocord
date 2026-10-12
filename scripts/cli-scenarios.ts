@@ -964,6 +964,21 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    name: 'build names a tsconfig.json it cannot read, not the config',
+    tier: 'fast',
+    windows: true,
+    files: {
+      'tsconfig.json': JSON.stringify({ extends: '@tsconfig/missing/tsconfig.json' }),
+      dist: null,
+    },
+    argv: ['build', '--prod'],
+    expect: {
+      code: 1,
+      says: ['tsconfig.json could not be read', '@tsconfig/missing/tsconfig.json'],
+      never: ['meocord.config.ts could not be loaded', 'Building production version'],
+    },
+  },
+  {
     name: 'register refuses a config of the wrong shape too',
     tier: 'fast',
     files: { 'meocord.config.ts': config("{ discordToken: 'x', shutdownTimeout: 'soon' }") },

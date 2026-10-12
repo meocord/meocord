@@ -38,6 +38,10 @@ export function checkSourceConfig({ building = true }: { building?: boolean } = 
   if (!fs.existsSync(meocordConfigPath)) return { problem: 'Configuration file "meocord.config.ts" is missing!' }
 
   const loaded = readMeoCordSourceConfig()
+  // Named as itself; with no loadError, watch mode reports it as a problem, not as the config failing to compile
+  if ('error' in loaded && loaded.file === 'tsconfig.json') {
+    return { problem: `tsconfig.json could not be read, so nothing was built or started:\n  ${loaded.error}` }
+  }
   if ('error' in loaded) {
     return { problem: `meocord.config.ts could not be loaded, so nothing was built or started:\n  ${loaded.error}`, loadError: loaded.error }
   }
