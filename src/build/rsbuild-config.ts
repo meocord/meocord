@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url'
 import { type RsbuildConfig, type Rspack } from '@rsbuild/core'
 import { OptionalProbesPlugin } from '@src/build/optional-probes.js'
 import { RunnableBundlePlugin } from '@src/build/runnable-bundle.js'
-import { typeExternals } from '@src/build/typed-externals.js'
+import { externalMatcher, typeExternals } from '@src/build/typed-externals.js'
 import { prepareModifiedTsConfig } from '@src/util/tsconfig.util.js'
 
 /**
@@ -35,9 +35,8 @@ export function optionalExternalConflicts(
   optionalExternals: readonly string[] = [],
   externals: readonly (string | RegExp)[] = [],
 ): string[] {
-  return optionalExternals.filter(name =>
-    externals.some(external => (typeof external === 'string' ? external === name : external.test(name))),
-  )
+  const matchers = externals.map(externalMatcher)
+  return optionalExternals.filter(name => matchers.some(matches => matches(name)))
 }
 
 /**

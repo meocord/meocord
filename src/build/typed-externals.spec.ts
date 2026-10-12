@@ -22,6 +22,23 @@ describe('typeExternals', () => {
     expect(await answer(item as Rspack.ExternalItem, 'discord.js', 'commonjs')).toBe('node-commonjs discord.js')
   })
 
+  // A `g` or `y` pattern's test resumes where its last match ended, so tested as given it would miss every other request
+  it.each([/^sharp$/g, /^sharp$/y])('keeps every request %s matches out of the bundle, however often it is asked', async pattern => {
+    const [typed] = typeExternals([pattern])
+    const ask = () =>
+      new Promise<string | undefined>(resolve =>
+        (typed as unknown as ExternalFunction)({ request: 'sharp', dependencyType: 'esm' }, (_, result) => resolve(result)),
+      )
+
+    expect([await ask(), await ask(), await ask()]).toEqual(['import sharp', 'import sharp', 'import sharp'])
+  })
+
+  // As Rsbuild tests it: a sticky pattern matches only from the start of the request
+  it('leaves to the bundle a request a y pattern matches only past its start', async () => {
+    expect(await answer(/sharp/y, '@img/sharp', 'esm')).toBeUndefined()
+    expect(await answer(/sharp/y, 'sharp', 'esm')).toBe('import sharp')
+  })
+
   it('leaves a request it does not match to the bundle', async () => {
     expect(await answer('discord.js', 'dotenv', 'esm')).toBeUndefined()
   })
