@@ -151,3 +151,25 @@ describe("@MessageHandler('')", () => {
     expect(heard.sort()).toEqual(["'' hello there", '() hello there'])
   })
 })
+
+// Spaces alone are no word either, so they read as no pattern, as '' does
+describe("@MessageHandler('   ')", () => {
+  it('warns, naming the handler, and is dispatched every message, as @MessageHandler() is', async () => {
+    const heard: string[] = []
+    @Controller()
+    class Listen {
+      @MessageHandler('   ')
+      blank(message: Message) {
+        heard.push(message.content)
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Listen] }).compile()
+
+    await module.dispatch(createMockMessage({ content: 'hello there' }))
+
+    expect([warnings(), heard]).toEqual([
+      ["@MessageHandler('   ') on Listen.blank is deprecated; in the next major version (5.0) it is refused. Use @MessageHandler() instead."],
+      ['hello there'],
+    ])
+  })
+})
