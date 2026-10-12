@@ -76,6 +76,21 @@ describe('a decorator that goes only on a method, applied to a class', () => {
     expect(error.message).toBe('Shop: @Inject goes on a constructor parameter or a property, not on a class.')
     expect(isRefusal(error)).toBe(true)
   })
+
+  it('refuses @Inject on a method parameter, naming the method', () => {
+    let error: unknown
+    try {
+      class Shop {
+        run(@Inject('token') _value: string) {}
+      }
+      void Shop
+    } catch (thrown) {
+      error = thrown
+    }
+
+    expect((error as Error).message).toBe('Shop.run: @Inject goes on a constructor parameter or a property, not a method parameter.')
+    expect(isRefusal(error)).toBe(true)
+  })
 })
 
 describe('a decorator that goes on a class or a method, applied to a controller through applyDecorators', () => {
