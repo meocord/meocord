@@ -193,16 +193,34 @@ type ExternalCallback = (error?: Error, result?: string) => void
 export function createNativeExternals(root: string): {
   externals: (data: ExternalRequest, callback: ExternalCallback) => void
   found: Map<string, NativePackage>
+  /** Each native package bundled code also imports from another installed copy, with that copy's directories. */
+  otherCopies: Map<string, string[]>
 } {
   const found = new Map<string, NativePackage>()
+  const otherCopies = new Map<string, string[]>()
   const plain = new Set<string>()
+  // Where each importing directory finds a native package, read once per directory
+  const resolved = new Map<string, string | undefined>()
+  const resolveFrom = (name: string, from: string) => {
+    const key = `${name}\0${from}`
+    if (!resolved.has(key)) resolved.set(key, resolvePackageDir(name, from, root))
+    return resolved.get(key)
+  }
 
   const externals = ({ request, context }: ExternalRequest, callback: ExternalCallback) => {
     const name = request ? packageNameOfRequest(request) : undefined
     if (!name || plain.has(name)) return callback()
-    if (found.has(name)) return callback(undefined, request)
 
-    const dir = resolvePackageDir(name, context ?? root, root)
+    const dir = resolveFrom(name, context ?? root)
+    const known = found.get(name)
+    if (known) {
+      // The bundle loads one copy of it for every importer, so code that needs another installed copy gets this one
+      const others = otherCopies.get(name) ?? []
+      if (dir && !samePackageDir(dir, known.dir) && !others.some(other => samePackageDir(other, dir))) {
+        otherCopies.set(name, [...others, dir])
+      }
+      return callback(undefined, request)
+    }
     const carrier = dir ? nativeCarrier(dir, name, root) : undefined
     if (!dir || !carrier) {
       plain.add(name)
@@ -212,7 +230,41 @@ export function createNativeExternals(root: string): {
     callback(undefined, request)
   }
 
-  return { externals, found }
+  return { externals, found, otherCopies }
+}
+
+/** Whether two directories are one installed package, as pnpm links one from its store under several names. */
+function samePackageDir(a: string, b: string): boolean {
+  const real = (dir: string) => {
+    try {
+      return realpathSync(dir)
+    } catch {
+      return dir
+    }
+  }
+  return real(a) === real(b)
+}
+
+/**
+ * The warning for a native package bundled code imports from more than one installed copy: each copy's version and
+ * place, and that the one packed is what every importer loads.
+ */
+export function otherCopiesWarning(name: string, packed: string, others: readonly string[], root: string): string {
+  const where = (dir: string) => {
+    let version = 'an unknown version'
+    try {
+      version = String(readJsonFile(path.join(dir, 'package.json')).version ?? version)
+    } catch {
+      // Unreadable: named by its place alone
+    }
+    return `${version} in ${path.relative(root, dir) || '.'}`
+  }
+  return (
+    `${name} is installed more than once for bundled code: ${[packed, ...others].map(where).join(', ')}. A self-contained ` +
+    `build packs one copy of a native package, ${where(packed)}, and every importer loads it, so code that needs another ` +
+    `version gets this one. Install one version of ${name}, for example with \`npm dedupe\` or an \`overrides\` entry. ` +
+    'The next major version (5.0) stops the build here.'
+  )
 }
 
 /** The sole entry of an `os`, `cpu` or `libc` list that admits every value. */

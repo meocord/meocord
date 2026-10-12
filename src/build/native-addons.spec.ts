@@ -8,6 +8,7 @@ import {
   installedPackages,
   isBuiltFor,
   createNativeExternals,
+  otherCopiesWarning,
   findBundledNativeAddons,
   packageFromPath,
   packageNameOfRequest,
@@ -258,6 +259,40 @@ describe('createNativeExternals', () => {
 
     expect(decide(externals, 'sqlite-native', path.join(parent, 'lib'))).toBe('sqlite-native')
     expect(found.get('sqlite-native')?.dir).toBe(path.join(parent, 'node_modules', 'sqlite-native'))
+  })
+
+  // The bundle loads one copy for every importer, so another copy some importer resolves to is named, not packed
+  it('records another installed copy that bundled code imports, once, and keeps both requests external', () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(wrap, 'wrap')
+    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const { externals, found, otherCopies } = createNativeExternals(root)
+
+    expect(decide(externals, 'natpkg')).toBe('natpkg')
+    expect(decide(externals, 'natpkg', path.join(wrap, 'lib'))).toBe('natpkg')
+    expect(decide(externals, 'natpkg', wrap)).toBe('natpkg')
+    expect(decide(externals, 'natpkg', root)).toBe('natpkg')
+
+    expect(found.get('natpkg')?.dir).toBe(path.join(root, 'node_modules', 'natpkg'))
+    expect([...otherCopies]).toEqual([['natpkg', [path.join(wrap, 'node_modules', 'natpkg')]]])
+  })
+
+  // pnpm links one store copy under several names
+  it('takes two links to one installed copy as one copy', () => {
+    const store = path.join(root, 'node_modules', '.pnpm', 'natpkg@1.0.0', 'node_modules', 'natpkg')
+    install(store, 'natpkg', { binary: 'addon.node' })
+    symlinkSync(store, path.join(root, 'node_modules', 'natpkg'), 'junction')
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(wrap, 'wrap')
+    mkdirSync(path.join(wrap, 'node_modules'), { recursive: true })
+    symlinkSync(store, path.join(wrap, 'node_modules', 'natpkg'), 'junction')
+    const { externals, otherCopies } = createNativeExternals(root)
+
+    decide(externals, 'natpkg')
+    decide(externals, 'natpkg', wrap)
+
+    expect(otherCopies.size).toBe(0)
   })
 
   it('keeps the same request external every time it is met, and reads each package once', () => {
@@ -661,5 +696,22 @@ describe('isBuiltFor', () => {
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'addon', version: '1.0.0', ...fields }))
 
     expect(isBuiltFor(dir, linux)).toBe(expected)
+  })
+})
+
+describe('otherCopiesWarning', () => {
+  it('names each copy with its version and place, the one packed, and what to do', () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg')
+    const nested = path.join(root, 'node_modules', 'wrap', 'node_modules', 'natpkg')
+    mkdirSync(nested, { recursive: true })
+    writeFileSync(path.join(nested, 'package.json'), JSON.stringify({ name: 'natpkg', version: '2.0.0' }))
+
+    expect(otherCopiesWarning('natpkg', path.join(root, 'node_modules', 'natpkg'), [nested], root)).toBe(
+      `natpkg is installed more than once for bundled code: 1.0.0 in ${path.join('node_modules', 'natpkg')}, 2.0.0 in ` +
+        `${path.join('node_modules', 'wrap', 'node_modules', 'natpkg')}. A self-contained build packs one copy of a native ` +
+        `package, 1.0.0 in ${path.join('node_modules', 'natpkg')}, and every importer loads it, so code that needs another ` +
+        'version gets this one. Install one version of natpkg, for example with `npm dedupe` or an `overrides` entry. The ' +
+        'next major version (5.0) stops the build here.',
+    )
   })
 })
