@@ -1,5 +1,6 @@
 import {
   type APIModalInteractionResponseCallbackData,
+  type ApplicationCommandOptionChoiceData,
   DiscordAPIError,
   type Interaction,
   type InteractionDeferReplyOptions,
@@ -8,6 +9,7 @@ import {
   type InteractionReplyOptions,
   type InteractionUpdateOptions,
   type JSONEncodable,
+  type LaunchActivityOptions,
   type MessageEditOptions,
   type MessagePayload,
   type MessageResolvable,
@@ -33,7 +35,8 @@ export interface ResponseReport {
   /**
    * Every answer call the interaction got, through `respond()` or discord.js directly, in order: the payload it sent,
    * without `withResponse`, and the `error` of one Discord refused. Checking a call's `method` types its `payload` as
-   * that method takes it: the options of a reply, an edit or a deferral, the modal shown, or the message deleted.
+   * that method takes it: the options of a reply, an edit or a deferral, the modal shown, the message deleted, or an
+   * autocomplete's choices.
    */
   calls: readonly (
     | (ResponseCall & { method: 'reply' | 'followUp'; payload?: string | MessagePayload | InteractionReplyOptions })
@@ -47,6 +50,9 @@ export interface ResponseReport {
     | (ResponseCall & { method: 'deferReply'; payload?: InteractionDeferReplyOptions })
     | (ResponseCall & { method: 'deferUpdate'; payload?: InteractionDeferUpdateOptions })
     | (ResponseCall & { method: 'deleteReply'; payload?: MessageResolvable | '@original' })
+    | (ResponseCall & { method: 'launchActivity'; payload?: Omit<LaunchActivityOptions, 'withResponse'> })
+    | (ResponseCall & { method: 'sendPremiumRequired'; payload?: undefined })
+    | (ResponseCall & { method: 'respond'; payload?: readonly ApplicationCommandOptionChoiceData[] })
   )[]
 }
 
@@ -56,9 +62,10 @@ const VISIBLE = new Set<ResponseCall['method']>(['reply', 'update', 'editReply',
  * Reports how an interaction was answered: where its answer stands, and every answer call it got, in order.
  *
  * Use it after `invoke` or `dispatch` to check what the member sees. A mock interaction records each `reply`,
- * `deferReply`, `editReply`, `followUp`, `deleteReply`, `update`, `deferUpdate` and `showModal`, whether the handler
- * made it through `respond()` or with discord.js directly, so both are reported, each once. For a message or a
- * reaction, read the mock's own methods.
+ * `deferReply`, `editReply`, `followUp`, `deleteReply`, `update`, `deferUpdate` and `showModal`, and under
+ * `useStrictMocks()` each `launchActivity`, `sendPremiumRequired` and autocomplete `respond` too, whether the handler made
+ * it through `respond()` or with discord.js directly, so both are reported, each once. For a message or a reaction, read
+ * the mock's own methods.
  *
  * @param interaction - The interaction a handler answered.
  * @returns The state, whether anything the member can see was sent, and the calls, in order.
@@ -95,7 +102,8 @@ export function getResponse(interaction: Interaction): ResponseReport {
   const sent = calls.some(call => VISIBLE.has(call.method) && !('error' in call))
   // Each call recorded what its method received, as that method takes it
   if (state) return { state: state.state, sent, calls: calls as ResponseReport['calls'] }
-  const answered = interaction.isRepliable() ? interaction.replied : false
+  // An autocomplete's choices are its answer, as observers read it, where its mock records them, under strict mocks
+  const answered = interaction.isRepliable() ? interaction.replied : Boolean(log) && interaction.isAutocomplete() && interaction.responded
   const deferred = interaction.isRepliable() ? interaction.deferred : false
   return {
     state: answered ? 'replied' : deferred ? 'deferred' : 'unanswered',

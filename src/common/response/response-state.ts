@@ -163,7 +163,8 @@ export interface ResponseSendOptions {
  */
 export interface ResponseCall {
   /**
-   * The Discord method it used; `message.edit` edits the message itself, once the interaction's token has expired.
+   * The Discord method it used; `respond` answers an autocomplete with its choices, and `message.edit` edits the message
+   * itself, once the interaction's token has expired.
    */
   method:
     | 'deferReply'
@@ -174,6 +175,9 @@ export interface ResponseCall {
     | 'followUp'
     | 'deleteReply'
     | 'showModal'
+    | 'launchActivity'
+    | 'sendPremiumRequired'
+    | 'respond'
     | 'message.edit'
   /** What was sent, as that method received it; none for a deferral or a deletion. */
   payload?: unknown

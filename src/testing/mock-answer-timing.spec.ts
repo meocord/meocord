@@ -94,6 +94,25 @@ describe('when a mock interaction is answered, under useStrictMocks()', () => {
     expect([right, await a, await b, interaction.responded]).toEqual([false, 'ok', 40060, true])
   })
 
+  it.each(['followUp', 'editReply'] as const)('marks a deferred interaction replied once %s() resolves', async method => {
+    const interaction = slash()
+    await interaction.deferReply()
+    const sending = interaction[method]('Done')
+    const before = interaction.replied
+    await sending
+
+    expect([before, interaction.replied]).toEqual([false, true])
+  })
+
+  it.each(['followUp', 'editReply'] as const)('leaves a deferred interaction unreplied when %s() rejects', async method => {
+    const interaction = slash()
+    await interaction.deferReply()
+    interaction[method].mockRejectedValueOnce(new Error('gone'))
+    await interaction[method]('Done').catch(() => undefined)
+
+    expect(interaction.replied).toBe(false)
+  })
+
   // A mock answer resolves on the next microtask, so only overlaps within one synchronous run are caught: a guard's
   // un-awaited reply has landed by the time MeoCord answers the denial, where on a bot the request is still in flight
   it("lands a guard's un-awaited reply before MeoCord answers the denial, so an overlap across an await isn't caught", async () => {
