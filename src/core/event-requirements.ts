@@ -16,6 +16,11 @@ const REACTIONS: IntentRequirement = [
 ]
 // Partials.User is left out: guild reactions carry their user, and requiring it would warn on the generated app
 const REACTION_PARTIALS = [Partials.Message, Partials.Reaction]
+const POLLS: IntentRequirement = [GatewayIntentBits.GuildMessagePolls, GatewayIntentBits.DirectMessagePolls]
+// discord.js drops a vote on a message it has not cached unless it may build the message, its poll and the answer
+const POLL_PARTIALS = [Partials.Message, Partials.Poll, Partials.PollAnswer]
+// The partials whose warning names members and polls; the others keep the wording for messages, reactions and users
+const CACHED_ELSEWHERE = new Set<Partials>([Partials.GuildMember, Partials.Poll, Partials.PollAnswer])
 
 /** The intents Discord only sends once they are also enabled for the app in the developer portal. */
 const PRIVILEGED = new Set<GatewayIntentBits>([
@@ -50,11 +55,15 @@ const EVENT_REQUIREMENTS: Partial<Record<keyof ClientEvents, EventRequirements>>
       'stageInstanceUpdate',
     ].map(event => [event, { intents: [[GatewayIntentBits.Guilds]] }]),
   ),
+  // A member that joins arrives whole; one that leaves or changes reaches its handler only if cached or with this partial
   ...Object.fromEntries(
-    ['guildMemberAdd', 'guildMemberRemove', 'guildMemberUpdate', 'guildMemberAvailable', 'threadMembersUpdate'].map(
-      event => [event, { intents: [[GatewayIntentBits.GuildMembers]] }],
-    ),
+    ['guildMemberAdd', 'guildMemberAvailable', 'threadMembersUpdate'].map(event => [
+      event,
+      { intents: [[GatewayIntentBits.GuildMembers]] },
+    ]),
   ),
+  guildMemberRemove: { intents: [[GatewayIntentBits.GuildMembers]], partials: [Partials.GuildMember] },
+  guildMemberUpdate: { intents: [[GatewayIntentBits.GuildMembers]], partials: [Partials.GuildMember] },
   guildAuditLogEntryCreate: { intents: [[GatewayIntentBits.GuildModeration]] },
   guildBanAdd: { intents: [[GatewayIntentBits.GuildModeration]] },
   guildBanRemove: { intents: [[GatewayIntentBits.GuildModeration]] },
@@ -77,21 +86,21 @@ const EVENT_REQUIREMENTS: Partial<Record<keyof ClientEvents, EventRequirements>>
   messageReactionAdd: { intents: [REACTIONS], partials: REACTION_PARTIALS },
   messageReactionRemove: { intents: [REACTIONS], partials: REACTION_PARTIALS },
   messageReactionRemoveAll: { intents: [REACTIONS], partials: [Partials.Message] },
-  messageReactionRemoveEmoji: { intents: [REACTIONS], partials: [Partials.Reaction] },
+  messageReactionRemoveEmoji: { intents: [REACTIONS], partials: REACTION_PARTIALS },
   typingStart: {
     intents: [[GatewayIntentBits.GuildMessageTyping, GatewayIntentBits.DirectMessageTyping]],
   },
-  messagePollVoteAdd: { intents: [[GatewayIntentBits.GuildMessagePolls, GatewayIntentBits.DirectMessagePolls]] },
-  messagePollVoteRemove: { intents: [[GatewayIntentBits.GuildMessagePolls, GatewayIntentBits.DirectMessagePolls]] },
+  messagePollVoteAdd: { intents: [POLLS], partials: POLL_PARTIALS },
+  messagePollVoteRemove: { intents: [POLLS], partials: POLL_PARTIALS },
   ...Object.fromEntries(
-    [
-      'guildScheduledEventCreate',
-      'guildScheduledEventDelete',
-      'guildScheduledEventUpdate',
-      'guildScheduledEventUserAdd',
-      'guildScheduledEventUserRemove',
-    ].map(event => [event, { intents: [[GatewayIntentBits.GuildScheduledEvents]] }]),
+    ['guildScheduledEventCreate', 'guildScheduledEventDelete', 'guildScheduledEventUpdate'].map(event => [
+      event,
+      { intents: [[GatewayIntentBits.GuildScheduledEvents]] },
+    ]),
   ),
+  // Each names its user by id alone, which discord.js reads from the cache unless this partial is on
+  guildScheduledEventUserAdd: { intents: [[GatewayIntentBits.GuildScheduledEvents]], partials: [Partials.User] },
+  guildScheduledEventUserRemove: { intents: [[GatewayIntentBits.GuildScheduledEvents]], partials: [Partials.User] },
   autoModerationRuleCreate: { intents: [[GatewayIntentBits.AutoModerationConfiguration]] },
   autoModerationRuleDelete: { intents: [[GatewayIntentBits.AutoModerationConfiguration]] },
   autoModerationRuleUpdate: { intents: [[GatewayIntentBits.AutoModerationConfiguration]] },
@@ -197,7 +206,9 @@ export function missingRequirementWarnings(options: ClientOptions, handlers: rea
         (partial === Partials.Channel
           ? 'direct messages: no DM channel is cached after the bot starts, and discord.js drops a message from a ' +
             'channel it has not cached.'
-          : 'events about messages, reactions or users the bot has not cached, such as messages sent before it started.'),
+          : CACHED_ELSEWHERE.has(partial)
+            ? 'events about members or polls the bot has not cached, such as members who joined before it started.'
+            : 'events about messages, reactions or users the bot has not cached, such as messages sent before it started.'),
     )
   }
   return warnings
