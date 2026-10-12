@@ -610,6 +610,53 @@ describe('gateway event handlers', () => {
       expect(heard.sort()).toEqual(['Given', 'Listed'])
     })
 
+    it.each([
+      ['under another token', true],
+      ['under its own token', false],
+    ])('runs the handlers of a class provider once when a factory aliases its instance %s', async (_case, aliased) => {
+      const heard: string[] = []
+      abstract class Weather {}
+      class OpenMeteo extends Weather {
+        @On('guildMemberAdd')
+        joined() {
+          heard.push('OpenMeteo')
+        }
+      }
+      const token = aliased ? Weather : OpenMeteo
+
+      const client = await startApp({
+        providers: [
+          { provide: token, useClass: OpenMeteo },
+          { provide: 'weather', useFactory: (weather: Weather) => weather, inject: [token] },
+        ],
+      })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect(heard).toEqual(['OpenMeteo'])
+    })
+
+    it('runs the handlers on each instance when a factory makes its own beside a class provider of the same class', async () => {
+      const heard: number[] = []
+      let made = 0
+      class OpenMeteo {
+        readonly id = ++made
+        @On('guildMemberAdd')
+        joined() {
+          heard.push(this.id)
+        }
+      }
+
+      const client = await startApp({
+        providers: [
+          { provide: OpenMeteo, useClass: OpenMeteo },
+          { provide: 'own', useFactory: () => new OpenMeteo() },
+        ],
+      })
+      await emit(client, 'guildMemberAdd', member)
+
+      expect([made, heard.sort()]).toEqual([2, [1, 2]])
+    })
+
     it('checks the intents of handlers on a service only a stage injects', async () => {
       @Service()
       class StageOnly {

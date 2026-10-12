@@ -29,7 +29,14 @@ export function eventSources(
   prepared: readonly AnyClass[],
   warn: (text: string) => void,
 ): EventSource[] {
-  const selfBound = new Set(units.map(({ token }) => token).filter(token => isAppClassToken(token) && !providers.has(token)))
+  // The tokens of each class the container makes, bound as itself or given as a provider's `useClass`
+  const classTokens = new Map<AnyClass, unknown[]>()
+  for (const { token, cooldownStore } of units) {
+    const provider = providers.get(token)
+    if (cooldownStore || (provider && !isClassProvider(provider)) || (!provider && !isAppClassToken(token))) continue
+    const cls = (provider ? provider.useClass : token) as AnyClass
+    classTokens.set(cls, [...(classTokens.get(cls) ?? []), token])
+  }
   const names = new Map(prepared.map(cls => [cls.name, cls]))
   const handlers = new Map<AnyClass, readonly EventHandlerMetadata[]>()
   const handlersOf = (cls: AnyClass): readonly EventHandlerMetadata[] => {
@@ -61,9 +68,11 @@ export function eventSources(
     if (typeof cls !== 'function') continue
     const found = handlersOf(cls)
     if (found.length === 0) continue
-    // A factory may return the instance the container made of a class bound as itself, whose source runs it
-    const own = selfBound.has(cls) ? cls : undefined
-    sources.push({ cls, handlers: found, resolve: () => (own && container.get(own) === instance ? undefined : (instance as Instance)) })
+    // A factory may return the instance the container made for a class unit, whose own source runs it; only units of
+    // the instance's class are resolved, and each resolves on the event through its own source anyway
+    const tokens = classTokens.get(cls) ?? []
+    const owned = () => tokens.some(token => container.get(token as ServiceIdentifier) === instance)
+    sources.push({ cls, handlers: found, resolve: () => (owned() ? undefined : (instance as Instance)) })
   }
   return sources
 }

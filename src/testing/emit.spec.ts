@@ -112,6 +112,28 @@ describe('TestingModule.emit', () => {
     expect(heard.sort()).toEqual(['Given', 'OpenMeteo', 'StageOnly'])
   })
 
+  it('runs an @Once handler on a class provider once when a factory aliases its instance', async () => {
+    const heard: string[] = []
+    abstract class Weather {}
+    class OpenMeteo extends Weather {
+      @Once('guildMemberAdd')
+      first() {
+        heard.push('first')
+      }
+    }
+
+    const module = MeoCordTestingModule.create({
+      providers: [
+        { provide: Weather, useClass: OpenMeteo },
+        { provide: 'weather', useFactory: (weather: Weather) => weather, inject: [Weather] },
+      ],
+    }).compile()
+
+    const runs = [await module.emit('guildMemberAdd', createMock<GuildMember>()), await module.emit('guildMemberAdd', createMock<GuildMember>())]
+
+    expect([runs.map(({ ran }) => ran), heard]).toEqual([[1, 0], ['first']])
+  })
+
   it('runs an @Once handler for the first event only', async () => {
     const warm = vi.fn()
 
