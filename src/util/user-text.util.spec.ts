@@ -49,6 +49,6 @@ describe('userWords', () => {
   })
 
   it('puts the words on one line', () => {
-    expect(userWords('  a\n\n# b\t c  ')).toBe('a # b c')
+    expect(userWords('  a\n\n# b\t c  ')).toBe(' a # b c ')
   })
 })

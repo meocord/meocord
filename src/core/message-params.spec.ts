@@ -396,3 +396,35 @@ describe('typed patterns at startup', () => {
   })
 })
 
+// A word in quotes keeps the spaces inside them, which a typed param refuses, so the reply shows them
+describe('a word refused for the spaces around it', () => {
+  @Controller()
+  class Words {
+    @MessageHandler('num {n:number}')
+    num() {}
+
+    @MessageHandler('mode {m:on|off}')
+    mode() {}
+
+    @MessageHandler('say {text} {--loud}')
+    say() {}
+  }
+
+  @MeoCord({ controllers: [Words], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+  class App {}
+
+  const replyTo = async (content: string) => {
+    const message = createMockMessage({ content, guild: createMockGuild() })
+    await MeoCordTestingModule.fromApp(App).compile().dispatch(message)
+    return (vi.mocked(message.reply).mock.calls[0]?.[0] as { content?: string } | undefined)?.content
+  }
+
+  it.each([
+    ['!num " 12 "', 'Usage: !num <n>\nn: " 12 " is not a valid number'],
+    ['!mode "on "', 'Usage: !mode <m>\nm: "on " is not one of on, off'],
+    ['!say hi --loud=" yes"', 'Usage: !say <text> [--loud]\n--loud: " yes" is not yes or no'],
+    ['!num "1\n\n2"', 'Usage: !num <n>\nn: "1 2" is not a valid number'],
+  ])('quotes %j as typed, on one line', async (content, reply) => {
+    expect(await replyTo(content)).toBe(reply)
+  })
+})

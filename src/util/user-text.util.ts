@@ -27,9 +27,13 @@ export function quoteForLog(text: string): string {
   return `${quoted(`${characters.slice(0, LOGGED_CHARACTERS).join('')}…`)} (${characters.length} characters)`
 }
 
-/** Words a user wrote, as a reply quotes them: on one line, with their markdown, masked links included, shown as typed. */
+/**
+ * Words a user wrote, as a reply quotes them: on one line, with their markdown, masked links included, shown as typed.
+ * Each run of whitespace reads as one space, and the spaces around the words are kept, since a word in quotes can
+ * carry them and be refused for them.
+ */
 export function userWords(text: string): string {
-  return escapeMarkdown(text.replace(/\s+/g, ' ').trim(), { maskedLink: true })
+  return escapeMarkdown(text.replace(/\s+/g, ' '), { maskedLink: true })
 }
 
 /** Items as a sentence lists them: `a`, `a and b`, `a, b and c`. */
