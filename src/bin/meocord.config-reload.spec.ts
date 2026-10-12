@@ -78,7 +78,7 @@ async function startWatching() {
   vi.spyOn(cli, 'relayStopSignals').mockImplementation(() => {})
   const compileConfig = vi.spyOn(cli, 'compileConfig').mockResolvedValue(true)
   const createBundler = vi.spyOn(cli, 'createBundler').mockImplementation(async () => ({
-    rsbuild: { initConfigs: async () => [], onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: vi.fn() }) },
+    rsbuild: { initConfigs: async () => [], onAfterCreateCompiler: () => {}, onAfterBuild: (callback: (params: object) => void) => callback({}), build: async () => ({ close: vi.fn() }) },
   }))
   await cli.startDev()
   const running = vi.mocked(spawn).mock.results.at(-1)?.value as { kill: ReturnType<typeof vi.fn> }
