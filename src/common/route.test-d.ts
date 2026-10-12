@@ -7,7 +7,7 @@ import {
   type User,
   type UserSelectMenuInteraction,
 } from 'discord.js'
-import { route } from '@src/common/index.js'
+import { route, type RouteParams } from '@src/common/index.js'
 import { Command, UsePipe, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type PipeInterface, type Piped, type StandardSchemaV1 } from '@src/interface/index.js'
@@ -34,6 +34,17 @@ describe('route', () => {
     expectTypeOf(refresh.build()).toEqualTypeOf<string>()
     // @ts-expect-error the pattern has no params
     refresh.build({ id: '1' })
+  })
+
+  // As the runtime reads it: a name of ASCII letters, digits and _, so `{café}` is the pattern's own text
+  it('takes a brace pair whose name is no word as literal text, not a param', () => {
+    expectTypeOf<RouteParams<'x/{café}'>>().toEqualTypeOf<never>()
+    expectTypeOf<RouteParams<'x/{a b}/{id}'>>().toEqualTypeOf<'id'>()
+    expectTypeOf<RouteParams<'x/{{id}}'>>().toEqualTypeOf<'id'>()
+    expectTypeOf<RouteParams<'x/{id}/{page:int}'>>().toEqualTypeOf<'id' | 'page'>()
+    expectTypeOf(route('x/{café}').build()).toEqualTypeOf<string>()
+    // @ts-expect-error {café} is no param
+    route('x/{café}').build({ café: '1' })
   })
 
   it('keeps its pattern as a literal type', () => {

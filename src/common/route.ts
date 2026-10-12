@@ -2,6 +2,7 @@ import { createRegexFromPattern, literalBraces, MAX_CUSTOM_ID_LENGTH } from '@sr
 import { parseSegment } from '@src/core/scalar-types.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce } from '@src/common/deprecation.js'
+import { type IsWord } from '@src/util/word-chars.util.js'
 
 const logger = new Logger('Route')
 
@@ -11,10 +12,21 @@ type ParamName<S extends string> = S extends `${infer Name}:${string}` ? Name : 
 /** A `{name:type}` param's type, `string` for a `{name}`. */
 type ParamType<S extends string> = S extends `${string}:${infer Type}` ? Type : 'string'
 
-/** Each param of a pattern, with its name and type. */
-type RouteParamSpecs<T extends string> = T extends `${string}{${infer Param}}${infer Rest}`
-  ? { name: ParamName<Param>; type: ParamType<Param> } | RouteParamSpecs<Rest>
+/**
+ * Each param of a pattern, with its name and type, read as the runtime reads it: a `{` then a name of ASCII letters,
+ * digits and `_`, an optional `:type` without `/`, then `}`. Any other brace is the pattern's own text, and reading
+ * resumes after it.
+ */
+type RouteParamSpecs<T extends string> = T extends `${string}{${infer After}`
+  ? After extends `${infer Param}}${infer Rest}`
+    ? IsParam<Param> extends true
+      ? { name: ParamName<Param>; type: ParamType<Param> } | RouteParamSpecs<Rest>
+      : RouteParamSpecs<After>
+    : never
   : never
+
+/** Whether the text between a `{` and the next `}` is a param: a word name, and a type without `/` after a `:`. */
+type IsParam<Param extends string> = Param extends `${string}/${string}` ? false : IsWord<ParamName<Param>>
 
 /** The words a type such as `open|closed` chooses from, as a union. */
 type Choices<T extends string> = T extends `${infer Word}|${infer Rest}` ? Word | Choices<Rest> : T
