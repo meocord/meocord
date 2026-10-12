@@ -357,17 +357,19 @@ export interface StartupControl {
  * Runs every factory in `order`, awaiting those that return a promise, so each value is made before
  * anything that injects it is resolved. Rejects with {@link providerFailure} for the first that fails. With `control`,
  * it makes no further value once the app is stopping.
+ *
+ * @returns Whether every factory was made: `false` when the app began stopping first.
  */
 export async function resolveProviders(
   container: Container,
   providers: ProviderMap,
   order: readonly unknown[],
   control?: StartupControl,
-): Promise<void> {
+): Promise<boolean> {
   for (const token of order) {
     const provider = providers.get(token)
     if (!provider || !isFactoryProvider(provider)) continue
-    if (control?.stopped()) return
+    if (control?.stopped()) return false
     control?.pending(tokenName(token))
     try {
       await container.getAsync(token as ServiceIdentifier)
@@ -377,4 +379,5 @@ export async function resolveProviders(
       control?.pending(undefined)
     }
   }
+  return true
 }
