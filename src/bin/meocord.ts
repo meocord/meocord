@@ -144,7 +144,7 @@ export class MeoCordCLI {
    * Configures and runs the MeoCord CLI.
    */
   async run() {
-    this.program().showHelpAfterError().parse(process.argv)
+    this.program().parse(process.argv)
   }
 
   /**
@@ -154,10 +154,12 @@ export class MeoCordCLI {
   program(): Command {
     let program = new Command()
 
+    // Before any command is added: commander copies it to each command as the command is made
     program
       .name(this.appName.toLowerCase())
       .description(`CLI for managing the ${this.appName} application`)
       .version(this.version)
+      .showHelpAfterError()
 
     program
       .command('show')
