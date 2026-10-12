@@ -4,7 +4,7 @@ import { type TextParam, usageIssue } from '@src/common/meocord-text.js'
 import { type EntityRef, type MessageParamType } from '@src/interface/index.js'
 import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/message-entities.js'
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
-import { type GivenFlag, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { type GivenFlag, literalFlags, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { type RunOptions } from '@src/core/handler-pipeline.js'
 import { bool, choicesOf, duration, lookupTable, number } from '@src/core/scalar-types.js'
 import { userWords } from '@src/util/user-text.util.js'
@@ -382,7 +382,11 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
   const given = new Map<string, GivenFlag>()
   const unknown = new Set<string>()
   const text = (message.content ?? '').trim()
-  for (const flag of splitFlagWords(text.slice(start.length)).flags) {
+  const split = splitFlagWords(text.slice(start.length))
+  // A flag the pattern's own `--` word took is that word, and neither one of its flags nor unknown
+  const literal = literalFlags(route.tokens, route.caseSensitive, split.words, split.flags)
+  for (const [index, flag] of split.flags.entries()) {
+    if (literal.has(index)) continue
     const declared = route.flags.find(candidate => key(candidate.flag) === key(flag.name))
     if (declared) given.set(declared.flag, flag)
     else if (!unknown.has(flag.name)) {

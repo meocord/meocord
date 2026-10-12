@@ -4,7 +4,7 @@ import { type ControllerClass } from '@src/core/component-routes.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
-import { type GivenFlag, isSpace, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { type GivenFlag, isLiteralFlag, isSpace, literalFlags, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { startupError } from '@src/util/refusal.util.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
@@ -464,6 +464,8 @@ export function afterStart(text: string, prefixes: readonly string[], mention: s
 /** One step of a compiled pattern: literal words by key, one param edge, and the routes ending here. */
 interface TrieNode {
   words: Map<string, TrieNode>
+  /** The pattern words here that start with `--`, of routes with flags, which a bare flag in this place also matches. */
+  flagWords?: Map<string, TrieNode>
   param?: TrieNode
   /** Routes, by rank, whose words end here. */
   ends: number[]
@@ -484,8 +486,8 @@ interface RouteGroup {
   /** The routes with flags, matched against a message's words once its flags are taken out. */
   flagged?: TrieNode
   /**
-   * The routes with flags that begin with a param, for a message whose first word is a flag: flags count only
-   * after a command's first word, and a route without command words takes them anywhere.
+   * The routes with flags that begin with a param, or with their own `--` word, for a message whose first word is a
+   * flag: flags count only after a command's first word, and a route without command words takes them anywhere.
    */
   flaggedAfterFlag?: TrieNode
   /** Routes by rank, under the first of their command words, the literal words their patterns begin with. */
@@ -583,6 +585,8 @@ function compileIndex(routes: readonly MessageRoute[]): MessageIndex {
         const key = wordKey(token.literal, route.caseSensitive)
         let next = node.words.get(key)
         if (!next) node.words.set(key, (next = trieNode()))
+        // Such a word typed bare is taken out as a flag before the words are walked, so it is matched as one too
+        if (route.flags.length > 0 && token.literal.startsWith('--')) (node.flagWords ??= new Map()).set(key, next)
         node = next
         continue
       }
@@ -599,6 +603,8 @@ function compileIndex(routes: readonly MessageRoute[]): MessageIndex {
   const all = [...groups.values()]
   for (const group of all) {
     const flagged = group.flagged
+    // A pattern's own leading `--` word stays reachable there: given bare, it is taken out as a flag, so the message
+    // seems to start with one
     if (flagged) group.flaggedAfterFlag = { ...flagged, words: new Map() }
   }
   const ownPrefixes = all.flatMap(group => (Array.isArray(group.prefix) ? group.prefix : []))
@@ -639,7 +645,10 @@ function mayEnter(node: TrieNode | undefined, first: string | undefined): node i
   return node.words.has(first)
 }
 
-/** The ranks of every route the words reach from `node`. Each node sits at one word depth, so each is visited once. */
+/**
+ * The ranks of every route the words reach from `node`. A pattern's own `--` word is reached by that word, or by a flag
+ * of its name given bare in its place, which takes no word.
+ */
 function reach(
   node: TrieNode,
   words: { value: string; start: number }[],
@@ -647,8 +656,15 @@ function reach(
   text: string,
   cuts: readonly number[],
   caseSensitive: boolean,
+  flags: readonly GivenFlag[],
   found: number[],
 ): void {
+  if (node.flagWords) {
+    for (const flag of flags) {
+      const next = flag.at === i && flag.value === undefined ? node.flagWords.get(wordKey(`--${flag.name}`, caseSensitive)) : undefined
+      if (next) reach(next, words, i, text, cuts, caseSensitive, flags, found)
+    }
+  }
   for (const tail of node.tails) if (assignTail(tail.tokens, words, i, text, cuts, caseSensitive)) found.push(tail.rank)
   if (i === words.length) {
     for (const rank of node.ends) found.push(rank)
@@ -656,25 +672,39 @@ function reach(
   }
   for (const rank of node.rests) found.push(rank)
   const next = node.words.get(wordKey(words[i].value, caseSensitive))
-  if (next) reach(next, words, i + 1, text, cuts, caseSensitive, found)
-  if (node.param) reach(node.param, words, i + 1, text, cuts, caseSensitive, found)
+  if (next) reach(next, words, i + 1, text, cuts, caseSensitive, flags, found)
+  if (node.param) reach(node.param, words, i + 1, text, cuts, caseSensitive, flags, found)
 }
 
-/** The params a route's words capture, given words its pattern is known to match. */
-function paramsOf(route: MessageRoute, words: { value: string; start: number }[], text: string, cuts: readonly number[]): Record<string, string> {
+/**
+ * The params a route's words capture, given words its pattern is known to match. A pattern's own `--` word that the
+ * message gave as a flag, one of `taken`, takes no word.
+ */
+function paramsOf(
+  route: MessageRoute,
+  words: { value: string; start: number }[],
+  text: string,
+  cuts: readonly number[],
+  taken: number,
+): Record<string, string> {
   const tail = tailStart(route.tokens)
-  const params: Record<string, string> =
-    tail === -1 ? {} : assignTail(route.tokens.slice(tail) as ParamToken[], words, tail, text, cuts, route.caseSensitive)!
-  for (let i = 0; i < (tail === -1 ? route.tokens.length : tail) && i < words.length; i++) {
+  const params: Record<string, string> = {}
+  let left = taken
+  let w = 0
+  for (let i = 0; i < (tail === -1 ? route.tokens.length : tail) && w < words.length; i++) {
     const token = route.tokens[i]
-    if ('literal' in token) continue
-    if (token.rest) {
-      params[token.param] = restFrom(text, words[i].start, cuts)
-      break
+    if ('literal' in token) {
+      if (left > 0 && token.literal.startsWith('--') && wordKey(words[w].value, route.caseSensitive) !== wordKey(token.literal, route.caseSensitive)) left--
+      else w++
+      continue
     }
-    params[token.param] = words[i].value
+    if (token.rest) {
+      params[token.param] = restFrom(text, words[w].start, cuts)
+      return params
+    }
+    params[token.param] = words[w++].value
   }
-  return params
+  return tail === -1 ? params : { ...params, ...assignTail(route.tokens.slice(tail) as ParamToken[], words, w, text, cuts, route.caseSensitive) }
 }
 
 /**
@@ -743,7 +773,7 @@ export function matchMessageRoute(
     const found: number[] = []
     if (mayEnter(group.root, first)) {
       const words = wordsOf(rest)
-      reach(group.root, words, 0, rest, NONE, group.caseSensitive, found)
+      reach(group.root, words, 0, rest, NONE, group.caseSensitive, NONE, found)
       for (const rank of found) {
         if (fitsScope(routes[rank].scope, starts.inGuild)) {
           if (!best || rank < best.rank) best = { rank, words, rest, flags: NONE, cuts: NONE }
@@ -756,7 +786,7 @@ export function matchMessageRoute(
     const scanned = rest.includes('--') ? splitFlagWords(rest) : { words: wordsOf(rest), flags: NONE, cuts: NONE }
     found.length = 0
     const from = scanned.words[0]?.start === 0 ? flagged : group.flaggedAfterFlag!
-    reach(from, scanned.words, 0, rest, scanned.cuts, group.caseSensitive, found)
+    reach(from, scanned.words, 0, rest, scanned.cuts, group.caseSensitive, scanned.flags, found)
     for (const rank of found) {
       const candidate = { rank, words: scanned.words, rest, flags: scanned.flags, cuts: scanned.cuts }
       if (fitsScope(routes[rank].scope, starts.inGuild)) {
@@ -767,11 +797,14 @@ export function matchMessageRoute(
   const chosen = best ?? outside
   if (!chosen) return undefined
   const route = routes[chosen.rank]
-  const params = paramsOf(route, chosen.words, chosen.rest, chosen.cuts)
-  for (const { name, value } of chosen.flags) {
+  // The flags the pattern's own `--` words took are those words, and set none of its flags
+  const taken = literalFlags(route.tokens, route.caseSensitive, chosen.words, chosen.flags)
+  const params = paramsOf(route, chosen.words, chosen.rest, chosen.cuts, taken.size)
+  chosen.flags.forEach(({ name, value }, index) => {
+    if (taken.has(index)) return
     const declared = route.flags.find(flag => wordKey(flag.flag, route.caseSensitive) === wordKey(name, route.caseSensitive))
     if (declared) params[declared.flag] = value ?? ''
-  }
+  })
   return { route, params, start: text.slice(0, text.length - chosen.rest.length) }
 }
 
@@ -804,14 +837,15 @@ export function matchMessageCommand(
     if (first !== undefined && !group.commands.has(first)) continue
     const plain = splitWords(rest)
     // A route with flags counts the words left once the message's flags are taken out
-    const positional = mayEnter(group.flagged, first) && rest.includes('--') ? splitFlagWords(rest).words : plain
+    const scanned = mayEnter(group.flagged, first) && rest.includes('--') ? splitFlagWords(rest) : { words: plain, flags: NONE }
     const candidates = group.commands.get(wordKey(plain[0]?.value ?? '', group.caseSensitive)) ?? []
     for (const rank of candidates) {
       if (best && rank >= best.rank) break
-      const words = routes[rank].flags.length > 0 ? positional : plain
-      const command = commandWordsOf(routes[rank].tokens)
-      if (command.every((word, i) => words[i] && wordKey(words[i].value, group.caseSensitive) === wordKey(word, group.caseSensitive))) {
-        const named = { rank, start: text.slice(0, text.length - rest.length), given: words.length - command.length }
+      const flagged = routes[rank].flags.length > 0
+      const words = flagged ? scanned.words : plain
+      const taken = commandWordsTaken(commandWordsOf(routes[rank].tokens), words, flagged ? scanned.flags : NONE, group.caseSensitive)
+      if (taken !== -1) {
+        const named = { rank, start: text.slice(0, text.length - rest.length), given: words.length - taken }
         if (fitsScope(routes[rank].scope, starts.inGuild)) {
           best = named
           break
@@ -822,6 +856,24 @@ export function matchMessageCommand(
   }
   const chosen = best ?? outside
   return chosen && { route: routes[chosen.rank], start: chosen.start, given: chosen.given }
+}
+
+/**
+ * How many of a message's words a route's command words take, or -1 when the message names another command. A
+ * command's own `--` word may be given bare as a flag in its place, and takes no word.
+ */
+function commandWordsTaken(
+  command: readonly string[],
+  words: readonly { value: string }[],
+  flags: readonly GivenFlag[],
+  caseSensitive: boolean,
+): number {
+  let w = 0
+  for (const word of command) {
+    if (words[w] && wordKey(words[w].value, caseSensitive) === wordKey(word, caseSensitive)) w++
+    else if (!flags.some(flag => isLiteralFlag(flag, word, w, caseSensitive))) return -1
+  }
+  return w
 }
 
 /**
