@@ -33,7 +33,7 @@ import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, lookupTable, parseSegment, shortestSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
-import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
+import { declaring, decoratedName, refuse, refuseOnClass } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
 
@@ -326,7 +326,7 @@ export function MessageHandler(pattern?: string, options: MessageHandlerOptions 
     // An empty pattern, or one of spaces alone, means every message, as no pattern does
     const blank = pattern !== undefined && pattern.trim() === ''
     if (blank) {
-      warnDeprecatedBehaviour(logger, `@MessageHandler('${pattern}') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
+      warnDeprecatedBehaviour(logger, `@MessageHandler('${pattern}') on ${decoratedName(target, propertyKey)}`, 'is refused', '@MessageHandler()')
     }
     const method = propertyKey.toString()
     const declared = { pattern: blank ? undefined : pattern, method, options }
@@ -753,7 +753,7 @@ export function Command<
     refuseOnClass('@Command', target, propertyKey)
     const originalMethod = _descriptor.value
     if (!originalMethod) {
-      throw refuse(new Error(`${target.constructor.name}.${propertyKey}: @Command is on something with no implementation.`))
+      throw refuse(new Error(`${decoratedName(target, propertyKey)}: @Command is on something with no implementation.`))
     }
 
     // Wrap original method for interaction type validation
@@ -764,9 +764,9 @@ export function Command<
       if (!types.some(type => matchesCommandType(type, interaction))) {
         throw new Error(
           types.length <= 1
-            ? `${target.constructor.name}.${propertyKey}: @Command('${commandName}', ${declaredAs}) takes ` +
+            ? `${decoratedName(target, propertyKey)}: @Command('${commandName}', ${declaredAs}) takes ` +
                 `${interactionClassName(commandType)}${givenInstead(interaction)}.`
-            : `${target.constructor.name}.${propertyKey}: its @Command routes take ${types.map(interactionClassName).join(' or ')}` +
+            : `${decoratedName(target, propertyKey)}: its @Command routes take ${types.map(interactionClassName).join(' or ')}` +
                 `${givenInstead(interaction)}.`,
         )
       }
@@ -787,7 +787,7 @@ export function Command<
 
     // Determine command type and builder
     if (typeof builderOrType === 'function') {
-      const where = `${target.constructor.name}.${propertyKey}`
+      const where = decoratedName(target, propertyKey)
       // A subcommand is part of its command's builder, which belongs on the command's own name
       const subcommandPath =
         Reflect.getMetadata(META.commandType, builderOrType) === CommandType.SLASH && commandName.includes(' ')
@@ -845,12 +845,12 @@ export function Command<
     if (isCustomIdRouted(commandType)) {
       // A route warned as it was made
       const braces = typeof name === 'string' ? literalBraces(commandName) : undefined
-      if (braces) logger.warn(`${target.constructor.name}.${propertyKey}: in the pattern "${commandName}", ${braces}`)
+      if (braces) logger.warn(`${decoratedName(target, propertyKey)}: in the pattern "${commandName}", ${braces}`)
       let pattern: ReturnType<typeof createRegexFromPattern>
       try {
         pattern = createRegexFromPattern(commandName)
       } catch (error) {
-        throw refuse(new Error(`${target.constructor.name}.${propertyKey}: ${(error as Error).message}`, { cause: error }))
+        throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${(error as Error).message}`, { cause: error }))
       }
       regex = pattern.regex
       dynamicParams = pattern.params
@@ -859,7 +859,7 @@ export function Command<
       if (pattern.shortest === 0 || pattern.shortest > MAX_CUSTOM_ID_LENGTH) {
         const length = pattern.shortest === 0 ? 'the pattern is empty' : `its shortest is ${pattern.shortest} characters`
         logger.warn(
-          `${target.constructor.name}.${propertyKey}: the pattern "${commandName}" matches no customId: Discord's customIds ` +
+          `${decoratedName(target, propertyKey)}: the pattern "${commandName}" matches no customId: Discord's customIds ` +
             `are 1 to ${MAX_CUSTOM_ID_LENGTH} characters, and ${length}, so the handler never runs.`,
         )
       }
@@ -904,7 +904,7 @@ function assertContextMenuKind(target: object, propertyKey: string, builderName:
   if (!declared || registered === undefined || declared.kind === registered) return
   const kind = registered === ApplicationCommandType.User ? 'user' : 'message'
   throw refuse(new Error(
-    `${target.constructor.name}.${propertyKey}: it takes a ${declared.name} context menu interaction, but ${builderName} ` +
+    `${decoratedName(target, propertyKey)}: it takes a ${declared.name} context menu interaction, but ${builderName} ` +
       `registers "${commandName}" as a ${kind} context menu command. Declare the handler's interaction as the kind the ` +
       `builder's setType() names.`,
   ))

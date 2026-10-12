@@ -6,7 +6,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { META } from '@src/util/metadata-keys.js'
-import { refuseOnMethod, declaring } from '@src/util/refusal.util.js'
+import { declaring, decoratedName, refuseOnMethod } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as an interceptor, which wraps a handler to act before and after it.
@@ -87,7 +87,7 @@ export function UseInterceptor<const T extends readonly unknown[]>(
   ...interceptors: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => InterceptorInterface> }
 ): ClassDecorator & MethodDecorator {
   return declaring(function (target: object, propertyKey?: string | symbol) {
-    const where = propertyKey === undefined ? (target as { name: string }).name : `${target.constructor.name}.${String(propertyKey)}`
+    const where = decoratedName(target, propertyKey)
     assertStageEntries('@UseInterceptor', 'interceptor', where, interceptors)
     // Decorators apply bottom-up, so a higher decorator's interceptors go first, as with @UseGuard.
     if (propertyKey === undefined) {
