@@ -1,10 +1,10 @@
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
-import { SlashCommandBuilder } from 'discord.js'
-import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, ReactionHandler } from '@src/decorator/index.js'
+import { type GuildMember, SlashCommandBuilder } from 'discord.js'
+import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, On, ReactionHandler } from '@src/decorator/index.js'
 import { getAutocompleteHandlers, getCommandMap, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { CommandType } from '@src/enum/index.js'
-import { inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
+import { createMock, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
 
 const warnings = () =>
   vi
@@ -300,5 +300,79 @@ describe('inspectHandler', () => {
     expect(inspectHandler(Sub, 'page').inheritedRoutes).toEqual(['button "page/{n:int}"'])
     expect(inspectHandler(Sub, 'ping').inheritedRoutes).toEqual(['slash "ping"'])
     expect(inspectHandler(Base, 'ping').inheritedRoutes).toEqual([])
+  })
+})
+
+// An event a subclass re-declares on a method it overrides is its own, as every other kind of route is
+describe('an event handler a subclass re-declares', () => {
+  const member = () => createMock<GuildMember>({ id: '1' })
+
+  it.each([
+    ['keeping inherited routes', {}],
+    ['replacing them', { inheritedRoutes: 'replace' as const }],
+  ])('runs once on the same event, %s', async (_, options) => {
+    const heard: string[] = []
+    @Controller()
+    class Base {
+      @On('guildMemberAdd')
+      greet() {
+        heard.push('base')
+      }
+    }
+    @Controller(options)
+    class Leaf extends Base {
+      @On('guildMemberAdd')
+      override greet() {
+        heard.push('leaf')
+      }
+    }
+
+    const { ran } = await start(Leaf).emit('guildMemberAdd', member())
+
+    expect([ran, heard]).toEqual([1, ['leaf']])
+  })
+
+  it("answers only its own event under inheritedRoutes: 'replace'", async () => {
+    const heard: string[] = []
+    @Controller()
+    class Base {
+      @On('guildMemberAdd')
+      greet() {
+        heard.push('add')
+      }
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Leaf extends Base {
+      @On('guildMemberRemove')
+      override greet() {
+        heard.push('remove')
+      }
+    }
+    const module = start(Leaf)
+
+    const runs = [(await module.emit('guildMemberAdd', member())).ran, (await module.emit('guildMemberRemove', member())).ran]
+
+    expect([runs, heard]).toEqual([[0, 1], ['remove']])
+  })
+
+  it('keeps the inherited event for a method overridden without decorators', async () => {
+    const heard: string[] = []
+    @Controller()
+    class Base {
+      @On('guildMemberAdd')
+      greet() {
+        heard.push('base')
+      }
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Leaf extends Base {
+      override greet() {
+        heard.push('leaf')
+      }
+    }
+
+    const { ran } = await start(Leaf).emit('guildMemberAdd', member())
+
+    expect([ran, heard]).toEqual([1, ['leaf']])
   })
 })
