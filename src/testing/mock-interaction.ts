@@ -943,6 +943,22 @@ function discordjsError(code: DiscordjsErrorCodes, message?: string): DiscordjsE
   return error
 }
 
+// Why default mode runs an answer discord.js refuses, as the warning words it
+const SET_BY_TEST = 'a test set this answer or the one before it'
+
+/**
+ * Refuses an answer as discord.js does. Where `lenient` says why the mock ran it so far, such as a behaviour a test
+ * set, default mode warns and lets it run; strict mocks refuse it.
+ */
+function refuseAnswer(method: string, error: Error, lenient: string | undefined): void {
+  if (lenient === undefined || strictMocks()) throw error
+  warnOnce(
+    mockLogger,
+    `${method}() here is refused by discord.js with "${error.message}", but the mock runs it, as ${lenient}. In the ` +
+      'next major version (5.0) the mock refuses it; call useStrictMocks() to have it refused now.',
+  )
+}
+
 /** An error as discord.js's options resolver throws it: a `TypeError` with discord.js's code and message. */
 const optionError = (code: DiscordjsErrorCodes, ...args: unknown[]): DiscordjsTypeError =>
   new (DiscordjsTypeError as unknown as new (code: DiscordjsErrorCodes, ...args: unknown[]) => DiscordjsTypeError)(code, ...args)
@@ -1046,12 +1062,14 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * collections of what it picks, each empty unless given. Other data Discord always sends reads as Discord sends it,
  * such as `false` for a flag and `null` for what may be absent; what picks the handler, `commandName` or `customId`, is
  * the test's to give. Replies follow Discord's order, so a second `reply()` rejects, and {@link getResponse} reports
- * every answer the interaction got. Under `useStrictMocks()` an answer marks the interaction `replied` or `deferred`
- * once it resolves, as discord.js does after Discord takes it: an edit or follow-up made before then rejects with
- * `InteractionNotReplied`, and a second answer sent while the first is in flight is refused with Discord's 40060. In
- * default mode the mark is made at the call, with a warning where a bot would fail. Every method is a mock function, and one that returns a promise in discord.js
- * resolves. What the mock computes for itself, such as `memberPermissions` and `appPermissions`, calls none of them and
- * caches nothing, so a stub a test sets stays for its own code.
+ * every answer the interaction got; under `useStrictMocks()`, `launchActivity()`, `sendPremiumRequired()` and an
+ * autocomplete's `respond()` count as answers too. Under `useStrictMocks()` an answer marks the interaction `replied`,
+ * `deferred` or, for an autocomplete, `responded` once it resolves, as discord.js does after Discord takes it: an edit
+ * or follow-up made before then rejects with `InteractionNotReplied`, and a second answer sent while the first is in
+ * flight is refused with Discord's 40060. In default mode the mark is made at the call, with a warning where a bot
+ * would fail. Every method is a mock function, and one that returns a promise in discord.js resolves. What the mock
+ * computes for itself, such as `memberPermissions` and `appPermissions`, calls none of them and caches nothing, so a
+ * stub a test sets stays for its own code.
  *
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
@@ -1255,12 +1273,16 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const followUps = new Map<string, Held>()
     // Whether the last answer ran a behaviour a test set, after which a second answer runs with a warning by default
     let answeredByTest = false
-    // A command answered with a modal has no original response, and Discord refuses one asked for
-    let modalAnswered = false
+    // Whether default mode ran a launchActivity() or sendPremiumRequired() before any answer, which it doesn't count as one
+    let uncounted = false
+    // A command answered without a message, as with a modal, has no original response, and Discord refuses one asked for
+    let noOriginal = false
 
     const isComponent = instance.type === InteractionType.MessageComponent
     // The original response of a component, or of a modal submitted from one, is the message it's on
     const componentMessage = () => heldFrom(instance.message)
+    // Read when answered, after a test's props are applied: a modal submitted from a command has no message
+    const onMessage = () => isComponent || (instance.type === InteractionType.ModalSubmit && Boolean(instance.message))
 
     const snapshot = () => {
       const saved = {
@@ -1273,31 +1295,46 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         originalGone,
         followUps: new Map(followUps),
         answeredByTest,
-        modalAnswered,
+        noOriginal,
       }
       return () => {
         Object.assign(instance, { replied: saved.replied, deferred: saved.deferred })
         decideEphemeral(saved.ephemeral, saved.ephemeralDecided)
-        ;({ original, originalGone, answeredByTest, answeredByMock, modalAnswered } = saved)
+        ;({ original, originalGone, answeredByTest, answeredByMock, noOriginal } = saved)
         followUps.clear()
         for (const [id, held] of saved.followUps) followUps.set(id, held)
       }
     }
 
-    /**
-     * Refuses an answer as discord.js does. Where the refusal turns on a behaviour a test set, this answer's or the
-     * one before it, which ran without one, default mode warns and lets it run; strict mocks refuse it.
-     */
-    const refuse = (method: string, error: Error, byTest: boolean): void => {
-      if (!(byTest || answeredByTest) || strictMocks()) throw error
+    // Refused as discord.js does, leniently in default mode where this answer or the one before it ran a test's behaviour
+    const refuse = (method: string, error: Error, byTest: boolean): void => refuseAnswer(method, error, byTest || answeredByTest ? SET_BY_TEST : undefined)
+    const answered = () => instance.deferred || instance.replied
+    // Default mode's launchActivity() and sendPremiumRequired(), which leave the interaction as it was, as before
+    const countedOnlyWhenStrict = (method: string) => {
+      if (answered()) {
+        warnOnce(
+          mockLogger,
+          `${method}() here runs though the interaction was answered; under useStrictMocks() this is refused with ` +
+            'InteractionAlreadyReplied, as discord.js refuses it.',
+        )
+        return
+      }
+      uncounted = true
       warnOnce(
         mockLogger,
-        `${method}() here is refused by discord.js with "${error.message}", but the mock runs it, as a test set this ` +
-          'answer or the one before it. In the next major version (5.0) the mock refuses it; call useStrictMocks() to ' +
-          'have it refused now.',
+        `${method}() here leaves the interaction unanswered, and getResponse() doesn't report it; under useStrictMocks() this ` +
+          "is the interaction's first answer, as in discord.js: it marks the interaction replied, and an answer before or " +
+          'after it is refused.',
       )
     }
-    const answered = () => instance.deferred || instance.replied
+    // What Discord answers here isn't known, so the refusal names the cause rather than a code
+    const refuseModalUpdate = () => {
+      const reason =
+        'update() needs the message a component opened this modal from, and this modal came from a command. Use ' +
+        'reply() or deferReply() instead.'
+      if (strictMocks()) throw new Error(reason)
+      warnOnce(mockLogger, `${reason} The mock runs it; in the next major version (5.0) it refuses it. Call useStrictMocks() to have it refused now.`)
+    }
 
     /**
      * What an answer sends, built now, as discord.js builds it when sending. One it refuses to build is refused under
@@ -1386,10 +1423,14 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         return { undo: undoneInTurn(undo), settle: () => void unsettled.splice(unsettled.indexOf(method), 1) }
       }
 
-    /** A later answer: refused before the interaction has one. */
-    const later = (method: string, then: (args: unknown[]) => void): AnswerGate =>
+    /**
+     * A later answer: refused before the interaction has one. One that `replies` marks the interaction replied, under
+     * strict mocks once it lands, as discord.js does once the request resolves; default mode marks it at once.
+     */
+    const later = (method: string, then: (args: unknown[]) => void, replies = false): AnswerGate =>
       (args, byTest) => {
-        if (!answered()) refuse(method, notYetReplied(method), byTest)
+        // A follow-up after an answer default mode doesn't count is sent, as it is once strict mocks count that answer
+        if (!answered() && !(method === 'followUp' && uncounted)) refuse(method, notYetReplied(method), byTest)
         if (unsettled.length > 0) {
           warnInFlight(
             `${unsettled[0]}() had not resolved when ${method}() was called; on a bot this throws InteractionNotReplied. ` +
@@ -1399,11 +1440,12 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         const undo = snapshot()
         try {
           then(args)
+          if (replies && !strict) instance.replied = true
         } catch (error) {
           undo()
           throw error
         }
-        return { undo: undoneInTurn(undo) }
+        return { undo: undoneInTurn(undo), land: replies && strict ? () => void (instance.replied = true) : undefined }
       }
 
     /** The id an edit, fetch or delete names, `undefined` for the original response. */
@@ -1418,7 +1460,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         if (held) followUps.set(id, built(held))
         return held && built(held)
       }
-      if (originalGone || modalAnswered) return undefined
+      if (originalGone || noOriginal) return undefined
       // Answered without one of the mock's calls, as after a 40060 or a test setting `replied`: the original is there
       if (!original && answered()) original = componentMessage()
       if (original) original = built(original)
@@ -1452,16 +1494,17 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         // One held to build when read resolves to its id alone, as building it now would refuse it
         return typeof held === 'function' ? createMockMessage({ id: followUpMade }) : messageFrom(held, madeFor(held.id), ...answeredIn())
       },
-      later('followUp', ([options]) => {
-        instance.replied = true
-        // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen; its id taken
+      later(
+        'followUp',
+        ([options]) => {
+          // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen; its id taken
         // once built, so one that fails to build under strict mocks takes none
         const held = hold('followUp', () => sent(options, false))
         const id = nextSnowflake()
         made = undefined
         followUps.set(id, typeof held === 'function' ? () => ({ ...held(), id }) : { ...held, id })
         followUpMade = id
-      }),
+      }, true),
     )
     // An edit replaces the message in the shape Discord stores, with ids and resolved media, stamped with when it was
     // edited, and fetchReply() reads that back, so code comparing the two sees what it would against Discord
@@ -1477,11 +1520,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         const held = target(id)
         made = held && edited(held, options)
         if (!made) return
-        if (id === undefined) {
-          original = made
-          instance.replied = true
-        } else followUps.set(id, made)
-      }),
+        if (id === undefined) original = made
+        else followUps.set(id, made)
+      }, true),
     )
     stubs.set(
       'fetchReply',
@@ -1505,21 +1546,33 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       }),
     )
 
+    // A first answer that sends no message: the original response stays the message the interaction is on, if any
+    const sendsNoMessage = () => {
+      if (onMessage()) original = componentMessage()
+      else noOriginal = true
+    }
     // showModal — the first response of a command or a component, like reply()
     if (instance.type === InteractionType.ApplicationCommand || isComponent) {
-      answer(
-        'showModal',
-        async () => undefined,
-        first('showModal', 'replied', () => {
-          modalAnswered = instance.type === InteractionType.ApplicationCommand
-          if (isComponent) original = componentMessage()
-        }),
-      )
+      answer('showModal', async () => undefined, first('showModal', 'replied', sendsNoMessage))
+    }
+    // An activity launched, or the upgrade button sent, is a first answer under strict mocks, as reply() is, on every
+    // repliable interaction. Default mode leaves the interaction unanswered and unreported, and warns once where they differ
+    for (const method of ['launchActivity', 'sendPremiumRequired'] as const) {
+      if (strict) answer(method, async () => undefined, first(method, 'replied', sendsNoMessage))
+      else stubs.set(method, recordedMock(method, async () => undefined, [], () => (countedOnlyWhenStrict(method), {})))
     }
 
     // deferUpdate / update — components, and modals submitted from a message's component
     if (isComponent || instance.type === InteractionType.ModalSubmit) {
-      answer('update', async () => undefined, first('update', 'replied', ([options]) => (original = hold('update', () => edited(heldFrom(instance.message, false), options)))))
+      answer(
+        'update',
+        async () => undefined,
+        first('update', 'replied', ([options]) => {
+          // Discord updates only a message a component is on; a modal from a command has none
+          if (!onMessage()) refuseModalUpdate()
+          original = hold('update', () => edited(heldFrom(instance.message, false), options))
+        }),
+      )
       answer('deferUpdate', async () => undefined, first('deferUpdate', 'deferred', () => (original = componentMessage())))
     }
   }
@@ -1530,39 +1583,71 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
   // it before answering would decide the window was already closed.
   if (instance.type === InteractionType.ApplicationCommandAutocomplete) {
     instance.responded = false
-    // Under strict mocks responded is set once respond() lands, as discord.js sets it once the request resolves, and a
-    // second one sent while the first is in flight is refused by Discord with 40060; default mode sets it at once
+    const strict = strictMocks()
+    const log: ResponseCall[] = []
+    // getResponse reports each respond() under strict mocks; default mode reports none, as before
+    if (strict) Object.defineProperty(instance, RESPONSE_LOG, { value: log })
+    // Responds whose change stands, and what `responded` read before the first of them, for a failed one to undo
+    let standing = 0
+    let before = false
     let respondsInFlight = 0
     let respondWarned = false
+    // Under strict mocks responded is set once respond() lands, as discord.js sets it once the request resolves, and a
+    // second one sent while the first is in flight is refused by Discord with 40060; default mode sets it at once
+    const gate: AnswerGate = (_args, byTest) => {
+      // Default mode leaves a behaviour a test set to itself, as before: responded stays as it was
+      if (!strict && byTest) {
+        warnOnce(
+          mockLogger,
+          'respond() here runs a behaviour a test set and leaves responded as it was; under useStrictMocks() this marks the ' +
+            'autocomplete responded once it resolves, as discord.js does, and a second respond() is refused.',
+        )
+        return {}
+      }
+      if (instance.responded) {
+        if (respondsInFlight > 0 && !respondWarned) {
+          respondWarned = true
+          mockLogger.warn(
+            'respond() was called while respond() had not resolved; on a bot discord.js sends it, and Discord refuses ' +
+              'it with 40060 ("Interaction has already been acknowledged") once the first lands. Await respond() ' +
+              'before responding again, or call useStrictMocks() to have the mock respond as Discord does.',
+          )
+        }
+        throw discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
+      }
+      respondsInFlight++
+      const settle = () => void respondsInFlight--
+      if (strict) {
+        return {
+          settle,
+          land: () => {
+            if (instance.responded) throw createDiscordError(40060, 'Interaction has already been acknowledged.')
+            instance.responded = true
+          },
+        }
+      }
+      if (standing++ === 0) before = instance.responded as boolean
+      instance.responded = true
+      return {
+        settle,
+        undo: () => {
+          if (--standing === 0) instance.responded = before
+        },
+      }
+    }
     stubs.set(
       'respond',
-      createMockFn(async (choices?: unknown) => {
-        if (instance.responded) {
-          if (respondsInFlight > 0 && !respondWarned) {
-            respondWarned = true
-            mockLogger.warn(
-              'respond() was called while respond() had not resolved; on a bot discord.js sends it, and Discord refuses ' +
-                'it with 40060 ("Interaction has already been acknowledged") once the first lands. Await respond() ' +
-                'before responding again, or call useStrictMocks() to have the mock respond as Discord does.',
-            )
+      recordedMock(
+        'respond',
+        async (choices?: unknown) => {
+          // Discord refuses a list longer than its limit, and the menu shows nothing
+          if (Array.isArray(choices) && choices.length > MAX_AUTOCOMPLETE_CHOICES) {
+            throw createDiscordError(50035, `Invalid Form Body\ndata.choices[BASE_TYPE_MAX_LENGTH]: Must be ${MAX_AUTOCOMPLETE_CHOICES} or fewer in length.`)
           }
-          throw discordjsError(DiscordjsErrorCodes.InteractionAlreadyReplied)
-        }
-        // Discord refuses a list longer than its limit, and the menu shows nothing
-        if (Array.isArray(choices) && choices.length > MAX_AUTOCOMPLETE_CHOICES) {
-          throw createDiscordError(50035, `Invalid Form Body\ndata.choices[BASE_TYPE_MAX_LENGTH]: Must be ${MAX_AUTOCOMPLETE_CHOICES} or fewer in length.`)
-        }
-        respondsInFlight++
-        if (!strictMocks()) instance.responded = true
-        try {
-          await undefined
-        } finally {
-          respondsInFlight--
-        }
-        if (!strictMocks()) return
-        if (instance.responded) throw createDiscordError(40060, 'Interaction has already been acknowledged.')
-        instance.responded = true
-      }),
+        },
+        log,
+        gate,
+      ),
     )
   }
 

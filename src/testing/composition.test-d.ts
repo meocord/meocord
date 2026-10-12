@@ -39,6 +39,8 @@ import {
   TextChannel,
   ThreadChannel,
   type APIInteractionGuildMember,
+  type ApplicationCommandOptionChoiceData,
+  type LaunchActivityOptions,
 } from 'discord.js'
 import { MeoCordTestingModule } from './meocord-testing-module.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
@@ -220,6 +222,27 @@ describe('a recorded response', () => {
 
     if (call.method === 'reply') expectTypeOf(call.payload).toEqualTypeOf<string | MessagePayload | InteractionReplyOptions | undefined>()
     if (call.method === 'deferUpdate') expectTypeOf(call.payload).toEqualTypeOf<InteractionDeferUpdateOptions | undefined>()
+    if (call.method === 'respond') expectTypeOf(call.payload).toEqualTypeOf<readonly ApplicationCommandOptionChoiceData[] | undefined>()
+    if (call.method === 'launchActivity') expectTypeOf(call.payload).toEqualTypeOf<Omit<LaunchActivityOptions, 'withResponse'> | undefined>()
+    if (call.method === 'sendPremiumRequired') expectTypeOf(call.payload).toEqualTypeOf<undefined>()
+  })
+
+  it('names every method an interaction is answered with, an autocomplete included', () => {
+    expectTypeOf<ResponseCall['method']>().toEqualTypeOf<
+      | 'deferReply'
+      | 'deferUpdate'
+      | 'reply'
+      | 'update'
+      | 'editReply'
+      | 'followUp'
+      | 'deleteReply'
+      | 'showModal'
+      | 'launchActivity'
+      | 'sendPremiumRequired'
+      | 'respond'
+      | 'message.edit'
+    >()
+    expectTypeOf(getResponse(createMockInteraction(AutocompleteInteraction)).calls[0]!.method).toEqualTypeOf<ResponseCall['method']>()
   })
 })
 
