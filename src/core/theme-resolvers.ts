@@ -1,3 +1,4 @@
+import { User } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@src/interface/index.js'
 import { themeProblems } from '@src/core/theme-validation.js'
@@ -294,14 +295,16 @@ const idOf = (value: unknown): string | undefined => (typeof value === 'string' 
 
 /**
  * The server and user a call comes from: an interaction's or a message's server and its user or author; a
- * reaction's message's server and the user who reacted, which a reaction handler gets second; an event argument's
- * server and user, when it has them.
+ * reaction's message's server and the user who reacted, which a reaction handler gets second as `{ user }` and a
+ * reaction event as the `User`; an event argument's server and user, when it has them.
  */
 export function themeTargets(args: readonly unknown[]): { guildId?: string; userId?: string } {
   const [first, second] = args as [Record<string, any> | undefined, Record<string, any> | undefined]
   if (!first || typeof first !== 'object') return {}
   const guildId = idOf(first.guildId) ?? idOf(first.guild?.id) ?? idOf(first.message?.guildId)
-  const userId = idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id)
+  // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
+  const userId =
+    idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)
   return { guildId, userId }
 }
 

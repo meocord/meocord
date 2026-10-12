@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { ButtonInteraction, type Message, type MessageReaction } from 'discord.js'
+import { ButtonInteraction, type Message, MessageReaction, TextChannel } from 'discord.js'
 import {
   Catch,
   Command,
@@ -8,6 +8,7 @@ import {
   Guard,
   MeoCord,
   MessageHandler,
+  On,
   ReactionHandler,
   Service,
   UseGuard,
@@ -17,7 +18,7 @@ import { Logger, ThemeCache, useTheme } from '@src/common/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type ExceptionFilter, type GuildThemeTarget, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
-import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
+import { createMockChannel, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 const seen: unknown[] = []
 const primary = () => useTheme().colors.primary
@@ -159,6 +160,59 @@ describe('the layers themeFor adds', () => {
     expect(seen).toEqual([
       ['message', '#000017', '#000015'],
       ['reaction', '#000017', '#000016'],
+    ])
+  })
+
+  it('finds the user who reacted in a reaction event, and no user in an event of an old and a new value', async () => {
+    @Controller()
+    class Events {
+      @On('messageReactionAdd')
+      added() {
+        seen.push(['added', primary(), useTheme().colors.info])
+      }
+
+      @On('messageReactionRemove')
+      removed() {
+        seen.push(['removed', primary(), useTheme().colors.info])
+      }
+
+      @On('channelUpdate')
+      channel() {
+        seen.push(['channel', primary(), useTheme().colors.info])
+      }
+
+      @On('messageUpdate')
+      edited() {
+        seen.push(['edited', primary(), useTheme().colors.info])
+      }
+    }
+    const user = vi.fn(({ user }: { user: { id: string } }) => colour(user.id === USER ? '#000061' : '#000062'))
+    const module = moduleWith({ guild: () => ({ colors: { info: '#000063' } }), user }, { controllers: [Events] })
+    const message = createMockMessage({ content: 'target' })
+    Object.assign(message, { guildId: GUILD })
+    // Made as the client emits it: a reaction has neither a user nor an author, and the user who reacted comes second
+    const reaction = Object.create(MessageReaction.prototype, { message: { value: message }, emoji: { value: { name: '⭐', id: null } } })
+    const reactor = createMockUser()
+    Object.assign(reactor, { id: USER })
+    const details = { type: 0, burst: false }
+    const channel = createMockChannel(TextChannel, { id: '300000000000000001', guildId: GUILD } as never)
+    // A partial old message has no author, and the new one's id is a message's
+    const old = createMockMessage({ content: 'before' })
+    Object.assign(old, { guildId: GUILD, author: null, partial: true })
+    const edited = createMockMessage({ content: 'after' })
+    Object.assign(edited, { id: '300000000000000002', guildId: GUILD })
+
+    await module.emit('messageReactionAdd', reaction, reactor, details)
+    await module.emit('messageReactionRemove', reaction, reactor, details)
+    await module.emit('channelUpdate', channel, channel)
+    await module.emit('messageUpdate', old as never, edited)
+
+    expect(user.mock.calls.map(([target]) => target.user.id)).toEqual([USER])
+    expect(seen).toEqual([
+      ['added', '#000061', '#000063'],
+      ['removed', '#000061', '#000063'],
+      ['channel', DEFAULT_THEME.colors.primary, '#000063'],
+      ['edited', DEFAULT_THEME.colors.primary, '#000063'],
     ])
   })
 
