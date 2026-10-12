@@ -6,6 +6,10 @@ import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@s
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
 import { type GivenFlag, isSpace, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { startupError } from '@src/util/refusal.util.js'
+import { warnOnce } from '@src/common/deprecation.js'
+import { Logger } from '@src/common/logger.js'
+
+const logger = new Logger('MeoCord')
 
 /** One word of a message pattern: a literal word, or a param with the type it declares, if any. */
 export type PatternToken = { literal: string } | { param: string; rest: boolean; optional: boolean; type?: string }
@@ -184,8 +188,20 @@ function startsOf(route: MessageRoute, place: 'guild' | 'dm', options: MessageCo
   return new Set([...prefixList(options.prefix), ...mention])
 }
 
-/** Whether two routes accept some of the same messages: a start they share, and words that match alike. */
-function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandOptions): boolean {
+/** Where two routes of equal rank and shape part: the one with a required param where the other has an optional one comes first. */
+function compareOptional(a: PatternToken[], b: PatternToken[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const [aToken, bToken] = [a[i], b[i]]
+    if ('param' in aToken && 'param' in bToken && aToken.optional !== bToken.optional) return aToken.optional ? 1 : -1
+  }
+  return 0
+}
+
+/**
+ * Whether two routes accept some of the same messages: a start they share, and words that match alike. `'optional'`
+ * when they do only because a required param and an optional one, in one position, both take a word there.
+ */
+function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandOptions): boolean | 'optional' {
   // A case-insensitive word matches every message the case-sensitive one does
   const exact = a.caseSensitive && b.caseSensitive
   const key = (start: string | symbol) => (typeof start === 'string' && !exact ? start.toLowerCase() : start)
@@ -196,13 +212,17 @@ function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandO
     return [...startsOf(a, place, options)].some(start => theirs.has(key(start)))
   })
   if (!startAlike || a.tokens.length !== b.tokens.length) return false
-  return a.tokens.every((token, i) => {
+  let byOptional = false
+  const alike = a.tokens.every((token, i) => {
     const other = b.tokens[i]
     if ('literal' in token) {
       return 'literal' in other && (exact ? token.literal === other.literal : token.literal.toLowerCase() === other.literal.toLowerCase())
     }
-    return 'param' in other && token.rest === other.rest && token.optional === other.optional
+    if (!('param' in other) || token.rest !== other.rest) return false
+    if (token.optional !== other.optional) byOptional = true
+    return true
   })
+  return alike && (byOptional ? 'optional' : true)
 }
 
 /**
@@ -263,12 +283,30 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
     }
   }
 
-  routes.sort((a, b) => b.specificity - a.specificity || compareShapes(a.tokens, b.tokens) || Number(takesAppStart(a)) - Number(takesAppStart(b)))
+  routes.sort(
+    (a, b) =>
+      b.specificity - a.specificity ||
+      compareShapes(a.tokens, b.tokens) ||
+      compareOptional(a.tokens, b.tokens) ||
+      Number(takesAppStart(a)) - Number(takesAppStart(b)),
+  )
 
   for (let i = 0; i < routes.length; i++) {
     for (let j = i + 1; j < routes.length; j++) {
       const [a, b] = [routes[i], routes[j]]
-      if (!sameMessages(a, b, options)) continue
+      const same = sameMessages(a, b, options)
+      if (!same) continue
+      // Ranked by their params, so the same one answers whatever the order; 5.0 refuses these as it does the rest
+      if (same === 'optional') {
+        if (a.controllerClass === b.controllerClass && a.method === b.method) continue
+        warnOnce(
+          logger,
+          `${a.controllerClass.name}.${a.method}: ${describeRoute(a)} and ${describeRoute(b)} in ${b.controllerClass.name}.${b.method} can ` +
+            `take the same messages, as one takes a word where the other has an optional param; ${a.controllerClass.name}.${a.method} ` +
+            'answers those. Change one pattern, or give one its own prefix. The next major version (5.0) stops the bot at startup for these.',
+        )
+        continue
+      }
       // One handler under two spellings, such as 'hello' and 'Hello', is one route, its pattern's over an alias's
       if (a.controllerClass === b.controllerClass && a.method === b.method) {
         if (a.aliasOf && !b.aliasOf) routes[i] = b
