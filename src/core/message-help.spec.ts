@@ -136,6 +136,8 @@ describe('the built-in help', () => {
     expect(replies(await send(client, '!help mute'))).toEqual([mute])
     expect(replies(await send(client, '!help M'))).toEqual([mute])
     expect(replies(await send(client, '!help purge'))).toEqual(['Usage: !purge <count> [--bots]\ncount: whole number · --bots (optional): on when given'])
+    // The help word in quotes counts as one word, as any word does
+    expect(replies(await send(client, '!"help" mute'))).toEqual([mute])
   })
 
   it('answers a query typed as an example by the command its leading words name, and lists other spellings', async () => {
