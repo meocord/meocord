@@ -75,7 +75,7 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { createMockClient, noteReactionDispatch } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
-import { createFallback, isUserOutcome } from '@src/core/fallback.js'
+import { createFallback, type Fallback, type FallbackOptions, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
@@ -722,6 +722,27 @@ export class TestingModule {
     if (this.dispatcher) return this.dispatcher
     const logger = new Logger('TestingModule')
     const warnUnanswered = this.appWarnUnanswered ?? process.env.NODE_ENV === 'development'
+    const notices: FallbackOptions = {
+      cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
+      storeDownNotice: who => claimStoreDownNotice(this.container, who),
+    }
+    // Strict mocks log an answer MeoCord fails to build and end the call in that fault, as a bot does; default mode
+    // rethrows it from the fallback, so observers hear the call's own outcome, and an interaction's again as an error
+    const answer = createFallback(logger, () => this.messageOptions, notices)
+    const rethrowing = createFallback(logger, () => this.messageOptions, { ...notices, strict: true })
+    const fallback: Fallback = async (error, context) => {
+      if (strictMocks()) return answer(error, context)
+      try {
+        return await rethrowing(error, context)
+      } catch (failure) {
+        warnOnce(
+          logger,
+          "dispatch() here reports a call whose answer MeoCord couldn't build with the call's own outcome, and an " +
+            "interaction's a second time as an error; under useStrictMocks() the call is reported once, as 'error'.",
+        )
+        throw failure
+      }
+    }
     this.dispatcher = new Dispatcher({
       container: this.container,
       controllerClasses: this.controllers,
@@ -729,12 +750,7 @@ export class TestingModule {
       logger,
       // A test's fake clock can pass 5 s inside a handler, so the slow-handler warning waits to be asked for
       warnSlowMessageHandlers: false,
-      // Strict: an answer MeoCord fails to build rejects the dispatch, where a bot logs it and carries on
-      fallback: createFallback(logger, () => this.messageOptions, {
-        strict: true,
-        cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
-        storeDownNotice: who => claimStoreDownNotice(this.container, who),
-      }),
+      fallback,
       // A mock's client is the one bot every mock client is, so a mention of it starts a command
       botUserId: event => {
         const id = event.client?.user?.id
@@ -790,9 +806,12 @@ export class TestingModule {
     const dispatcher = this.dispatcherOf()
     const handlers: DispatchedHandler[] = []
     const unhandled: unknown[] = []
+    // The fault each error's answer failed with, which the call ends in in that error's place
+    const unanswered = new Map<unknown, unknown>()
     const record: DispatchRecorder = {
       settled: (controller, method, { ran, error }) => handlers.push({ controller, method, ran, ...(error !== undefined && { error }) }),
       unhandled: error => unhandled.push(error),
+      unanswered: (error, failure) => unanswered.set(error, failure),
     }
 
     if (options) {
@@ -806,8 +825,11 @@ export class TestingModule {
       throw new TypeError('dispatch takes an interaction, a message, or a reaction with { user }.')
     }
 
-    // What the fallback answers as the user's own outcome, such as a usage reply or a refusal, is an outcome to assert on
-    const failures = unhandled.filter(error => !isUserOutcome(error, options ? undefined : input))
+    // What the fallback answers as the user's own outcome, such as a usage reply or a refusal, is an outcome to assert on,
+    // unless its answer failed to build, which is the call's fault, as on a bot
+    const failures = unhandled.flatMap(error =>
+      unanswered.has(error) ? [unanswered.get(error)] : isUserOutcome(error, options ? undefined : input) ? [] : [error],
+    )
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, `${failures.length} errors were left to the fallback.`)
     const error = handlers.find(handler => handler.error !== undefined)?.error ?? unhandled[0]
