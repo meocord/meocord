@@ -1743,6 +1743,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       instance.guildId = null
       if (unset('guild')) Object.defineProperty(instance, 'guild', { value: null, writable: true, configurable: true })
     }
+    // Default mode reads a guildId alone as a placeholder server with that id, as its warning says, answered in place of
+    // the mock's own stub, so where the interaction is still reads as given. Strict mocks read null, as discord.js does
+    if (strictPlace?.given === 'guildId' && !strictMocks() && unset('guild')) stubs.set('guild', guildPlaceholder(own('guildId') as string) as never)
     // The channel it came from, as the gateway caches it for an interaction: its server's cached one, looked up on each
     // read so a channel the test caches later is the one read, or the user's DM
     let channel: unknown
@@ -1774,6 +1777,11 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     // and in a server that user's member; each read live, so a targetId set later picks its user, and assignable
     if (UserContextMenuCommandInteraction.prototype.isPrototypeOf(instance)) {
       if (unset('targetId')) instance.targetId = (own('targetUser') as User | undefined)?.id ?? nextSnowflake()
+      // Under strict mocks a target user given is the client's cached one, as discord.js resolves it, so its member is
+      // that user's; default mode keeps the member's own user, and a read of targetMember warns once
+      const givenTarget = own('targetUser') as User | undefined
+      const users = cacheOf((instance.client as Client).users)
+      if (strictMocks() && typeof givenTarget === 'object' && givenTarget !== null) users?.set(givenTarget.id, givenTarget)
       const targetUser = (): User => {
         const id = own('targetId') as string
         return cached(cacheOf((instance.client as Client).users), id, () => mockUser(id)) as User
@@ -1787,7 +1795,19 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         })
       if (unset('targetUser')) live('targetUser', targetUser)
       if (unset('targetMember')) {
-        live('targetMember', () => (own('guildId') ? memberFor(own('guild'), targetUser(), true, own('guildId') as string) : null))
+        live('targetMember', () => {
+          if (!own('guildId')) return null
+          const member = memberFor(own('guild'), targetUser(), true, own('guildId') as string) as GuildMember
+          // Only the mock reads this for the test, so the warning comes at the test's read
+          if (givenTarget && member.user !== givenTarget) {
+            warnOnce(
+              mockLogger,
+              "UserContextMenuCommandInteraction.targetMember here is the member of another user with the targetUser's " +
+                "id; under useStrictMocks() the targetUser given is cached on the client, so targetMember is that user's member.",
+            )
+          }
+          return member
+        })
       }
     }
     // A message context menu's target: the message given, else one made for its targetId. The message is the one
@@ -2744,7 +2764,7 @@ function placeWarning(name: string, key: string, place: StrictPlace): string {
       "Give the member's guild too, or call useStrictMocks() to place it there now.",
     ],
     guildId: [
-      'a server the bot is in, though the mock was given only a guildId',
+      'a placeholder server with that id, though the mock was given only a guildId',
       "a guildId alone is a server the bot isn't in: guild and channel are null, and the member is a raw one",
       'Give a guild too, or call useStrictMocks() to read it so now.',
     ],
@@ -2968,6 +2988,14 @@ function mentionedIds(content: string | undefined): { users: string[]; roles: st
 const cacheOf = (manager: unknown): Collection<string, unknown> | undefined => {
   const cache = (manager as { cache?: unknown } | undefined)?.cache
   return cache instanceof Collection ? (cache as Collection<string, unknown>) : undefined
+}
+
+// The managers of a server whose caches a placeholder one holds empty
+const PLACEHOLDER_GUILD_MANAGERS = ['members', 'roles', 'channels', 'emojis', 'stickers', 'bans', 'invites', 'scheduledEvents', 'autoModerationRules']
+
+/** A server default mode reads for a guildId alone: no `Guild`, so it answers no server checks, but with that id and empty caches. */
+function guildPlaceholder(id: string): object {
+  return stubDeep({ id, ...Object.fromEntries(PLACEHOLDER_GUILD_MANAGERS.map(key => [key, stubDeep({ cache: new Collection() })])) })
 }
 
 /** The cached item under `id`, put there by `make` when the cache lacks it. */
