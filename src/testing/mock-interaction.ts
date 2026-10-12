@@ -202,8 +202,15 @@ const stubReadWarnings = new WeakMap<object, Map<string, () => void>>()
 
 type StubValue = Mock | object | string | number | boolean | null
 
+// When each mock was made, which what Discord stamps when a structure arrives, such as a member's join, reads
+const madeTimes = new WeakMap<object, number>()
+
+/** When `mock` was made: the time a value Discord stamps as it sends the structure reads. */
+export const madeAt = (mock: object): number => madeTimes.get(mock) ?? Date.now()
+
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
   noteMockMade()
+  const made = Date.now()
   const stubs = externalStubs ?? new Map<string, StubValue>()
   // Placeholders read so far, by the value strict mocks give: a read of a kept one still warns, once
   const placeholders = new Map<string, string>()
@@ -306,6 +313,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
     },
   })
   mockTargets.set(proxy, instance)
+  madeTimes.set(proxy, made)
   return proxy
 }
 
@@ -2694,7 +2702,7 @@ function strictPlaceOf(own: (key: string) => unknown): StrictPlace | undefined {
 let readingPlace = 0
 
 /** Runs `read` as the mock's own read of where a mock is, which warns about no placement. */
-function readPlaceQuietly<T>(read: () => T): T {
+export function readPlaceQuietly<T>(read: () => T): T {
   readingPlace++
   try {
     return read()
