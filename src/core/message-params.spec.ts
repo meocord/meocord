@@ -1,4 +1,6 @@
 import { Collection, type GuildMember, type Role, type TextChannel, type User } from 'discord.js'
+import { vi } from 'vitest'
+import { Logger } from '@src/common/logger.js'
 import { Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MessageUsageError } from '@src/common/errors.js'
 import { type MessageParamType } from '@src/interface/index.js'
@@ -330,6 +332,16 @@ describe('typed patterns at startup', () => {
     expect(declare({ types: { color: {} } })).toThrow('"color" needs a parse(word, message) function')
     expect(declare({ deleteUsageRepliesAfter: -1 })).toThrow('takes a number of seconds, or 0')
     expect(declare({ deleteUsageRepliesAfter: 0, types: { color: { parse: () => 1 } } })).not.toThrow()
+  })
+
+  it('warns that a usage reply time beyond what a timer can wait keeps the reply', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const thirtyDays = 30 * 24 * 60 * 60
+
+    MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { deleteUsageRepliesAfter: thirtyDays } })(class Patient {})
+
+    expect(warn.mock.calls.flat().join(' ')).toContain('Patient: @MeoCord({ messages: { deleteUsageRepliesAfter } }) is 2592000 seconds')
+    warn.mockRestore()
   })
 })
 
