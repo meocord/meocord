@@ -1,9 +1,9 @@
 import { escapeMarkdown } from 'discord.js'
 
 /** Characters a log line shows escaped: C0 and C1 controls, DEL, line and paragraph separators, and bidi controls. */
-const UNSAFE_IN_LOG = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
+const UNSAFE_IN_LOG = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Bidi_Control}]/gu
 /** The same, with the quote and the backslash, for text shown between quotes. */
-const UNSAFE_IN_QUOTES = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069"\\]/g
+const UNSAFE_IN_QUOTES = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Bidi_Control}"\\]/gu
 const SHORT_ESCAPES: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t', '"': '\\"', '\\': '\\\\' }
 
 const escapeChar = (char: string) => SHORT_ESCAPES[char] ?? `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`
