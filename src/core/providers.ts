@@ -99,6 +99,14 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
   return map
 }
 
+/** For each container, how to forget the value each factory provider made, so a start that failed is made afresh. */
+const madeValues = new WeakMap<Container, (() => void)[]>()
+
+/** Forgets every value `container`'s factory providers made, so the next resolve runs each factory again. */
+export function forgetFactoryValues(container: Container): void {
+  for (const forget of madeValues.get(container) ?? []) forget()
+}
+
 /**
  * Binds one provider into `container` as a singleton. `bindClass` binds a class a provider depends
  * on, as the app binds its own, so a provided class or a factory's `inject` can name any class.
@@ -120,6 +128,7 @@ export function bindProvider(container: Container, provider: Provider, bindClass
   // Made once, as a singleton, but kept only once made: a factory that throws or rejects runs again on the next
   // resolve, so a start() after it failed tries it again. Resolves while one is pending share it.
   let kept: { value: unknown } | undefined
+  madeValues.set(container, [...(madeValues.get(container) ?? []), () => (kept = undefined)])
   container.bind(token).toDynamicValue(context => {
     if (kept) return kept.value
     // Resolved in dependency order before anything needs it, so each injected value is already made

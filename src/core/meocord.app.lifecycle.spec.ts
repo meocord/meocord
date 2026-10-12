@@ -656,7 +656,36 @@ describe('lifecycle hooks', () => {
       expect(exit).toHaveBeenCalledWith(0)
     })
 
-    it('runs no onShutdown when onReady never ran', async () => {
+    it('runs no onShutdown for a class whose onReady never ran, nor for one that depends on it', async () => {
+      const loaded = await load()
+      const stopped: string[] = []
+
+      @loaded.Service()
+      class Scheduler implements OnReady, OnShutdown {
+        onReady() {}
+        onShutdown() {
+          stopped.push('Scheduler')
+        }
+      }
+
+      @loaded.Service()
+      class Reminders implements OnShutdown {
+        constructor(readonly scheduler: Scheduler) {}
+        onShutdown() {
+          stopped.push('Reminders')
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [], services: [Reminders] })
+
+      await loaded.shutdownAndExit(false)
+
+      expect(stopped).toEqual([])
+      expect(client.destroy).toHaveBeenCalled()
+      expect(exit).toHaveBeenCalledWith(0)
+    })
+
+    it('runs onShutdown for a class with no onReady once it is made, though the ready hooks never ran', async () => {
       const loaded = await load()
       let stopped = false
 
@@ -667,13 +696,11 @@ describe('lifecycle hooks', () => {
         }
       }
 
-      const { client } = await startApp(loaded, { controllers: [], services: [Scheduler] })
+      await startApp(loaded, { controllers: [], services: [Scheduler] })
 
       await loaded.shutdownAndExit(false)
 
-      expect(stopped).toBe(false)
-      expect(client.destroy).toHaveBeenCalled()
-      expect(exit).toHaveBeenCalledWith(0)
+      expect(stopped).toBe(true)
     })
 
     it('leaves an app whose login failed out of shutdown, and exits with the code the failed login set', async () => {

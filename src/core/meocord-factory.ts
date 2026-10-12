@@ -3,7 +3,7 @@ import { COOLDOWN_POLICY, cooldownPolicyFrom } from '@src/core/cooldown-runner.j
 import { Container, type ServiceIdentifier } from 'inversify'
 import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
-import { MeoCordApp } from '@src/core/meocord.app.js'
+import { MeoCordApp, type StartAttempt } from '@src/core/meocord.app.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
@@ -28,7 +28,9 @@ import {
   assertProvidedServices,
   bindProvider,
   bindsOwnToken,
+  forgetFactoryValues,
   isClassProvider,
+  isValueProvider,
   providerMap,
   type ProviderMap,
   resolutionOrder,
@@ -458,7 +460,32 @@ export class MeoCordFactory {
       // In development only, unless the app says otherwise
       options.warnUnanswered ?? process.env.NODE_ENV === 'development',
       shard,
+      startAttempt(container, lifecycle, providers),
     )
     })
   }
+}
+
+/**
+ * What the app's starts make: each lifecycle unit is recorded as the container constructs it, as the testing module
+ * records them, and a container snapshot marks where a start begins, so a failed start drops every singleton it made,
+ * the values factory providers keep included.
+ */
+function startAttempt(container: Container, lifecycle: readonly LifecycleUnit[], providers: ProviderMap): StartAttempt {
+  const constructed = new Set<unknown>()
+  for (const { token } of lifecycle) {
+    container.onActivation(token as ServiceIdentifier, (_context, instance) => {
+      constructed.add(token)
+      return instance
+    })
+  }
+  const drop = () => {
+    container.restore()
+    forgetFactoryValues(container)
+  }
+  const given = new Set(lifecycle.map(({ token }) => token).filter(token => {
+    const provider = providers.get(token)
+    return provider !== undefined && isValueProvider(provider)
+  }))
+  return { constructed, given, begin: () => container.snapshot(), drop }
 }
