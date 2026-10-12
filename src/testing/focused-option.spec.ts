@@ -1,4 +1,4 @@
-import { ApplicationCommandOptionType } from 'discord.js'
+import { ApplicationCommandOptionType, DiscordjsErrorCodes } from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
@@ -69,5 +69,44 @@ describe('a number given for the focused option', () => {
 
     expect(readings(options)).toEqual([5, 5, 5])
     expect(warned).toEqual([expect.stringMatching(/focused option "amount".*number.*string.*5\.0.*'5'.*useStrictMocks\(\)/s)])
+  })
+})
+
+describe("an autocomplete's focused option read by name", () => {
+  it('reads as Discord sent it under useStrictMocks(): an empty string, the option marked focused', () => {
+    useStrictMocks()
+    const options = createChatInputOptions({ focused: 'query' })
+
+    expect([options.getString('query'), options.getString('query', true), options.getInteger('query')]).toEqual(['', '', ''])
+    expect(options.get('query')).toBe(options.data[0])
+    expect(options.get('query')).toEqual({ name: 'query', type: ApplicationCommandOptionType.String, value: '', focused: true })
+    expect(warned).toEqual([])
+  })
+
+  it('reads a typed number as its digits under useStrictMocks(), its type kept', () => {
+    useStrictMocks()
+    const options = createChatInputOptions({ focused: 'n', n: 12 })
+
+    expect([options.getInteger('n'), options.get('n')?.focused]).toEqual(['12', true])
+    expect(() => options.getString('n')).toThrow(expect.objectContaining({ code: DiscordjsErrorCodes.CommandInteractionOptionType }))
+  })
+
+  it('reads as before in default mode, with one warning that discord.js reads the option Discord sent', () => {
+    const options = createChatInputOptions({ focused: 'query' })
+
+    expect(options.getString('query')).toBeNull()
+    expect(warned).toEqual([expect.stringMatching(/^The focused option "query" is read here from what the test gave, where discord\.js reads the option Discord sent.*useStrictMocks\(\)/s)])
+    expect(options.get('query')).toBeNull()
+    expect(() => options.getString('query', true)).toThrow(expect.objectContaining({ code: DiscordjsErrorCodes.CommandInteractionOptionNotFound }))
+    expect(warned).toHaveLength(1)
+  })
+
+  it('reads a typed value as given in default mode, warning only where it differs', () => {
+    const options = createChatInputOptions({ focused: 'query', query: 'ab' })
+
+    expect(options.getString('query')).toBe('ab')
+    expect(warned).toEqual([])
+    expect(options.get('query')?.focused).toBeUndefined()
+    expect(warned).toEqual([expect.stringMatching(/^The focused option "query" is read here from what the test gave/)])
   })
 })

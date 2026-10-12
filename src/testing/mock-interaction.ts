@@ -3322,6 +3322,9 @@ function optionTypeOf(value: unknown): ApplicationCommandOptionType {
   return ApplicationCommandOptionType.String
 }
 
+/** The option types a user types into, which an autocomplete's focused option is one of. */
+const TYPED = [ApplicationCommandOptionType.String, ApplicationCommandOptionType.Integer, ApplicationCommandOptionType.Number]
+
 /** The discord.js classes an entity option's value is an instance of, each read by its own getters. */
 const ENTITY_CLASSES = [User, GuildMember, Role, BaseChannel, Attachment] as const
 type EntityClass = (typeof ENTITY_CLASSES)[number]
@@ -3454,7 +3457,8 @@ function buildOptionData(
  * entity option carries its id in `value` and the object itself, as the gateway sends it: a user option its `user`,
  * and in a server its `member` too. A user option's
  * `getMember()` is the user's member in the server of the interaction the options are given to, and `null` in a DM;
- * a member given resolves `getUser()` to its user. A getter throws discord.js's type error for an option of another
+ * a member given resolves `getUser()` to its user. Under `useStrictMocks()` a user option's `getMentionable()` is its
+ * member too where there is one, as discord.js reads it; default mode returns the user, with a warning once. A getter throws discord.js's type error for an option of another
  * type, as discord.js does, required or not. Only a user or member read as a role, or a role read as a user or member,
  * is `null`, or that error when required, as the option may be a mentionable one; a plain `{ id }` reads as any entity.
  * A whole number is an Integer option and a fraction a Number one, so
@@ -3462,7 +3466,9 @@ function buildOptionData(
  *
  * The `focused` option reads as Discord sends it, through `getFocused()`, `getFocused(true)` and `data` alike: a
  * string, `''` when no value is given, and marked `focused` in `data`. A number given for it is its digits under
- * `useStrictMocks()`; otherwise it stays the number, with a warning when read.
+ * `useStrictMocks()`; otherwise it stays the number, with a warning when read. Under `useStrictMocks()` `get()` and the
+ * typed getters read it by name from that same option, as discord.js does; one given no value takes the string,
+ * integer and number getters alike. Default mode reads what was given, `null` for no value, with a warning once.
  *
  * Given to an `AutocompleteInteraction`, a user, member, role, channel, mentionable or attachment option reads as
  * Discord sends an autocomplete's options under `useStrictMocks()`: its id alone, in `data` and the handler's params,
@@ -3491,6 +3497,17 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   opts: ChatInputOptions = {},
 ): DeepMocked<CommandInteractionOptionResolver<Cached>> {
   const { subcommandGroup = null, subcommand = null, focused = null, ...values } = opts
+
+  // The option the user is typing, as Discord sent it among the others, which every getter reads in discord.js
+  const focusedOption = () => (base._hoistedOptions as CommandInteractionOption[]).find(each => each.focused)!
+  // Default mode reads the focused option from what the test gave, and says once what discord.js reads instead
+  const warnFocused = (name: string) =>
+    warnOnce(
+      mockLogger,
+      `The focused option "${name}" is read here from what the test gave, where discord.js reads the option Discord sent: ` +
+        "marked focused, its value a string ('' before anything is typed). In the next major version (5.0) the mock reads " +
+        'it so; call useStrictMocks() to have it read so now.',
+    )
 
   function resolveOrThrow<U>(name: string, value: U | null, required?: boolean): U | null {
     if (value === null) {
@@ -3522,7 +3539,20 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   // option may be of the getter's type, as a user may be a mentionable option's, reads as null if the getter doesn't
   // take it, and throws when required
   const readOption = <V>(name: string, expected: readonly (ApplicationCommandOptionType | '_MESSAGE')[], takes: (value: object | string | number | boolean) => boolean, required?: boolean): V | null => {
+    if (name === focused && strictMocks()) {
+      // discord.js reads the focused option as Discord sent it: a string, its own type kept. One given no value may be
+      // any type the user can type into, as the mock doesn't know which it was declared as
+      const option = focusedOption()
+      const types = values[name] === undefined || values[name] === null ? TYPED : [option.type]
+      if (!types.some(type => expected.includes(type))) {
+        throw optionError(DiscordjsErrorCodes.CommandInteractionOptionType, name, option.type, expected.join(', '))
+      }
+      return option.value as V
+    }
     const value = values[name]
+    if (name === focused && (value === undefined || value === null)) warnFocused(name)
+    // Read through the option Discord sent, whose number warns where discord.js reads a string
+    if (name === focused && typeof value === 'number') void focusedOption().value
     if (value === undefined || value === null) return resolveOrThrow<V>(name, null, required)
     const typeError = () => optionError(DiscordjsErrorCodes.CommandInteractionOptionType, name, optionTypeOf(value), expected.join(', '))
     if (!possibleTypesOf(value).some(type => expected.includes(type))) throw typeError()
@@ -3588,13 +3618,25 @@ export function createChatInputOptions<Cached extends CacheType = any>(
     const value = readOption<object>(name, [USER, MENTIONABLE], plainOr(User, GuildMember))
     return value instanceof User ? memberOf(name, value) : value
   })
-  base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | null>((name: string, required?: boolean) =>
-    readOption(name, [MENTIONABLE], plainOr(User, GuildMember, Role), required),
-  )
+  // A user's member in a server, as discord.js reads `member ?? user`; default mode keeps the user, with a warning
+  base.getMentionable = createMockFn<(name: string, required?: boolean) => { id: string } | object | null>((name: string, required?: boolean) => {
+    const value = readOption<{ id: string }>(name, [MENTIONABLE], plainOr(User, GuildMember, Role), required)
+    if (!(value instanceof User)) return value
+    const member = memberOf(name, value)
+    if (member === null || strictMocks()) return member ?? value
+    warnOnce(
+      mockLogger,
+      `getMentionable('${name}') returns the user here, where discord.js returns the user's member in a server; in the next ` +
+        'major version (5.0) the mock returns the member. Call useStrictMocks() to have it returned now.',
+    )
+    return value
+  })
   base.getAttachment = createMockFn<(name: string, required?: boolean) => Attachment | null>((name: string, required?: boolean) =>
     readOption(name, [ATTACHMENT], plainOr(Attachment), required),
   )
   base.get = createMockFn<(name: string, required?: boolean) => CommandInteractionOption | null>((name: string, required?: boolean) => {
+    if (name === focused && strictMocks()) return focusedOption()
+    if (name === focused) warnFocused(name)
     const value = values[name]
     return value === undefined || value === null ? resolveOrThrow(name, null, required) : toOptionData(name, value, memberOf, unresolved)
   })
@@ -3606,7 +3648,7 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   base.getFocused = createMockFn((getFull?: boolean) => {
     if (focused === null) throw optionError(DiscordjsErrorCodes.AutocompleteInteractionOptionNoFocusedOption)
     // The one options.data holds, so the two agree
-    const option = (base._hoistedOptions as CommandInteractionOption[]).find(each => each.focused)!
+    const option = focusedOption()
     return getFull === true ? { ...option } : option.value
   })
 
