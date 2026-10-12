@@ -246,7 +246,20 @@ describe('spawning the application', () => {
 
       const { args, options } = lastSpawn()
       expect(entryArgs(args)).toEqual([expect.stringContaining('main.js')])
-      expect(registerEnv(options.env)).toEqual({ MEOCORD_REGISTER_ONLY: '1', MEOCORD_FORCE_REGISTER: '1' })
+      expect(registerEnv(options.env)).toEqual({ MEOCORD_REGISTER_ONLY: '1', MEOCORD_FORCE_REGISTER: '1', MEOCORD_REGISTER_MODE: 'production' })
+    })
+
+    // A bundle built with bundleDependencies has NODE_ENV written in, so the command's mode reaches it on its own
+    it.each([
+      ['development', 'development'],
+      ['production', 'production'],
+      ['test', 'production'],
+    ])('with NODE_ENV=%s, tells the bot to register as %s does', async (nodeEnv, mode) => {
+      vi.stubEnv('NODE_ENV', nodeEnv)
+      await new MeoCordCLI().register()
+      vi.unstubAllEnvs()
+
+      expect(registerEnv(lastSpawn().options.env)).toMatchObject({ MEOCORD_REGISTER_MODE: mode })
     })
 
     it('passes the guild it is given', async () => {

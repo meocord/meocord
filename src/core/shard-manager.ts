@@ -9,7 +9,7 @@ import { type MeoCordApplication } from '@src/interface/index.js'
 import { SHUTDOWN_MARGIN_MS, shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { bundleEntry } from '@src/util/bundle-entry.util.js'
-import { FORCE_REGISTER_ENV } from '@src/util/registration-mode.util.js'
+import { FORCE_REGISTER_ENV, registersAsDevelopment } from '@src/util/registration-mode.util.js'
 import { isShardMessage, REFUSED_CODE, type ShardMessage } from '@src/core/shard-messages.js'
 import { isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { onDevRunnerStop, tellDevRunner, underDevRunner } from '@src/util/dev-runner.util.js'
@@ -172,7 +172,7 @@ export class ShardManager implements MeoCordApplication {
         controllerClasses,
         logger: this.logger,
         config: config.commands,
-        development: process.env.NODE_ENV === 'development',
+        development: registersAsDevelopment(),
         force: process.env[FORCE_REGISTER_ENV] === '1',
       })
     } catch (error) {
