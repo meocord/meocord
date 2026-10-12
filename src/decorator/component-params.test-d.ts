@@ -109,6 +109,18 @@ describe("a plain-string pattern's params", () => {
     void Buttons
   })
 
+  // As the runtime reads it, `{café}` is the pattern's own text, so the handler gets no café
+  it('are refused for a brace pair whose name is no word', () => {
+    class Shop {
+      // @ts-expect-error {café} is literal text, not a param
+      @Command('shop/{café}', CommandType.BUTTON)
+      open(_interaction: ButtonInteraction, { café }: { café: string }) {
+        void café
+      }
+    }
+    void Shop
+  })
+
   it('are refused for a key the pattern does not capture', () => {
     class Buttons {
       // @ts-expect-error the pattern captures id, not uid
