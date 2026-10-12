@@ -2183,9 +2183,10 @@ export function ownedManager(prototype: object, owner: Record<string, object>): 
  * empty collection. Members, roles and channels given are put in
  * their managers' caches, where dispatch looks first when it resolves a message's typed params; a member
  * {@link createMockMember} made without a server is in this one. Its `roles.everyone` is the role given with the
- * guild's id, or else an @everyone role of its own at position 0 with no permissions, in `roles.cache` as Discord has
- * it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given, so `t.forGuild(guild)`
- * translates as for a new English server.
+ * guild's id, or else an @everyone role of its own at position 0, in `roles.cache` as Discord has it. That role has no
+ * permissions in default mode; under `useStrictMocks()` it has the ones Discord gives @everyone in a new server. The
+ * guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given, so `t.forGuild(guild)` translates as for
+ * a new English server.
  *
  * The mock makes a member for any id it's asked for, so a test of an id that isn't a member rejects the fetch, as
  * `guild.members.fetch.mockRejectedValue(createDiscordError(10007))`, or resolves a collection without that member.
