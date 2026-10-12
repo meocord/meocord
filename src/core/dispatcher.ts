@@ -129,7 +129,7 @@ export interface DispatcherOptions {
 /** A handler of a message, by name, and how to run it in a call. */
 interface MessageRun {
   name: string
-  run: (call: Call) => Promise<boolean>
+  run: (call: Call) => Promise<void>
 }
 
 /** How long a message's handler may take, with others waiting after it, before it is named as slow. */
@@ -229,6 +229,30 @@ export class Dispatcher {
       this.controllerInstancesCache.set(controllerClass, this.container.get(controllerClass))
     }
     return this.controllerInstancesCache.get(controllerClass)
+  }
+
+  /**
+   * Runs `run` on the controller's instance, resolved as its handler starts. A controller that cannot be made fails
+   * only its own handlers: the error goes to the global filters, then the fallback, and the call goes on without it.
+   */
+  private async withInstance(
+    controllerClass: ControllerClass,
+    args: readonly unknown[],
+    call: Call,
+    run: (instance: any) => Promise<unknown>,
+    unresolved = new Set<ControllerClass>(),
+  ): Promise<void> {
+    // A controller that failed to resolve for this event is reported once, however many of its handlers it reaches
+    if (unresolved.has(controllerClass)) return
+    let instance: unknown
+    try {
+      instance = this.getInstance(controllerClass)
+    } catch (error) {
+      unresolved.add(controllerClass)
+      await handleUnroutedError(this.container, args, error, this.runOptions(call))
+      return
+    }
+    await run(instance)
   }
 
   /**
@@ -471,19 +495,21 @@ export class Dispatcher {
     }
     // The matched handler, then every listener, each resolved from the container only as it starts
     const runs: MessageRun[] = []
+    const unresolved = new Set<ControllerClass>()
     if (target) {
       const { route, params, start, given } = target
       noteInvocation(message, `${start}${commandWordsOf(route.tokens).join(' ')}`)
       const hooks = messageCommandHooks(route, params, message, start, given, this.messageOptions.types)
       runs.push({
         name: `${route.controllerClass.name}.${route.method}`,
-        run: at => this.invokeHandler(this.getInstance(route.controllerClass), route.method, [message, params], at, hooks),
+        run: at =>
+          this.withInstance(route.controllerClass, [message], at, instance => this.invokeHandler(instance, route.method, [message, params], at, hooks), unresolved),
       })
     }
     for (const { controllerClass, method } of this.messageListeners) {
       runs.push({
         name: `${controllerClass.name}.${method}`,
-        run: at => this.invokeHandler(this.getInstance(controllerClass), method, [message], at),
+        run: at => this.withInstance(controllerClass, [message], at, instance => this.invokeHandler(instance, method, [message], at), unresolved),
       })
     }
     if (this.messageOptions.handlers === 'concurrent') await this.runTogether(runs, call)
@@ -594,7 +620,7 @@ export class Dispatcher {
       .map(controllerClass => ({
         controllerClass,
         // Handlers for this emoji first, then those for every emoji
-        handlers: getReactionHandlers(this.getInstance(controllerClass))
+        handlers: getReactionHandlers(controllerClass.prototype)
           .filter(forEmoji)
           .sort((a, b) => Number(!a.emoji) - Number(!b.emoji)),
       }))
@@ -628,10 +654,9 @@ export class Dispatcher {
     }
 
     for (const { controllerClass, handlers } of runs) {
-      const controllerInstance = this.getInstance(controllerClass)
-      for (const { method } of handlers) {
-        await this.invokeHandler(controllerInstance, method, [reaction, { user, action }], call)
-      }
+      await this.withInstance(controllerClass, [reaction, { user, action }], call, async instance => {
+        for (const { method } of handlers) await this.invokeHandler(instance, method, [reaction, { user, action }], call)
+      })
     }
   }
 
