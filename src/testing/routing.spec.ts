@@ -1,7 +1,11 @@
 import 'reflect-metadata'
 import { Command, Controller, Guard, MeoCord, MessageHandler, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
+import { vi } from 'vitest'
+import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { findRouteConflicts, resolveRoute } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 @Controller()
 class BroadController {
@@ -220,8 +224,79 @@ describe('resolveRoute for messages', () => {
     expect(resolveRoute(ServerApp, { content: '!warn', dm: true })).toBeUndefined()
     expect(resolveRoute(ServerApp, { content: '!kick 123', dm: true })).toBeUndefined()
     expect(resolveRoute(ServerApp, { content: '!ping', dm: true })?.method).toBe('ping')
-    // Where the message was sent is not known, so every scope fits
+    // Read as sent in a server
     expect(resolveRoute(ServerApp, { content: '!warn' })?.method).toBe('warn')
+  })
+
+  describe('a message without dm', () => {
+    @Controller()
+    class GuildHelp {
+      @MessageHandler('info', { scope: 'guild' })
+      g() {}
+    }
+    @Controller()
+    class DmHelp {
+      @MessageHandler('info', { scope: 'dm' })
+      d() {}
+
+      @MessageHandler('inbox', { scope: 'dm' })
+      inbox() {}
+    }
+    @MeoCord({ controllers: [GuildHelp, DmHelp], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class GuildFirst {}
+    @MeoCord({ controllers: [DmHelp, GuildHelp], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+    class DmFirst {}
+
+    afterEach(() => {
+      forgetStrictMocks()
+      forgetDeprecationWarnings()
+      vi.restoreAllMocks()
+    })
+
+    // As before by default, where the controllers' order decides, with a warning when it names the DM handler
+    it('resolves a server and a DM pair as every scope fits, warning where it names the DM one, with default mocks', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      expect([GuildFirst, DmFirst].map(app => resolveRoute(app, { content: '!info' })?.method)).toEqual(['g', 'd'])
+      expect([GuildFirst, DmFirst].map(app => resolveRoute(app, { content: '!info', dm: true })?.method)).toEqual(['d', 'd'])
+      expect(warn.mock.calls).toEqual([
+        [
+          'resolveRoute resolved a message without dm to DmHelp.d, which works in a DM alone, where dispatch runs GuildHelp.g for a ' +
+            'message sent in a server. Pass dm: true for a DM. Under useStrictMocks() it resolves to GuildHelp.g.',
+        ],
+      ])
+    })
+
+    // As dispatch routes a message sent in a server, whatever the controllers' order
+    it('resolves a server and a DM pair to the server handler in either order, with strict mocks', () => {
+      useStrictMocks()
+
+      expect([GuildFirst, DmFirst].map(app => resolveRoute(app, { content: '!info' })?.method)).toEqual(['g', 'g'])
+      expect([GuildFirst, DmFirst].map(app => resolveRoute(app, { content: '!info', dm: true })?.method)).toEqual(['d', 'd'])
+    })
+
+    it('still finds a handler that works in a DM alone, and warns that dispatch runs it only there', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      expect(resolveRoute(GuildFirst, { content: '!inbox' })?.method).toBe('inbox')
+      expect(warn.mock.calls).toEqual([
+        [
+          'resolveRoute found only DmHelp.inbox, which works in a DM alone, for a message without dm; dispatch runs it only in a DM. ' +
+            'Pass dm: true. Under useStrictMocks() this resolves to undefined.',
+        ],
+      ])
+    })
+
+    it('resolves a handler that works in a DM alone to nothing under strict mocks, as dispatch runs it only in a DM', () => {
+      useStrictMocks()
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      expect([resolveRoute(GuildFirst, { content: '!inbox' }), resolveRoute(GuildFirst, { content: '!inbox', dm: true })?.method]).toEqual([
+        undefined,
+        'inbox',
+      ])
+      expect(warn).not.toHaveBeenCalled()
+    })
   })
 
   it('takes the prefix a message has when the app reads prefixes from a function', () => {
