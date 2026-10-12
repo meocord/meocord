@@ -9,6 +9,8 @@ import {
   createMockMessage,
   createMockUser,
 } from './mock-interaction.js'
+import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 
 const role = (id: string, position: number, permissions: bigint[] = []) =>
   createMockInteraction(Role, { id, position, permissions: new PermissionsBitField(permissions).freeze() })
@@ -113,6 +115,49 @@ describe("a mock channel's permissions", () => {
     expect(muted.permissionsIn(channel).has(PermissionFlagsBits.ViewChannel)).toBe(true)
     expect(channel.permissionsFor(moderator)!.has(PermissionFlagsBits.SendMessages)).toBe(true)
     expect(channel.permissionOverwrites.cache).toBeInstanceOf(Collection)
+  })
+})
+
+describe("a mock channel's permissions, for a channel made without a server, in default mode", () => {
+  let warned: string[]
+  beforeEach(() => {
+    forgetDeprecationWarnings()
+    warned = []
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('are undefined, as a thread\'s are, and say so once, rather than throwing', () => {
+    const channel = createMockChannel(TextChannel)
+    const member = createMockMember()
+
+    expect(channel.permissionsFor(member)).toBeUndefined()
+    expect(member.permissionsIn(channel)).toBeUndefined()
+    expect(channel.permissionsFor(member)).toBeUndefined()
+    expect(warned).toEqual([
+      'TextChannel.permissionsFor reads a placeholder here; in the next major version (5.0) the mock gives the channel a server ' +
+        'and computes it. Give the channel a guild, such as createMockChannel(TextChannel, { guild }), or call useStrictMocks() to ' +
+        'have the mock compute it now.',
+    ])
+  })
+
+  it('are computed once a test gives the channel a server', () => {
+    const channel = createMockChannel(TextChannel)
+    const guild = createMockGuild({ channels: [channel] })
+    channel.guild = guild
+
+    expect(channel.permissionsFor(createMockMember({ guild }))).toBeInstanceOf(PermissionsBitField)
+    expect(warned).toEqual([])
+  })
+
+  it("are computed from a server a test makes by hand, as discord.js computes them", () => {
+    const channel = createMockChannel(TextChannel)
+    const member = createMockMember()
+    const guild = { id: '100000000000000001', members: { resolve: () => null }, roles: { resolve: () => null } }
+    channel.guild = guild as never
+
+    expect(channel.permissionsFor(member)).toBeNull()
+    expect(warned).toEqual([])
   })
 })
 
