@@ -423,7 +423,7 @@
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.63.6", "", { "os": "win32", "cpu": "x64" }, "sha512-0RAxO1pS/6lY1mSoD2Apm+6aPyfUlm+OWKgncIdj/eVN9I+pDY3lKgD7xsUNFei1u7MZQETGOo6m8POXMDp53A=="],
 
-    "@rsbuild/core": ["@rsbuild/core@2.2.11", "", { "dependencies": { "@rspack/core": "~2.2.8", "@swc/helpers": "^0.5.23" }, "peerDependencies": { "core-js": ">= 3.0.0" }, "optionalPeers": ["core-js"], "bin": { "rsbuild": "./bin/rsbuild.js" } }, "sha512-avPW0j6RaEbtV2mfl0AzTAJEimPX4Xj0pCcZyxNCrE9vkS91HmweM5V7XQj3kI5iTYfHRp9Y6To8RRHYLEvG7A=="],
+    "@rsbuild/core": ["@rsbuild/core@2.2.12", "", { "dependencies": { "@rspack/core": "~2.2.8", "@swc/helpers": "^0.5.23" }, "peerDependencies": { "core-js": ">= 3.0.0" }, "optionalPeers": ["core-js"], "bin": { "rsbuild": "./bin/rsbuild.js" } }, "sha512-SnJ81Jf9ZGms8hUq0FGxrqlUxdHKV76VK9gxrEdtWLbTic+qRt0SIAsk5NdIr1tXFzqzQ6Fqeffs+K1EUuZEHw=="],
 
     "@rspack/binding": ["@rspack/binding@2.2.8", "", { "optionalDependencies": { "@rspack/binding-darwin-arm64": "2.2.8", "@rspack/binding-darwin-x64": "2.2.8", "@rspack/binding-linux-arm64-gnu": "2.2.8", "@rspack/binding-linux-arm64-musl": "2.2.8", "@rspack/binding-linux-ppc64-gnu": "2.2.8", "@rspack/binding-linux-riscv64-gnu": "2.2.8", "@rspack/binding-linux-riscv64-musl": "2.2.8", "@rspack/binding-linux-s390x-gnu": "2.2.8", "@rspack/binding-linux-x64-gnu": "2.2.8", "@rspack/binding-linux-x64-musl": "2.2.8", "@rspack/binding-wasm32-wasi": "2.2.8", "@rspack/binding-win32-arm64-msvc": "2.2.8", "@rspack/binding-win32-ia32-msvc": "2.2.8", "@rspack/binding-win32-x64-msvc": "2.2.8" } }, "sha512-c9flkSua3khHnOKBCRk8BkHGOwU9YB7niv+5JfQXiLZIvJmgKsZ7PD8QrFklMhsJT3oVAc6c9GN7/wy1YkACjA=="],
 
