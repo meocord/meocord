@@ -4,6 +4,7 @@ import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -27,6 +28,12 @@ async function loadBuild() {
   const decorators: typeof DecoratorModule = await import('@src/decorator/index.js')
   return { ...app, ...factory, ...decorators }
 }
+
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still loads its builds fresh
+beforeAll(async () => {
+  await loadBuild()
+}, WARM_UP_TIMEOUT_MS)
 
 async function startApp(build: Awaited<ReturnType<typeof loadBuild>>) {
   @build.MeoCord({ controllers: [], clientOptions: { intents: [] } })
