@@ -316,6 +316,8 @@ export class TestingModule {
     private readonly services: readonly (new (...args: any[]) => unknown)[] = [],
     /** How long `close()` waits for the `onShutdown` hooks, as the bot's `shutdownTimeout` does. */
     private readonly shutdownTimeout: number = DEFAULT_SHUTDOWN_TIMEOUT_MS,
+    /** The `app`, whose presenter `init()` makes after the providers, as the bot does. */
+    private readonly app?: object,
   ) {}
 
   private resolving?: Promise<void>
@@ -366,6 +368,8 @@ export class TestingModule {
       listEventSources(this.container.get(HandlerRegistry), this.sources)
       prepareLateThemes(this.container, this.sources.map(({ cls }) => cls))
       for (const service of this.services) this.container.get(service)
+      // After the providers and listed services, as the bot makes it, so a provided value it injects is made
+      if (this.app) bindAppPresenter(this.container, this.app)
     })
     await this.resolving
     if (options.ready) {
@@ -1375,6 +1379,14 @@ export class TestingModuleBuilder {
           dependencies: tokenDependencies(container, providers, token),
           ...(token === boundStore && { cooldownStore: true }),
         }))
+        // Recorded as the container makes each one, before anything can be made, so close() shuts down exactly what exists
+        const constructed = new Set<unknown>()
+        for (const { token } of lifecycle) {
+          container.onActivation(token as ServiceIdentifier, (_context, instance) => {
+            constructed.add(token)
+            return instance
+          })
+        }
 
         // Every check has run, and touched only the container: from here the module is made, once none found an error
         stopOnStartupErrors()
@@ -1389,15 +1401,6 @@ export class TestingModuleBuilder {
         warnOverlappingPatterns(this.options.controllers ?? [])
         warnHandlersOffControllers(this.options.controllers ?? [], startup.classes)
         for (const warning of perCallEventWarnings(startup, providers, appPresenterClass)) new Logger('TestingModule').warn(warning)
-        if (this.options.app) bindAppPresenter(container, this.options.app)
-        // Recorded as the container makes each one, so close() shuts down exactly what exists
-        const constructed = new Set<unknown>()
-        for (const { token } of lifecycle) {
-          container.onActivation(token as ServiceIdentifier, (_context, instance) => {
-            constructed.add(token)
-            return instance
-          })
-        }
 
         const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
 
@@ -1413,6 +1416,7 @@ export class TestingModuleBuilder {
           warnUnanswered,
           services,
           this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+          this.options.app,
         )
       })
     } catch (error) {
