@@ -759,8 +759,10 @@ export function Command<
     // Wrap original method for interaction type validation
     const declaredAs = typeof builderOrType === 'function' ? builderOrType.name : `CommandType.${builderOrType}`
     const checked: NonNullable<typeof _descriptor.value> = function (this: unknown, interaction, params) {
-      // Every type the method's routes declare: each @Command wraps it, so one alone would refuse the others' interactions
-      const types = routeTypesOf(target, propertyKey)
+      // Every type the method's routes declare, in the class the call is made on: each @Command wraps it, so one alone
+      // would refuse the others' interactions, and an override that adds a route type reaches this one through super
+      const called = typeof this === 'object' && this !== null && Object.prototype.isPrototypeOf.call(target, this) ? Object.getPrototypeOf(this) : target
+      const types = routeTypesOf(called as object, propertyKey)
       if (!types.some(type => matchesCommandType(type, interaction))) {
         throw new Error(
           types.length <= 1

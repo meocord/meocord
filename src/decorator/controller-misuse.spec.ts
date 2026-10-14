@@ -146,6 +146,41 @@ describe('a @Command handler called with another kind of interaction', () => {
     })
   })
 
+  // The base method's own check reads the routes of the class the call is made on, so super passes what the override does
+  describe('on an override that adds a route of another type and calls its base method through super', () => {
+    @Controller()
+    class Base {
+      @Command('ping', CommandType.SLASH)
+      ping(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+        return `base ${interaction.constructor.name}`
+      }
+    }
+
+    @Controller()
+    class Sub extends Base {
+      @Command('again', CommandType.BUTTON)
+      override ping(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+        return super.ping(interaction)
+      }
+    }
+
+    it('is dispatched each of its routes, the base method running for both', async () => {
+      const module = MeoCordTestingModule.create({ controllers: [Sub] }).compile()
+
+      const slash = await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' }))
+      const button = await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'again' }))
+
+      expect([slash.ran, button.ran]).toEqual([true, true])
+    })
+
+    it('still refuses, on the base class alone, an interaction only the override takes', () => {
+      expect(() => (new Base().ping as (interaction: unknown) => void)(createMockInteraction(ButtonInteraction))).toThrow(
+        "Base.ping: @Command('ping', CommandType.SLASH) takes a ChatInputCommandInteraction, not a ButtonInteraction.",
+      )
+      expect(new Sub().ping(createMockInteraction(ButtonInteraction))).toBe('base ButtonInteraction')
+    })
+  })
+
   it('puts the article a class name takes before it, and names an unknown type an interaction', () => {
     class Odd {
       @Command('odd', 'NOT_A_TYPE' as CommandType)
