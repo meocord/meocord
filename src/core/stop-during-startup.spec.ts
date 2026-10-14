@@ -250,6 +250,39 @@ describe('a start that fails', () => {
     expect(given.closed).toBe(1)
   })
 
+  it.each([
+    ['a factory', [] as (() => Promise<string>)[], [1]],
+    ['the login', [() => Promise.reject(new Error('gateway unreachable (stand-in)'))], []],
+  ])('closes a value the app gave once at a stop after %s failed, with no retry', async (_what, logins, cacheFailsOn) => {
+    const loaded = await load()
+    gateway(loaded, logins)
+    let caches = 0
+    const given = { closed: 0, onShutdown: () => void given.closed++ }
+    @loaded.MeoCord({
+      controllers: [],
+      providers: [
+        { provide: 'POOL', useValue: given },
+        {
+          provide: 'CACHE',
+          inject: ['POOL'],
+          useFactory: async () => {
+            if (cacheFailsOn.includes(++caches)) throw new Error('cache unreachable')
+            return {}
+          },
+        },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class App {}
+    const app = loaded.MeoCordFactory.create(App)
+
+    await expect(app.start()).rejects.toThrow()
+    expect(given.closed).toBe(0)
+    await app.stop()
+
+    expect(given.closed).toBe(1)
+  })
+
   it("runs each class's onReady and onShutdown once after a failed login and a retry that comes online", async () => {
     const loaded = await load()
     const clients = gateway(loaded, [() => Promise.reject(new Error('gateway unreachable (stand-in)'))])
