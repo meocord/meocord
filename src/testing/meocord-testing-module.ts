@@ -20,7 +20,7 @@ import {
 } from 'discord.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
-import { ExecutionContext } from '@src/common/execution-context.js'
+import { ExecutionContext, inferContextType } from '@src/common/execution-context.js'
 import { Translator } from '@src/common/translator.js'
 import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
 import {
@@ -29,6 +29,7 @@ import {
   bindAppPresenter,
   bindGlobalStages,
   type GlobalStages,
+  type HandlerOutcome,
   prepareAppPresenter,
   prepareHandlerStages,
   prepareThemes,
@@ -95,7 +96,8 @@ import {
   tokenName,
 } from '@src/core/providers.js'
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
-import { getReactionHandlers } from '@src/decorator/controller.decorator.js'
+import { getHandlerRoutes, getReactionHandlers } from '@src/decorator/controller.decorator.js'
+import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
 import { strictMocks } from './strict-mocks.js'
 import { notAClass } from './routing.js'
 import { warnOnce } from '@src/common/deprecation.js'
@@ -548,6 +550,9 @@ export class TestingModule {
    *   rejects it, as dispatch runs no handler for a message with no text: give the mock the `content` the handler
    *   takes. A word that is not a value of its type, and a prefixed message that names the command but leaves out
    *   a param, go through the handler's filters as a `MessageUsageError`, as dispatch answers them.
+   *   An `@On` or `@Once` handler no route reaches runs as {@link emit} runs it, as an event with the arguments given,
+   *   under `useStrictMocks()`; without strict mocks it runs as its first argument's type, and `invoke` warns once
+   *   where that differs.
    * @returns Whether the handler ran, and the error a filter handled, if any. Rejects with an error no
    *   filter handles, or with the error a filter throws: the built-in fallback, which answers such
    *   errors in the bot, does not run here. Rejects before running anything with an interaction or a
@@ -590,6 +595,14 @@ export class TestingModule {
     const instance = this.container.get(controller) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[methodName] !== 'function') throw new Error(`${controller.name}.${methodName} is not a method.`)
     const [first] = args as unknown[]
+    const event = eventHandlerOf(controller, methodName)
+    // As emit and the bot run it; without strict mocks it runs as before, as a test that passes that way could fail
+    if (event && strictMocks()) {
+      this.checkArgumentCount(controller, methodName, instance[methodName], first, args.length)
+      this.registerClient(first)
+      const { ran, error } = await this.track(this.runEventHandler(instance, methodName, args as unknown[]))
+      return error === undefined ? { ran } : { ran, error }
+    }
     const interaction = first instanceof BaseInteraction ? (first as Interaction) : undefined
     // The handler dispatch gives the customId to, among every handler of the module
     const component = interaction && hasCustomId(interaction) ? componentRouteFor(this.componentRoutes(), controller, methodName, interaction) : undefined
@@ -611,6 +624,7 @@ export class TestingModule {
       }
     }
     this.checkArgumentCount(controller, methodName, instance[methodName], first, callArgs.length)
+    if (event) this.warnEventRun(controller, methodName, event, first, callArgs.length !== args.length)
     this.registerClient(first)
     const { ran, error } = await this.track(runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
@@ -618,6 +632,38 @@ export class TestingModule {
 
   /** The handlers already warned about for being given fewer arguments than they take, so each is named once. */
   private readonly warnedArgumentCounts = new Set<string>()
+
+  /** The `@On` and `@Once` handlers already warned about for running other than as an event, so each is named once. */
+  private readonly warnedEventRuns = new Set<string>()
+
+  /**
+   * Warns once, without strict mocks, that `invoke` runs an event handler other than as the bot does: as the type its
+   * first argument gives, or with params it added. Only `invoke` warns, on the test's own call.
+   */
+  private warnEventRun(
+    controller: new (...args: any[]) => unknown,
+    methodName: string,
+    event: EventHandlerMetadata,
+    first: unknown,
+    paramsAdded: boolean,
+  ): void {
+    const type = inferContextType(first)
+    // invoke adds params only for an interaction or a message, whose type is never 'event'
+    if (type === 'event') return
+    const key = `${controller.name}.${methodName}`
+    if (this.warnedEventRuns.has(key)) return
+    this.warnedEventRuns.add(key)
+    const call = `${/^[aeiou]/.test(type) ? 'an' : 'a'} '${type}' call${paramsAdded ? ' with its params added' : ''}`
+    new Logger('TestingModule').warn(
+      `invoke runs ${key}, an @${event.once ? 'Once' : 'On'}('${event.event}') handler, as ${call}; the bot runs it as ` +
+        "an 'event' with its arguments as given, and useStrictMocks() runs it so.",
+    )
+  }
+
+  /** Runs an `@On` or `@Once` handler as the bot and `emit` do: as an event, with its arguments as given. */
+  private runEventHandler(instance: Record<string, (...args: unknown[]) => unknown>, method: string, args: unknown[]): Promise<HandlerOutcome> {
+    return runHandler(this.container, instance, method, args, { type: 'event', awaitObservers: true })
+  }
 
   /** The autocomplete mismatches already warned about without strict mocks, so each handler and route warns once. */
   private readonly warnedAutocompleteRoutes = new Set<string>()
@@ -880,7 +926,7 @@ export class TestingModule {
         const run = async () => {
           const instance = source.resolve()
           if (!instance) return false
-          const { ran } = await runHandler(this.container, instance, handler.method, args, { type: 'event', awaitObservers: true })
+          const { ran } = await this.runEventHandler(instance, handler.method, args)
           return ran
         }
         calls.push(this.track(run()))
@@ -904,6 +950,12 @@ function throwFailures(hook: 'onReady' | 'onShutdown', failures: readonly { name
       `${failures.length} ${hook} hooks threw: ${failures.map(({ name }) => name).join(', ')}.`,
     )
   }
+}
+
+/** A method's `@On` or `@Once` handler, when no route also reaches it: a route's input decides how that one runs. */
+function eventHandlerOf(controller: new (...args: any[]) => unknown, methodName: string): EventHandlerMetadata | undefined {
+  if (getHandlerRoutes(controller.prototype).some(route => route.method === methodName)) return undefined
+  return getEventHandlers(controller.prototype).find(handler => handler.method === methodName)
 }
 
 /** The app's `messages` options, when the testing module is given an app. */
