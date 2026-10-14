@@ -5,6 +5,7 @@ import { routeSpecificity } from '@src/core/route-specificity.js'
 import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
 import { type GivenFlag, type GivenWords, isLiteralFlag, isSpace, literalFlags, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { setOwn, shadowInherited } from '@src/util/value.util.js'
 import { startupError } from '@src/util/refusal.util.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
@@ -32,6 +33,8 @@ export interface MessagePattern {
   tokens: PatternToken[]
   flags: FlagToken[]
   specificity: number
+  /** Its params' and flags' names that `Object.prototype` has, which a message that leaves one out reads as left out. */
+  inheritedNames: string[]
 }
 
 /** A patterned `@MessageHandler`, as dispatch ranks and matches it. */
@@ -49,6 +52,8 @@ export interface MessageRoute {
   scope: MessageScope
   /** Its flags, which a message may give anywhere after the command's first word, apart from its words. */
   flags: FlagToken[]
+  /** Its params' and flags' names that `Object.prototype` has, which a message that leaves one out reads as left out. */
+  inheritedNames: string[]
   /** The handler's own pattern, when this route is one of its aliases. */
   aliasOf?: string
   /** What the command does, from the handler's `description`. */
@@ -200,7 +205,8 @@ export function parseMessagePattern(pattern: string): MessagePattern {
     rest: params.some(token => token.rest),
     optional: params.some(token => token.optional),
   })
-  return { tokens, flags, specificity }
+  const inheritedNames = [...params.map(token => token.param), ...flags.map(flag => flag.flag)].filter(name => name in Object.prototype)
+  return { tokens, flags, specificity, inheritedNames }
 }
 
 /** A prefix setting as a list, where `''` stands for none. */
@@ -648,11 +654,11 @@ function assignTail(
   for (let t = 0; t < tail.length && w < words.length; t++) {
     const token = tail[t]
     if (token.rest) {
-      params[token.param] = restFrom(text, words[w].start, cuts)
+      setOwn(params, token.param, restFrom(text, words[w].start, cuts))
       return params
     }
     if (t < tail.length - 1 && !fitsParamType(token.type!, words[w].value, caseSensitive)) continue
-    params[token.param] = words[w++].value
+    setOwn(params, token.param, words[w++].value)
   }
   return w === words.length ? params : undefined
 }
@@ -808,10 +814,10 @@ function paramsOf(
       continue
     }
     if (token.rest) {
-      params[token.param] = restFrom(text, words[w].start, cuts)
+      setOwn(params, token.param, restFrom(text, words[w].start, cuts))
       return params
     }
-    params[token.param] = words[w++].value
+    setOwn(params, token.param, words[w++].value)
   }
   return tail === -1 ? params : { ...params, ...assignTail(route.tokens.slice(tail) as ParamToken[], words, w, text, cuts, route.caseSensitive) }
 }
@@ -912,8 +918,10 @@ export function matchMessageRoute(
   chosen.flags.forEach(({ name, value }, index) => {
     if (taken.has(index)) return
     const declared = route.flags.find(flag => wordKey(flag.flag, route.caseSensitive) === wordKey(name, route.caseSensitive))
-    if (declared) params[declared.flag] = value ?? ''
+    if (declared) setOwn(params, declared.flag, value ?? '')
   })
+  // A param or flag left out reads as left out, not as what Object.prototype has under its name
+  if (route.inheritedNames.length > 0) shadowInherited(params, route.inheritedNames)
   return { route, params, start: text.slice(0, text.length - chosen.rest.length) }
 }
 

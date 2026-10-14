@@ -8,6 +8,7 @@ import { caseKey, type GivenFlag, type GivenWords, isLiteralFlag, literalFlags, 
 import { type RunOptions } from '@src/core/handler-pipeline.js'
 import { bool, choicesOf, duration, lookupTable, number } from '@src/core/scalar-types.js'
 import { userWords } from '@src/util/user-text.util.js'
+import { ownValue, setOwn, shadowInherited } from '@src/util/value.util.js'
 
 type ParamToken = Extract<PatternToken, { param: string }>
 
@@ -201,16 +202,20 @@ export async function parseMessageParams(
   const issues: MessageUsageIssue[] = []
   const items: Item[] = []
   for (const token of route.tokens) {
-    if (!('param' in token) || token.type === undefined || raw[token.param] === undefined) continue
+    // Only a word the message gave is typed: an own one, never what Object.prototype has under the param's name
+    const word = 'param' in token ? ownValue(raw, token.param) : undefined
+    if (!('param' in token) || token.type === undefined || word === undefined) continue
     if (!token.rest) {
-      items.push({ key: token.param, label: token.param, type: token.type, word: raw[token.param] })
+      items.push({ key: token.param, label: token.param, type: token.type, word })
       continue
     }
-    const words = splitWords(raw[token.param])
-    params[token.param] = new Array(words.length)
+    const words = splitWords(word)
+    setOwn(params, token.param, new Array(words.length))
     words.forEach(({ value }, index) => items.push({ key: token.param, label: token.param, type: token.type!, word: value, index }))
   }
   const flagIssues = route.flags.length > 0 ? readFlags(route, message, start, params, items) : []
+  // readFlags takes out each flag's key, so one left out whose name Object.prototype has reads as left out again
+  if (route.inheritedNames.length > 0) shadowInherited(params, route.inheritedNames)
 
   const guild = message.guild
   if (!guild && (needsGuild(route) || items.some(item => GUILD_TYPES.has(item.type)))) {
@@ -218,7 +223,7 @@ export async function parseMessageParams(
   }
 
   const put = (item: Item, value: unknown) => {
-    if (item.index === undefined) params[item.key] = value
+    if (item.index === undefined) setOwn(params, item.key, value)
     else (params[item.key] as unknown[])[item.index] = value
   }
   const refs: RefSlot[] = []
@@ -281,7 +286,7 @@ export async function fetchMessageParams(parsed: ParsedMessageParams, checkCoold
 
   const found = await resolveRefs(entities)
   const params: Record<string, unknown> = { ...parsed.params }
-  for (const [key, value] of Object.entries(params)) if (Array.isArray(value)) params[key] = [...value]
+  for (const [key, value] of Object.entries(params)) if (Array.isArray(value)) setOwn(params, key, [...value])
   const issues: MessageUsageIssue[] = []
   for (const slot of refs) {
     const value = slot.ref instanceof MessageEntityRef ? found.get(slot.ref) : await slot.ref.resolve()
@@ -289,7 +294,7 @@ export async function fetchMessageParams(parsed: ParsedMessageParams, checkCoold
       issues.push(missingEntity(slot))
       continue
     }
-    if (slot.index === undefined) params[slot.key] = value
+    if (slot.index === undefined) setOwn(params, slot.key, value)
     else (params[slot.key] as unknown[])[slot.index] = value
   }
   if (issues.length > 0) throw new MessageUsageError(usage, issues, { quiet })
@@ -413,7 +418,7 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
     if (flag.type === undefined) {
       const on = value === undefined ? given.has(flag.flag) : bool(value)
       if (on === undefined) issues.push(usageIssue({ key: 'meocord.usage.notYesNo', params: { label, value: userWords(value!) } }, flag.flag))
-      else params[flag.flag] = on
+      else setOwn(params, flag.flag, on)
     } else if (!given.has(flag.flag)) {
       if (!flag.optional) issues.push(usageIssue({ key: 'meocord.usage.missing', params: { param: label } }, flag.flag))
     } else if (!value) {
