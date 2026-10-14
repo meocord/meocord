@@ -1,6 +1,8 @@
 import { type Logger } from '@src/common/logger.js'
+import { shared } from '@src/util/shared-state.util.js'
 
-const warned = new Set<string>()
+// One per process for this meocord version, so a warning both builds give prints once
+const warned = shared('deprecationWarnings', () => new Set<string>())
 
 /** Warns once per run that `old` goes in 5.0, naming what to use instead. */
 export function warnDeprecated(logger: Logger, old: string, replacement: string): void {
