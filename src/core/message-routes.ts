@@ -2,7 +2,7 @@ import { type Message } from 'discord.js'
 import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { type ControllerClass } from '@src/core/component-routes.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
-import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@src/core/message-params.js'
+import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType, effectiveScope } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
 import { type GivenFlag, type GivenWords, isLiteralFlag, isSpace, literalFlags, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { setOwn, shadowInherited } from '@src/util/value.util.js'
@@ -964,7 +964,8 @@ export function matchMessageCommand(
       const taken = commandWordsTaken(commandWordsOf(routes[rank].tokens), words, flags, group.caseSensitive)
       if (taken !== -1) {
         const named = { rank, start: text.slice(0, text.length - rest.length), given: { words, flags } }
-        if (fitsScope(routes[rank].scope, starts.inGuild)) {
+        // Where it works as dispatch answers it, so a DM's usage comes from a route that works there
+        if (fitsScope(effectiveScope(routes[rank]), starts.inGuild)) {
           best = named
           break
         }
