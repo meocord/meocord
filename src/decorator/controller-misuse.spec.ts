@@ -179,6 +179,18 @@ describe('a @Command handler called with another kind of interaction', () => {
       )
       expect(new Sub().ping(createMockInteraction(ButtonInteraction))).toBe('base ButtonInteraction')
     })
+
+    it("reads only a subclass's routes, not those of another class it is called on", () => {
+      @Controller()
+      class Other {
+        @Command('other', CommandType.BUTTON)
+        ping() {}
+      }
+
+      expect(() => Base.prototype.ping.call(new Other(), createMockInteraction(ButtonInteraction))).toThrow(
+        "Base.ping: @Command('ping', CommandType.SLASH) takes a ChatInputCommandInteraction, not a ButtonInteraction.",
+      )
+    })
   })
 
   it('puts the article a class name takes before it, and names an unknown type an interaction', () => {
