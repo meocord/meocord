@@ -3,7 +3,7 @@ import { type Client } from 'discord.js'
 import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
-import { forgetProcessState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/process-state.js'
 
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -87,6 +87,21 @@ describe('a process that loads both builds', () => {
 
     expect(destroyed).toHaveLength(2)
     expect(exit.mock.calls).toEqual([[0]])
+  })
+
+  it('ends a failed shard once, whichever build reports the failure', async () => {
+    vi.resetModules()
+    const first = await import('@src/core/shard-exit.js')
+    vi.resetModules()
+    const second = await import('@src/core/shard-exit.js')
+    expect(second.endFailedShard).not.toBe(first.endFailedShard)
+
+    first.endFailedShard(new Error('cache unreachable'))
+    second.endFailedShard(new Error('cache unreachable'))
+    await vi.waitFor(() => expect(exit).toHaveBeenCalled())
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(exit.mock.calls).toEqual([[1]])
   })
 
   it("clears the exit code one build's failed login set once an app of the other logs in", async () => {

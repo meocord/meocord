@@ -5,7 +5,7 @@ import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as CommonModule from '@src/common/index.js'
 import type * as TestingModule from '@src/testing/index.js'
 import type * as EnumModule from '@src/enum/index.js'
-import { forgetProcessState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/process-state.js'
 
 const { warned } = vi.hoisted(() => ({ warned: [] as string[] }))
 

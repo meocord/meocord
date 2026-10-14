@@ -6,7 +6,7 @@ import type * as CommonModule from '@src/common/index.js'
 import type * as TestingModule from '@src/testing/index.js'
 import type * as EnumModule from '@src/enum/index.js'
 import { type DispatchResult, type ResponsePresenter } from '@src/interface/index.js'
-import { forgetProcessState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/process-state.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { error: [] as unknown[][] } }))
 

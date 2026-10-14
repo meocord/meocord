@@ -7,7 +7,7 @@ import type * as ShardManagerModule from '@src/core/shard-manager.js'
 import type * as ShardContextModule from '@src/core/shard-context.js'
 import { type MeoCordConfig, type OnReady, type ReadyInfo } from '@src/interface/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { forgetProcessState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/process-state.js'
 
 const { logged, config, channel } = vi.hoisted(() => ({
   channel: { closed: false },

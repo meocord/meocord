@@ -7,7 +7,7 @@ import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { type FakeDiscord, startFakeDiscord } from '../../scripts/lib/fake-discord.js'
-import { forgetProcessState } from '@src/core/meocord.app.js'
+import { forgetProcessState } from '@src/core/process-state.js'
 
 const { logged, config } = vi.hoisted(() => ({
   logged: { log: [] as unknown[][], error: [] as unknown[][], warn: [] as unknown[][] },
