@@ -217,9 +217,10 @@ export interface OnReady {
  * finished, so its partial setup is cleaned up.
  *
  * A start that fails, because a provider's factory or the login failed, shuts down what it made by the same rule, so
- * the process can end with its exit code. A value the app gave with `useValue` is left open until the bot stops: a
- * retry of `start()` makes the rest again, and `app.stop()`, a Ctrl+C or a SIGTERM closes it. A Ctrl+C or a SIGTERM
- * while a failed start shuts down waits for that shutdown to finish.
+ * the process can end with its exit code. A value the app gave with `useValue` is left open: a retry of `start()` makes
+ * the rest again, and once the bot stops, by `app.stop()`, a Ctrl+C or a SIGTERM, the value is shut down by the same
+ * rule, which leaves out one with an `onReady` a failed start never ran. A stop while a failed start shuts down waits
+ * for that shutdown, all within one `shutdownTimeout`.
  *
  * @example
  * ```ts

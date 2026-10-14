@@ -277,7 +277,7 @@ export class MeoCordApp implements MeoCordApplication {
         // for, and then while it holds a value it was given open, which a signal closes as stop() does. One that holds
         // nothing leaves, so a signal later stops only the apps that run; a stopped start stays until its close settles
         if (!this.closing) {
-          this.undoing = this.undoStart()
+          this.undoing = this.undoStart().finally(() => (this.undoing = undefined))
           await this.undoing
           if (!this.closing && !this.holdsOpen()) runningApps.delete(this.close)
         }
@@ -329,7 +329,7 @@ export class MeoCordApp implements MeoCordApplication {
   /** Whether a start has marked where it began and not been undone, so a failed one drops what it made exactly once. */
   private begun = false
 
-  /** The last failed start's {@link undoStart}, which a stop waits for before it closes what is left. */
+  /** A failed start's {@link undoStart} under way, which a stop waits for before it closes what is left. */
   private undoing?: Promise<void>
 
   /** Whether a shutdown has an `onShutdown` to run, as for a value the app gave once a failed start is undone. */
@@ -736,8 +736,8 @@ export class MeoCordApp implements MeoCordApplication {
     return entries
   }
 
-  /** Runs the `onShutdown` hooks through the shutdown sequence, within the configured `shutdownTimeout`. */
-  private async runShutdownHooks(): Promise<void> {
+  /** Runs the `onShutdown` hooks through the shutdown sequence, within `timeoutMs`: the stop's share of `shutdownTimeout`. */
+  private async runShutdownHooks(timeoutMs: number): Promise<void> {
     // Read once the onReady in progress settled
     await runShutdownSequence(this.container, () => this.shutdownEntries(), {
       // No new call starts once the listeners are gone; an error the client emits meanwhile still has its listeners
@@ -749,7 +749,7 @@ export class MeoCordApp implements MeoCordApplication {
       drainAlways: true,
       runningCalls: () => this.calls.running(),
       readyPass: this.readyPass,
-      timeoutMs: this.shutdownTimeout,
+      timeoutMs,
       hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
       warn: message => this.logger.warn(message),
     })
@@ -797,8 +797,14 @@ export class MeoCordApp implements MeoCordApplication {
 
   private async shutDownClient(): Promise<boolean> {
     this.logger.log('Shutting down bot...')
-    // A failed start's shutdown under way finishes first, so its hooks run in full, before those of what it left open
-    await this.undoing
+    // A failed start's shutdown under way finishes first, so its hooks run in full, before those of what it left open.
+    // `shutdownTimeout` bounds the whole stop, as a shard's manager waits only that long, so the rest gets what is left
+    let timeoutMs = this.shutdownTimeout
+    if (this.undoing) {
+      const waitedFrom = Date.now()
+      await this.undoing
+      timeoutMs = Math.max(0, timeoutMs - (Date.now() - waitedFrom))
+    }
     // So nothing is made after the bot has shut down; a factory that fails meanwhile is a failure of the stop too
     const startupFailed = this.preparing !== undefined && (await this.waitForStartup(this.preparing))
 
@@ -808,7 +814,7 @@ export class MeoCordApp implements MeoCordApplication {
       this.logger.log('The bot was still logging in, so it stops without coming online')
       this.bot.removeAllListeners()
       this.abortLogin()
-      await this.runShutdownHooks()
+      await this.runShutdownHooks(timeoutMs)
       this.logger.log('Bot has shut down')
       return true
     }
@@ -816,7 +822,7 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.activityInterval) clearInterval(this.activityInterval)
 
     // The calls drain on every shutdown, and the onReady in progress settles first
-    await this.runShutdownHooks()
+    await this.runShutdownHooks(timeoutMs)
 
     try {
       this.bot.removeAllListeners()
