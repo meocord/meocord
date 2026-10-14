@@ -78,8 +78,10 @@ describe('a start that failed', () => {
   let exit: ReturnType<typeof vi.spyOn>
   let signalListeners: NodeJS.SignalsListener[]
 
-  // The first import transforms the modules, which a cold run would otherwise count against the first case
-  beforeAll(() => load())
+  // The first import transforms the modules, which a cold run would otherwise count against the first case. About 2 s
+  // on a healthy runner, several times that on a slow one
+  const WARM_UP_TIMEOUT_MS = 30_000
+  beforeAll(() => load(), WARM_UP_TIMEOUT_MS)
 
   beforeEach(() => {
     logged.log.length = 0
