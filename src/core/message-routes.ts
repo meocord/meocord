@@ -4,7 +4,7 @@ import { type ControllerClass } from '@src/core/component-routes.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
-import { type GivenFlag, isLiteralFlag, isSpace, literalFlags, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { type GivenFlag, type GivenWords, isLiteralFlag, isSpace, literalFlags, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { startupError } from '@src/util/refusal.util.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { Logger } from '@src/common/logger.js'
@@ -872,7 +872,7 @@ export function matchMessageCommand(
   routes: readonly MessageRoute[],
   content: string,
   starts: MessageStarts,
-): { route: MessageRoute; start: string; given: number } | undefined {
+): { route: MessageRoute; start: string; given: GivenWords } | undefined {
   let index = indexes.get(routes)
   if (!index) indexes.set(routes, (index = compileIndex(routes)))
   let first = 0
@@ -881,8 +881,8 @@ export function matchMessageCommand(
   const text = content.trim()
 
   // The command's usage comes from a route whose scope fits, else from one whose reply says where it works
-  let best: { rank: number; start: string; given: number } | undefined
-  let outside: { rank: number; start: string; given: number } | undefined
+  let best: { rank: number; start: string; given: GivenWords } | undefined
+  let outside: { rank: number; start: string; given: GivenWords } | undefined
   for (const group of index.groups) {
     if (group.prefix === false && !(group.mentionOnly && starts.inGuild !== false)) continue
     const rest = restFor(group, text, starts)
@@ -898,9 +898,10 @@ export function matchMessageCommand(
       if (best && rank >= best.rank) break
       const flagged = routes[rank].flags.length > 0
       const words = flagged ? scanned.words : plain
-      const taken = commandWordsTaken(commandWordsOf(routes[rank].tokens), words, flagged ? scanned.flags : NONE, group.caseSensitive)
+      const flags = flagged ? scanned.flags : NONE
+      const taken = commandWordsTaken(commandWordsOf(routes[rank].tokens), words, flags, group.caseSensitive)
       if (taken !== -1) {
-        const named = { rank, start: text.slice(0, text.length - rest.length), given: words.length - taken }
+        const named = { rank, start: text.slice(0, text.length - rest.length), given: { words, flags } }
         if (fitsScope(routes[rank].scope, starts.inGuild)) {
           best = named
           break
@@ -990,7 +991,7 @@ export function hasMessageText(content: unknown): boolean {
  * What a test calling a handler with a message alone passes as its params, as dispatch builds them: `undefined` for a
  * listener, `{}` for a message whose content isn't a string, as a mock's without strict mocks, else what the pattern
  * captures with the route and start; for one naming the command without fitting it, the route, start and `given`, the
- * words after the command words. Either only when dispatch would give the message to this handler among
+ * message's words and flags. Either only when dispatch would give the message to this handler among
  * `controllers`; otherwise why it does not reach the handler, a message with no text included.
  */
 export async function messageParamsFor(
@@ -999,7 +1000,7 @@ export async function messageParamsFor(
   message: Message,
   options: MessageCommandOptions,
   controllers: readonly ControllerClass[] = [controllerClass],
-): Promise<{ params: Record<string, string>; route?: MessageRoute; start?: string; given?: number } | { mismatch: string } | undefined> {
+): Promise<{ params: Record<string, string>; route?: MessageRoute; start?: string; given?: GivenWords } | { mismatch: string } | undefined> {
   // The handler's pattern and its aliases, ranked as dispatch ranks them
   const routes = buildMessageRoutes([controllerClass], options).filter(candidate => candidate.method === methodName)
   if (routes.length === 0) return undefined

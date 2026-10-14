@@ -66,6 +66,7 @@ import {
   usesAppPrefix,
 } from '@src/core/message-routes.js'
 import { messageCommandHooks, subcommandUsageError } from '@src/core/message-params.js'
+import { type GivenWords } from '@src/core/message-words.js'
 import { CommandNotFoundError } from '@src/common/errors.js'
 import { existingResponse } from '@src/common/response/response-state.js'
 
@@ -475,7 +476,7 @@ export class Dispatcher {
     if (message.author.bot || !hasMessageText(message.content)) return
     const call = this.callFor(record)
 
-    let target: { route: MessageRoute; params: Record<string, string>; start: string; given?: number } | undefined
+    let target: { route: MessageRoute; params: Record<string, string>; start: string; given?: GivenWords } | undefined
     try {
       if (this.messageRoutes.length > 0) {
         const starts = await messageStartsFor(this.messageRoutes, this.messageOptions, message, this.options.botUserId(message))
