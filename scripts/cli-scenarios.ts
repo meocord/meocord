@@ -27,7 +27,7 @@ import { pathToFileURL } from 'url'
 import { ControllerType } from '../src/enum/controller.enum.js'
 import { AUTOCOMPLETE_QUERY_OPTION } from '../src/bin/generator.js'
 import { startFakeDiscord } from './lib/fake-discord.js'
-import { cleanEnv, installedCliOf, mustRun, outputOf, pack, renderApp } from './lib/packed-app.js'
+import { cleanEnv, eslintScriptOf, installedCliOf, isRunning, mustRun, outputOf, pack, renderApp } from './lib/packed-app.js'
 
 type Tier = 'fast' | 'slow'
 type Runtime = 'node' | 'bun'
@@ -653,7 +653,13 @@ function run(command: string, args: string[], dir: string, scenario: Scenario): 
     const timeoutMs = scenario.timeoutMs ?? 120_000
     const timeout = setTimeout(() => {
       // What was still running, and how much CPU each had used, tells a process stuck waiting from one still working
-      error = `did not finish within ${timeoutMs / 1000}s; still running:\n${processTree(child.pid!)}`
+      const listing = performance.now()
+      const tree = processTree(child.pid!)
+      // Listing processes takes seconds on Windows, and a command that ended meanwhile was slow, not stuck
+      error = isRunning(child.pid!)
+        ? `did not finish within ${timeoutMs / 1000}s; still running:\n${tree}`
+        : `did not finish within ${timeoutMs / 1000}s, and ended while its processes were listed, ` +
+          `${((performance.now() - listing) / 1000).toFixed(1)}s later: slow, not stuck`
       toGroup('SIGKILL')
     }, timeoutMs)
 
@@ -1034,7 +1040,8 @@ const scenarios: Scenario[] = [
       expect: { code: 0, creates: [`src/${kind}s/admin/probe.${kind}.ts`] },
     },
   ]),
-  // npm writes node_modules/.bin/eslint.cmd on Windows, which can't be spawned without a shell
+  // npm writes node_modules/.bin/eslint.cmd on Windows, which can't be spawned without a shell. Setup has run the app's
+  // ESLint once, so this checks the generate and its formatting, not how long a cold ESLint takes to load
   {
     name: 'generate in an app npm installed reports the file created, with no failure from formatting it',
     // An npm install and its ESLint run: the Windows job, where the shim is a .cmd, and the slow tier
@@ -2121,10 +2128,12 @@ async function main(): Promise<void> {
     // Packages that make errors with Error.captureStackTrace, for the scenarios that load them under the stack hook
     mustRun('add error-making packages to the application', process.execPath, ['add', 'axios@^1.20.0', 'depd@^2.0.0', 'ioredis@^6.0.0', 'node-fetch@^2.7.0'], appDir)
     mustRun('install the application', process.execPath, ['install'], appDir)
+    warmESLint('the application', appDir)
     cpSync(path.join(appDir, '.env.example'), path.join(appDir, '.env'))
     if (selected.some(scenario => scenario.cwd === 'npm-app')) {
       renderApp(npmAppDir, tarball, 'npm')
       mustRun('install the application with npm', 'npm', ['install', '--no-audit', '--no-fund'], npmAppDir)
+      warmESLint('the application npm installed', npmAppDir)
       cpSync(path.join(npmAppDir, '.env.example'), path.join(npmAppDir, '.env'))
     }
     if (selected.some(scenario => scenario.cwd === 'pnpm-app')) renderApp(pnpmAppDir, tarball, 'pnpm')
@@ -2134,6 +2143,8 @@ async function main(): Promise<void> {
     await new Promise<void>(resolve => stalledApi.listen(0, '127.0.0.1', resolve))
     process.env[STALLED_API_ENV] = `http://127.0.0.1:${(stalledApi.address() as AddressInfo).port}/api`
     stallServer = stalledApi
+    // Installs and the first ESLint runs, which no scenario's bound covers
+    console.log(`Set up in ${((performance.now() - started) / 1000).toFixed(0)}s\n`)
 
     let failed = 0
     for (const scenario of selected) {
@@ -2159,5 +2170,13 @@ async function main(): Promise<void> {
 }
 
 let stallServer: Server | undefined
+
+/**
+ * Runs an installed application's own ESLint once, as setup. Its first run reads TypeScript, typescript-eslint and the
+ * config cold, which took 124 s once on a fresh Windows install, so a generate scenario after it times the generate.
+ */
+function warmESLint(app: string, dir: string): void {
+  mustRun(`load ${app}'s ESLint once`, 'node', [eslintScriptOf(dir), 'src/app.ts'], dir)
+}
 
 await main()
