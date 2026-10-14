@@ -4,7 +4,8 @@ import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockClient, createMockInteraction, createMockUser } from './index.js'
+import { Cooldown, Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
+import { createMockClient, createMockGuild, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from './index.js'
 
 let warned: string[]
 beforeEach(() => {
@@ -64,11 +65,14 @@ describe("a mock user's DM channel's own keys", () => {
 })
 
 describe("a mock DM interaction's channel", () => {
-  it('reads in default mode with no warning, as the mock places it itself', async () => {
+  it("is the user's DM channel, with no warning until the test reads its client", async () => {
     const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
+    const dm = await interaction.user.createDM()
 
-    expect(interaction.channel).toBe(await interaction.user.createDM())
-    expect(warned.filter(text => W_OWN_CLIENT.test(text))).toHaveLength(1)
+    expect(interaction.channel).toBe(dm)
+    expectWarned([])
+    void dm.client
+    expectWarned([W_OWN_CLIENT])
   })
 
   it('warns of nothing when only the mock reads it', () => {
@@ -131,5 +135,31 @@ describe("a mock client's users.send()", () => {
     expect(channel.send).toHaveBeenCalledWith('hello')
     expect(message.channel).toBe(channel)
     expect(message.channel.type).toBe(ChannelType.DM)
+  })
+})
+
+// MeoCord DMs a message's author itself, as dmOnCooldown does; only a test's own read of the channel's client warns
+describe("a default-mode DM channel's client", () => {
+  @Controller()
+  class Daily {
+    @MessageHandler('daily')
+    @Cooldown({ seconds: 60 })
+    claim() {}
+  }
+
+  @MeoCord({ controllers: [Daily], messages: { prefix: '!', dmOnCooldown: true }, clientOptions: { intents: [] } })
+  class App {}
+
+  it('stays quiet when MeoCord DMs the author on a cooldown', async () => {
+    const module = MeoCordTestingModule.fromApp(App).compile()
+    const author = createMockUser()
+    const guild = createMockGuild()
+    const first = createMockMessage({ content: '!daily', author, guild })
+    const second = createMockMessage({ content: '!daily', author, guild })
+    await module.dispatch(first)
+    await module.dispatch(second)
+
+    expect(author.send).toHaveBeenCalledTimes(1)
+    expectWarned([])
   })
 })
