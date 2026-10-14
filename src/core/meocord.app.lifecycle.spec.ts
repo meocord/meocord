@@ -52,6 +52,12 @@ async function load() {
   return { discord, inject, CooldownStore, MemoryCooldownStore, CommandType, createMockInteraction, getResponse, ...app, ...factory, ...decorators }
 }
 
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still imports fresh
+beforeAll(async () => {
+  await load()
+})
+
 type Loaded = Awaited<ReturnType<typeof load>>
 
 /** Starts an app built by the factory, with a client that logs in without a network. */
