@@ -52,9 +52,14 @@ function typedMethods(): TypedMethod[] {
 }
 
 describe('a mock of a discord.js method that returns a promise without being async', () => {
+  // Reading discord.js's typings builds a TypeScript program, which is the file's setup rather than the test's
+  let methods: TypedMethod[]
+  beforeAll(() => {
+    methods = typedMethods()
+  })
+
   // A discord.js upgrade that adds such a method, or one that turns a listed name synchronous elsewhere, fails here
   it('resolves exactly where discord.js typings say the method returns a promise', () => {
-    const methods = typedMethods()
     expect(methods.length).toBeGreaterThan(100)
 
     const disagree = methods.filter(({ target, key, method, promise }) => returnsPromise(target, key, method) !== promise)

@@ -189,10 +189,17 @@ function routesFor(r: ReturnType<typeof random>): MessageRoute[] | undefined {
   }
 }
 
+// The seeds run, SEEDS_PER_TEST to a test, so no one test holds the whole run and a failure names its seeds
+const SEEDS = 600
+const SEEDS_PER_TEST = 10
+// Messages compared in each test, at the least: fewer means the generator mostly makes route sets dispatch refuses
+const MIN_COMPARED_PER_TEST = 250
+const seedRanges = Array.from({ length: SEEDS / SEEDS_PER_TEST }, (_, i) => ({ first: i * SEEDS_PER_TEST + 1, last: (i + 1) * SEEDS_PER_TEST }))
+
 describe('the compiled message index', () => {
-  it('picks the route and params a scan of the ranked routes picks, on random routes and messages', () => {
+  it.for(seedRanges)('picks the route and params a scan of the ranked routes picks, on random routes and messages, seeds $first to $last', ({ first, last }) => {
     let compared = 0
-    for (let seed = 1; seed <= 600; seed++) {
+    for (let seed = first; seed <= last; seed++) {
       const r = random(seed)
       const routes = routesFor(r)
       if (!routes) continue
@@ -210,6 +217,6 @@ describe('the compiled message index', () => {
         compared++
       }
     }
-    expect(compared).toBeGreaterThan(15_000)
+    expect(compared).toBeGreaterThanOrEqual(MIN_COMPARED_PER_TEST)
   })
 })

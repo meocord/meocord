@@ -46,6 +46,13 @@ async function load() {
   const { isExplainedError } = await import('@src/common/explained-error.js')
   return { discord, ...app, ...factory, ...decorators, ...manager, ...context, isExplainedError }
 }
+
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still imports fresh
+beforeAll(async () => {
+  await load()
+})
+
 type Loaded = Awaited<ReturnType<typeof load>>
 
 function appClass(
