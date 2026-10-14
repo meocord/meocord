@@ -70,7 +70,7 @@ const PROCESS_STATE = 'processState'
 
 /**
  * What the process's apps share, kept by both builds of this version, so a process that loads both has one pair of
- * signal listeners and one shutdown, which stops the apps either build started, and one exit code a failed login set.
+ * signal listeners and one shutdown, which stops the apps either build started, and one exit code a failed start set.
  */
 const processState = shared(PROCESS_STATE, () => ({
   /** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
@@ -78,8 +78,8 @@ const processState = shared(PROCESS_STATE, () => ({
   stopRequest: stopRequests(),
   signalHandlersInstalled: false,
   shuttingDown: undefined as Promise<void> | undefined,
-  /** Whether a failed login set the process exit code, so a later successful one knows to clear it. */
-  failedLoginSetExitCode: false,
+  /** Whether a failed start, of a provider's factory or the login, set the exit code, so a later login knows to clear it. */
+  startFailureSetExitCode: false,
   /** Whether `meocord start --dev` was told the bot could not log in, so a later login tells it the bot is online. */
   toldDevRunnerLoginFailed: false,
 }))
@@ -363,7 +363,7 @@ export class MeoCordApp implements MeoCordApplication {
         releaseAmbientAppTheme(this.container)
         if (process.exitCode === undefined || process.exitCode === 0) {
           process.exitCode = 1
-          processState.failedLoginSetExitCode = true
+          processState.startFailureSetExitCode = true
         }
         throw error
       }
@@ -453,7 +453,7 @@ export class MeoCordApp implements MeoCordApplication {
       if (fatal) await reportFatalLogin(this.shard, fatal, explanation ?? (error instanceof Error ? error.message : String(error)))
       if (process.exitCode === undefined || process.exitCode === 0) {
         process.exitCode = 1
-        processState.failedLoginSetExitCode = true
+        processState.startFailureSetExitCode = true
       }
       await tellDevRunner({ meocord: 'login-failed' }, this.shard)
       processState.toldDevRunnerLoginFailed = true
@@ -465,9 +465,9 @@ export class MeoCordApp implements MeoCordApplication {
     // A shutdown that began as the login completed has the client to close; the bot is not reported online
     if (this.closing) throw stoppedBeforeOnline()
     // 0 rather than undefined, which Bun ignores
-    if (processState.failedLoginSetExitCode && process.exitCode === 1) {
+    if (processState.startFailureSetExitCode && process.exitCode === 1) {
       process.exitCode = 0
-      processState.failedLoginSetExitCode = false
+      processState.startFailureSetExitCode = false
     }
     if (processState.toldDevRunnerLoginFailed) {
       processState.toldDevRunnerLoginFailed = false
