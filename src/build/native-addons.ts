@@ -1,6 +1,6 @@
 import { cpSync, existsSync, readdirSync, realpathSync } from 'fs'
 import path from 'path'
-import { type BuildPlatform, currentPlatform } from '@src/util/platform.util.js'
+import { type BuildPlatform, currentPlatform, LIBC_PLATFORM } from '@src/util/platform.util.js'
 import { readJsonFile } from '@src/util/json.util.js'
 
 /**
@@ -288,8 +288,9 @@ function allowedBy(field: unknown, value: string): boolean {
  * Whether an installed package is built for the platform, going by the `os`, `cpu` and `libc` its
  * package.json declares. A package that declares none of them runs anywhere.
  *
- * `libc` is compared only when the build platform's C library is known, so a runtime that cannot
- * report it keeps the package rather than dropping it on a guess.
+ * `libc` is compared only when the build platform's C library is known, so a Linux runtime that
+ * cannot report it keeps the package rather than dropping it on a guess. A platform with no C
+ * library to choose, such as macOS or Windows, takes no package that names one, as npm reads it.
  */
 export function isBuiltFor(dir: string, platform: BuildPlatform): boolean {
   let pkg: { os?: unknown; cpu?: unknown; libc?: unknown }
@@ -299,7 +300,8 @@ export function isBuiltFor(dir: string, platform: BuildPlatform): boolean {
     return true
   }
   if (!allowedBy(pkg.os, platform.platform) || !allowedBy(pkg.cpu, platform.arch)) return false
-  return !platform.libc || allowedBy(pkg.libc, platform.libc)
+  if (platform.libc) return allowedBy(pkg.libc, platform.libc)
+  return platform.platform === LIBC_PLATFORM || !pkg.libc
 }
 
 /**
