@@ -57,7 +57,7 @@ describe('a DM to a server-only message command whose words do not fit', () => {
   })
 
   it('still answers the words a message in a server lacks with the usage', async () => {
-    expect(await send('!pin', createMockGuild())).toEqual({ ran: [], reply: 'Usage: !pin <text…> --in=<in>\ntext is missing' })
+    expect(await send('!pin', createMockGuild())).toEqual({ ran: [], reply: 'Usage: !pin <text…> --in=<in>\ntext is missing\n--in is missing' })
     expect(await send('!kick', createMockGuild())).toEqual({ ran: [], reply: 'Usage: !kick <who> [reason…]\nwho is missing' })
   })
 
