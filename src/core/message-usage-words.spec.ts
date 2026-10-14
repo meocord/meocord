@@ -119,9 +119,9 @@ describe('the usage reply to a message that names a command without fitting it',
       expect(await replyTo(content, App, createMockGuild())).toEqual({ ran: [], reply })
     })
 
-    // The matcher takes only a mention or an ID before another param, so a role's name there has no true reply yet
-    it.each(['!tail Mods 3', '!tail mods 3'])("doesn't say %j names no role, in a server with a role named Mods", async content => {
-      expect(await replyTo(content, App, withMods())).toEqual({ ran: [], reply: `Usage: !tail [r] [n]\n${TOO_MANY}` })
+    // The matcher takes only a mention or an ID before another param, which no text says, so the usage stands alone
+    it.each(['!tail Mods 3', '!tail mods 3'])('answers %j with the usage alone, in a server with a role named Mods', async content => {
+      expect(await replyTo(content, App, withMods())).toEqual({ ran: [], reply: 'Usage: !tail [r] [n]' })
     })
 
     it.each([
@@ -172,5 +172,7 @@ describe('the usage reply to a message that names a command without fitting it',
 
     expect((await replyTo('!ticket 5', Translated, guild)).reply).toBe('Cara pakai: !ticket <id> close\nclose belum diisi')
     expect((await replyTo('!roll x y', Translated, guild)).reply).toBe('Cara pakai: !roll [a] [b]\na: "x" bukan bilangan bulat yang sah')
+    const withMods = Object.assign(createMockGuild({ roles: [{ id: '100000000000000011', name: 'Mods' } as never] }), { preferredLocale: 'id' })
+    expect((await replyTo('!tail Mods 3', Translated, withMods)).reply).toBe('Cara pakai: !tail [r] [n]')
   })
 })

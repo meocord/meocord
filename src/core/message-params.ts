@@ -428,7 +428,8 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
 /**
  * What is wrong with a command whose words a message named but whose pattern it does not fit, read word by word
  * against the pattern: each word or required param it left out, a word given another in its place, else words
- * beyond what the pattern takes, else the first word its param's built-in type does not take.
+ * beyond what the pattern takes, else the first word its param's built-in type does not take. With none of those true,
+ * there are none, and the usage stands alone.
  */
 export function missingParams(
   route: MessageRoute,
@@ -461,8 +462,9 @@ export function missingParams(
     }
   }
   if (missing.length > 0) return missing
-  if (w < words.length || !unfit) return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
-  return [wrongType(unfit, types)]
+  if (w < words.length) return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
+  // Else no reason MeoCord has a text for may be true, as for a role's name the matcher takes only as a mention or an ID
+  return unfit ? [wrongType(unfit, types)] : []
 }
 
 /**
