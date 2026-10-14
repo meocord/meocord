@@ -46,14 +46,19 @@ function gateway(loaded: Loaded, logins: (() => Promise<string>)[]) {
   return { clients, destroy }
 }
 
-/** An app whose provider's factory fails on the attempts listed, and gives a value otherwise. */
+/**
+ * An app whose provider's factory fails on the attempts listed, and gives a value otherwise. It injects a value the app
+ * gave, which has no hooks, so nothing stays open for a shutdown to close.
+ */
 function appWithFactory(loaded: Loaded, failOn: number[]) {
   let attempts = 0
   @loaded.MeoCord({
     controllers: [],
     providers: [
+      { provide: 'CONFIG', useValue: { region: 'eu' } },
       {
         provide: 'CACHE',
+        inject: ['CONFIG'],
         useFactory: async () => {
           if (failOn.includes(++attempts)) throw new Error('cache unreachable')
           return {}
@@ -98,7 +103,7 @@ describe('a start that failed', () => {
     vi.restoreAllMocks()
   })
 
-  it("is not shut down by a later signal when a provider's factory failed", async () => {
+  it("is not shut down by a later signal when a provider's factory failed and it holds nothing open", async () => {
     const loaded = await load()
     const { destroy } = gateway(loaded, [])
     const app = appWithFactory(loaded, [1])
@@ -172,6 +177,126 @@ describe('a start that failed', () => {
 
     expect(exit).not.toHaveBeenCalled()
     closed()
+    await stopped
+    await vi.waitFor(() => expect(exit).toHaveBeenCalled())
+  })
+
+  it("closes a value the app gave when a signal comes after a provider's factory failed", async () => {
+    const loaded = await load()
+    gateway(loaded, [])
+    const closed: string[] = []
+    @loaded.MeoCord({
+      controllers: [],
+      providers: [
+        { provide: 'POOL', useValue: { onShutdown: () => void closed.push('pool') } },
+        {
+          provide: 'CACHE',
+          inject: ['POOL'],
+          useFactory: async () => {
+            throw new Error('cache unreachable')
+          },
+        },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class GivenApp {}
+    await expect(loaded.MeoCordFactory.create(GivenApp).start()).rejects.toThrow('cache unreachable')
+    expect(closed).toEqual([])
+
+    process.emit('SIGINT')
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1))
+
+    expect(closed).toEqual(['pool'])
+  })
+
+  it("finishes a failed start's onShutdown hooks before a signal that comes during them exits", async () => {
+    const loaded = await load()
+    gateway(loaded, [])
+    const events: string[] = []
+    let closing!: () => void
+    const reachedClose = new Promise<void>(resolve => (closing = resolve))
+    let finish!: () => void
+    @loaded.MeoCord({
+      controllers: [],
+      providers: [
+        {
+          provide: 'POOL',
+          useFactory: async () => ({
+            onShutdown: async () => {
+              closing()
+              await new Promise<void>(resolve => (finish = resolve))
+              events.push('pool closed')
+            },
+          }),
+        },
+        {
+          provide: 'CACHE',
+          inject: ['POOL'],
+          useFactory: async () => {
+            throw new Error('cache unreachable')
+          },
+        },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class SlowCloseApp {}
+    exit.mockImplementation(((code: number) => void events.push(`exit ${code}`)) as never)
+    const start = loaded.MeoCordFactory.create(SlowCloseApp).start()
+    await reachedClose
+
+    process.emit('SIGINT')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(events).toEqual([])
+    finish()
+
+    await expect(start).rejects.toThrow('cache unreachable')
+    await vi.waitFor(() => expect(events).toEqual(['pool closed', 'exit 1']))
+  })
+
+  it("stays among the running apps when a stop comes during a failed start's onShutdown hooks, until its close settles", async () => {
+    const loaded = await load()
+    const { destroy } = gateway(loaded, [])
+    let destroyed!: () => void
+    destroy.mockReturnValue(new Promise<void>(resolve => (destroyed = resolve)))
+    let closing!: () => void
+    const reachedClose = new Promise<void>(resolve => (closing = resolve))
+    let finish!: () => void
+    @loaded.MeoCord({
+      controllers: [],
+      providers: [
+        {
+          provide: 'POOL',
+          useFactory: async () => ({
+            onShutdown: async () => {
+              closing()
+              await new Promise<void>(resolve => (finish = resolve))
+            },
+          }),
+        },
+        {
+          provide: 'CACHE',
+          inject: ['POOL'],
+          useFactory: async () => {
+            throw new Error('cache unreachable')
+          },
+        },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class StoppedCloseApp {}
+    const app = loaded.MeoCordFactory.create(StoppedCloseApp)
+    const start = app.start()
+    await reachedClose
+
+    const stopped = app.stop()
+    finish()
+    await expect(start).rejects.toThrow('cache unreachable')
+    await vi.waitFor(() => expect(destroy).toHaveBeenCalled())
+    process.emit('SIGINT')
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(exit).not.toHaveBeenCalled()
+    destroyed()
     await stopped
     await vi.waitFor(() => expect(exit).toHaveBeenCalled())
   })

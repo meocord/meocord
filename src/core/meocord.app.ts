@@ -264,8 +264,8 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Logs the bot in, as {@link MeoCordApplication.start} describes. The providers, services and event handlers are set
-   * up once, or again after a provider's factory failed; a retry after a failed login reuses them.
+   * Logs the bot in, as {@link MeoCordApplication.start} describes. The event handlers are attached once; the providers
+   * and services are made for each start, as a failed one, of a factory or the login, shuts them down and drops them.
    */
   async start(): Promise<void> {
     if (isRegisterOnly()) return this.registerOnly()
@@ -273,11 +273,13 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.online) return
     this.starting ??= this.startOnce()
       .catch(async error => {
-        // A failed start leaves the running apps, so a signal later stops only the apps that run; a stopped start stays
-        // until its close settles
+        // A failed start stays among the running apps while it shuts down what it made, which a stop meanwhile waits
+        // for, and then while it holds a value it was given open, which a signal closes as stop() does. One that holds
+        // nothing leaves, so a signal later stops only the apps that run; a stopped start stays until its close settles
         if (!this.closing) {
-          runningApps.delete(this.close)
-          await this.undoStart()
+          this.undoing = this.undoStart()
+          await this.undoing
+          if (!this.closing && !this.holdsOpen()) runningApps.delete(this.close)
         }
         // A shard ends, for its manager to restart, or to stop all if told it is fatal; a stopped start is the stop's
         if (this.shard && !this.closing) endFailedShard(error)
@@ -326,6 +328,14 @@ export class MeoCordApp implements MeoCordApplication {
 
   /** Whether a start has marked where it began and not been undone, so a failed one drops what it made exactly once. */
   private begun = false
+
+  /** The last failed start's {@link undoStart}, which a stop waits for before it closes what is left. */
+  private undoing?: Promise<void>
+
+  /** Whether a shutdown has an `onShutdown` to run, as for a value the app gave once a failed start is undone. */
+  private holdsOpen(): boolean {
+    return this.shutdownEntries().some(({ instance }) => typeof instance.onShutdown === 'function')
+  }
 
   /** The `start()` under way, which a concurrent call waits for. */
   private starting?: Promise<void>
@@ -787,6 +797,8 @@ export class MeoCordApp implements MeoCordApplication {
 
   private async shutDownClient(): Promise<boolean> {
     this.logger.log('Shutting down bot...')
+    // A failed start's shutdown under way finishes first, so its hooks run in full, before those of what it left open
+    await this.undoing
     // So nothing is made after the bot has shut down; a factory that fails meanwhile is a failure of the stop too
     const startupFailed = this.preparing !== undefined && (await this.waitForStartup(this.preparing))
 
