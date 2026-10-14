@@ -280,6 +280,60 @@ function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandO
   return alike && (byOptional ? 'optional' : true)
 }
 
+/** What a static empty prefix list does now, which a prefix function's `[]` doesn't: take messages as they are. */
+const EMPTY_PREFIX_LIST = "`[]` takes messages as they are, with no prefix; write `''` for that"
+
+/**
+ * The warnings for message handlers a bot starts with today though a message can't reach them as written, each once,
+ * for the app or the handler: a static empty prefix list, which takes messages as they are, where a prefix function's
+ * `[]` starts no command; and two flags of a command that reads flags in any case whose names differ only in case, the
+ * second of which is never set. The next major version (5.0) changes the first and refuses the second.
+ */
+export function messageRouteWarnings(routes: readonly MessageRoute[], options: MessageCommandOptions): string[] {
+  const warnings: string[] = []
+  if (Array.isArray(options.prefix) && options.prefix.length === 0) {
+    warnings.push(
+      `@MeoCord({ messages: { prefix: [] } }): ${EMPTY_PREFIX_LIST}. In the next major version (5.0), \`[]\` starts no command, ` +
+        "as a prefix function's `[]` does.",
+    )
+  }
+  const seen = new Map<ControllerClass, Map<string, Set<string>>>()
+  for (const route of routes) {
+    // A handler's aliases share its options and flags, so each is read once; one method can carry several handlers
+    const pattern = route.aliasOf ?? route.pattern
+    const methods = seen.get(route.controllerClass) ?? seen.set(route.controllerClass, new Map()).get(route.controllerClass)!
+    const patterns = methods.get(route.method) ?? methods.set(route.method, new Set()).get(route.method)!
+    if (patterns.has(pattern)) continue
+    patterns.add(pattern)
+    const handler = `${route.controllerClass.name}.${route.method}: @MessageHandler('${pattern}'`
+    const own = getMessageHandlers(route.controllerClass.prototype).find(
+      candidate => candidate.method === route.method && candidate.pattern === pattern,
+    )?.options
+    if (Array.isArray(own?.prefix) && own.prefix.length === 0) {
+      warnings.push(
+        `${handler}, { prefix: [] }): ${EMPTY_PREFIX_LIST}, or \`false\` for no prefix and no mention. In the next major ` +
+          'version (5.0), `[]` starts no command.',
+      )
+    }
+    if (route.caseSensitive) continue
+    const first = new Map<string, FlagToken>()
+    for (const flag of route.flags) {
+      const same = first.get(flag.flag.toLowerCase())
+      if (!same) {
+        first.set(flag.flag.toLowerCase(), flag)
+        continue
+      }
+      warnings.push(
+        `${handler}): ${writtenFlag(same)} and ${writtenFlag(flag)} differ only in case, and this command reads flags in any ` +
+          `case, so --${flag.flag} always sets ${writtenFlag(same)} and ${writtenFlag(flag)} is never set. Rename one, or set ` +
+          'caseSensitive: true. The next major version (5.0) refuses this.',
+      )
+      break
+    }
+  }
+  return warnings
+}
+
 /**
  * Every patterned message handler of the given controllers, most specific first, read from metadata
  * alone. Throws for a pattern or handler option that cannot be read and for two that match the same messages.
