@@ -4,6 +4,7 @@ import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { log: [] as unknown[][], error: [] as unknown[][] } }))
 
@@ -78,9 +79,7 @@ describe('a start that failed', () => {
   let exit: ReturnType<typeof vi.spyOn>
   let signalListeners: NodeJS.SignalsListener[]
 
-  // The first import transforms the modules, which a cold run would otherwise count against the first case. About 2 s
-  // on a healthy runner, several times that on a slow one
-  const WARM_UP_TIMEOUT_MS = 30_000
+  // The first import transforms the modules, which a cold run would otherwise count against the first case
   beforeAll(() => load(), WARM_UP_TIMEOUT_MS)
 
   beforeEach(() => {
