@@ -6,7 +6,10 @@ import type * as DecoratorModule from '@src/decorator/index.js'
 import { forgetProcessState } from '@src/core/process-state.js'
 import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
-const { logged } = vi.hoisted(() => ({ logged: { log: [] as unknown[][], error: [] as unknown[][] } }))
+const { logged, config } = vi.hoisted(() => ({
+  logged: { log: [] as unknown[][], error: [] as unknown[][] },
+  config: { discordToken: 'token' } as { discordToken: string; shutdownTimeout?: number },
+}))
 
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -19,7 +22,7 @@ vi.mock('@src/common/index.js', async importOriginal => ({
     error = (...args: unknown[]) => logged.error.push(args)
   },
 }))
-vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'token' }) }))
+vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => config }))
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
 /** Fresh modules and a forgotten shutdown per test, as a new process has: the running apps and the shutdown are process-wide. */
@@ -77,6 +80,9 @@ function onlineApp(loaded: Loaded) {
   return loaded.MeoCordFactory.create(OnlineApp)
 }
 
+/** A `shutdownTimeout` long enough that a stop given a fresh one, half as long again, is told apart under load. */
+const SHARED_TIMEOUT_MS = 1_000
+
 const shutdownLines = () => logged.log.flat().filter(line => line === 'Shutting down bot...' || line === 'Bot has shut down')
 
 describe('a start that failed', () => {
@@ -100,6 +106,7 @@ describe('a start that failed', () => {
       }
     }
     process.exitCode = exitCode
+    delete config.shutdownTimeout
     vi.restoreAllMocks()
   })
 
@@ -251,6 +258,62 @@ describe('a start that failed', () => {
 
     await expect(start).rejects.toThrow('cache unreachable')
     await vi.waitFor(() => expect(events).toEqual(['pool closed', 'exit 1']))
+  })
+
+  it("closes what a failed start left open within what remains of shutdownTimeout when a signal comes during its hooks", async () => {
+    config.shutdownTimeout = SHARED_TIMEOUT_MS
+    const loaded = await load()
+    gateway(loaded, [])
+    const hang = () => new Promise<void>(() => {})
+    let closing!: () => void
+    const reachedClose = new Promise<void>(resolve => (closing = resolve))
+    let givenClosing = false
+    @loaded.MeoCord({
+      controllers: [],
+      providers: [
+        {
+          provide: 'GIVEN',
+          useValue: {
+            onShutdown: () => {
+              givenClosing = true
+              return hang()
+            },
+          },
+        },
+        {
+          provide: 'POOL',
+          inject: ['GIVEN'],
+          useFactory: async () => ({
+            onShutdown: () => {
+              closing()
+              return hang()
+            },
+          }),
+        },
+        {
+          provide: 'CACHE',
+          inject: ['POOL'],
+          useFactory: async () => {
+            throw new Error('cache unreachable')
+          },
+        },
+      ],
+      clientOptions: { intents: [] },
+    })
+    class HangingCloseApp {}
+    let exitedAt = 0
+    exit.mockImplementation((() => void (exitedAt = Date.now())) as never)
+    void loaded.MeoCordFactory.create(HangingCloseApp).start().catch(() => undefined)
+    await reachedClose
+    await new Promise(resolve => setTimeout(resolve, SHARED_TIMEOUT_MS / 2))
+
+    const signalledAt = Date.now()
+    process.emit('SIGINT')
+    await vi.waitFor(() => expect(exitedAt).toBeGreaterThan(0), { timeout: SHARED_TIMEOUT_MS * 3 })
+
+    expect(givenClosing).toBe(true)
+    // The failed start's own hooks end at their deadline, half a timeout after the signal; the given value's get the half left
+    expect(exitedAt - signalledAt).toBeLessThan(SHARED_TIMEOUT_MS * 1.25)
   })
 
   it("stays among the running apps when a stop comes during a failed start's onShutdown hooks, until its close settles", async () => {
