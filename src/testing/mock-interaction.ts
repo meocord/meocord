@@ -539,7 +539,7 @@ const COLLECTING_METHODS = new Set(['awaitMessages', 'awaitReactions'])
 const dmChannels = new WeakMap<object, object>()
 /**
  * A user's one DM channel: its recipient is the user, and it is the user's `dmChannel`. Under strict mocks its client
- * is the user's; default mode keeps a client of its own, and a test's `createDM()` warns once.
+ * is the user's; default mode keeps a client of its own, and a read of it warns once where it isn't the user's.
  */
 function dmChannelOf(user: object): object {
   let channel = dmChannels.get(user)
@@ -552,12 +552,32 @@ function dmChannelOf(user: object): object {
       const place = (target: object, key: string, value: unknown) => Object.defineProperty(target, key, { value, writable: true, configurable: true })
       place(made, 'recipient', user)
       place(user, 'dmChannel', made)
-      if (strictMocks() && user.client instanceof Client) place(made, 'client', user.client)
+      if (user.client instanceof Client) {
+        if (strictMocks()) place(made, 'client', user.client)
+        else warnOnClientRead(made, user.client)
+      }
     }
     channel = made
     dmChannels.set(user, channel)
   }
   return channel
+}
+
+/**
+ * Has a read of a default-mode DM channel's `client`, its own where strict mocks give the user's, warn once, so a test
+ * that reads it hears of the difference and the mock's own reads, as a send through the channel makes, stay quiet.
+ */
+function warnOnClientRead(channel: Record<string, unknown>, userClient: Client): void {
+  if (readPlaceQuietly(() => channel.client) === userClient) return
+  // The read is answered by the channel's stub, which warns by the mock's own instance
+  warnOnRead((mockTargets.get(channel) ?? channel) as Record<string, unknown>, 'client', () => {
+    if (readingPlace > 0) return
+    warnOnce(
+      mockLogger,
+      "A mock user's DM channel here has a client of its own, not the user's; under useStrictMocks() it shares the user's " +
+        'client.',
+    )
+  })
 }
 
 // What default mode's user manager DMs do apart from discord.js's, warned of once each
@@ -785,21 +805,7 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
       return key === 'createDM' ? resolved.createDM() : (resolved.send as (...rest: unknown[]) => unknown)(...args)
     })
   }
-  if (key === 'createDM') {
-    return createMockFn(async () => {
-      const user = receiver()
-      const channel = dmChannelOf(user) as { client?: unknown }
-      // Warned at the call, so the mock's own reads of a DM interaction's channel stay quiet
-      if (user instanceof User && user.client instanceof Client && channel.client !== user.client) {
-        warnOnce(
-          mockLogger,
-          "A mock user's DM channel here has a client of its own, not the user's; under useStrictMocks() it shares the " +
-            "user's client.",
-        )
-      }
-      return channel
-    })
-  }
+  if (key === 'createDM') return createMockFn(async () => dmChannelOf(receiver()))
   if (key === 'send' && target instanceof User) {
     return createMockFn(async (...args: unknown[]) => ((await (receiver() as User).createDM()).send as (...args: unknown[]) => unknown)(...args))
   }
@@ -3684,7 +3690,8 @@ function warnOnSentReads(instance: Record<string, unknown>, stubs: Map<string, M
  * a DM send in a server of its own and keeps another author, with a warning when read.
  */
 function sentMessage(held: HeldMessage, channel: unknown, client?: unknown, fields: MockMessageOverrides = {}, made?: MadePlace): MockMessage {
-  const by = (client ?? (channel as { client?: unknown } | null | undefined)?.client) as Client | undefined
+  // The mock's own read of where the message was sent
+  const by = (client ?? readPlaceQuietly(() => (channel as { client?: unknown } | null | undefined)?.client)) as Client | undefined
   const inChannel = channel instanceof BaseChannel
   const dm = inChannel && channel.isDMBased()
   const strict = strictMocks()
