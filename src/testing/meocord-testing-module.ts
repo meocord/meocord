@@ -67,7 +67,7 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { HandlerRegistry, listEventSources } from '@src/core/handler-registry.js'
 import { type EventSource, eventSources } from '@src/core/event-sources.js'
-import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
+import { adviseInPlaceOfInjecting, boundBeforeProviders, meocordClasses } from '@src/core/meocord-classes.js'
 import { assertStartupClasses, lateGuardCheck, perCallEventWarnings, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
@@ -84,6 +84,7 @@ import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/s
 import { describeValue, isConstructor, withArticle } from '@src/util/value.util.js'
 import {
   assertProvided,
+  appProviderRefusal,
   assertProvidedServices,
   bindProvider,
   bindsOwnToken,
@@ -1015,7 +1016,9 @@ export class TestingModuleBuilder {
   /**
    * Replaces a provider with a test double.
    *
-   * The double needs only the members the test uses; misspelled member names are still rejected.
+   * The double needs only the members the test uses; misspelled member names are still rejected. A token MeoCord binds
+   * itself, such as `ShardContext` or `HandlerRegistry`, takes the double in place of MeoCord's own, so a test can stub
+   * cross-shard calls.
    *
    * @param token - The provider to replace.
    * @example
@@ -1217,6 +1220,17 @@ export class TestingModuleBuilder {
         // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them
         // by token, then the overrides, which win
         const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
+        // The app's own providers checked as the bot checks them. A token the module binds itself above fails at its
+        // first call, so it is refused; another the bot binds before its providers is refused under strict mocks, and
+        // runs here in default mode with a warning
+        const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
+        const botBinds = boundBeforeProviders(i18n !== undefined)
+        for (const token of providers.keys()) {
+          const refusal = appProviderRefusal(`${this.options.app?.name}`, token, own => botBinds.includes(own), new Logger('TestingModule'))
+          if (!refusal) continue
+          if (container.isBound(token as ServiceIdentifier) || strictMocks()) startupError(refusal)
+          else warnOnce(new Logger('TestingModule'), `${refusal.message} The testing module runs it; under useStrictMocks() compile() refuses it, as the bot does.`)
+        }
         for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
         for (const [token, override] of this.overrides) providers.set(token, override)
         // A stage override stands in for its class wherever the class is bound. A stage also provided takes the stub in
@@ -1258,7 +1272,6 @@ export class TestingModuleBuilder {
         // The themeFor class this module runs, the app's or overrideThemeFor's, bound on its own as the app binds it
         const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
         // Every class the module runs, as the app finds them, except stage classes an override stands in for
-        const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
         const appPresenterClass = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter
         const startup = startupClasses({
           controllers: (this.options.controllers ?? []).filter(isConstructor),
@@ -1329,8 +1342,12 @@ export class TestingModuleBuilder {
           bindsOwnToken(container, CooldownStore, store)
         }
 
-        // Before the controllers, so a class token that is provided is not also bound as itself
-        for (const provider of providers.values()) bindProvider(container, provider, bindClass)
+        // Before the controllers, so a class token that is provided is not also bound as itself. A test's provider of a
+        // token the module bound above, as HandlerRegistry or ShardContext, stands in for that binding
+        for (const provider of providers.values()) {
+          if (container.isBound(provider.provide as ServiceIdentifier)) container.unbind(provider.provide as ServiceIdentifier)
+          bindProvider(container, provider, bindClass)
+        }
 
         for (const ctrl of this.options.controllers ?? []) bindClass(ctrl)
         for (const service of services) bindClass(service)

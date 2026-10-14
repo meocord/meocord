@@ -22,6 +22,8 @@ import { ExecutionContext } from '@src/common/execution-context.js'
 import { createTranslator, Translator } from '@src/common/translator.js'
 import { ThemeCache } from '@src/core/theme-resolvers.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
+import { boundBeforeProviders, meocordClasses } from '@src/core/meocord-classes.js'
+import { tokenName } from '@src/core/providers.js'
 
 @Controller()
 class Ping {}
@@ -58,3 +60,25 @@ describe("a provider for a token MeoCord binds itself", () => {
     expect(warned).toEqual([])
   })
 })
+
+// The testing module refuses an app's provider of each token this list names, so the list is pinned to what the bot binds
+describe('the tokens the bot binds before an app\'s providers', () => {
+  const i18n = createTranslator({ default: 'en-US', locales: { 'en-US': {} } })
+  const refuses = (token: unknown) => {
+    @MeoCord({ controllers: [Ping], providers: [{ provide: token as never, useValue: {} }], i18n, clientOptions: { intents: [] } })
+    class App {}
+    try {
+      MeoCordFactory.create(App)
+      return false
+    } catch (error) {
+      return (error as Error).message.includes(`cannot provide ${tokenName(token)}, which MeoCord binds itself.`)
+    }
+  }
+
+  it('are the ones the bot refuses a provider of, among the tokens an app can name', () => {
+    const named = [...new Set([...boundBeforeProviders(true), ...meocordClasses()])]
+
+    expect(named.filter(refuses)).toEqual(boundBeforeProviders(true))
+  })
+})
+

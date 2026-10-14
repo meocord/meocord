@@ -1,5 +1,8 @@
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { ExecutionContext } from '@src/common/execution-context.js'
+import { type Logger } from '@src/common/logger.js'
+import { warnOnce } from '@src/common/deprecation.js'
+import { ThemeCache } from '@src/core/theme-resolvers.js'
 import { injectedTokens, undecoratedConstructor, untypedParameter } from '@src/core/guard-runner.js'
 import { meocordClassAdvice, meocordClasses } from '@src/core/meocord-classes.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
@@ -32,6 +35,24 @@ export function tokenName(token: unknown): string {
 
 const isToken = (value: unknown): value is ProviderToken =>
   typeof value === 'function' || typeof value === 'string' || typeof value === 'symbol'
+
+/**
+ * Checks one of an app's own `@MeoCord({ providers })` as the bot does. A provider of a token MeoCord binds later, or
+ * for each call, is warned about until 5.0 refuses it; one of a token `isOwn` names, which MeoCord binds before the
+ * providers, is refused.
+ *
+ * @returns The refusal, for the caller to report, or `undefined`.
+ */
+export function appProviderRefusal(appName: string, token: unknown, isOwn: (token: unknown) => boolean, logger: Logger): Error | undefined {
+  if (token === ThemeCache || token === ExecutionContext) {
+    warnOnce(
+      logger,
+      `${appName}: @MeoCord({ providers }) provides ${tokenName(token)}, which MeoCord binds itself; ` +
+        'the next major version (5.0) refuses it. Remove the provider.',
+    )
+  }
+  return isOwn(token) ? new Error(`${appName}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`) : undefined
+}
 
 /**
  * Checks each provider's shape and indexes them by token, reporting each that cannot be bound, such as one with no

@@ -8,7 +8,6 @@ import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-conf
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
-import { warnOnce } from '@src/common/deprecation.js'
 import { Translator } from '@src/common/translator.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
@@ -26,6 +25,7 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import {
   assertProvided,
   assertProvidedServices,
+  appProviderRefusal,
   bindProvider,
   bindsOwnToken,
   forgetFactoryValues,
@@ -59,7 +59,7 @@ import {
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { prepareLateThemes, registerClientTheme } from '@src/core/theme-runtime.js'
-import { ThemeCache, themeResolverClass } from '@src/core/theme-resolvers.js'
+import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import {
   allDeclaredErrors,
@@ -318,16 +318,9 @@ export class MeoCordFactory {
     // After MeoCord's own tokens, which a provider may not replace, and before the app's classes, so
     // a class token that is provided is not also bound as itself
     for (const [token, provider] of providers) {
-      // Bound later, or for each call, so not caught below; supported until 5.0 refuses it
-      if (token === ThemeCache || token === ExecutionContext) {
-        warnOnce(
-          this.logger,
-          `${(target as { name?: string }).name}: @MeoCord({ providers }) provides ${tokenName(token)}, which MeoCord binds itself; ` +
-            'the next major version (5.0) refuses it. Remove the provider.',
-        )
-      }
-      if (container.isBound(token as ServiceIdentifier)) {
-        startupError(new Error(`${(target as { name?: string }).name}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`))
+      const refusal = appProviderRefusal(`${(target as { name?: string }).name}`, token, own => container.isBound(own as ServiceIdentifier), this.logger)
+      if (refusal) {
+        startupError(refusal)
         continue
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))

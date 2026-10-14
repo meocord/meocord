@@ -1,3 +1,4 @@
+import { Client } from 'discord.js'
 import { CooldownStore } from '@src/common/cooldown-store.js'
 import {
   CooldownError,
@@ -17,6 +18,18 @@ import { ThemeCache } from '@src/core/theme-resolvers.js'
 
 /** The classes MeoCord binds itself, which an app's class may inject but MeoCord makes, never from their decorators. */
 export const meocordClasses = (): readonly unknown[] => [CooldownStore, ExecutionContext, HandlerRegistry, ShardContext, ThemeCache, Translator]
+
+/**
+ * The tokens the bot binds before an app's providers, which `@MeoCord({ providers })` cannot provide: `Translator` too
+ * when the app gives `i18n`.
+ */
+export const boundBeforeProviders = (i18n: boolean): readonly unknown[] => [
+  Client,
+  HandlerRegistry,
+  ShardContext,
+  CooldownStore,
+  ...(i18n ? [Translator] : []),
+]
 
 const created = (cls: { name: string }) => `create it with \`new ${cls.name}(…)\``
 
