@@ -456,8 +456,9 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
 /**
  * What is wrong with a command whose words a message named but whose pattern it does not fit, read word by word
  * against the pattern: each word or required param it left out, a word given another in its place, else words
- * beyond what the pattern takes, else the first word its param's built-in type does not take. With none of those true,
- * there are none, and the usage stands alone.
+ * beyond what the pattern takes, else the first word its param's built-in type does not take; and then each required
+ * flag it left out, as a message whose words fit is told. With none of those true, there are none, and the usage stands
+ * alone.
  */
 export function missingParams(
   route: MessageRoute,
@@ -467,15 +468,20 @@ export function missingParams(
 ): MessageUsageIssue[] {
   const { words, flags } = given
   const missing: MessageUsageIssue[] = []
+  // The flags given bare in place of the pattern's own `--` words, which are those words and set no flag
+  const literal = new Set<GivenFlag>()
   let unfit: Item | undefined
   let w = 0
   for (const token of route.tokens) {
     if ('literal' in token) {
-      if (w < words.length && caseKey(words[w].value, route.caseSensitive) === caseKey(token.literal, route.caseSensitive)) w++
-      // A pattern's own `--` word given bare in its place takes no word; another word in its place is not taken
-      else if (!flags.some(flag => isLiteralFlag(flag, token.literal, w, route.caseSensitive))) {
-        missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.literal } }))
+      if (w < words.length && caseKey(words[w].value, route.caseSensitive) === caseKey(token.literal, route.caseSensitive)) {
+        w++
+        continue
       }
+      // A pattern's own `--` word given bare in its place takes no word; another word in its place is not taken
+      const word = flags.find(flag => !literal.has(flag) && isLiteralFlag(flag, token.literal, w, route.caseSensitive))
+      if (word) literal.add(word)
+      else missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.literal } }))
     } else if (w === words.length) {
       if (!token.optional) missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.param } }, token.param))
     } else if (token.rest) {
@@ -489,10 +495,23 @@ export function missingParams(
       }
     }
   }
-  if (missing.length > 0) return missing
-  if (w < words.length) return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
-  // Else no reason MeoCord has a text for may be true, as for a role's name the matcher takes only as a mention or an ID
-  return unfit ? [wrongType(unfit, types)] : []
+  // With none of these, the reason may be one MeoCord has no text for, as a role's name the matcher takes only as a
+  // mention or an ID
+  const reasons =
+    missing.length > 0 ? missing
+    : w < words.length ? [usageIssue({ key: 'meocord.usage.tooManyWords' })]
+    : unfit ? [wrongType(unfit, types)]
+    : []
+  // So one reply names all the message lacks, rather than the flags only once its words fit
+  const missingFlags = route.flags
+    .filter(
+      flag =>
+        flag.type !== undefined &&
+        !flag.optional &&
+        !flags.some(sent => !literal.has(sent) && caseKey(sent.name, route.caseSensitive) === caseKey(flag.flag, route.caseSensitive)),
+    )
+    .map(flag => usageIssue({ key: 'meocord.usage.missing', params: { param: `--${flag.flag}` } }, flag.flag))
+  return [...reasons, ...missingFlags]
 }
 
 /**
