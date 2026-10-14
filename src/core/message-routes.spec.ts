@@ -52,7 +52,7 @@ describe('message patterns', () => {
     expect(matchMessageRoute(routes, '!"roll" 20', starts)?.params).toEqual({ sides: '20' })
     expect(matchMessageRoute(routes, '!“roll” 20', starts)?.params).toEqual({ sides: '20' })
     expect(matchMessageRoute(routes, '!“purge” 5 --bots', starts)?.params).toEqual({ count: '5', bots: '' })
-    expect(matchMessageCommand(routes, '!“roll”', starts)).toMatchObject({ route: { method: 'roll' }, given: 0 })
+    expect(matchMessageCommand(routes, '!“roll”', starts)).toMatchObject({ route: { method: 'roll' }, given: { words: [{ value: 'roll' }], flags: [] } })
   })
 
   it('reads an unclosed quote as an ordinary character', () => {

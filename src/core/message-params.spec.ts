@@ -352,13 +352,14 @@ describe('usage', () => {
   })
 
   it('names the required params a command left out, or says it has too many words', () => {
+    const given = (...values: string[]) => ({ words: values.map((value, start) => ({ value, start })), flags: [] })
     const route = routeOf('pay {to:member} {amount:int} {note...?}')
-    expect(missingParams(route, 0)).toEqual([
+    expect(missingParams(route, given('pay'), undefined, null)).toEqual([
       { param: 'to', message: 'to is missing' },
       { param: 'amount', message: 'amount is missing' },
     ])
-    expect(missingParams(route, 1)).toEqual([{ param: 'amount', message: 'amount is missing' }])
-    expect(missingParams(routeOf('ping'), 2)).toEqual([{ message: 'The command has more words than it takes' }])
+    expect(missingParams(route, given('pay', '<@1>'), undefined, null)).toEqual([{ param: 'amount', message: 'amount is missing' }])
+    expect(missingParams(routeOf('ping'), given('ping', 'a', 'b'), undefined, null)).toEqual([{ message: 'The command has more words than it takes' }])
   })
 })
 

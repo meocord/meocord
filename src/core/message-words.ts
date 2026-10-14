@@ -72,6 +72,9 @@ export interface FlagWords {
   cuts: number[]
 }
 
+/** The words and flags a message gives a command, as its routes read them: the flags taken out of the words when it has flags. */
+export type GivenWords = Pick<FlagWords, 'words' | 'flags'>
+
 /**
  * A message's words and flags in one pass: `--name` or `--name=value`, with the value in quotes when it has
  * spaces, is a flag, and a word in quotes never is, so `"--bots"` stays text. Words keep where they start
@@ -148,7 +151,7 @@ export function restFrom(text: string, start: number, cuts: readonly number[]): 
 /** A pattern's word as {@link literalFlags} reads it: a literal word, or a param. */
 type PatternWord = { literal: string } | { param: string; rest: boolean; optional: boolean }
 
-const caseKey = (word: string, caseSensitive: boolean) => (caseSensitive ? word : word.toLowerCase())
+export const caseKey = (word: string, caseSensitive: boolean) => (caseSensitive ? word : word.toLowerCase())
 
 /** Whether a flag, given bare in place `at` among the other words, is a pattern's own `--` word `literal`. */
 export const isLiteralFlag = (flag: GivenFlag, literal: string, at: number, caseSensitive: boolean): boolean =>

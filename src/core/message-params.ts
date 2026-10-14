@@ -1,10 +1,10 @@
-import { type Message } from 'discord.js'
+import { type Guild, type Message, type Role } from 'discord.js'
 import { MessageUsageError, type MessageUsageIssue } from '@src/common/errors.js'
 import { type TextParam, usageIssue } from '@src/common/meocord-text.js'
 import { type EntityRef, type MessageParamType } from '@src/interface/index.js'
 import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/message-entities.js'
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
-import { type GivenFlag, literalFlags, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { caseKey, type GivenFlag, type GivenWords, isLiteralFlag, literalFlags, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { type RunOptions } from '@src/core/handler-pipeline.js'
 import { bool, choicesOf, duration, lookupTable, number } from '@src/core/scalar-types.js'
 import { userWords } from '@src/util/user-text.util.js'
@@ -19,6 +19,12 @@ function idOf(word: string, mention: RegExp): string | undefined {
 const USER_MENTION = /^<@!?(\d{17,20})>$/
 const ROLE_MENTION = /^<@&(\d{17,20})>$/
 const CHANNEL_MENTION = /^<#(\d{17,20})>$/
+
+/** The server's role a word names: its mention or ID, else its name in any case. */
+function roleNamed(guild: Guild, word: string): Role | undefined {
+  const id = idOf(word, ROLE_MENTION)
+  return id ? guild.roles.cache.get(id) : guild.roles.cache.find(candidate => candidate.name.toLowerCase() === word.toLowerCase())
+}
 
 /** The scalar types, each turning a word into its value or `undefined`, and the Discord ones, which resolve below. */
 export const BUILT_IN_TYPES = lookupTable({
@@ -242,8 +248,7 @@ export async function parseMessageParams(
       }
     } else if (type === 'role') {
       // Roles are cached with the Guilds intent, so a role is known here or not at all
-      const id = idOf(word, ROLE_MENTION)
-      const role = id ? guild!.roles.cache.get(id) : guild!.roles.cache.find(candidate => candidate.name.toLowerCase() === word.toLowerCase())
+      const role = roleNamed(guild!, word)
       if (role) {
         refer(item, 'role', new MessageEntityRef('role', role.id, message.client, guild))
         continue
@@ -335,14 +340,14 @@ export function messageCommandHooks(
   params: Record<string, string>,
   message: Message,
   start: string,
-  given: number | undefined,
+  given: GivenWords | undefined,
   types: Record<string, MessageParamType> | undefined,
 ): Pick<RunOptions, 'parseArgs' | 'fetchArgs'> {
   let parsed: ParsedMessageParams | undefined
   return {
     parseArgs: async args => {
       assertMessageScope(route, message, start)
-      if (given !== undefined) throw new MessageUsageError(usageOf(route, start), missingParams(route, given))
+      if (given !== undefined) throw new MessageUsageError(usageOf(route, start), missingParams(route, given, types, message.guild))
       if (!hasTypedParams(route)) return args
       parsed = await parseMessageParams(route, params, message, start, types)
       return [args[0], parsed.params]
@@ -421,18 +426,52 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
 }
 
 /**
- * What is wrong with a command whose words a message named but whose pattern it does not fit, given how many
- * words followed the command words: each required param it left out, or words beyond what the pattern takes.
+ * What is wrong with a command whose words a message named but whose pattern it does not fit, read word by word
+ * against the pattern: each word or required param it left out, a word given another in its place, else words
+ * beyond what the pattern takes, else the first word its param's built-in type does not take.
  */
-export function missingParams(route: MessageRoute, given: number): MessageUsageIssue[] {
-  const firstParam = route.tokens.findIndex(token => !('literal' in token))
-  const after = firstParam === -1 ? [] : route.tokens.slice(firstParam)
-  const missing = after
-    .slice(given)
-    .filter((token): token is ParamToken => 'param' in token && !token.optional)
-    .map(token => usageIssue({ key: 'meocord.usage.missing', params: { param: token.param } }, token.param))
+export function missingParams(
+  route: MessageRoute,
+  given: GivenWords,
+  types: Record<string, MessageParamType> | undefined,
+  guild: Guild | null,
+): MessageUsageIssue[] {
+  const { words, flags } = given
+  const missing: MessageUsageIssue[] = []
+  let unfit: Item | undefined
+  let w = 0
+  for (const token of route.tokens) {
+    if ('literal' in token) {
+      if (w < words.length && caseKey(words[w].value, route.caseSensitive) === caseKey(token.literal, route.caseSensitive)) w++
+      // A pattern's own `--` word given bare in its place takes no word; another word in its place is not taken
+      else if (!flags.some(flag => isLiteralFlag(flag, token.literal, w, route.caseSensitive))) {
+        missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.literal } }))
+      }
+    } else if (w === words.length) {
+      if (!token.optional) missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.param } }, token.param))
+    } else if (token.rest) {
+      w = words.length
+    } else {
+      // Words fill the params in order, as the usage shows them
+      const word = words[w++].value
+      const type = token.type
+      if (!unfit && type !== undefined && isUnfit(type, word, route.caseSensitive, guild)) {
+        unfit = { key: token.param, label: token.param, type, word }
+      }
+    }
+  }
   if (missing.length > 0) return missing
-  return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
+  if (w < words.length || !unfit) return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
+  return [wrongType(unfit, types)]
+}
+
+/**
+ * Whether a param of a type is known not to take a word: a built-in type or words to choose from that the word doesn't
+ * fit. A role is also found by its name, so only a word that names none of the server's roles is unfit.
+ */
+function isUnfit(type: string, word: string, caseSensitive: boolean, guild: Guild | null): boolean {
+  if (type === 'role') return guild !== null && roleNamed(guild, word) === undefined
+  return (type in BUILT_IN_TYPES || Boolean(choicesOf(type))) && !fitsParamType(type, word, caseSensitive)
 }
 
 /** Whether a route's params need resolving: it declares a type for one, or has flags. */
