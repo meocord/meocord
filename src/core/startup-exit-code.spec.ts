@@ -4,6 +4,7 @@ import type * as AppModule from '@src/core/meocord.app.js'
 import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 vi.mock('@src/common/index.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -77,7 +78,7 @@ describe('the exit code of a stop', () => {
   let signalListeners: NodeJS.SignalsListener[]
 
   // The first import transforms the modules, which a cold run would otherwise count against the first case
-  beforeAll(() => load())
+  beforeAll(() => load(), WARM_UP_TIMEOUT_MS)
 
   beforeEach(() => {
     process.exitCode = undefined
