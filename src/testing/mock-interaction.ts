@@ -732,6 +732,31 @@ function fetchedIds(args: unknown[]): string | string[] | undefined {
   return undefined
 }
 
+// How many messages discord.js's MessageManager.fetch() asks Discord for when its options give no limit
+const DEFAULT_FETCH_LIMIT = 50
+
+/** Which of two messages is newer, by snowflake id, else by when the mock was made: negative when `a` is. */
+function newerFirst(a: { id: string; createdTimestamp: number }, b: { id: string; createdTimestamp: number }): number {
+  if (isSnowflake(a.id) && isSnowflake(b.id) && a.id !== b.id) return BigInt(b.id) > BigInt(a.id) ? 1 : -1
+  return b.createdTimestamp - a.createdTimestamp
+}
+
+/**
+ * A channel's messages as `messages.fetch(options)` lists them under strict mocks: those its cache holds, newest first,
+ * before, after or around the message `options` names, at most `limit` of them.
+ */
+function recentMessages(manager: object, options: unknown): Collection<string, Message> {
+  const { limit = DEFAULT_FETCH_LIMIT, before, after, around } = (options ?? {}) as { limit?: number; before?: string; after?: string; around?: string }
+  const all = [...(cacheOf(manager)?.values() ?? [])] as Message[]
+  const sorted = all.sort(newerFirst)
+  const at = (id: string) => sorted.findIndex(message => message.id === id)
+  let window = sorted
+  if (before !== undefined) window = at(before) === -1 ? [] : sorted.slice(at(before) + 1)
+  else if (after !== undefined) window = at(after) === -1 ? [] : sorted.slice(0, at(after)).slice(-limit)
+  else if (around !== undefined) window = at(around) === -1 ? [] : sorted.slice(Math.max(0, at(around) - Math.floor(limit / 2)))
+  return new Collection(window.slice(0, limit).map(message => [message.id, message]))
+}
+
 /**
  * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
  * `createDM` to the user's DM channel, `send` and its kin to a message, `awaitMessages` and `awaitReactions` to an
@@ -793,7 +818,13 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
         const ids = fetchedIds(args)
         const one = (id: string) => cached(cacheOf(receiver()), id, () => item(id, receiver()))
         if (Array.isArray(ids)) return new Collection(ids.map(id => [id, one(id)]))
-        return ids === undefined ? new Collection() : one(ids)
+        if (ids !== undefined) return one(ids)
+        // Under strict mocks a channel's fetch() lists the messages it holds, as discord.js lists its recent ones;
+        // default mode resolves to none, and warns once for a channel that strict mocks would list messages of
+        const messages = target instanceof GuildMessageManager || target instanceof DMMessageManager
+        if (messages && strictMocks()) return recentMessages(receiver(), args[0])
+        if (messages) warnUnlisted(receiver())
+        return new Collection()
       })
     }
     // Under strict mocks an edit reaches the item named, the cached one or one made and cached under its id, as
@@ -2378,6 +2409,25 @@ function messageManager(prototype: object): object {
     )
   })
   return manager
+}
+
+// The message managers whose fetch() with no id has warned
+const unlistedWarned = new WeakSet<object>()
+
+/**
+ * Warns once for a channel whose messages.fetch() with no id resolves to none in default mode, though strict mocks
+ * would list messages there: those its cache holds, read as the mock's own, and those made or sent in it, which they
+ * cache.
+ */
+function warnUnlisted(manager: object): void {
+  if (unlistedWarned.has(manager)) return
+  if (!cacheOf(manager)?.size && !messagesMade.get(manager)?.size) return
+  unlistedWarned.add(manager)
+  mockLogger.warn(
+    `${(Object.getPrototypeOf(manager) as { constructor: { name: string } }).constructor.name}.fetch() here resolves to no ` +
+      "messages, though messages were made, sent or cached in its channel, where discord.js lists a channel's recent " +
+      'messages; under useStrictMocks() fetch() lists them.',
+  )
 }
 
 /** Notes a message made in a channel, and caches it there under strict mocks, as discord.js caches what arrives. */

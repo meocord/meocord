@@ -19,6 +19,7 @@ afterEach(() => vi.restoreAllMocks())
 afterAll(() => forgetStrictMocks())
 
 const text = () => createMockChannel(TextChannel, { guild: createMockGuild() })
+const FETCH_WARNING = /^GuildMessageManager\.fetch\(\) here resolves to no messages, though messages were made, sent or cached in its channel.*under useStrictMocks\(\) fetch\(\) lists them\.$/s
 const CACHE_WARNING = /^GuildMessageManager\.cache here lacks messages made in its channel.*5\.0.*useStrictMocks\(\)/s
 
 describe.each([
@@ -76,5 +77,73 @@ describe('the messages a mock channel caches', () => {
 
     expect(interaction.reply).toHaveBeenCalledWith('earlier')
     expect(warned.filter(line => CACHE_WARNING.test(line))).toEqual([])
+  })
+})
+
+describe("a mock channel's messages.fetch() with no id", () => {
+  // Three messages, oldest first, as a channel holds them once made and sent there
+  const threeIn = async () => {
+    const channel = text()
+    const first = createMockMessage({ content: 'one', channel })
+    const second = await channel.send('two')
+    const third = await channel.send('three')
+    return { channel, ids: [first.id, second.id, third.id] }
+  }
+  const idsOf = (fetched: { keys(): Iterable<string> }) => [...fetched.keys()]
+
+  it('lists the messages made or sent there, newest first, under useStrictMocks(), as discord.js lists recent ones', async () => {
+    useStrictMocks()
+    const { channel, ids } = await threeIn()
+
+    expect(idsOf(await channel.messages.fetch())).toEqual([...ids].reverse())
+    expect(warned).toEqual([])
+  })
+
+  it('honours limit, before, after and around under useStrictMocks()', async () => {
+    useStrictMocks()
+    const { channel, ids } = await threeIn()
+    const [first, second, third] = ids
+
+    expect(idsOf(await channel.messages.fetch({ limit: 2 }))).toEqual([third, second])
+    expect(idsOf(await channel.messages.fetch({ before: third }))).toEqual([second, first])
+    expect(idsOf(await channel.messages.fetch({ after: first }))).toEqual([third, second])
+    expect(idsOf(await channel.messages.fetch({ around: second, limit: 3 }))).toEqual([third, second, first])
+    expect(idsOf(await channel.messages.fetch({ before: '1' }))).toEqual([])
+  })
+
+  it('resolves to an empty collection in default mode, as before, a message the test cached included', async () => {
+    const { channel } = await threeIn()
+    const cached = createMockMessage({ content: 'cached', channel })
+    channel.messages.cache.set(cached.id, cached as never)
+
+    expect((await channel.messages.fetch()).size).toBe(0)
+  })
+
+  it('warns once per channel in default mode where messages were made or sent in it', async () => {
+    const { channel } = await threeIn()
+    const other = (await threeIn()).channel
+    await channel.messages.fetch()
+    await channel.messages.fetch({ limit: 2 })
+    await other.messages.fetch()
+
+    expect(warned.filter(text => FETCH_WARNING.test(text))).toHaveLength(2)
+  })
+
+  it('warns in default mode for a channel that holds only a message the test cached, which strict mocks list', async () => {
+    const channel = text()
+    const elsewhere = createMockMessage({ content: 'elsewhere' })
+    channel.messages.cache.set(elsewhere.id, elsewhere as never)
+
+    expect((await channel.messages.fetch()).size).toBe(0)
+    expect(warned.filter(text => FETCH_WARNING.test(text))).toHaveLength(1)
+  })
+
+  it('stays quiet in default mode for a channel nothing was made or sent in, and for a fetch by id', async () => {
+    const empty = text()
+    await empty.messages.fetch()
+    const { channel, ids } = await threeIn()
+    await channel.messages.fetch(ids[0])
+
+    expect(warned.filter(text => FETCH_WARNING.test(text))).toEqual([])
   })
 })
