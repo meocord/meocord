@@ -113,9 +113,10 @@ export abstract class ExecutionContext {
   abstract getInteraction(): Interaction | undefined
 
   /**
-   * The message being handled, or the first one an event carries, as `@On('messageCreate')` does; `undefined` for
-   * anything else. For `@On('messageUpdate')`, that is the message as it was before the edit, which may be partial;
-   * the edited one is the event's second argument, from {@link ExecutionContext.getArgs}.
+   * The message being handled, or an event's first argument when it is a message, as in `@On('messageCreate')`;
+   * `undefined` for anything else, a reaction's message included. For `@On('messageUpdate')`, that is the message as it
+   * was before the edit, which may be partial; the edited one is the event's second argument, from
+   * {@link ExecutionContext.getArgs}.
    */
   abstract getMessage(): Message | undefined
 
