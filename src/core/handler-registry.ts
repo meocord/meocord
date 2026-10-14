@@ -149,7 +149,10 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
   aliases: readonly string[]
   /** What the command does, from its `description` option. */
   description: string | undefined
-  /** Where the command works: its `scope` option, narrowed to servers by a `member`, `role` or `channel` param or flag. */
+  /**
+   * Where the command works: its `scope` option, narrowed to servers by a `member`, `role` or `channel` param, or
+   * required flag.
+   */
   scope: MessageScope
   /** Whether its `hidden` option leaves it out of help's lists, including a parent's list of subcommands. */
   hidden: boolean

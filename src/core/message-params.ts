@@ -51,9 +51,16 @@ const GUILD_TYPES = new Set(['member', 'role', 'channel'])
 /** Whether a param type is found only in a server. */
 export const isGuildType = (type: string): boolean => GUILD_TYPES.has(type)
 
-/** Whether a route's pattern takes a param found only in a server, so a DM gets its usage instead. */
-export const needsGuild = (route: MessageRoute): boolean =>
+/** Whether a route's pattern takes a `member`, `role` or `channel` param, optional or not. */
+export const takesGuildParam = (route: Pick<MessageRoute, 'tokens'>): boolean =>
   route.tokens.some(token => 'param' in token && token.type !== undefined && GUILD_TYPES.has(token.type))
+
+/**
+ * Whether a route works only in a server, as dispatch decides it: a `member`, `role` or `channel` param, optional or
+ * not, or a required flag of one of those types. An optional flag of those types refuses a DM only when it is given.
+ */
+export const needsGuild = (route: Pick<MessageRoute, 'tokens' | 'flags'>): boolean =>
+  takesGuildParam(route) || route.flags.some(flag => !flag.optional && flag.type !== undefined && GUILD_TYPES.has(flag.type))
 
 
 /** Whether a pattern's `{name:type}` names a type: built in, words to choose from, or one the app adds. */
