@@ -811,7 +811,7 @@ export interface MessageHelpEntry {
   description?: string
   /** Its aliases and other spellings, as the caller types them, such as `!m`. */
   aliases: string[]
-  /** Where it works; a command with a `member`, `role` or `channel` param works in servers only. */
+  /** Where it works; a command with a `member`, `role` or `channel` param, or required flag, works in servers only. */
   scope: MessageScope
   /** Each param and flag, with what it takes. */
   params: MessageHelpParam[]
@@ -1148,8 +1148,9 @@ export interface MessageHandlerOptions {
   description?: string
   /**
    * Where the command works; `'any'` by default. A message sent elsewhere gets a usage reply saying
-   * where it works, and the handler does not run. A command with a `member`, `role` or `channel` param
-   * works in servers only; `'dm'` with one is refused as the bot starts.
+   * where it works, and the handler does not run. A command with a `member`, `role` or `channel` param, or a required
+   * flag of one of those types, works in servers only; `'dm'` with one, or with an optional such flag, is refused as the
+   * bot starts. An optional flag of those types refuses a DM only when the message gives it.
    */
   scope?: MessageScope
   /**
