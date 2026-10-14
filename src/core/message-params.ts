@@ -1,7 +1,7 @@
 import { type Guild, type Message, type Role } from 'discord.js'
 import { MessageUsageError, type MessageUsageIssue } from '@src/common/errors.js'
 import { type TextParam, usageIssue } from '@src/common/meocord-text.js'
-import { type EntityRef, type MessageParamType } from '@src/interface/index.js'
+import { type EntityRef, type MessageParamType, type MessageScope } from '@src/interface/index.js'
 import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/message-entities.js'
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
 import { caseKey, type GivenFlag, type GivenWords, isLiteralFlag, literalFlags, splitFlagWords, splitWords } from '@src/core/message-words.js'
@@ -68,6 +68,15 @@ export const takesGuildParam = (route: Pick<MessageRoute, 'tokens'>): boolean =>
  */
 export const needsGuild = (route: Pick<MessageRoute, 'tokens' | 'flags'>): boolean =>
   takesGuildParam(route) || route.flags.some(flag => !flag.optional && flag.type !== undefined && GUILD_TYPES.has(flag.type))
+
+/**
+ * Where a route works: its scope, narrowed to servers by a `member`, `role` or `channel` param, or required flag, as
+ * dispatch narrows it.
+ */
+export function effectiveScope(route: Pick<MessageRoute, 'scope' | 'tokens' | 'flags'>): MessageScope {
+  if (route.scope !== 'any') return route.scope
+  return needsGuild(route) ? 'guild' : 'any'
+}
 
 
 /** Whether a pattern's `{name:type}` names a type: built in, words to choose from, or one the app adds. */
@@ -138,12 +147,24 @@ export function paramTypeLabel(type: string | undefined, types: Record<string, M
 export function assertMessageScope(route: MessageRoute, message: Message, start: string): void {
   const inGuild = message.guildId !== null && message.guildId !== undefined
   if (route.scope === 'guild' && !inGuild) {
-    throw new MessageUsageError(usageOf(route, start), [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet: start === '' })
+    throw serverOnly(usageOf(route, start), start === '')
   }
   if (route.scope === 'dm' && inGuild) {
     throw new MessageUsageError(usageOf(route, start), [usageIssue({ key: 'meocord.usage.dmOnly' })], { dmOnly: true, quiet: start === '' })
   }
 }
+
+/** The usage error for a message sent outside a server to a command, or with a flag, that only a server has. */
+const serverOnly = (usage: string, quiet: boolean): MessageUsageError =>
+  new MessageUsageError(usage, [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet })
+
+/** Whether a message gives one of a route's flags of a type only a server has, such as `--in=#general`. */
+const givesGuildFlag = (route: MessageRoute, flags: readonly GivenFlag[]): boolean =>
+  flags.some(given =>
+    route.flags.some(
+      flag => flag.type !== undefined && GUILD_TYPES.has(flag.type) && caseKey(flag.flag, route.caseSensitive) === caseKey(given.name, route.caseSensitive),
+    ),
+  )
 
 /** One word to turn into a value, a param's, a flag's or a list item's, and where the value goes. */
 interface Item {
@@ -218,9 +239,7 @@ export async function parseMessageParams(
   if (route.inheritedNames.length > 0) shadowInherited(params, route.inheritedNames)
 
   const guild = message.guild
-  if (!guild && (needsGuild(route) || items.some(item => GUILD_TYPES.has(item.type)))) {
-    throw new MessageUsageError(usage, [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet })
-  }
+  if (!guild && (needsGuild(route) || items.some(item => GUILD_TYPES.has(item.type)))) throw serverOnly(usage, quiet)
 
   const put = (item: Item, value: unknown) => {
     if (item.index === undefined) setOwn(params, item.key, value)
@@ -352,7 +371,11 @@ export function messageCommandHooks(
   return {
     parseArgs: async args => {
       assertMessageScope(route, message, start)
-      if (given !== undefined) throw new MessageUsageError(usageOf(route, start), missingParams(route, given, types, message.guild))
+      if (given !== undefined) {
+        // A DM to a command only a server has is told so before what its words lack, as one whose words fit is
+        if (!message.guild && (needsGuild(route) || givesGuildFlag(route, given.flags))) throw serverOnly(usageOf(route, start), start === '')
+        throw new MessageUsageError(usageOf(route, start), missingParams(route, given, types, message.guild))
+      }
       if (!hasTypedParams(route)) return args
       parsed = await parseMessageParams(route, params, message, start, types)
       return [args[0], parsed.params]
