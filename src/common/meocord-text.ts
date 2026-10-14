@@ -128,7 +128,8 @@ export function textFor(interaction: { client?: object; locale?: string }, text:
   return renderText(translatorOfClient(interaction.client), interactionLocale(interaction), text)
 }
 
-const issueTexts = new WeakMap<MessageUsageIssue, MeoCordText>()
+// One per process for this meocord version, so an issue made by one build is translated by the other
+const issueTexts = shared('issueTexts', () => new WeakMap<MessageUsageIssue, MeoCordText>())
 
 /** An issue of a usage error, whose message is the text in English, keeping the text to translate it later. */
 export function usageIssue(text: MeoCordText, param?: string): MessageUsageIssue {

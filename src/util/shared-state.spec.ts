@@ -2,20 +2,25 @@ import { ButtonInteraction, ChatInputCommandInteraction, type Message, MessageFl
 import { vi } from 'vitest'
 import packageJson from '../../package.json' with { type: 'json' }
 import * as errors from '@src/common/errors.js'
-import { Command, Controller } from '@src/decorator/index.js'
+import { Command, Controller, MeoCord } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { CATALOGS, LOCALE_CHAIN } from '@src/common/translator.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { defaultPresenter, setPresenter } from '@src/common/response/presenter.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
 import { mergeTheme, runWithTheme } from '@src/core/theme-scope.js'
-import { createMockFn, createMockInteraction, createMockMessage, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
+import { createMockFn, createMockInteraction, createMockMessage, getResponse, MeoCordTestingModule, withTheme } from '@src/testing/index.js'
 import { forgetMockFn, useMockFn } from '@src/testing/mock-fn.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import { nextSnowflake } from '@src/testing/snowflake.js'
 import { sharedKey } from '@src/util/shared-state.util.js'
 import { respond, responseOf } from '@src/common/response/response-state.js'
 import { callOrder, stampCall } from '@src/common/response/call-order.js'
+import { createTranslator, Theme, translateError, useTheme } from '@src/common/index.js'
+import { resetThemeStatics } from '@src/common/theme.js'
+import { forgetDeprecationWarnings, warnOnce } from '@src/common/deprecation.js'
+import { forgetHiddenValues, hideInLogs, type Logger, REDACTED } from '@src/common/logger.js'
+import { LOG_LEVEL_ENV, logThreshold, resetLogLevel, takeRejectedLogLevel } from '@src/common/log-level.js'
 
 // The other build of this version, as a CommonJS file beside ES module ones loads it: the same source, made again
 async function otherBuild() {
@@ -32,6 +37,11 @@ async function otherBuild() {
     testing: await import('@src/testing/index.js'),
     response: await import('@src/common/response/response-state.js'),
     callOrder: await import('@src/common/response/call-order.js'),
+    common: await import('@src/common/index.js'),
+    decorator: await import('@src/decorator/index.js'),
+    deprecation: await import('@src/common/deprecation.js'),
+    logger: await import('@src/common/logger.js'),
+    logLevel: await import('@src/common/log-level.js'),
   }
 }
 
@@ -186,6 +196,126 @@ describe('state the two builds of one meocord version share', () => {
     await respond(interaction).send('two')
 
     expect(getResponse(interaction).calls.map(call => (call.error ? `${call.method}!` : call.method))).toEqual(['reply', 'deleteReply', 'followUp'])
+  })
+
+  it("reads the started app's theme outside a call from either build, until it closes", async () => {
+    @MeoCord({ controllers: [], clientOptions: { intents: [] }, theme: { colors: { primary: '#0000B1' } } })
+    class Bot {}
+    const module = await MeoCordTestingModule.create({ app: Bot }).compile().init({ ready: true })
+
+    const ready = other.common.useTheme().colors.primary
+    await module.close()
+
+    expect([ready, other.common.useTheme().colors.primary]).toEqual(['#0000B1', DEFAULT_THEME.colors.primary])
+  })
+
+  it("colours an answer outside a call from the other build with the app's theme, as in a collector's callback", async () => {
+    let collect: ((click: ButtonInteraction) => Promise<unknown>) | undefined
+    @Controller()
+    class Picker {
+      @Command('pick', CommandType.BUTTON)
+      pick() {
+        collect = click => other.response.respond(click).send({ embeds: [{ description: 'picked' }] })
+      }
+    }
+    @MeoCord({ controllers: [Picker], clientOptions: { intents: [] }, theme: { colors: { primary: '#0000B2' } } })
+    class Bot {}
+    const module = MeoCordTestingModule.create({ app: Bot, controllers: [Picker] }).compile()
+    const pressed = createMockInteraction(ButtonInteraction, { customId: 'pick' })
+    await module.dispatch(pressed)
+
+    const click = createMockInteraction(ButtonInteraction, { customId: 'picked', client: pressed.client })
+    await collect!(click)
+
+    expect(click.update.mock.calls[0]?.[0]).toMatchObject({ embeds: [{ color: 0x0000b2 }] })
+  })
+
+  it("runs a handler in the theme of a @UseTheme from the other build", async () => {
+    let primary: unknown
+    @other.decorator.UseTheme({ colors: { primary: '#0000B3' } })
+    @Controller()
+    class Shop {
+      @Command('buy', CommandType.BUTTON)
+      buy() {
+        primary = useTheme().colors.primary
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Shop] }).compile()
+
+    await module.invoke(Shop, 'buy', createMockInteraction(ButtonInteraction, { customId: 'buy' }))
+
+    expect(primary).toBe('#0000B3')
+  })
+
+  it('keeps what the deprecated Theme statics set through either build, beneath every theme', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      other.common.Theme.primaryColor = '#0000B4'
+      Theme.successColor = '#0000B5'
+
+      expect([useTheme().colors.primary, other.common.useTheme().colors.success]).toEqual(['#0000B4', '#0000B5'])
+    } finally {
+      resetThemeStatics()
+    }
+  })
+
+  it("runs a mock theme the other build's createMockTheme made as it is", () => {
+    const theme = other.testing.createMockTheme({ colors: { primary: '#0000B6' } })
+
+    expect(withTheme(theme, () => useTheme())).toBe(theme)
+  })
+
+  it("translates the issues of a usage error the other build made", () => {
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': {}, id: { meocord: { usage: { heading: 'Cara pakai: {usage}', serverOnly: 'Hanya di server.' } } } } })
+    const error = new other.errors.MessageUsageError('!ban <who>', [other.text.usageIssue({ key: 'meocord.usage.serverOnly' })])
+
+    expect(translateError(error, t, 'id')).toBe('Cara pakai: !ban <who>\nHanya di server.')
+  })
+
+  it('prints a warn-once text both builds ask for once', () => {
+    const logger = { warn: vi.fn() } as unknown as Logger
+    try {
+      warnOnce(logger, 'Shared.text is deprecated.')
+      other.deprecation.warnOnce(logger, 'Shared.text is deprecated.')
+
+      expect(logger.warn).toHaveBeenCalledTimes(1)
+    } finally {
+      forgetDeprecationWarnings()
+    }
+  })
+
+  it('resolves the log level once for both builds, and hands out an unknown MEOCORD_LOG_LEVEL once', () => {
+    vi.stubEnv(LOG_LEVEL_ENV, 'loud')
+    resetLogLevel()
+    try {
+      const ours = logThreshold()
+      vi.stubEnv(LOG_LEVEL_ENV, 'error')
+
+      expect(other.logLevel.logThreshold()).toBe(ours)
+      expect([other.logLevel.takeRejectedLogLevel(), takeRejectedLogLevel()]).toEqual(['loud', undefined])
+    } finally {
+      vi.unstubAllEnvs()
+      resetLogLevel()
+    }
+  })
+
+  it("keeps a value either build hides out of the other's lines", () => {
+    const value = 'MTA0.a-value-the-size-of-a-credential.shared-state-spec'
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.stubEnv(LOG_LEVEL_ENV, 'log')
+    resetLogLevel()
+    try {
+      hideInLogs(value)
+      new other.logger.Logger().log(`token ${value}`)
+
+      expect(String(log.mock.calls[0])).toContain(`token ${REDACTED}`)
+      expect(String(log.mock.calls[0])).not.toContain(value)
+    } finally {
+      log.mockRestore()
+      vi.unstubAllEnvs()
+      resetLogLevel()
+      forgetHiddenValues()
+    }
   })
 
   it('keeps its keys to this version, apart from any other installed one', () => {

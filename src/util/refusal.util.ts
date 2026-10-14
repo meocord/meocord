@@ -4,18 +4,20 @@ import { isExplainedError } from '@src/common/explained-error.js'
 import { Logger } from '@src/common/logger.js'
 import { isBuiltApplication, STARTUP_ERRORS_KEY } from '@src/util/bundle-entry.util.js'
 import { comparablePath, framePath } from '@src/util/source-path.util.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 const REFUSAL = Symbol.for('meocord.refusal')
 
-/** Whether this process reports refusals yet; see `reportRefusals`. */
-let reporting = false
-
-/** Refusals someone else reports, and ends the process for, which `reportRefusals` leaves to them. */
-const handedOff = new WeakSet<object>()
+/**
+ * One per process for this meocord version, so the two builds report a refusal once: whether this process reports
+ * refusals yet (see `reportRefusals`), and the refusals someone else reports, and ends the process for, which it leaves
+ * to them.
+ */
+const refusals = shared('refusalReporting', () => ({ reporting: false, handedOff: new WeakSet<object>() }))
 
 /** Leaves a refusal to whoever reports it instead, such as a shard's manager: going uncaught, it is neither logged nor exits. */
 export function handOffRefusal(error: Error): void {
-  handedOff.add(error)
+  refusals.handedOff.add(error)
 }
 
 /**
@@ -25,7 +27,7 @@ export function handOffRefusal(error: Error): void {
 export function refuse<E extends Error>(error: E): E {
   if (Object.isExtensible(error)) Object.defineProperty(error, REFUSAL, { value: true, enumerable: false })
   // Before the error is thrown, so a built application reports it however the throw ends
-  if (!reporting && isBuiltApplication()) reportRefusals()
+  if (!refusals.reporting && isBuiltApplication()) reportRefusals()
   return error
 }
 
@@ -273,9 +275,9 @@ export function reportRefusals(
   exit: (code: number) => void = code => process.exit(code),
   { bun = process.versions.bun !== undefined, reject = (reason: unknown) => void Promise.reject(reason) } = {},
 ): void {
-  reporting = true
+  refusals.reporting = true
   const report = (error: Error) => {
-    if (handedOff.has(error)) return
+    if (refusals.handedOff.has(error)) return
     if (!isExplainedError(error)) log(describeRefusal(error, process.cwd()))
     exit(1)
   }

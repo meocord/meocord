@@ -25,9 +25,10 @@ import {
   useTheme,
 } from '@src/core/theme-scope.js'
 import { META } from '@src/util/metadata-keys.js'
+import { shared } from '@src/util/shared-state.util.js'
 
-/** Classes with a `@UseTheme`, on the class or one of its methods. */
-export const THEMED_CLASSES = new WeakSet<object>()
+/** Classes with a `@UseTheme`, on the class or one of its methods, from either build of this version. */
+export const THEMED_CLASSES = shared('themedClasses', () => new WeakSet<object>())
 
 /** One app's themes: its own layer, and the resolved themes built from it. */
 interface AppThemes {
@@ -48,7 +49,8 @@ interface AppThemes {
   handlers: WeakMap<object, Map<string, ResolvedTheme>>
 }
 
-const apps = new WeakMap<Container, AppThemes>()
+// One per process for this meocord version, so an app started through one build finds its theme from the other
+const apps = shared('appThemes', () => new WeakMap<Container, AppThemes>())
 
 /** The classes on `cls`'s prototype chain, itself first. */
 function chainOf(cls: object): object[] {
@@ -168,7 +170,7 @@ export function beginCallTheme(
   return { scope, ready }
 }
 
-const clientApps = new WeakMap<object, Container>()
+const clientApps = shared('clientThemes', () => new WeakMap<object, Container>())
 
 /** Records which app a client's interactions come to, so an answer outside any call can find its theme. */
 export function registerClientTheme(client: object, container: Container): void {
