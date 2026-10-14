@@ -8,6 +8,7 @@ import type * as DecoratorModule from '@src/decorator/index.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { type FakeDiscord, startFakeDiscord } from '../../scripts/lib/fake-discord.js'
 import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { logged, config } = vi.hoisted(() => ({
   logged: { log: [] as unknown[][], error: [] as unknown[][], warn: [] as unknown[][] },
@@ -53,8 +54,7 @@ async function load() {
 }
 
 // Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
-// each test still imports fresh. About 2 s on a healthy runner, several times that on a slow one
-const WARM_UP_TIMEOUT_MS = 30_000
+// each test still imports fresh
 beforeAll(async () => {
   await load()
 }, WARM_UP_TIMEOUT_MS)

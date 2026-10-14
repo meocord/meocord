@@ -5,6 +5,7 @@ import * as discord from 'discord.js'
 import { Collection, TextChannel } from 'discord.js'
 import { returnsPromise } from './mock-interaction.js'
 import { createMockChannel, createMockGuild, createMockMember, createMockMessage } from './index.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 type Method = (...args: unknown[]) => unknown
 interface TypedMethod {
@@ -52,9 +53,7 @@ function typedMethods(): TypedMethod[] {
 }
 
 describe('a mock of a discord.js method that returns a promise without being async', () => {
-  // Reading discord.js's typings builds a TypeScript program, which is the file's setup rather than the test's: about
-  // 2 s on a healthy runner, several times that on a slow one
-  const WARM_UP_TIMEOUT_MS = 30_000
+  // Reading discord.js's typings builds a TypeScript program, which is the file's setup rather than the test's
   let methods: TypedMethod[]
   beforeAll(() => {
     methods = typedMethods()
