@@ -306,10 +306,12 @@ export class MeoCordApp implements MeoCordApplication {
    * holds nothing of it open and a retry makes it afresh.
    */
   private async undoStart(): Promise<void> {
-    if (!this.attempt || !this.made && this.attempt.constructed.size === 0) return
-    const { given } = this.attempt
+    if (!this.attempt || !this.begun) return
+    this.begun = false
+    const { given, constructed } = this.attempt
     const entries = this.shutdownEntries().filter(({ token }) => !given.has(token))
-    this.attempt.constructed.clear()
+    // A value the app gave stays constructed, so a stop with no retry still closes it
+    for (const token of constructed) if (!given.has(token)) constructed.delete(token)
     this.readySettled.clear()
     this.attempt.drop()
     this.made = false
@@ -321,6 +323,9 @@ export class MeoCordApp implements MeoCordApplication {
       warn: message => this.logger.warn(message),
     })
   }
+
+  /** Whether a start has marked where it began and not been undone, so a failed one drops what it made exactly once. */
+  private begun = false
 
   /** The `start()` under way, which a concurrent call waits for. */
   private starting?: Promise<void>
@@ -346,6 +351,7 @@ export class MeoCordApp implements MeoCordApplication {
     claimAmbientAppTheme(this.container)
     if (!this.made) {
       this.attempt?.begin()
+      this.begun = true
       // Kept while it runs, so a stop meanwhile waits for it
       this.preparing = this.prepare()
       try {
