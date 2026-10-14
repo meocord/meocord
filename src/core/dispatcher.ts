@@ -60,6 +60,7 @@ import {
   matchMessageSubcommands,
   matchMessageRoute,
   type MessageRoute,
+  messageRouteWarnings,
   type MessageStarts,
   messageStarts,
   messageStartsFor,
@@ -171,6 +172,8 @@ export class Dispatcher {
     // The app's own help command reads this table too, so it lists the commands dispatch reaches
     if (this.container.isBound(HandlerRegistry)) shareMessageRoutes(this.container.get(HandlerRegistry), this.messageRoutes)
     this.warnUnreachableHelp()
+    // Here, where the routes are built once, rather than in buildMessageRoutes, which startup runs twice
+    for (const warning of messageRouteWarnings(this.messageRoutes, this.messageOptions)) this.logger.warn(warning)
     this.messageListeners = this.controllerClasses.flatMap(controllerClass =>
       getMessageHandlers(controllerClass.prototype)
         .filter(handler => handler.pattern === undefined)
