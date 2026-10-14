@@ -41,8 +41,7 @@ import { type LifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } fr
 import { RunningCalls } from '@src/core/running-calls.js'
 import { type StartupControl } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
-import { stopRequests } from '@src/util/stop-request.util.js'
-import { shared, sharedKey } from '@src/util/shared-state.util.js'
+import { processState } from '@src/core/process-state.js'
 import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
@@ -65,30 +64,7 @@ import { escapeForLog } from '@src/util/user-text.util.js'
 export const SLOW_READY_HOOK_MS = 10_000
 
 
-/** Where both builds of this version keep the process's state, as {@link shared} names it. */
-const PROCESS_STATE = 'processState'
-
-/**
- * What the process's apps share, kept by both builds of this version, so a process that loads both has one pair of
- * signal listeners and one shutdown, which stops the apps either build started, and one exit code a failed start set.
- */
-const processState = shared(PROCESS_STATE, () => ({
-  /** Closes each started app: runs its shutdown hooks and destroys its client, resolving `false` on failure. */
-  runningApps: new Set<() => Promise<boolean>>(),
-  stopRequest: stopRequests(),
-  signalHandlersInstalled: false,
-  shuttingDown: undefined as Promise<void> | undefined,
-  /** Whether a failed start, of a provider's factory or the login, set the exit code, so a later login knows to clear it. */
-  startFailureSetExitCode: false,
-  /** Whether `meocord start --dev` was told the bot could not log in, so a later login tells it the bot is online. */
-  toldDevRunnerLoginFailed: false,
-}))
 const { runningApps } = processState
-
-/** Forgets the process's state, for specs that load the modules afresh as a new process would. */
-export function forgetProcessState(): void {
-  Reflect.deleteProperty(globalThis, sharedKey(PROCESS_STATE))
-}
 
 /**
  * Shuts every started app down and exits, with the code set when the shutdown began or 0, and 1 if an app failed to
