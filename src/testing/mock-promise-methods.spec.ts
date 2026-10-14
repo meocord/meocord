@@ -52,11 +52,13 @@ function typedMethods(): TypedMethod[] {
 }
 
 describe('a mock of a discord.js method that returns a promise without being async', () => {
-  // Reading discord.js's typings builds a TypeScript program, which is the file's setup rather than the test's
+  // Reading discord.js's typings builds a TypeScript program, which is the file's setup rather than the test's: about
+  // 2 s on a healthy runner, several times that on a slow one
+  const WARM_UP_TIMEOUT_MS = 30_000
   let methods: TypedMethod[]
   beforeAll(() => {
     methods = typedMethods()
-  })
+  }, WARM_UP_TIMEOUT_MS)
 
   // A discord.js upgrade that adds such a method, or one that turns a listed name synchronous elsewhere, fails here
   it('resolves exactly where discord.js typings say the method returns a promise', () => {
