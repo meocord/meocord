@@ -1,9 +1,20 @@
 import 'reflect-metadata'
-import { ButtonInteraction, type Interaction, type Message, MessageReaction, type PartialMessageReaction, type PartialUser, type User } from 'discord.js'
+import {
+  ButtonInteraction,
+  Collection,
+  type GuildTextBasedChannel,
+  type Interaction,
+  type Message,
+  MessageReaction,
+  type PartialMessageReaction,
+  type PartialUser,
+  type User,
+} from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
-import { ExecutionContext } from '@src/common/index.js'
-import { Controller, Guard, MessageHandler, On, Once, UseGuard } from '@src/decorator/index.js'
+import { createTranslator, defineCatalog, ExecutionContext } from '@src/common/index.js'
+import { translatorOfClient } from '@src/common/meocord-text.js'
+import { Controller, Guard, MeoCord, MessageHandler, On, Once, UseGuard } from '@src/decorator/index.js'
 import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
 import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from './index.js'
 
@@ -114,6 +125,23 @@ describe('invoke on an @On or @Once handler, under useStrictMocks()', () => {
     expect([button.deferUpdate, button.reply, button.deferReply].map(answer => vi.mocked(answer).mock.calls.length)).toEqual([0, 0, 0])
   })
 
+  it("sets the app's translator on the client of each argument, as emit does, when the first carries none", async () => {
+    @Controller()
+    class Bulk {
+      @On('messageDeleteBulk')
+      bulk(_messages: unknown, _channel: GuildTextBasedChannel) {}
+    }
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ hi: 'hi' }) } })
+    @MeoCord({ controllers: [Bulk], i18n: t, clientOptions: { intents: [] } })
+    class App {}
+    const module = MeoCordTestingModule.fromApp(App).compile()
+    const channel = createMockMessage({ content: 'hi' }).channel as GuildTextBasedChannel
+
+    await module.invoke(Bulk, 'bulk', new Collection() as never, channel)
+
+    expect(translatorOfClient(channel.client)).toBe(t)
+  })
+
   it('keeps the message path for a method a route also reaches', async () => {
     const module = MeoCordTestingModule.create({ controllers: [Audit] }).compile()
 
@@ -134,10 +162,10 @@ describe('invoke on an @On or @Once handler, without strict mocks', () => {
 
     expect(seen).toEqual(['MessageOnly ran', 'MessageOnly ran', 'onInteraction ran with 2'])
     expect(warnings()).toEqual([
-      "invoke runs Audit.onMessage, an @On('messageCreate') handler, as a 'message' call; the bot runs it as an 'event' " +
+      "invoke runs Audit.onMessage, an @On('messageCreate') handler, as a message call; the bot runs it as an event " +
         'with its arguments as given, and useStrictMocks() runs it so.',
-      "invoke runs Audit.onInteraction, an @On('interactionCreate') handler, as an 'interaction' call with its params " +
-        "added; the bot runs it as an 'event' with its arguments as given, and useStrictMocks() runs it so.",
+      "invoke runs Audit.onInteraction, an @On('interactionCreate') handler, as an interaction call with its params " +
+        'added; the bot runs it as an event with its arguments as given, and useStrictMocks() runs it so.',
     ])
   })
 

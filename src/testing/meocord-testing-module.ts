@@ -81,7 +81,7 @@ import { Logger } from '@src/common/logger.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
-import { describeValue, isConstructor } from '@src/util/value.util.js'
+import { describeValue, isConstructor, withArticle } from '@src/util/value.util.js'
 import {
   assertProvided,
   assertProvidedServices,
@@ -599,7 +599,7 @@ export class TestingModule {
     // As emit and the bot run it; without strict mocks it runs as before, as a test that passes that way could fail
     if (event && strictMocks()) {
       this.checkArgumentCount(controller, methodName, instance[methodName], first, args.length)
-      this.registerClient(first)
+      this.registerEventClients(args as unknown[])
       const { ran, error } = await this.track(this.runEventHandler(instance, methodName, args as unknown[]))
       return error === undefined ? { ran } : { ran, error }
     }
@@ -653,10 +653,10 @@ export class TestingModule {
     const key = `${controller.name}.${methodName}`
     if (this.warnedEventRuns.has(key)) return
     this.warnedEventRuns.add(key)
-    const call = `${/^[aeiou]/.test(type) ? 'an' : 'a'} '${type}' call${paramsAdded ? ' with its params added' : ''}`
+    const call = `${withArticle(type)} call${paramsAdded ? ' with its params added' : ''}`
     new Logger('TestingModule').warn(
       `invoke runs ${key}, an @${event.once ? 'Once' : 'On'}('${event.event}') handler, as ${call}; the bot runs it as ` +
-        "an 'event' with its arguments as given, and useStrictMocks() runs it so.",
+        'an event with its arguments as given, and useStrictMocks() runs it so.',
     )
   }
 
