@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { createMockFn, type MockedFunction, type Mock, usesRunnerMockFn } from './mock-fn.js'
+import { createMockFn, type MockedFunction, type Mock, usesRunnerMockFn } from '@src/testing/mock-fn.js'
 import {
   type APIAuthorizingIntegrationOwnersMap,
   type APIInteractionDataResolvedGuildMember,
@@ -116,16 +116,16 @@ import {
   type PartialGroupDMChannel,
   type PrimaryEntryPointCommandInteraction,
 } from 'discord.js'
-import { createDiscordError } from './response.js'
+import { createDiscordError } from '@src/testing/response.js'
 import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
-import { discordDefault, placeholderValue, REAL_GETTER } from './discord-defaults.js'
+import { discordDefaults, placeholderValue, REAL_GETTER } from '@src/testing/discord-defaults.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
-import { asDiscordStores, embedsAsDiscordStores } from './discord-shape.js'
-import { MOCK_BOT_ID, nextSnowflake } from './snowflake.js'
-import { noteMockMade, strictMocks } from './strict-mocks.js'
-import { sharedName } from '@src/util/shared-state.util.js'
+import { asDiscordStores, embedsAsDiscordStores } from '@src/testing/discord-shape.js'
+import { MOCK_BOT_ID, nextSnowflake } from '@src/testing/snowflake.js'
+import { noteMockMade, strictMocks } from '@src/testing/strict-mocks.js'
+import { RESPONSE_LOG } from '@src/testing/response-log.js'
 
 // ---------------------------------------------------------------------------
 // DeepMocked<T>
@@ -1036,12 +1036,6 @@ function defineMadeTime(mock: object, generatedId: string | undefined): void {
     })
   }
 }
-
-/**
- * Where a mock interaction keeps every answer it got, through respond() or discord.js directly, in order, under a key
- * both builds of this meocord version read.
- */
-export const RESPONSE_LOG: unique symbol = Symbol.for(sharedName('responseLog'))
 
 type Behaviour = (...args: any[]) => any
 
@@ -4091,3 +4085,23 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   optionEntities.set(resolver, entities.map(([name]) => name))
   return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
 }
+
+// What a mock reads for a property the test gave none, made with this module's factories and helpers. Built last, as it
+// reads them, and only read once a mock is made
+const discordDefault = discordDefaults({
+  botMemberOf,
+  createChatInputOptions,
+  createMockChannel,
+  createMockGuild,
+  createMockMessage,
+  createMockUser,
+  heldChannelOf,
+  isRawMember,
+  isUnsetEveryone,
+  madeAt,
+  memberRoles,
+  NEW_SERVER_EVERYONE_PERMISSIONS,
+  ownedManager,
+  readPlaceAs,
+  readPlaceQuietly,
+})
