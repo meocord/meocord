@@ -9,10 +9,12 @@ import {
   Cooldown,
   Defer,
   Interceptor,
+  MeoCord,
   MessageHandler,
   On,
   Pipe,
   ReactionHandler,
+  Service,
   UseFilter,
   UseInterceptor,
   UsePipe,
@@ -195,6 +197,36 @@ describe('input stages on handlers without interaction input', () => {
     }
 
     expect(compile(Deferred)).toThrow('Deferred.hi: @Defer is for interaction handlers, and this is a message handler')
+  })
+
+  // A class only a provider makes runs its @On handlers too, refused for the same stages, with a warning until 5.0
+  it('name an event handler on a class a provider makes, which then does not run', async () => {
+    const warned: string[] = []
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((...args: unknown[]) => void warned.push(args.map(String).join(' ')))
+    const anything: StandardSchemaV1 = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } }
+    const heard: string[] = []
+
+    @Service()
+    class Audit {
+      @On('guildCreate')
+      async joined(..._args: unknown[]) {
+        heard.push('joined')
+      }
+    }
+    Validate(anything)(Audit.prototype, 'joined', Object.getOwnPropertyDescriptor(Audit.prototype, 'joined') as never)
+    @MeoCord({ controllers: [], providers: [{ provide: 'AUDIT', useClass: Audit }], clientOptions: { intents: [] } })
+    class App {}
+    const module = await MeoCordTestingModule.fromApp(App).compile().init()
+
+    await module.emit('guildCreate', {} as never)
+
+    expect(heard).toEqual([])
+    expect(warned).toContainEqual(
+      expect.stringMatching(
+        /^Audit\.joined: @Validate and @UsePipe are for interaction .*, and this is an event handler\. Until the next major version \(5\.0\) refuses it at startup, @On\('guildCreate'\) in Audit\.joined does not run\.$/,
+      ),
+    )
+    vi.restoreAllMocks()
   })
 })
 
