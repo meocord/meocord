@@ -1,8 +1,11 @@
-import { AutocompleteInteraction, ButtonInteraction, Message, MessageReaction } from 'discord.js'
+import { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, Message, MessageReaction } from 'discord.js'
 import { createMetadata } from '@src/common/metadata.js'
 import { SetMetadata } from '@src/common/decorator.js'
-import { HandlerExecutionContext, UnroutedExecutionContext } from '@src/common/execution-context.js'
-import { createMockInteraction, createMockMessage } from '@src/testing/index.js'
+import { ExecutionContext, HandlerExecutionContext, UnroutedExecutionContext } from '@src/common/execution-context.js'
+import { responsePhaseOf } from '@src/core/observer-runner.js'
+import { Guard, MeoCord, Observer, On, Service, UseGuard } from '@src/decorator/index.js'
+import { type DispatchResult } from '@src/interface/index.js'
+import { createMockInteraction, createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
 
 const Roles = createMetadata<string[]>('roles')
 
@@ -110,6 +113,28 @@ describe('ExecutionContext', () => {
       expect(forReaction.getInteraction()).toBeUndefined()
     })
 
+    it("gives an event's stages the interaction or message the event carries, and no answer to give", () => {
+      const button = createMockInteraction(ButtonInteraction)
+      const message = createMockMessage()
+      const onInteraction = new HandlerExecutionContext({ controller: BaseController, methodName: 'ban', args: [button], type: 'event' })
+      const onMessage = new HandlerExecutionContext({ controller: BaseController, methodName: 'ban', args: [message], type: 'event' })
+
+      expect([onInteraction.getType(), onInteraction.getInteraction(), onInteraction.response, responsePhaseOf(onInteraction)]).toEqual([
+        'event',
+        button,
+        undefined,
+        undefined,
+      ])
+      expect([onMessage.getMessage(), onMessage.response]).toEqual([message, undefined])
+    })
+
+    it('answers an interaction a handler is called for', () => {
+      const slash = createMockInteraction(ChatInputCommandInteraction)
+      const context = contextFor(BaseController, 'ban', [slash, {}])
+
+      expect([context.response !== undefined, responsePhaseOf(context)]).toEqual([true, 'unanswered'])
+    })
+
     it("carries one guard's params without changing the call's", () => {
       const context = contextFor(BaseController, 'ban')
       const withParams = context.withParams({ limit: 2 })
@@ -118,5 +143,37 @@ describe('ExecutionContext', () => {
       expect(withParams.getParams()).toEqual({ limit: 2 })
       expect(withParams.getHandlerName()).toBe('ban')
     })
+  })
+})
+
+describe('an @On handler for an interaction or a message', () => {
+  it('gives its guard the event\'s interaction but no response, and its observers no answer phase', async () => {
+    const seen: unknown[] = []
+    @Guard()
+    class Peek {
+      constructor(private readonly context: ExecutionContext) {}
+      canActivate() {
+        seen.push({ interaction: this.context.getInteraction() !== undefined, response: this.context.response })
+        return true
+      }
+    }
+    @Observer()
+    class Settled {
+      onSettled(_context: ExecutionContext, { response }: DispatchResult) {
+        seen.push({ phase: response })
+      }
+    }
+    @Service()
+    class Watch {
+      @On('interactionCreate')
+      @UseGuard(Peek)
+      heard() {}
+    }
+    @MeoCord({ controllers: [], services: [Watch], observers: [Settled], clientOptions: { intents: [] } })
+    class App {}
+
+    await MeoCordTestingModule.fromApp(App).compile().emit('interactionCreate', createMockInteraction(ChatInputCommandInteraction))
+
+    expect(seen).toEqual([{ interaction: true, response: undefined }, { phase: undefined }])
   })
 })

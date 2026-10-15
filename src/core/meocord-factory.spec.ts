@@ -55,8 +55,12 @@ describe('MeoCordFactory.create()', () => {
     const BUNDLE_ENTRY = Symbol.for('meocord.bundleEntry')
     const logger = () => (MeoCordFactory as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger
 
+    const exitCode = process.exitCode
+
     afterEach(() => {
       Reflect.deleteProperty(globalThis, BUNDLE_ENTRY)
+      // A refusal in a built application sets it, which would fail the test run
+      process.exitCode = exitCode
     })
 
     async function refused() {
@@ -73,7 +77,7 @@ describe('MeoCordFactory.create()', () => {
       return { thrown: thrown as Error, explained: isExplainedError(thrown), exitCode: after }
     }
 
-    it('is reported once in a built application, and marked so main.ts does not report it again', async () => {
+    it('is reported once in a built application, marked so main.ts does not report it again, with the exit code 1', async () => {
       Reflect.set(globalThis, BUNDLE_ENTRY, '/bots/shop/dist/main.js')
 
       const { thrown, explained, exitCode } = await refused()
@@ -82,8 +86,8 @@ describe('MeoCordFactory.create()', () => {
       expect(logger().error).toHaveBeenCalledTimes(1)
       expect(logger().error.mock.calls[0][0]).toMatch(/^NoMetadataApp: not decorated with @MeoCord\(\)/)
       expect(explained).toBe(true)
-      // main.ts, or the report of an uncaught refusal, sets it
-      expect(exitCode).toBeUndefined()
+      // Set here, so the bot exits 1 whatever main.ts does with an error MeoCord explained
+      expect(exitCode).toBe(1)
     })
 
     it('reaches a test or a script as it is: nothing logged, and the exit code left alone', async () => {
@@ -164,6 +168,7 @@ describe('MeoCordFactory.create()', () => {
       // The message, then where in the application's source it comes from
       expect(logger().error.mock.calls[0][0].split('\n')[0]).toBe(message)
       expect(isExplainedError(thrown)).toBe(true)
+      expect(process.exitCode).toBe(1)
     })
   })
 

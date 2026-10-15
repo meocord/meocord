@@ -70,6 +70,16 @@ describe('typed message params', () => {
     )
   })
 
+  // Too long to add up to a number of milliseconds, so it is no length of time, as Infinity is no number
+  it('names a duration word too long to add up as not a length of time', async () => {
+    const route = routeOf('remind {after:duration}')
+    const { message } = guildMessage()
+
+    const error = await usageError(resolveMessageParams(route, { after: '9'.repeat(400) + 's' }, message, '!', undefined))
+
+    expect(error.issues.map(issue => [issue.param, issue.message.endsWith('is not a valid length of time, such as 10m')])).toEqual([['after', true]])
+  })
+
   it("uses an app's own type, and its label in the issue", async () => {
     const color: MessageParamType<number> = {
       label: 'hex colour',
@@ -342,13 +352,14 @@ describe('usage', () => {
   })
 
   it('names the required params a command left out, or says it has too many words', () => {
+    const given = (...values: string[]) => ({ words: values.map((value, start) => ({ value, start })), flags: [] })
     const route = routeOf('pay {to:member} {amount:int} {note...?}')
-    expect(missingParams(route, 0)).toEqual([
+    expect(missingParams(route, given('pay'), undefined, null)).toEqual([
       { param: 'to', message: 'to is missing' },
       { param: 'amount', message: 'amount is missing' },
     ])
-    expect(missingParams(route, 1)).toEqual([{ param: 'amount', message: 'amount is missing' }])
-    expect(missingParams(routeOf('ping'), 2)).toEqual([{ message: 'The command has more words than it takes' }])
+    expect(missingParams(route, given('pay', '<@1>'), undefined, null)).toEqual([{ param: 'amount', message: 'amount is missing' }])
+    expect(missingParams(routeOf('ping'), given('ping', 'a', 'b'), undefined, null)).toEqual([{ message: 'The command has more words than it takes' }])
   })
 })
 
@@ -396,3 +407,35 @@ describe('typed patterns at startup', () => {
   })
 })
 
+// A word in quotes keeps the spaces inside them, which a typed param refuses, so the reply shows them
+describe('a word refused for the spaces around it', () => {
+  @Controller()
+  class Words {
+    @MessageHandler('num {n:number}')
+    num() {}
+
+    @MessageHandler('mode {m:on|off}')
+    mode() {}
+
+    @MessageHandler('say {text} {--loud}')
+    say() {}
+  }
+
+  @MeoCord({ controllers: [Words], clientOptions: { intents: [] }, messages: { prefix: '!' } })
+  class App {}
+
+  const replyTo = async (content: string) => {
+    const message = createMockMessage({ content, guild: createMockGuild() })
+    await MeoCordTestingModule.fromApp(App).compile().dispatch(message)
+    return (vi.mocked(message.reply).mock.calls[0]?.[0] as { content?: string } | undefined)?.content
+  }
+
+  it.each([
+    ['!num " 12 "', 'Usage: !num <n>\nn: " 12 " is not a valid number'],
+    ['!mode "on "', 'Usage: !mode <m>\nm: "on " is not one of on, off'],
+    ['!say hi --loud=" yes"', 'Usage: !say <text> [--loud]\n--loud: " yes" is not yes or no'],
+    ['!num "1\n\n2"', 'Usage: !num <n>\nn: "1 2" is not a valid number'],
+  ])('quotes %j as typed, on one line', async (content, reply) => {
+    expect(await replyTo(content)).toBe(reply)
+  })
+})

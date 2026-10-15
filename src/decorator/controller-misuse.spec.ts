@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { AutocompleteInteraction, ButtonInteraction, type Message, SlashCommandBuilder } from 'discord.js'
+import { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, type Message, ModalSubmitInteraction, SlashCommandBuilder } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { Command, CommandBuilder, Controller, MessageHandler } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
@@ -100,6 +100,99 @@ describe('a @Command handler called with another kind of interaction', () => {
     )
   })
 
+  // One method may answer routes of several interaction types: each runs it with its own interaction
+  describe('on a method with @Commands of two interaction types', () => {
+    class Stats {
+      ran: string[] = []
+
+      @Command('stats', CommandType.SLASH)
+      @Command('stats/refresh', CommandType.BUTTON)
+      stats(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+        this.ran.push(interaction.constructor.name)
+      }
+    }
+
+    it('runs it with an interaction of either', () => {
+      const stats = new Stats()
+
+      stats.stats(createMockInteraction(ChatInputCommandInteraction))
+      stats.stats(createMockInteraction(ButtonInteraction))
+
+      expect(stats.ran).toEqual(['ChatInputCommandInteraction', 'ButtonInteraction'])
+    })
+
+    it('is dispatched each of its routes, as the bot dispatches them', async () => {
+      const heard: string[] = []
+      @Controller()
+      class Routed {
+        @Command('stats', CommandType.SLASH)
+        @Command('stats/refresh', CommandType.BUTTON)
+        stats(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+          heard.push(interaction.constructor.name)
+        }
+      }
+      const module = MeoCordTestingModule.create({ controllers: [Routed] }).compile()
+
+      await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'stats' }))
+      await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'stats/refresh' }))
+
+      expect(heard).toEqual(['ChatInputCommandInteraction', 'ButtonInteraction'])
+    })
+
+    it('refuses an interaction of neither, naming both', () => {
+      expect(() => (new Stats().stats as (interaction: unknown) => void)(createMockInteraction(ModalSubmitInteraction))).toThrow(
+        'Stats.stats: its @Command routes take a ButtonInteraction or a ChatInputCommandInteraction, not a ModalSubmitInteraction.',
+      )
+    })
+  })
+
+  // The base method's own check reads the routes of the class the call is made on, so super passes what the override does
+  describe('on an override that adds a route of another type and calls its base method through super', () => {
+    @Controller()
+    class Base {
+      @Command('ping', CommandType.SLASH)
+      ping(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+        return `base ${interaction.constructor.name}`
+      }
+    }
+
+    @Controller()
+    class Sub extends Base {
+      @Command('again', CommandType.BUTTON)
+      override ping(interaction: ChatInputCommandInteraction | ButtonInteraction) {
+        return super.ping(interaction)
+      }
+    }
+
+    it('is dispatched each of its routes, the base method running for both', async () => {
+      const module = MeoCordTestingModule.create({ controllers: [Sub] }).compile()
+
+      const slash = await module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' }))
+      const button = await module.dispatch(createMockInteraction(ButtonInteraction, { customId: 'again' }))
+
+      expect([slash.ran, button.ran]).toEqual([true, true])
+    })
+
+    it('still refuses, on the base class alone, an interaction only the override takes', () => {
+      expect(() => (new Base().ping as (interaction: unknown) => void)(createMockInteraction(ButtonInteraction))).toThrow(
+        "Base.ping: @Command('ping', CommandType.SLASH) takes a ChatInputCommandInteraction, not a ButtonInteraction.",
+      )
+      expect(new Sub().ping(createMockInteraction(ButtonInteraction))).toBe('base ButtonInteraction')
+    })
+
+    it("reads only a subclass's routes, not those of another class it is called on", () => {
+      @Controller()
+      class Other {
+        @Command('other', CommandType.BUTTON)
+        ping() {}
+      }
+
+      expect(() => Base.prototype.ping.call(new Other(), createMockInteraction(ButtonInteraction))).toThrow(
+        "Base.ping: @Command('ping', CommandType.SLASH) takes a ChatInputCommandInteraction, not a ButtonInteraction.",
+      )
+    })
+  })
+
   it('puts the article a class name takes before it, and names an unknown type an interaction', () => {
     class Odd {
       @Command('odd', 'NOT_A_TYPE' as CommandType)
@@ -149,5 +242,27 @@ describe("@MessageHandler('')", () => {
     await module.dispatch(createMockMessage({ content: 'hello there' }))
 
     expect(heard.sort()).toEqual(["'' hello there", '() hello there'])
+  })
+})
+
+// Spaces alone are no word either, so they read as no pattern, as '' does
+describe("@MessageHandler('   ')", () => {
+  it('warns, naming the handler, and is dispatched every message, as @MessageHandler() is', async () => {
+    const heard: string[] = []
+    @Controller()
+    class Listen {
+      @MessageHandler('   ')
+      blank(message: Message) {
+        heard.push(message.content)
+      }
+    }
+    const module = MeoCordTestingModule.create({ controllers: [Listen] }).compile()
+
+    await module.dispatch(createMockMessage({ content: 'hello there' }))
+
+    expect([warnings(), heard]).toEqual([
+      ["@MessageHandler('   ') on Listen.blank is deprecated; in the next major version (5.0) it is refused. Use @MessageHandler() instead."],
+      ['hello there'],
+    ])
   })
 })

@@ -77,35 +77,38 @@ export function mergeTheme(theme: ResolvedTheme, layer: ThemeOverride | undefine
   return merged
 }
 
-// Written by the deprecated `Theme` statics: beneath every theme an app sets
-let legacyLayer: ThemeOverride | undefined
-let legacyVersion = 0
-let defaults = DEFAULT_THEME as ResolvedTheme
+/**
+ * The theme state outside a call, one for both builds of this version so either reads what the other set: the defaults
+ * with what the deprecated `Theme` statics set beneath every theme, the app whose theme is read outside a call, and how
+ * an answer outside a call finds its theme.
+ */
+const state = shared('themeState', () => ({
+  defaults: DEFAULT_THEME as ResolvedTheme,
+  legacyVersion: 0,
+  ambient: undefined as { owner: object; theme: () => ResolvedTheme } | undefined,
+  ambientVersion: 0,
+  themeOutsideCalls: undefined as ((interaction: object) => ResolvedTheme | Promise<ResolvedTheme>) | undefined,
+}))
 
 /** MeoCord's defaults, with what the deprecated `Theme` statics set over them. */
 export function defaultTheme(): ResolvedTheme {
-  return defaults
+  return state.defaults
 }
 
 /** The number of times the legacy layer has changed, so a theme built on an older one is built again. */
 export function themeLayersVersion(): number {
-  return legacyVersion
+  return state.legacyVersion
 }
 
 /** Sets the layer the deprecated `Theme` statics write, merged over MeoCord's defaults. */
 export function setLegacyThemeLayer(layer: ThemeOverride | undefined): void {
-  legacyLayer = layer === undefined ? undefined : copyLayer(layer)
-  defaults = mergeTheme(DEFAULT_THEME as ResolvedTheme, legacyLayer)
-  legacyVersion++
+  state.defaults = mergeTheme(DEFAULT_THEME as ResolvedTheme, layer === undefined ? undefined : copyLayer(layer))
+  state.legacyVersion++
 }
-
-// The theme outside any call: the one of the app or testing module that claimed it, until it gives it up
-let ambient: { owner: object; theme: () => ResolvedTheme } | undefined
-let ambientVersion = 0
 
 /** The number of times the app read outside a call has changed, so each app decides again whether its calls need a scope. */
 export function ambientThemeVersion(): number {
-  return ambientVersion
+  return state.ambientVersion
 }
 
 /**
@@ -114,22 +117,22 @@ export function ambientThemeVersion(): number {
  * its theme to its own calls.
  */
 export function claimAmbientTheme(owner: object, theme: () => ResolvedTheme): boolean {
-  if (ambient && ambient.owner !== owner) return false
-  if (!ambient) ambientVersion++
-  ambient = { owner, theme }
+  if (state.ambient && state.ambient.owner !== owner) return false
+  if (!state.ambient) state.ambientVersion++
+  state.ambient = { owner, theme }
   return true
 }
 
 /** Gives up the theme read outside a call, when `owner` has it: its start failed, or it has shut down. */
 export function releaseAmbientTheme(owner: object): void {
-  if (ambient?.owner !== owner) return
-  ambient = undefined
-  ambientVersion++
+  if (state.ambient?.owner !== owner) return
+  state.ambient = undefined
+  state.ambientVersion++
 }
 
 /** Whether `owner` is the app whose theme is read outside a call. */
 export function ownsAmbientTheme(owner: object): boolean {
-  return ambient?.owner === owner
+  return state.ambient?.owner === owner
 }
 
 /** Runs `fn` with `theme` as the theme of the call, for everything it runs, awaits or starts. */
@@ -150,12 +153,9 @@ export function runInThemeScope<T>(themeScope: ThemeScope, fn: () => T): T {
   return scope.run(themeScope, fn)
 }
 
-// Set by the runtime: the theme an app gives an interaction answered outside any call, as in a collector
-let themeOutsideCalls: ((interaction: object) => ResolvedTheme | Promise<ResolvedTheme>) | undefined
-
 /** Sets how an answer outside any call finds its theme: from the interaction's app, server and user. */
 export function setThemeOutsideCalls(resolve: (interaction: object) => ResolvedTheme | Promise<ResolvedTheme>): void {
-  themeOutsideCalls = resolve
+  state.themeOutsideCalls = resolve
 }
 
 /**
@@ -165,7 +165,7 @@ export function setThemeOutsideCalls(resolve: (interaction: object) => ResolvedT
 export function themeForInteraction(interaction: object): ResolvedTheme | Promise<ResolvedTheme> {
   const call = scope.getStore()
   if (call) return call.theme
-  return themeOutsideCalls?.(interaction) ?? useTheme()
+  return state.themeOutsideCalls?.(interaction) ?? useTheme()
 }
 
 /**
@@ -196,7 +196,7 @@ export function themeForInteraction(interaction: object): ResolvedTheme | Promis
  * @group Responses
  */
 export function useTheme(): ResolvedTheme {
-  return scope.getStore()?.theme ?? ambient?.theme() ?? defaults
+  return scope.getStore()?.theme ?? state.ambient?.theme() ?? state.defaults
 }
 
 /**

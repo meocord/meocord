@@ -2,10 +2,15 @@ import { type Message } from 'discord.js'
 import { getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { type ControllerClass } from '@src/core/component-routes.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
-import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType } from '@src/core/message-params.js'
+import { BUILT_IN_TYPES, fitsParamType, isGuildType, isKnownParamType, effectiveScope } from '@src/core/message-params.js'
 import { type MessageCommandOptions, type MessagePrefix, type MessageScope } from '@src/interface/index.js'
-import { type GivenFlag, isSpace, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { type GivenFlag, type GivenWords, isLiteralFlag, isSpace, literalFlags, restFrom, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { setOwn, shadowInherited } from '@src/util/value.util.js'
 import { startupError } from '@src/util/refusal.util.js'
+import { warnOnce } from '@src/common/deprecation.js'
+import { Logger } from '@src/common/logger.js'
+
+const logger = new Logger('MeoCord')
 
 /** One word of a message pattern: a literal word, or a param with the type it declares, if any. */
 export type PatternToken = { literal: string } | { param: string; rest: boolean; optional: boolean; type?: string }
@@ -28,6 +33,8 @@ export interface MessagePattern {
   tokens: PatternToken[]
   flags: FlagToken[]
   specificity: number
+  /** Its params' and flags' names that `Object.prototype` has, which a message that leaves one out reads as left out. */
+  inheritedNames: string[]
 }
 
 /** A patterned `@MessageHandler`, as dispatch ranks and matches it. */
@@ -45,6 +52,8 @@ export interface MessageRoute {
   scope: MessageScope
   /** Its flags, which a message may give anywhere after the command's first word, apart from its words. */
   flags: FlagToken[]
+  /** Its params' and flags' names that `Object.prototype` has, which a message that leaves one out reads as left out. */
+  inheritedNames: string[]
   /** The handler's own pattern, when this route is one of its aliases. */
   aliasOf?: string
   /** What the command does, from the handler's `description`. */
@@ -70,6 +79,65 @@ export const fitsScope = (scope: MessageScope, inGuild: boolean | undefined) => 
 
 const PARAM = /^\{(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\.\.\.)?(\?)?\}$/
 const FLAG = /^\{--(\w+)(?::([\w-]+(?:\|[\w-]+)*))?(\?)?\}$/
+/**
+ * A whole brace pair that PARAM or FLAG refused, read loosely to tell its name from its type: anything up to `:` or `}`,
+ * then the marks a param ends with, `...` and `?`, wherever they were written.
+ */
+const LOOSE_FLAG = /^\{--([^:}]*?)(?::([^}]*?))?(\.\.\.)?(\?)?\}$/
+const LOOSE_PARAM = /^\{([^:}]*?)(?::([^}]*?))?(\.\.\.)?(\?)?\}$/
+/** A name or type with marks after it, as one written out of order carries them. */
+const MARKED = /^(.*?)((?:\.\.\.|\?)+)$/
+/** A param's name, and a flag's, which also starts with a letter, as a message could not give it otherwise. */
+const PARAM_NAME = /^\w+$/
+const FLAG_NAME = /^[A-Za-z]\w*$/
+
+/** A param as its pattern writes it, which the grammar spells only one way. */
+const writtenParam = (token: ParamToken) => `{${token.param}${token.type ? `:${token.type}` : ''}${token.rest ? '...' : ''}${token.optional ? '?' : ''}}`
+/** A flag as its pattern writes it. */
+const writtenFlag = (flag: FlagToken) => `{--${flag.flag}${flag.type ? `:${flag.type}` : ''}${flag.optional ? '?' : ''}}`
+
+/**
+ * Why a word with a brace in it is no param or flag: text around its braces, or a whole pair whose name, type or marks
+ * the syntax doesn't take. Each names the rule broken, with the word mended as an example.
+ */
+function notAParam(word: string): string {
+  const flag = LOOSE_FLAG.exec(word)
+  if (flag) {
+    const [, name, type, rest] = flag
+    if (rest || word.includes('...')) {
+      return `"${word}" is not a flag: a flag doesn't take the rest of the message; a param does, such as {${mended(unmarked(name), 'param')}...}.`
+    }
+    if (unmarked(name) !== name || (type !== undefined && unmarked(type) !== type)) {
+      const typed = type === undefined ? '' : `:${unmarked(type)}`
+      return `"${word}" is not a flag: its ? goes last, as in {--${unmarked(name)}${typed}?}.`
+    }
+    if (!FLAG_NAME.test(name)) {
+      return `"${word}" is not a flag: a flag's name starts with a letter, then letters, digits or _, such as {--${mended(name, 'flag')}}.`
+    }
+    return `"${word}" is not a flag: a type is a name, or words to choose from joined by |, such as {--${name}:on|off}.`
+  }
+  const param = LOOSE_PARAM.exec(word)
+  if (param) {
+    const [, name, type] = param
+    if (unmarked(name) !== name || (type !== undefined && unmarked(type) !== type)) {
+      const typed = type === undefined ? '' : `:${unmarked(type)}`
+      const ordered = `{${unmarked(name)}${typed}${word.includes('...') ? '...' : ''}${word.includes('?') ? '?' : ''}}`
+      return `"${word}" is not a param: its marks go last, ... then ?, as in ${ordered}.`
+    }
+    if (!PARAM_NAME.test(name)) return `"${word}" is not a param: a param's name is ASCII letters, digits and _, such as {${mended(name, 'param')}}.`
+    return `"${word}" is not a param: a type is a name, or words to choose from joined by |, such as {${name}:on|off}.`
+  }
+  return `"${word}" is not a param: a param is a whole word, such as {name}, {name:type}, {name...}, {name?} or a flag, {--name}.`
+}
+
+/** A name or type without the marks written after it, `...` and `?`. */
+const unmarked = (text: string) => MARKED.exec(text)?.[1] ?? text
+
+/** A name with each character the syntax doesn't take as `_`, and a flag's led by a letter, for an example. */
+function mended(name: string, kind: 'param' | 'flag'): string {
+  const word = name.replace(/\W/g, '_') || kind
+  return kind === 'flag' && !/^[A-Za-z]/.test(word) ? `flag${word}` : word
+}
 
 /**
  * Reads a pattern into its words and flags. Throws for a pattern of flags alone, a param that is not a whole word, a
@@ -105,11 +173,7 @@ export function parseMessagePattern(pattern: string): MessagePattern {
   words.forEach((word, index) => {
     const match = PARAM.exec(word)
     if (!match) {
-      if (/[{}]/.test(word)) {
-        throw new Error(
-          `"${word}" is not a param: a param is a whole word, such as {name}, {name:type}, {name...}, {name?} or a flag, {--name}.`,
-        )
-      }
+      if (/[{}]/.test(word)) throw new Error(notAParam(word))
       tokens.push({ literal: word })
       return
     }
@@ -124,7 +188,7 @@ export function parseMessagePattern(pattern: string): MessagePattern {
     const next = tokens[index + 1]
     if (!('param' in token) || !token.optional || !next) return
     if (!('param' in next) || !next.optional) {
-      throw new Error(`{${token.param}?} is optional, so only optional params may follow it; "${'param' in next ? `{${next.param}}` : next.literal}" is not.`)
+      throw new Error(`${writtenParam(token)} is optional, so only optional params may follow it; "${'param' in next ? writtenParam(next) : next.literal}" is not.`)
     }
     if (token.type === undefined || token.type === 'string') {
       throw new Error(
@@ -141,7 +205,8 @@ export function parseMessagePattern(pattern: string): MessagePattern {
     rest: params.some(token => token.rest),
     optional: params.some(token => token.optional),
   })
-  return { tokens, flags, specificity }
+  const inheritedNames = [...params.map(token => token.param), ...flags.map(flag => flag.flag)].filter(name => name in Object.prototype)
+  return { tokens, flags, specificity, inheritedNames }
 }
 
 /** A prefix setting as a list, where `''` stands for none. */
@@ -184,8 +249,20 @@ function startsOf(route: MessageRoute, place: 'guild' | 'dm', options: MessageCo
   return new Set([...prefixList(options.prefix), ...mention])
 }
 
-/** Whether two routes accept some of the same messages: a start they share, and words that match alike. */
-function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandOptions): boolean {
+/** Where two routes of equal rank and shape part: the one with a required param where the other has an optional one comes first. */
+function compareOptional(a: PatternToken[], b: PatternToken[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const [aToken, bToken] = [a[i], b[i]]
+    if ('param' in aToken && 'param' in bToken && aToken.optional !== bToken.optional) return aToken.optional ? 1 : -1
+  }
+  return 0
+}
+
+/**
+ * Whether two routes accept some of the same messages: a start they share, and words that match alike. `'optional'`
+ * when they do only because a required param and an optional one, in one position, both take a word there.
+ */
+function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandOptions): boolean | 'optional' {
   // A case-insensitive word matches every message the case-sensitive one does
   const exact = a.caseSensitive && b.caseSensitive
   const key = (start: string | symbol) => (typeof start === 'string' && !exact ? start.toLowerCase() : start)
@@ -196,13 +273,71 @@ function sameMessages(a: MessageRoute, b: MessageRoute, options: MessageCommandO
     return [...startsOf(a, place, options)].some(start => theirs.has(key(start)))
   })
   if (!startAlike || a.tokens.length !== b.tokens.length) return false
-  return a.tokens.every((token, i) => {
+  let byOptional = false
+  const alike = a.tokens.every((token, i) => {
     const other = b.tokens[i]
     if ('literal' in token) {
       return 'literal' in other && (exact ? token.literal === other.literal : token.literal.toLowerCase() === other.literal.toLowerCase())
     }
-    return 'param' in other && token.rest === other.rest && token.optional === other.optional
+    if (!('param' in other) || token.rest !== other.rest) return false
+    if (token.optional !== other.optional) byOptional = true
+    return true
   })
+  return alike && (byOptional ? 'optional' : true)
+}
+
+/** What a static empty prefix list does now, which a prefix function's `[]` doesn't: take messages as they are. */
+const EMPTY_PREFIX_LIST = "`[]` takes messages as they are, with no prefix; write `''` for that"
+
+/**
+ * The warnings for message handlers a bot starts with today though a message can't reach them as written, each once,
+ * for the app or the handler: a static empty prefix list, which takes messages as they are, where a prefix function's
+ * `[]` starts no command; and two flags of a command that reads flags in any case whose names differ only in case, the
+ * second of which is never set. The next major version (5.0) changes the first and refuses the second.
+ */
+export function messageRouteWarnings(routes: readonly MessageRoute[], options: MessageCommandOptions): string[] {
+  const warnings: string[] = []
+  if (Array.isArray(options.prefix) && options.prefix.length === 0) {
+    warnings.push(
+      `@MeoCord({ messages: { prefix: [] } }): ${EMPTY_PREFIX_LIST}. In the next major version (5.0), \`[]\` starts no command, ` +
+        "as a prefix function's `[]` does.",
+    )
+  }
+  const seen = new Map<ControllerClass, Map<string, Set<string>>>()
+  for (const route of routes) {
+    // A handler's aliases share its options and flags, so each is read once; one method can carry several handlers
+    const pattern = route.aliasOf ?? route.pattern
+    const methods = seen.get(route.controllerClass) ?? seen.set(route.controllerClass, new Map()).get(route.controllerClass)!
+    const patterns = methods.get(route.method) ?? methods.set(route.method, new Set()).get(route.method)!
+    if (patterns.has(pattern)) continue
+    patterns.add(pattern)
+    const handler = `${route.controllerClass.name}.${route.method}: @MessageHandler('${pattern}'`
+    const own = getMessageHandlers(route.controllerClass.prototype).find(
+      candidate => candidate.method === route.method && candidate.pattern === pattern,
+    )?.options
+    if (Array.isArray(own?.prefix) && own.prefix.length === 0) {
+      warnings.push(
+        `${handler}, { prefix: [] }): ${EMPTY_PREFIX_LIST}, or \`false\` for no prefix and no mention. In the next major ` +
+          'version (5.0), `[]` starts no command.',
+      )
+    }
+    if (route.caseSensitive) continue
+    const first = new Map<string, FlagToken>()
+    for (const flag of route.flags) {
+      const same = first.get(flag.flag.toLowerCase())
+      if (!same) {
+        first.set(flag.flag.toLowerCase(), flag)
+        continue
+      }
+      warnings.push(
+        `${handler}): ${writtenFlag(same)} and ${writtenFlag(flag)} differ only in case, and this command reads flags in any ` +
+          `case, so --${flag.flag} always sets ${writtenFlag(same)} and ${writtenFlag(flag)} is never set. Rename one, or set ` +
+          'caseSensitive: true. The next major version (5.0) refuses this.',
+      )
+      break
+    }
+  }
+  return warnings
 }
 
 /**
@@ -263,12 +398,30 @@ export function buildMessageRoutes(controllerClasses: readonly ControllerClass[]
     }
   }
 
-  routes.sort((a, b) => b.specificity - a.specificity || compareShapes(a.tokens, b.tokens) || Number(takesAppStart(a)) - Number(takesAppStart(b)))
+  routes.sort(
+    (a, b) =>
+      b.specificity - a.specificity ||
+      compareShapes(a.tokens, b.tokens) ||
+      compareOptional(a.tokens, b.tokens) ||
+      Number(takesAppStart(a)) - Number(takesAppStart(b)),
+  )
 
   for (let i = 0; i < routes.length; i++) {
     for (let j = i + 1; j < routes.length; j++) {
       const [a, b] = [routes[i], routes[j]]
-      if (!sameMessages(a, b, options)) continue
+      const same = sameMessages(a, b, options)
+      if (!same) continue
+      // Ranked by their params, so the same one answers whatever the order; 5.0 refuses these as it does the rest
+      if (same === 'optional') {
+        if (a.controllerClass === b.controllerClass && a.method === b.method) continue
+        warnOnce(
+          logger,
+          `${a.controllerClass.name}.${a.method}: ${describeRoute(a)} and ${describeRoute(b)} in ${b.controllerClass.name}.${b.method} can ` +
+            `take the same messages, as one takes a word where the other has an optional param; ${a.controllerClass.name}.${a.method} ` +
+            'answers those. Change one pattern, or give one its own prefix. The next major version (5.0) stops the bot at startup for these.',
+        )
+        continue
+      }
       // One handler under two spellings, such as 'hello' and 'Hello', is one route, its pattern's over an alias's
       if (a.controllerClass === b.controllerClass && a.method === b.method) {
         if (a.aliasOf && !b.aliasOf) routes[i] = b
@@ -324,7 +477,7 @@ function assertScope(scope: unknown, { tokens, flags }: MessagePattern): void {
   if (scope !== 'dm') return
   const param = tokens.find((token): token is ParamToken => 'param' in token && token.type !== undefined && isGuildType(token.type))
   const flag = flags.find(candidate => candidate.type !== undefined && isGuildType(candidate.type))
-  const shown = param ? `{${param.param}:${param.type}}` : flag && `{--${flag.flag}:${flag.type}}`
+  const shown = param ? writtenParam(param) : flag && writtenFlag(flag)
   if (shown) throw new Error(`scope is 'dm', but ${shown} is found only in a server.`)
 }
 
@@ -426,6 +579,8 @@ export function afterStart(text: string, prefixes: readonly string[], mention: s
 /** One step of a compiled pattern: literal words by key, one param edge, and the routes ending here. */
 interface TrieNode {
   words: Map<string, TrieNode>
+  /** The pattern words here that start with `--`, of routes with flags, which a bare flag in this place also matches. */
+  flagWords?: Map<string, TrieNode>
   param?: TrieNode
   /** Routes, by rank, whose words end here. */
   ends: number[]
@@ -446,8 +601,8 @@ interface RouteGroup {
   /** The routes with flags, matched against a message's words once its flags are taken out. */
   flagged?: TrieNode
   /**
-   * The routes with flags that begin with a param, for a message whose first word is a flag: flags count only
-   * after a command's first word, and a route without command words takes them anywhere.
+   * The routes with flags that begin with a param, or with their own `--` word, for a message whose first word is a
+   * flag: flags count only after a command's first word, and a route without command words takes them anywhere.
    */
   flaggedAfterFlag?: TrieNode
   /** Routes by rank, under the first of their command words, the literal words their patterns begin with. */
@@ -499,11 +654,11 @@ function assignTail(
   for (let t = 0; t < tail.length && w < words.length; t++) {
     const token = tail[t]
     if (token.rest) {
-      params[token.param] = restFrom(text, words[w].start, cuts)
+      setOwn(params, token.param, restFrom(text, words[w].start, cuts))
       return params
     }
     if (t < tail.length - 1 && !fitsParamType(token.type!, words[w].value, caseSensitive)) continue
-    params[token.param] = words[w++].value
+    setOwn(params, token.param, words[w++].value)
   }
   return w === words.length ? params : undefined
 }
@@ -545,6 +700,8 @@ function compileIndex(routes: readonly MessageRoute[]): MessageIndex {
         const key = wordKey(token.literal, route.caseSensitive)
         let next = node.words.get(key)
         if (!next) node.words.set(key, (next = trieNode()))
+        // Such a word typed bare is taken out as a flag before the words are walked, so it is matched as one too
+        if (route.flags.length > 0 && token.literal.startsWith('--')) (node.flagWords ??= new Map()).set(key, next)
         node = next
         continue
       }
@@ -561,6 +718,8 @@ function compileIndex(routes: readonly MessageRoute[]): MessageIndex {
   const all = [...groups.values()]
   for (const group of all) {
     const flagged = group.flagged
+    // A pattern's own leading `--` word stays reachable there: given bare, it is taken out as a flag, so the message
+    // seems to start with one
     if (flagged) group.flaggedAfterFlag = { ...flagged, words: new Map() }
   }
   const ownPrefixes = all.flatMap(group => (Array.isArray(group.prefix) ? group.prefix : []))
@@ -601,7 +760,10 @@ function mayEnter(node: TrieNode | undefined, first: string | undefined): node i
   return node.words.has(first)
 }
 
-/** The ranks of every route the words reach from `node`. Each node sits at one word depth, so each is visited once. */
+/**
+ * The ranks of every route the words reach from `node`. A pattern's own `--` word is reached by that word, or by a flag
+ * of its name given bare in its place, which takes no word.
+ */
 function reach(
   node: TrieNode,
   words: { value: string; start: number }[],
@@ -609,8 +771,15 @@ function reach(
   text: string,
   cuts: readonly number[],
   caseSensitive: boolean,
+  flags: readonly GivenFlag[],
   found: number[],
 ): void {
+  if (node.flagWords) {
+    for (const flag of flags) {
+      const next = flag.at === i && flag.value === undefined ? node.flagWords.get(wordKey(`--${flag.name}`, caseSensitive)) : undefined
+      if (next) reach(next, words, i, text, cuts, caseSensitive, flags, found)
+    }
+  }
   for (const tail of node.tails) if (assignTail(tail.tokens, words, i, text, cuts, caseSensitive)) found.push(tail.rank)
   if (i === words.length) {
     for (const rank of node.ends) found.push(rank)
@@ -618,25 +787,39 @@ function reach(
   }
   for (const rank of node.rests) found.push(rank)
   const next = node.words.get(wordKey(words[i].value, caseSensitive))
-  if (next) reach(next, words, i + 1, text, cuts, caseSensitive, found)
-  if (node.param) reach(node.param, words, i + 1, text, cuts, caseSensitive, found)
+  if (next) reach(next, words, i + 1, text, cuts, caseSensitive, flags, found)
+  if (node.param) reach(node.param, words, i + 1, text, cuts, caseSensitive, flags, found)
 }
 
-/** The params a route's words capture, given words its pattern is known to match. */
-function paramsOf(route: MessageRoute, words: { value: string; start: number }[], text: string, cuts: readonly number[]): Record<string, string> {
+/**
+ * The params a route's words capture, given words its pattern is known to match. A pattern's own `--` word that the
+ * message gave as a flag, one of `taken`, takes no word.
+ */
+function paramsOf(
+  route: MessageRoute,
+  words: { value: string; start: number }[],
+  text: string,
+  cuts: readonly number[],
+  taken: number,
+): Record<string, string> {
   const tail = tailStart(route.tokens)
-  const params: Record<string, string> =
-    tail === -1 ? {} : assignTail(route.tokens.slice(tail) as ParamToken[], words, tail, text, cuts, route.caseSensitive)!
-  for (let i = 0; i < (tail === -1 ? route.tokens.length : tail) && i < words.length; i++) {
+  const params: Record<string, string> = {}
+  let left = taken
+  let w = 0
+  for (let i = 0; i < (tail === -1 ? route.tokens.length : tail) && w < words.length; i++) {
     const token = route.tokens[i]
-    if ('literal' in token) continue
-    if (token.rest) {
-      params[token.param] = restFrom(text, words[i].start, cuts)
-      break
+    if ('literal' in token) {
+      if (left > 0 && token.literal.startsWith('--') && wordKey(words[w].value, route.caseSensitive) !== wordKey(token.literal, route.caseSensitive)) left--
+      else w++
+      continue
     }
-    params[token.param] = words[i].value
+    if (token.rest) {
+      setOwn(params, token.param, restFrom(text, words[w].start, cuts))
+      return params
+    }
+    setOwn(params, token.param, words[w++].value)
   }
-  return params
+  return tail === -1 ? params : { ...params, ...assignTail(route.tokens.slice(tail) as ParamToken[], words, w, text, cuts, route.caseSensitive) }
 }
 
 /**
@@ -705,7 +888,7 @@ export function matchMessageRoute(
     const found: number[] = []
     if (mayEnter(group.root, first)) {
       const words = wordsOf(rest)
-      reach(group.root, words, 0, rest, NONE, group.caseSensitive, found)
+      reach(group.root, words, 0, rest, NONE, group.caseSensitive, NONE, found)
       for (const rank of found) {
         if (fitsScope(routes[rank].scope, starts.inGuild)) {
           if (!best || rank < best.rank) best = { rank, words, rest, flags: NONE, cuts: NONE }
@@ -718,7 +901,7 @@ export function matchMessageRoute(
     const scanned = rest.includes('--') ? splitFlagWords(rest) : { words: wordsOf(rest), flags: NONE, cuts: NONE }
     found.length = 0
     const from = scanned.words[0]?.start === 0 ? flagged : group.flaggedAfterFlag!
-    reach(from, scanned.words, 0, rest, scanned.cuts, group.caseSensitive, found)
+    reach(from, scanned.words, 0, rest, scanned.cuts, group.caseSensitive, scanned.flags, found)
     for (const rank of found) {
       const candidate = { rank, words: scanned.words, rest, flags: scanned.flags, cuts: scanned.cuts }
       if (fitsScope(routes[rank].scope, starts.inGuild)) {
@@ -729,11 +912,16 @@ export function matchMessageRoute(
   const chosen = best ?? outside
   if (!chosen) return undefined
   const route = routes[chosen.rank]
-  const params = paramsOf(route, chosen.words, chosen.rest, chosen.cuts)
-  for (const { name, value } of chosen.flags) {
+  // The flags the pattern's own `--` words took are those words, and set none of its flags
+  const taken = literalFlags(route.tokens, route.caseSensitive, chosen.words, chosen.flags)
+  const params = paramsOf(route, chosen.words, chosen.rest, chosen.cuts, taken.size)
+  chosen.flags.forEach(({ name, value }, index) => {
+    if (taken.has(index)) return
     const declared = route.flags.find(flag => wordKey(flag.flag, route.caseSensitive) === wordKey(name, route.caseSensitive))
-    if (declared) params[declared.flag] = value ?? ''
-  }
+    if (declared) setOwn(params, declared.flag, value ?? '')
+  })
+  // A param or flag left out reads as left out, not as what Object.prototype has under its name
+  if (route.inheritedNames.length > 0) shadowInherited(params, route.inheritedNames)
   return { route, params, start: text.slice(0, text.length - chosen.rest.length) }
 }
 
@@ -746,7 +934,7 @@ export function matchMessageCommand(
   routes: readonly MessageRoute[],
   content: string,
   starts: MessageStarts,
-): { route: MessageRoute; start: string; given: number } | undefined {
+): { route: MessageRoute; start: string; given: GivenWords } | undefined {
   let index = indexes.get(routes)
   if (!index) indexes.set(routes, (index = compileIndex(routes)))
   let first = 0
@@ -755,8 +943,8 @@ export function matchMessageCommand(
   const text = content.trim()
 
   // The command's usage comes from a route whose scope fits, else from one whose reply says where it works
-  let best: { rank: number; start: string; given: number } | undefined
-  let outside: { rank: number; start: string; given: number } | undefined
+  let best: { rank: number; start: string; given: GivenWords } | undefined
+  let outside: { rank: number; start: string; given: GivenWords } | undefined
   for (const group of index.groups) {
     if (group.prefix === false && !(group.mentionOnly && starts.inGuild !== false)) continue
     const rest = restFor(group, text, starts)
@@ -766,15 +954,18 @@ export function matchMessageCommand(
     if (first !== undefined && !group.commands.has(first)) continue
     const plain = splitWords(rest)
     // A route with flags counts the words left once the message's flags are taken out
-    const positional = mayEnter(group.flagged, first) && rest.includes('--') ? splitFlagWords(rest).words : plain
+    const scanned = mayEnter(group.flagged, first) && rest.includes('--') ? splitFlagWords(rest) : { words: plain, flags: NONE }
     const candidates = group.commands.get(wordKey(plain[0]?.value ?? '', group.caseSensitive)) ?? []
     for (const rank of candidates) {
       if (best && rank >= best.rank) break
-      const words = routes[rank].flags.length > 0 ? positional : plain
-      const command = commandWordsOf(routes[rank].tokens)
-      if (command.every((word, i) => words[i] && wordKey(words[i].value, group.caseSensitive) === wordKey(word, group.caseSensitive))) {
-        const named = { rank, start: text.slice(0, text.length - rest.length), given: words.length - command.length }
-        if (fitsScope(routes[rank].scope, starts.inGuild)) {
+      const flagged = routes[rank].flags.length > 0
+      const words = flagged ? scanned.words : plain
+      const flags = flagged ? scanned.flags : NONE
+      const taken = commandWordsTaken(commandWordsOf(routes[rank].tokens), words, flags, group.caseSensitive)
+      if (taken !== -1) {
+        const named = { rank, start: text.slice(0, text.length - rest.length), given: { words, flags } }
+        // Where it works as dispatch answers it, so a DM's usage comes from a route that works there
+        if (fitsScope(effectiveScope(routes[rank]), starts.inGuild)) {
           best = named
           break
         }
@@ -784,6 +975,24 @@ export function matchMessageCommand(
   }
   const chosen = best ?? outside
   return chosen && { route: routes[chosen.rank], start: chosen.start, given: chosen.given }
+}
+
+/**
+ * How many of a message's words a route's command words take, or -1 when the message names another command. A
+ * command's own `--` word may be given bare as a flag in its place, and takes no word.
+ */
+function commandWordsTaken(
+  command: readonly string[],
+  words: readonly { value: string }[],
+  flags: readonly GivenFlag[],
+  caseSensitive: boolean,
+): number {
+  let w = 0
+  for (const word of command) {
+    if (words[w] && wordKey(words[w].value, caseSensitive) === wordKey(word, caseSensitive)) w++
+    else if (!flags.some(flag => isLiteralFlag(flag, word, w, caseSensitive))) return -1
+  }
+  return w
 }
 
 /**
@@ -845,7 +1054,7 @@ export function hasMessageText(content: unknown): boolean {
  * What a test calling a handler with a message alone passes as its params, as dispatch builds them: `undefined` for a
  * listener, `{}` for a message whose content isn't a string, as a mock's without strict mocks, else what the pattern
  * captures with the route and start; for one naming the command without fitting it, the route, start and `given`, the
- * words after the command words. Either only when dispatch would give the message to this handler among
+ * message's words and flags. Either only when dispatch would give the message to this handler among
  * `controllers`; otherwise why it does not reach the handler, a message with no text included.
  */
 export async function messageParamsFor(
@@ -854,7 +1063,7 @@ export async function messageParamsFor(
   message: Message,
   options: MessageCommandOptions,
   controllers: readonly ControllerClass[] = [controllerClass],
-): Promise<{ params: Record<string, string>; route?: MessageRoute; start?: string; given?: number } | { mismatch: string } | undefined> {
+): Promise<{ params: Record<string, string>; route?: MessageRoute; start?: string; given?: GivenWords } | { mismatch: string } | undefined> {
   // The handler's pattern and its aliases, ranked as dispatch ranks them
   const routes = buildMessageRoutes([controllerClass], options).filter(candidate => candidate.method === methodName)
   if (routes.length === 0) return undefined

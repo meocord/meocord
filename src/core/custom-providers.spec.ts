@@ -5,6 +5,8 @@ import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as CommonModule from '@src/common/index.js'
 import { type OnReady, type OnShutdown, type Provider } from '@src/interface/index.js'
+import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { logged } = vi.hoisted(() => ({ logged: { error: [] as unknown[][] } }))
 
@@ -26,6 +28,7 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 /** Fresh modules per test, as a new process would have. */
 async function load() {
   vi.resetModules()
+  forgetProcessState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
@@ -33,6 +36,13 @@ async function load() {
   const common: typeof CommonModule = await import('@src/common/index.js')
   return { discord, ...app, ...factory, ...decorators, ...common }
 }
+
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still imports fresh
+beforeAll(async () => {
+  await load()
+}, WARM_UP_TIMEOUT_MS)
+
 type Loaded = Awaited<ReturnType<typeof load>>
 
 /** Builds an app from the factory with a client that logs in without a network. */

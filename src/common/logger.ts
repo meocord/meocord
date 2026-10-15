@@ -6,6 +6,7 @@ import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
 import chalk, { chalkStderr, type ChalkInstance } from 'chalk'
 import { LOG_LEVEL_ENV, LOG_LEVEL_RANK, logThreshold, takeRejectedLogLevel } from '@src/common/log-level.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 dayjs.extend(utc)
 dayjs.extend(timezone)
@@ -42,7 +43,8 @@ export const REDACTED = '[redacted]'
  */
 const MIN_HIDDEN_LENGTH = 16
 
-const hiddenValues = new Set<string>()
+// One per process for this meocord version, so a value hidden through one build stays out of the other's lines
+const hiddenValues = shared('hiddenValues', () => new Set<string>())
 
 /**
  * Keeps `value`, such as the bot's credential, out of every line Logger prints from now on, whatever object, string

@@ -33,11 +33,13 @@ class Commands {
 }
 
 // A presenter with a fault of its own, as an app's may have
-const failingPresenter: ResponsePresenter = {
-  loading: () => ({ text: 'Working' }),
-  error: () => {
+class FailingPresenter implements ResponsePresenter {
+  loading() {
+    return { text: 'Working' }
+  }
+  error(): never {
     throw new TypeError('presenter broke')
-  },
+  }
 }
 
 @MeoCord({
@@ -48,6 +50,9 @@ const failingPresenter: ResponsePresenter = {
   clientOptions: { intents: [] },
 })
 class App {}
+
+@MeoCord({ controllers: [Commands], observers: [Audit], presenter: FailingPresenter, clientOptions: { intents: [] } })
+class PresentedApp {}
 
 /** A server whose preferred locale is not a locale, which the translator cannot read: the usage reply fails to render. */
 const unreadable = () => Object.assign(createMockGuild(), { preferredLocale: 42 }) as unknown as Guild
@@ -119,10 +124,8 @@ describe('in a testing module, an answer MeoCord fails to build', () => {
   })
 
   it('rejects the dispatch when the presenter fails to build an interaction’s error view', async () => {
-    const module = MeoCordTestingModule.fromApp(App).compile()
+    const module = MeoCordTestingModule.fromApp(PresentedApp).compile()
     const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'broken' })
-    const { setPresenter } = await import('@src/common/response/presenter.js')
-    setPresenter(interaction.client, failingPresenter)
 
     await expect(module.dispatch(interaction)).rejects.toThrow('presenter broke')
     expect(errors).toContainEqual([expect.stringContaining('Could not write the answer for'), expect.objectContaining({ message: 'presenter broke' })])

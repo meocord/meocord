@@ -441,17 +441,18 @@ function valueAt(catalog: CatalogShape | undefined, key: string): unknown {
 
 /**
  * A message by its dotted key, or undefined when the catalog lacks it or the key names a group. `reference`, the
- * default catalog for a translation, decides whether an object is a plural or a group, so a translation that keeps
- * only a group's `other` message isn't read as a plural; where the reference lacks the key, the object's own keys
- * decide. A plural without an `other` form reads as missing, so a translation that left it out falls back to the next
- * catalog.
+ * default catalog for a translation, decides where it has a group that an object is that group, so a translation that
+ * keeps only a group's `other` message isn't read as a plural. Where it has a message, or lacks the key, the object's
+ * own keys decide, so a translation may give a plural for a message its language needs one for. A plural without an
+ * `other` form reads as missing, so a translation that left it out falls back to the next catalog.
  */
 export function lookup(catalog: CatalogShape | undefined, key: string, reference: CatalogShape | undefined = catalog): string | PluralMessage | undefined {
   const current = valueAt(catalog, key)
   if (typeof current === 'string') return current
   if (!isPluralShape(current) || typeof current.other !== 'string') return undefined
   const shape = reference === catalog ? current : valueAt(reference, key)
-  return shape === undefined || isPluralShape(shape) ? (current as PluralMessage) : undefined
+  const group = typeof shape === 'object' && shape !== null && !isPluralShape(shape)
+  return group ? undefined : (current as PluralMessage)
 }
 
 const plurals = new Map<string, Intl.PluralRules>()

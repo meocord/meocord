@@ -12,7 +12,10 @@ export function markExplained(error: unknown): void {
  *
  * Use it where a bot logs a startup failure, so an error MeoCord explained is not logged twice: an app
  * `MeoCordFactory.create()` refuses, such as two handlers for one command, or Discord refusing the bot token or a
- * privileged intent at login. The error is otherwise unchanged.
+ * privileged intent at login. A built bot has `process.exitCode` set for such an error already, and a start that a stop
+ * ended, which is explained too, leaves it as it was, so the process exits 0. Outside a build, as a script run by hand,
+ * `MeoCordFactory.create()` sets no code for an app it refuses, so a catch that returns early for an explained error,
+ * as below, sets `process.exitCode` itself there. The error is otherwise unchanged.
  *
  * @param error - An error `MeoCordFactory.create()` threw or `app.start()` rejected with.
  * @returns `true` when MeoCord explained the error.
@@ -28,9 +31,10 @@ export function markExplained(error: unknown): void {
  *   await app.start()
  * }
  *
- * // An error MeoCord explained, such as an app it refuses or a token Discord refused, is already logged
+ * // An error MeoCord explained, such as an app it refuses or a token Discord refused, is already logged, with the exit code set
  * bootstrap().catch(error => {
- *   if (!isExplainedError(error)) logger.error('Error during startup:', error)
+ *   if (isExplainedError(error)) return
+ *   logger.error('Error during startup:', error)
  *   process.exitCode = 1
  * })
  * ```

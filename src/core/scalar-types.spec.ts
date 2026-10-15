@@ -52,6 +52,9 @@ describe('number and duration words', () => {
     ['1h-30m', undefined, undefined, undefined],
     ['1İs', undefined, undefined, undefined],
     ['1.'.repeat(2_000) + 'x', undefined, undefined, undefined],
+    // Too long to add up: one amount past the largest number, or two whose sum is
+    ['9'.repeat(400) + 's', undefined, undefined, undefined],
+    [`1${'0'.repeat(308)}ms`.repeat(2), undefined, undefined, undefined],
   ]
 
   it('reads each word as the same value', () => {

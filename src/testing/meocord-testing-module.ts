@@ -20,7 +20,7 @@ import {
 } from 'discord.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
-import { ExecutionContext } from '@src/common/execution-context.js'
+import { ExecutionContext, inferContextType } from '@src/common/execution-context.js'
 import { Translator } from '@src/common/translator.js'
 import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
 import {
@@ -29,13 +29,14 @@ import {
   bindAppPresenter,
   bindGlobalStages,
   type GlobalStages,
+  type HandlerOutcome,
   prepareAppPresenter,
   prepareHandlerStages,
   prepareThemes,
   type RunOptions,
   runHandler,
 } from '@src/core/handler-pipeline.js'
-import { setPresenter } from '@src/common/response/presenter.js'
+import { clientPresenter, setPresenter } from '@src/common/response/presenter.js'
 import { autocompleteMismatch, commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
 import { buildComponentRoutes, type ComponentRoute } from '@src/core/component-routes.js'
 import { hasCustomId } from '@src/util/interaction.util.js'
@@ -50,9 +51,9 @@ import {
   type ThemeResolvers,
 } from '@src/interface/index.js'
 import { ThemeCache, type ThemeResolverClass, themeResolverClass } from '@src/core/theme-resolvers.js'
-import { claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import { appTheme, claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
-import { copyLayer, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
+import { copyLayer, defaultTheme, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
 import {
@@ -66,7 +67,7 @@ import { messageCommandHooks } from '@src/core/message-params.js'
 import { appObservers, assertObservers, bindObservers } from '@src/core/observer-runner.js'
 import { HandlerRegistry, listEventSources } from '@src/core/handler-registry.js'
 import { type EventSource, eventSources } from '@src/core/event-sources.js'
-import { adviseInPlaceOfInjecting, meocordClasses } from '@src/core/meocord-classes.js'
+import { adviseInPlaceOfInjecting, boundBeforeProviders, meocordClasses } from '@src/core/meocord-classes.js'
 import { assertStartupClasses, lateGuardCheck, perCallEventWarnings, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
@@ -75,14 +76,15 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { createMockClient, noteReactionDispatch } from './mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
-import { createFallback, isUserOutcome } from '@src/core/fallback.js'
+import { createFallback, type Fallback, type FallbackOptions, isUserOutcome } from '@src/core/fallback.js'
 import { Logger } from '@src/common/logger.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, shutdownTimeoutProblem } from '@src/util/shutdown-timeout.util.js'
-import { describeValue, isConstructor } from '@src/util/value.util.js'
+import { describeValue, isConstructor, withArticle } from '@src/util/value.util.js'
 import {
   assertProvided,
+  appProviderRefusal,
   assertProvidedServices,
   bindProvider,
   bindsOwnToken,
@@ -95,7 +97,8 @@ import {
   tokenName,
 } from '@src/core/providers.js'
 import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
-import { getReactionHandlers } from '@src/decorator/controller.decorator.js'
+import { getHandlerRoutes, getReactionHandlers } from '@src/decorator/controller.decorator.js'
+import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
 import { strictMocks } from './strict-mocks.js'
 import { notAClass } from './routing.js'
 import { warnOnce } from '@src/common/deprecation.js'
@@ -314,6 +317,8 @@ export class TestingModule {
     private readonly services: readonly (new (...args: any[]) => unknown)[] = [],
     /** How long `close()` waits for the `onShutdown` hooks, as the bot's `shutdownTimeout` does. */
     private readonly shutdownTimeout: number = DEFAULT_SHUTDOWN_TIMEOUT_MS,
+    /** The `app`, whose presenter `init()` makes after the providers, as the bot does. */
+    private readonly app?: object,
   ) {}
 
   private resolving?: Promise<void>
@@ -364,6 +369,8 @@ export class TestingModule {
       listEventSources(this.container.get(HandlerRegistry), this.sources)
       prepareLateThemes(this.container, this.sources.map(({ cls }) => cls))
       for (const service of this.services) this.container.get(service)
+      // After the providers and listed services, as the bot makes it, so a provided value it injects is made
+      if (this.app) bindAppPresenter(this.container, this.app)
     })
     await this.resolving
     if (options.ready) {
@@ -458,13 +465,11 @@ export class TestingModule {
     const failures: { name: string; error: unknown }[] = []
     const failed = (unit: LifecycleUnit, error: unknown) => failures.push({ name: unit.name, error })
     // No warning for a hook whose dependency failed: the test sees the dependency's own error
-    // What close() shuts down is what was constructed, so the entries the runner records are not kept
     await runReadyHooks(
       this.container,
       this.lifecycle,
       client,
       { primary },
-      [],
       { resolveFailed: failed, hookFailed: failed },
       { runOnReady: this.readyPass.runOnReady },
     )
@@ -548,6 +553,9 @@ export class TestingModule {
    *   rejects it, as dispatch runs no handler for a message with no text: give the mock the `content` the handler
    *   takes. A word that is not a value of its type, and a prefixed message that names the command but leaves out
    *   a param, go through the handler's filters as a `MessageUsageError`, as dispatch answers them.
+   *   An `@On` or `@Once` handler no route reaches runs as {@link emit} runs it, as an event with the arguments given,
+   *   under `useStrictMocks()`; without strict mocks it runs as its first argument's type, and `invoke` warns once
+   *   where that differs.
    * @returns Whether the handler ran, and the error a filter handled, if any. Rejects with an error no
    *   filter handles, or with the error a filter throws: the built-in fallback, which answers such
    *   errors in the bot, does not run here. Rejects before running anything with an interaction or a
@@ -590,6 +598,14 @@ export class TestingModule {
     const instance = this.container.get(controller) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[methodName] !== 'function') throw new Error(`${controller.name}.${methodName} is not a method.`)
     const [first] = args as unknown[]
+    const event = eventHandlerOf(controller, methodName)
+    // As emit and the bot run it; without strict mocks it runs as before, as a test that passes that way could fail
+    if (event && strictMocks()) {
+      this.checkArgumentCount(controller, methodName, instance[methodName], first, args.length)
+      this.registerEventClients(args as unknown[])
+      const { ran, error } = await this.track(this.runEventHandler(instance, methodName, args as unknown[]))
+      return error === undefined ? { ran } : { ran, error }
+    }
     const interaction = first instanceof BaseInteraction ? (first as Interaction) : undefined
     // The handler dispatch gives the customId to, among every handler of the module
     const component = interaction && hasCustomId(interaction) ? componentRouteFor(this.componentRoutes(), controller, methodName, interaction) : undefined
@@ -611,10 +627,7 @@ export class TestingModule {
       }
     }
     this.checkArgumentCount(controller, methodName, instance[methodName], first, callArgs.length)
-    const presenter = appPresenterOf(this.container)
-    // A message command's errors are drawn by the app's presenter too, as an interaction's are
-    const client = first instanceof BaseInteraction || first instanceof Message ? first.client : undefined
-    if (presenter && client) setPresenter(client, presenter)
+    if (event) this.warnEventRun(controller, methodName, event, first, callArgs.length !== args.length)
     this.registerClient(first)
     const { ran, error } = await this.track(runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
@@ -622,6 +635,38 @@ export class TestingModule {
 
   /** The handlers already warned about for being given fewer arguments than they take, so each is named once. */
   private readonly warnedArgumentCounts = new Set<string>()
+
+  /** The `@On` and `@Once` handlers already warned about for running other than as an event, so each is named once. */
+  private readonly warnedEventRuns = new Set<string>()
+
+  /**
+   * Warns once, without strict mocks, that `invoke` runs an event handler other than as the bot does: as the type its
+   * first argument gives, or with params it added. Only `invoke` warns, on the test's own call.
+   */
+  private warnEventRun(
+    controller: new (...args: any[]) => unknown,
+    methodName: string,
+    event: EventHandlerMetadata,
+    first: unknown,
+    paramsAdded: boolean,
+  ): void {
+    const type = inferContextType(first)
+    // invoke adds params only for an interaction or a message, whose type is never 'event'
+    if (type === 'event') return
+    const key = `${controller.name}.${methodName}`
+    if (this.warnedEventRuns.has(key)) return
+    this.warnedEventRuns.add(key)
+    const call = `${withArticle(type)} call${paramsAdded ? ' with its params added' : ''}`
+    new Logger('TestingModule').warn(
+      `invoke runs ${key}, an @${event.once ? 'Once' : 'On'}('${event.event}') handler, as ${call}; the bot runs it as ` +
+        'an event with its arguments as given, and useStrictMocks() runs it so.',
+    )
+  }
+
+  /** Runs an `@On` or `@Once` handler as the bot and `emit` do: as an event, with its arguments as given. */
+  private runEventHandler(instance: Record<string, (...args: unknown[]) => unknown>, method: string, args: unknown[]): Promise<HandlerOutcome> {
+    return runHandler(this.container, instance, method, args, { type: 'event', awaitObservers: true })
+  }
 
   /** The autocomplete mismatches already warned about without strict mocks, so each handler and route warns once. */
   private readonly warnedAutocompleteRoutes = new Set<string>()
@@ -670,14 +715,46 @@ export class TestingModule {
   }
 
   /**
-   * Makes this module the app of the input's client, as the bot is of its own, so `respond()` outside any call,
-   * as in a collector's callback on that client, answers in this module's theme.
+   * Makes this module the app of the input's client, as the bot is of its own: its answers are drawn by this
+   * module's presenter, in its theme and language, `respond()` outside any call included, as in a collector's callback
+   * on that client. A module without a presenter clears the client's under strict mocks, so the default draws; default
+   * mode leaves another module's in place and warns once.
    */
   private registerClient(input: unknown): void {
     const client = (input as { client?: unknown } | undefined)?.client
     if (!client || typeof client !== 'object') return
+    const presenter = appPresenterOf(this.container)
+    if (presenter || strictMocks()) setPresenter(client, presenter)
+    else if (clientPresenter(client)) {
+      warnOnce(
+        new Logger('TestingModule'),
+        "A module without a presenter here answers with the presenter another module set on the same client; under " +
+          "useStrictMocks() this module's own presenter, or the default, is used.",
+      )
+    }
     registerClientTheme(client, this.container)
     registerClientTranslator(client, this.container.isBound(Translator) ? this.container.get(Translator) : undefined)
+  }
+
+  /**
+   * Makes this module the app of each event argument's client, as the bot is of its own, under strict mocks; default
+   * mode leaves the clients as they are and warns once where this module would draw answers otherwise.
+   */
+  private registerEventClients(args: readonly unknown[]): void {
+    const withClient = args.filter(arg => typeof (arg as { client?: unknown } | null)?.client === 'object')
+    if (withClient.length === 0) return
+    if (strictMocks()) {
+      for (const arg of withClient) this.registerClient(arg)
+      return
+    }
+    const ownTheme = appTheme(this.container) !== defaultTheme()
+    if (!appPresenterOf(this.container) && !this.container.isBound(Translator) && !ownTheme) return
+    warnOnce(
+      new Logger('TestingModule'),
+      "emit() here leaves the client's presenter, theme and translator as they were, where the bot draws the answers to " +
+        "an event with its app's; in the next major version (5.0) emit sets the module's on the client. Call " +
+        'useStrictMocks() to have it set them now.',
+    )
   }
 
   private builtComponentRoutes?: ComponentRoute[]
@@ -694,6 +771,27 @@ export class TestingModule {
     if (this.dispatcher) return this.dispatcher
     const logger = new Logger('TestingModule')
     const warnUnanswered = this.appWarnUnanswered ?? process.env.NODE_ENV === 'development'
+    const notices: FallbackOptions = {
+      cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
+      storeDownNotice: who => claimStoreDownNotice(this.container, who),
+    }
+    // Strict mocks log an answer MeoCord fails to build and end the call in that fault, as a bot does; default mode
+    // rethrows it from the fallback, so observers hear the call's own outcome, and an interaction's again as an error
+    const answer = createFallback(logger, () => this.messageOptions, notices)
+    const rethrowing = createFallback(logger, () => this.messageOptions, { ...notices, strict: true })
+    const fallback: Fallback = async (error, context) => {
+      if (strictMocks()) return answer(error, context)
+      try {
+        return await rethrowing(error, context)
+      } catch (failure) {
+        warnOnce(
+          logger,
+          "dispatch() here reports a call whose answer MeoCord couldn't build with the call's own outcome, and an " +
+            "interaction's a second time as an error; under useStrictMocks() the call is reported once, as 'error'.",
+        )
+        throw failure
+      }
+    }
     this.dispatcher = new Dispatcher({
       container: this.container,
       controllerClasses: this.controllers,
@@ -701,12 +799,7 @@ export class TestingModule {
       logger,
       // A test's fake clock can pass 5 s inside a handler, so the slow-handler warning waits to be asked for
       warnSlowMessageHandlers: false,
-      // Strict: an answer MeoCord fails to build rejects the dispatch, where a bot logs it and carries on
-      fallback: createFallback(logger, () => this.messageOptions, {
-        strict: true,
-        cooldownNotice: refusal => claimCooldownNotice(this.container, refusal),
-        storeDownNotice: who => claimStoreDownNotice(this.container, who),
-      }),
+      fallback,
       // A mock's client is the one bot every mock client is, so a mention of it starts a command
       botUserId: event => {
         const id = event.client?.user?.id
@@ -762,28 +855,30 @@ export class TestingModule {
     const dispatcher = this.dispatcherOf()
     const handlers: DispatchedHandler[] = []
     const unhandled: unknown[] = []
+    // The fault each error's answer failed with, which the call ends in in that error's place
+    const unanswered = new Map<unknown, unknown>()
     const record: DispatchRecorder = {
       settled: (controller, method, { ran, error }) => handlers.push({ controller, method, ran, ...(error !== undefined && { error }) }),
       unhandled: error => unhandled.push(error),
+      unanswered: (error, failure) => unanswered.set(error, failure),
     }
 
     if (options) {
       noteReactionDispatch(input)
       await this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action: options.action ?? ReactionHandlerAction.ADD }, record))
     } else if (input instanceof BaseInteraction) {
-      const presenter = appPresenterOf(this.container)
-      if (presenter) setPresenter(input.client, presenter)
       await this.track(dispatcher.interaction(input as Interaction, record))
     } else if (input instanceof Message) {
-      const presenter = appPresenterOf(this.container)
-      if (presenter) setPresenter(input.client, presenter)
       await this.track(dispatcher.message(input, record))
     } else {
       throw new TypeError('dispatch takes an interaction, a message, or a reaction with { user }.')
     }
 
-    // What the fallback answers as the user's own outcome, such as a usage reply or a refusal, is an outcome to assert on
-    const failures = unhandled.filter(error => !isUserOutcome(error, options ? undefined : input))
+    // What the fallback answers as the user's own outcome, such as a usage reply or a refusal, is an outcome to assert on,
+    // unless its answer failed to build, which is the call's fault, as on a bot
+    const failures = unhandled.flatMap(error =>
+      unanswered.has(error) ? [unanswered.get(error)] : isUserOutcome(error, options ? undefined : input) ? [] : [error],
+    )
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, `${failures.length} errors were left to the fallback.`)
     const error = handlers.find(handler => handler.error !== undefined)?.error ?? unhandled[0]
@@ -820,6 +915,7 @@ export class TestingModule {
   async emit<E extends keyof ClientEvents>(event: E, ...args: ClientEvents[E]): Promise<EmitResult> {
     this.warnIfClosed()
     await this.init()
+    this.registerEventClients(args)
     const calls: Promise<boolean>[] = []
     for (const [index, source] of (this.sources ?? []).entries()) {
       for (const handler of source.handlers) {
@@ -833,7 +929,7 @@ export class TestingModule {
         const run = async () => {
           const instance = source.resolve()
           if (!instance) return false
-          const { ran } = await runHandler(this.container, instance, handler.method, args, { type: 'event', awaitObservers: true })
+          const { ran } = await this.runEventHandler(instance, handler.method, args)
           return ran
         }
         calls.push(this.track(run()))
@@ -857,6 +953,12 @@ function throwFailures(hook: 'onReady' | 'onShutdown', failures: readonly { name
       `${failures.length} ${hook} hooks threw: ${failures.map(({ name }) => name).join(', ')}.`,
     )
   }
+}
+
+/** A method's `@On` or `@Once` handler, when no route also reaches it: a route's input decides how that one runs. */
+function eventHandlerOf(controller: new (...args: any[]) => unknown, methodName: string): EventHandlerMetadata | undefined {
+  if (getHandlerRoutes(controller.prototype).some(route => route.method === methodName)) return undefined
+  return getEventHandlers(controller.prototype).find(handler => handler.method === methodName)
 }
 
 /** The app's `messages` options, when the testing module is given an app. */
@@ -914,7 +1016,9 @@ export class TestingModuleBuilder {
   /**
    * Replaces a provider with a test double.
    *
-   * The double needs only the members the test uses; misspelled member names are still rejected.
+   * The double needs only the members the test uses; misspelled member names are still rejected. A token MeoCord binds
+   * itself, such as `ShardContext` or `HandlerRegistry`, takes the double in place of MeoCord's own, so a test can stub
+   * cross-shard calls.
    *
    * @param token - The provider to replace.
    * @example
@@ -1116,6 +1220,17 @@ export class TestingModuleBuilder {
         // Checked as the app checks its own: the app's providers in their order, then the test's, which replace them
         // by token, then the overrides, which win
         const providers = providerMap(this.wiring?.providers ?? [], '@MeoCord({ providers })')
+        // The app's own providers checked as the bot checks them. A token the module binds itself above fails at its
+        // first call, so it is refused; another the bot binds before its providers is refused under strict mocks, and
+        // runs here in default mode with a warning
+        const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
+        const botBinds = boundBeforeProviders(i18n !== undefined)
+        for (const token of providers.keys()) {
+          const refusal = appProviderRefusal(`${this.options.app?.name}`, token, own => botBinds.includes(own), new Logger('TestingModule'))
+          if (!refusal) continue
+          if (container.isBound(token as ServiceIdentifier) || strictMocks()) startupError(refusal)
+          else warnOnce(new Logger('TestingModule'), `${refusal.message} The testing module runs it; under useStrictMocks() compile() refuses it, as the bot does.`)
+        }
         for (const [token, provider] of providerMap(this.options.providers ?? [], "the testing module's providers")) providers.set(token, provider)
         for (const [token, override] of this.overrides) providers.set(token, override)
         // A stage override stands in for its class wherever the class is bound. A stage also provided takes the stub in
@@ -1157,7 +1272,6 @@ export class TestingModuleBuilder {
         // The themeFor class this module runs, the app's or overrideThemeFor's, bound on its own as the app binds it
         const themeResolver = themeResolverClass(stages?.themeFor?.resolvers)
         // Every class the module runs, as the app finds them, except stage classes an override stands in for
-        const i18n = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { i18n?: Translator })?.i18n
         const appPresenterClass = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { presenter?: unknown })?.presenter
         const startup = startupClasses({
           controllers: (this.options.controllers ?? []).filter(isConstructor),
@@ -1228,8 +1342,12 @@ export class TestingModuleBuilder {
           bindsOwnToken(container, CooldownStore, store)
         }
 
-        // Before the controllers, so a class token that is provided is not also bound as itself
-        for (const provider of providers.values()) bindProvider(container, provider, bindClass)
+        // Before the controllers, so a class token that is provided is not also bound as itself. A test's provider of a
+        // token the module bound above, as HandlerRegistry or ShardContext, stands in for that binding
+        for (const provider of providers.values()) {
+          if (container.isBound(provider.provide as ServiceIdentifier)) container.unbind(provider.provide as ServiceIdentifier)
+          bindProvider(container, provider, bindClass)
+        }
 
         for (const ctrl of this.options.controllers ?? []) bindClass(ctrl)
         for (const service of services) bindClass(service)
@@ -1278,6 +1396,14 @@ export class TestingModuleBuilder {
           dependencies: tokenDependencies(container, providers, token),
           ...(token === boundStore && { cooldownStore: true }),
         }))
+        // Recorded as the container makes each one, before anything can be made, so close() shuts down exactly what exists
+        const constructed = new Set<unknown>()
+        for (const { token } of lifecycle) {
+          container.onActivation(token as ServiceIdentifier, (_context, instance) => {
+            constructed.add(token)
+            return instance
+          })
+        }
 
         // Every check has run, and touched only the container: from here the module is made, once none found an error
         stopOnStartupErrors()
@@ -1292,15 +1418,6 @@ export class TestingModuleBuilder {
         warnOverlappingPatterns(this.options.controllers ?? [])
         warnHandlersOffControllers(this.options.controllers ?? [], startup.classes)
         for (const warning of perCallEventWarnings(startup, providers, appPresenterClass)) new Logger('TestingModule').warn(warning)
-        if (this.options.app) bindAppPresenter(container, this.options.app)
-        // Recorded as the container makes each one, so close() shuts down exactly what exists
-        const constructed = new Set<unknown>()
-        for (const { token } of lifecycle) {
-          container.onActivation(token as ServiceIdentifier, (_context, instance) => {
-            constructed.add(token)
-            return instance
-          })
-        }
 
         const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
 
@@ -1316,6 +1433,7 @@ export class TestingModuleBuilder {
           warnUnanswered,
           services,
           this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
+          this.options.app,
         )
       })
     } catch (error) {

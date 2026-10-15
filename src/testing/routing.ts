@@ -7,11 +7,16 @@ import {
   readCustomId,
 } from '@src/core/component-routes.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
-import { buildMessageRoutes, fitsScope, matchMessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
-import { needsGuild } from '@src/core/message-params.js'
+import { buildMessageRoutes, fitsScope, matchMessageRoute, type MessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
+import { isGuildType, needsGuild, takesGuildParam } from '@src/core/message-params.js'
+import { warnOnce } from '@src/common/deprecation.js'
+import { Logger } from '@src/common/logger.js'
+import { strictMocks } from '@src/testing/strict-mocks.js'
 import { type MessageCommandOptions, type MessagePrefix } from '@src/interface/index.js'
 import { META } from '@src/util/metadata-keys.js'
 import { describeValue } from '@src/util/value.util.js'
+
+const logger = new Logger('resolveRoute')
 
 /**
  * The command types routed by a `customId` pattern: buttons, select menus and modals.
@@ -42,9 +47,14 @@ export interface MessageToResolve {
   botId?: string
   /**
    * Whether the message is a direct message, where `mention: 'only'` does not apply, and a handler that works only in
-   * a server, by its scope or a `member`, `role` or `channel` param in its pattern, is not reached, as dispatch answers
-   * it with its usage. A flag of those types is refused only when the message gives it, which this does not read.
-   * Without it the message may be from anywhere, and a mention alone starts what it starts in a server.
+   * a server, by its scope or a `member`, `role` or `channel` param in its pattern, is not reached, as dispatch never
+   * runs it: it answers "This command works in a server only." to a message sent with a prefix or a mention, and
+   * nothing to one without, which may be chat. Under `useStrictMocks()` a handler with a required flag of those types,
+   * or one the message gives, is not reached either, as dispatch refuses it the same way; default mode resolves it,
+   * with a warning. Without it, a mention alone starts what it starts in a server, and a handler of any scope may
+   * answer, with a warning where one that works only in a DM does. Under `useStrictMocks()`, the message is read as
+   * sent in a server, as dispatch reads one: such a handler is passed over for one that works there, or resolves to
+   * `undefined`.
    */
   dm?: boolean
 }
@@ -114,6 +124,10 @@ export function notAClass(app: unknown): { name: string; hint: string } {
   return { name: describeValue(app), hint }
 }
 
+/** Whether a message gives a route's `member`, `role` or `channel` flag, which dispatch refuses in a DM. */
+const givesGuildFlag = (route: MessageRoute, params: Record<string, unknown>): boolean =>
+  route.flags.some(flag => flag.type !== undefined && isGuildType(flag.type) && Object.hasOwn(params, flag.flag))
+
 /** The options `@MeoCord` declares on an application class. */
 function appOptionsOf(app: ControllerClass): { controllers?: ControllerClass[]; messages?: MessageCommandOptions } {
   // An app that isn't a class at all, as a circular import gives, has no metadata to read
@@ -175,11 +189,44 @@ export function resolveRoute(
   if ('content' in input) {
     const { messages = {} } = appOptionsOf(app)
     const starts = staticMessageStarts(app, messages, input)
-    const matched = matchMessageRoute(buildMessageRoutes(controllersOf(app), messages), input.content, starts)
+    const routes = buildMessageRoutes(controllersOf(app), messages)
+    let matched = matchMessageRoute(routes, input.content, starts)
+    const named = (route: MessageRoute) => `${route.controllerClass.name}.${String(route.method)}`
+    // Without `dm`: under strict mocks, read as sent in a server, as dispatch routes such a message whatever the
+    // controllers' order; otherwise as from anywhere, warning where that answers differently
+    if (starts.inGuild === undefined) {
+      const inServer = matchMessageRoute(routes, input.content, { ...starts, inGuild: true })
+      if (strictMocks()) matched = inServer && fitsScope(inServer.route.scope, true) ? inServer : undefined
+      else if (matched && inServer && matched.route !== inServer.route && !fitsScope(matched.route.scope, true)) {
+        warnOnce(
+          logger,
+          `resolveRoute resolved a message without dm to ${named(matched.route)}, which works in a DM alone, where dispatch runs ` +
+            `${named(inServer.route)} for a message sent in a server. Pass dm: true for a DM. Under useStrictMocks() it resolves to ` +
+            `${named(inServer.route)}.`,
+        )
+      } else if (matched && !fitsScope(matched.route.scope, true)) {
+        // Only a handler that works in a DM alone takes it, which dispatch runs in a DM only
+        warnOnce(
+          logger,
+          `resolveRoute found only ${named(matched.route)}, which works in a DM alone, for a message without dm; dispatch runs it ` +
+            'only in a DM. Pass dm: true. Under useStrictMocks() this resolves to undefined.',
+        )
+      }
+    }
     if (!matched) return undefined
     const { route, params } = matched
-    // Dispatch answers a route that does not work in a DM with its usage, and never runs it
-    if (starts.inGuild === false && (!fitsScope(route.scope, false) || needsGuild(route))) return undefined
+    // Dispatch never runs a route that does not work in a DM; one sent with a prefix or mention is told it works in a server only
+    if (starts.inGuild === false && (!fitsScope(route.scope, false) || takesGuildParam(route))) return undefined
+    // Nor one with a required flag only a server has, or given one: refused under strict mocks, warned about otherwise
+    if (starts.inGuild === false && (needsGuild(route) || givesGuildFlag(route, params))) {
+      if (strictMocks()) return undefined
+      warnOnce(
+        logger,
+        `resolveRoute resolved a DM to ${named(route)}, which dispatch answers "This command ` +
+          'works in a server only.": a member, role or channel flag is found only in a server. Under useStrictMocks() this ' +
+          'resolves to undefined.',
+      )
+    }
     return { controller: route.controllerClass, method: route.method, handler: route.controllerClass.prototype[route.method], params }
   }
 

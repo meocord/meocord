@@ -1,12 +1,13 @@
 import { type DeepReadonly, type MeoCordTheme, type RootTheme } from '@src/interface/index.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { copyLayer, defaultTheme, mergeTheme, runWithTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** A theme's parts, as the app's root theme takes them: required when the app has added tokens, since those have no default. */
 type MockThemeArgs = Partial<RootTheme> extends RootTheme ? [overrides?: RootTheme] : [overrides: RootTheme]
 
-// Themes createMockTheme made, which withTheme uses as they are
-const mocks = new WeakSet<object>()
+// Themes createMockTheme made through either build of this version, which withTheme uses as they are
+const mocks = shared('mockThemes', () => new WeakSet<object>())
 
 function mockTheme(overrides: unknown, where: string): ResolvedTheme {
   if (overrides === undefined) return defaultTheme()

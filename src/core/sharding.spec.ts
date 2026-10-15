@@ -7,6 +7,8 @@ import type * as ShardManagerModule from '@src/core/shard-manager.js'
 import type * as ShardContextModule from '@src/core/shard-context.js'
 import { type MeoCordConfig, type OnReady, type ReadyInfo } from '@src/interface/index.js'
 import { CommandType } from '@src/enum/index.js'
+import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { logged, config, channel } = vi.hoisted(() => ({
   channel: { closed: false },
@@ -32,9 +34,10 @@ vi.mock('@src/util/sharding-mode.util.js', async importOriginal => ({
   managerGone: () => channel.closed,
 }))
 
-/** Fresh modules per test, as shutdown state and signal listeners live at module level. */
+/** Fresh modules and a forgotten shutdown per test, as the shutdown state and signal listeners are process-wide. */
 async function load() {
   vi.resetModules()
+  forgetProcessState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
@@ -44,6 +47,13 @@ async function load() {
   const { isExplainedError } = await import('@src/common/explained-error.js')
   return { discord, ...app, ...factory, ...decorators, ...manager, ...context, isExplainedError }
 }
+
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still imports fresh
+beforeAll(async () => {
+  await load()
+}, WARM_UP_TIMEOUT_MS)
+
 type Loaded = Awaited<ReturnType<typeof load>>
 
 function appClass(

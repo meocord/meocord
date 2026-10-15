@@ -1,5 +1,5 @@
 import 'reflect-metadata'
-import { ButtonInteraction, ChatInputCommandInteraction, DMChannel, GuildMember, TextChannel } from 'discord.js'
+import { ButtonInteraction, ChatInputCommandInteraction, DMChannel, Guild, GuildMember, TextChannel } from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
@@ -136,6 +136,15 @@ describe('where a mock interaction is, in default mode', () => {
     expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.guild .*guildId.*isn't in.*null.*useStrictMocks\(\)/s)])
   })
 
+  it('reads a guildId alone as a placeholder server with that id, whose caches read empty, as its warning says', () => {
+    const interaction = slash({ guildId: ELSEWHERE })
+    const guild = interaction.guild as Guild
+
+    expect([guild.id, guild.members.cache.get('100000000000000002'), guild.channels.cache.size]).toEqual([ELSEWHERE, undefined, 0])
+    expect([guild instanceof Guild, interaction.inCachedGuild(), interaction.inRawGuild()]).toEqual([false, false, true])
+    expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.guild reads a placeholder server with that id/)])
+  })
+
   it('names no conflict for a message whose place the mock made, beside a guild the test gave', () => {
     const guild = createMockGuild()
     void click({ message: createMockMessage(), guild, guildId: guild.id }).channel
@@ -181,7 +190,7 @@ describe('where a mock interaction is, in default mode', () => {
 
     void [interaction.memberPermissions, interaction.appPermissions]
 
-    expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions reads a server the bot is in, though the mock was given only a guildId/)])
+    expect(warned).toEqual([expect.stringMatching(/^ChatInputCommandInteraction\.memberPermissions reads a placeholder server with that id, though the mock was given only a guildId/)])
   })
 
   it('warns by appPermissions, not by what it reads, for a guild alone, which strict mocks place in that guild', () => {

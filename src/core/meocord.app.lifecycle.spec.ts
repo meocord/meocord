@@ -7,6 +7,8 @@ import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { type FakeDiscord, startFakeDiscord } from '../../scripts/lib/fake-discord.js'
+import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { logged, config } = vi.hoisted(() => ({
   logged: { log: [] as unknown[][], error: [] as unknown[][], warn: [] as unknown[][] },
@@ -33,11 +35,12 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
 /**
- * Fresh modules per test: shutdown state and the signal listeners live at module level, as they do
- * in a real process, so each test starts from a process that has shut nothing down yet.
+ * Fresh modules and a forgotten shutdown per test: the shutdown state and the signal listeners are process-wide, as
+ * they are in a real process, so each test starts from a process that has shut nothing down yet.
  */
 async function load() {
   vi.resetModules()
+  forgetProcessState()
   const discord = await import('discord.js')
   const app: typeof AppModule = await import('@src/core/meocord.app.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
@@ -49,6 +52,12 @@ async function load() {
   const { createMockInteraction, getResponse } = await import('@src/testing/index.js')
   return { discord, inject, CooldownStore, MemoryCooldownStore, CommandType, createMockInteraction, getResponse, ...app, ...factory, ...decorators }
 }
+
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still imports fresh
+beforeAll(async () => {
+  await load()
+}, WARM_UP_TIMEOUT_MS)
 
 type Loaded = Awaited<ReturnType<typeof load>>
 
@@ -647,7 +656,36 @@ describe('lifecycle hooks', () => {
       expect(exit).toHaveBeenCalledWith(0)
     })
 
-    it('runs no onShutdown when onReady never ran', async () => {
+    it('runs no onShutdown for a class whose onReady never ran, nor for one that depends on it', async () => {
+      const loaded = await load()
+      const stopped: string[] = []
+
+      @loaded.Service()
+      class Scheduler implements OnReady, OnShutdown {
+        onReady() {}
+        onShutdown() {
+          stopped.push('Scheduler')
+        }
+      }
+
+      @loaded.Service()
+      class Reminders implements OnShutdown {
+        constructor(readonly scheduler: Scheduler) {}
+        onShutdown() {
+          stopped.push('Reminders')
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [], services: [Reminders] })
+
+      await loaded.shutdownAndExit(false)
+
+      expect(stopped).toEqual([])
+      expect(client.destroy).toHaveBeenCalled()
+      expect(exit).toHaveBeenCalledWith(0)
+    })
+
+    it('runs onShutdown for a class with no onReady once it is made, though the ready hooks never ran', async () => {
       const loaded = await load()
       let stopped = false
 
@@ -658,13 +696,11 @@ describe('lifecycle hooks', () => {
         }
       }
 
-      const { client } = await startApp(loaded, { controllers: [], services: [Scheduler] })
+      await startApp(loaded, { controllers: [], services: [Scheduler] })
 
       await loaded.shutdownAndExit(false)
 
-      expect(stopped).toBe(false)
-      expect(client.destroy).toHaveBeenCalled()
-      expect(exit).toHaveBeenCalledWith(0)
+      expect(stopped).toBe(true)
     })
 
     it('leaves an app whose login failed out of shutdown, and exits with the code the failed login set', async () => {

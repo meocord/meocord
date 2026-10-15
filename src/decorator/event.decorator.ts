@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { type ClientEvents } from 'discord.js'
-import { ownHandlerList } from '@src/decorator/controller.decorator.js'
+import { addOwnHandler } from '@src/decorator/controller.decorator.js'
 import { META } from '@src/util/metadata-keys.js'
 import { refuseOnClass, declaring } from '@src/util/refusal.util.js'
 
@@ -19,9 +19,8 @@ function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
     _descriptor: TypedPropertyDescriptor<F>,
   ) {
     refuseOnClass(once ? '@Once' : '@On', target, propertyKey)
-    const handlers = ownHandlerList<EventHandlerMetadata>(META.eventHandlers, target)
-    handlers.push({ event, method: propertyKey, once })
-    Reflect.defineMetadata(META.eventHandlers, handlers, target)
+    // One the class inherits for the same method and event is replaced, as for every other kind of handler
+    addOwnHandler<EventHandlerMetadata>(META.eventHandlers, target, { event, method: propertyKey, once }, other => other.method === propertyKey && other.event === event)
   })
 }
 
