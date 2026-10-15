@@ -7,10 +7,10 @@ import {
   getHandlerRoutes,
   getMessageHandlers,
   getReactionHandlers,
-  type HandlerRoute,
+  eventRoute,
   ownEventHandlers,
 } from '@src/decorator/controller.decorator.js'
-import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
+import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
 import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
@@ -334,9 +334,6 @@ function unasked(
   const others = completed.length ? `; its options with autocomplete are ${quoted(completed)}` : ', nor any option with autocomplete on'
   return `"${commandPath}" has no option "${optionName}"${others}. Correct the option name.`
 }
-
-/** An `@On` or `@Once` handler as the inherited-routes warning names it; one event per method, as a subclass replaces it. */
-const eventRoute = ({ method, event }: EventHandlerMetadata): HandlerRoute => ({ method, label: `event "${event}"` })
 
 /**
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for

@@ -5,6 +5,8 @@ import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, On, 
 import { getAutocompleteHandlers, getCommandMap, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { CommandType } from '@src/enum/index.js'
 import { createMock, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 
 const warnings = () =>
   vi
@@ -300,6 +302,49 @@ describe('inspectHandler', () => {
     expect(inspectHandler(Sub, 'page').inheritedRoutes).toEqual(['button "page/{n:int}"'])
     expect(inspectHandler(Sub, 'ping').inheritedRoutes).toEqual(['slash "ping"'])
     expect(inspectHandler(Base, 'ping').inheritedRoutes).toEqual([])
+  })
+
+  // The bot answers an inherited @On or @Once event, so a test reads it here; default mode keeps 4.2's list
+  describe('on an event the handler inherits', () => {
+    @Controller()
+    class Joins {
+      @On('guildCreate')
+      joined() {}
+    }
+    @Controller()
+    class Redecorated extends Joins {
+      @On('guildDelete')
+      override joined() {}
+    }
+    @Controller()
+    class Overridden extends Joins {
+      override joined() {}
+    }
+    const read = () => [Redecorated, Overridden, Joins].map(controller => inspectHandler(controller, 'joined').inheritedRoutes)
+    const inspectWarnings = () =>
+      vi
+        .mocked(Logger.prototype.warn)
+        .mock.calls.map(([line]) => String(line))
+        .filter(line => line.startsWith('inspectHandler() here'))
+
+    beforeEach(() => forgetDeprecationWarnings())
+    afterEach(() => forgetStrictMocks())
+
+    it('names it under useStrictMocks(), as the bot answers it', () => {
+      forgetStrictMocks()
+      useStrictMocks()
+
+      expect(read()).toEqual([['event "guildCreate"'], ['event "guildCreate"'], []])
+      expect(inspectWarnings()).toEqual([])
+    })
+
+    it('leaves it out in default mode, warning once for each handler that inherits one', () => {
+      expect([...read(), ...read()]).toEqual([[], [], [], [], [], []])
+      expect(inspectWarnings()).toEqual([
+        'inspectHandler() here leaves the @On and @Once events Redecorated.joined inherits out of inheritedRoutes, though the bot answers them; under useStrictMocks() it lists them.',
+        'inspectHandler() here leaves the @On and @Once events Overridden.joined inherits out of inheritedRoutes, though the bot answers them; under useStrictMocks() it lists them.',
+      ])
+    })
   })
 })
 
