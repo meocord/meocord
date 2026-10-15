@@ -42,10 +42,10 @@ import {
   type ApplicationCommandOptionChoiceData,
   type LaunchActivityOptions,
 } from 'discord.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
-import { getResponse } from './response.js'
-import { createModalFields } from './modal-fields.js'
+import { getResponse } from '@src/testing/response.js'
+import { createModalFields } from '@src/testing/modal-fields.js'
 import {
   createChatInputOptions,
   createMock,
@@ -57,7 +57,7 @@ import {
   createMockRawMember,
   createMockMessage,
   createMockUser,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 
 /**
  * One mock passed where another factory, or the testing module, takes a discord.js value: each compiles with no cast.

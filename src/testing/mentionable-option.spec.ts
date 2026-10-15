@@ -3,8 +3,8 @@ import { ChatInputCommandInteraction, GuildMember, Role } from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createChatInputOptions, createMockGuild, createMockInteraction, createMockUser } from './index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createChatInputOptions, createMockGuild, createMockInteraction, createMockUser } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

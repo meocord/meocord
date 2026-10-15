@@ -3,8 +3,8 @@ import { ChannelType, Role, TextChannel, ThreadChannel, VoiceChannel } from 'dis
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockChannel, createMockGuild, createMockInteraction, createMockMember } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockChannel, createMockGuild, createMockInteraction, createMockMember } from '@src/testing/index.js'
 
 let warned: string[]
 beforeEach(() => {

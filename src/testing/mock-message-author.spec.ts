@@ -1,8 +1,8 @@
 import 'reflect-metadata'
 import { ButtonInteraction, type GuildMember, type Message, type User } from 'discord.js'
 import { Controller, Cooldown, MeoCord, MessageHandler } from '@src/decorator/index.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createMock, createMockClient, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { createMock, createMockClient, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from '@src/testing/mock-interaction.js'
 
 describe('createMockMessage with an author', () => {
   it('is sent by the author given, cached on its client', () => {

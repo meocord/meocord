@@ -13,7 +13,7 @@ import {
 } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import {
   createMockChannel,
   createMockClient,
@@ -22,7 +22,7 @@ import {
   createMockMember,
   createMockMessage,
   createMockUser,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 
 const role = (id: string, position: number, permissions: bigint[]) =>
   createMockInteraction(Role, { id, position, permissions: new PermissionsBitField(permissions).freeze() })

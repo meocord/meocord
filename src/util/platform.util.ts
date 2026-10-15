@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 // Relative imports only: the pre-entry, which a build bundles from this package's files, imports this module
-import { bundleEntry, isBuiltApplication } from './bundle-entry.util.js'
+import { bundleEntry, isBuiltApplication } from '@src/util/bundle-entry.util.js'
 
 /**
  * File written beside a bundle that carries native addons, naming the platform it was built for.

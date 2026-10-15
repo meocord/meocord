@@ -20,7 +20,7 @@ import {
   createMockMember,
   createMockMessage,
   createMockUser,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 
 describe("a mock channel's type guards", () => {
   // discord.js answers them from the channel's type and the managers it has, so the mock's answer what it is

@@ -4,8 +4,8 @@ import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { respond } from '@src/common/response/response-state.js'
-import { createMockInteraction } from './mock-interaction.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockInteraction } from '@src/testing/mock-interaction.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

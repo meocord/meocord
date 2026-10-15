@@ -9,10 +9,10 @@ import { Command, Controller, Cooldown, Inject, MeoCord, Observer, On, Service }
 import { ShardContext } from '@src/core/shard-context.js'
 import { CommandType } from '@src/enum/index.js'
 import { type DispatchResult } from '@src/interface/index.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createMockClient, createMockInteraction } from './mock-interaction.js'
-import { getResponse } from './response.js'
-import { findRouteConflicts, resolveRoute } from './routing.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { createMockClient, createMockInteraction } from '@src/testing/mock-interaction.js'
+import { getResponse } from '@src/testing/response.js'
+import { findRouteConflicts, resolveRoute } from '@src/testing/routing.js'
 
 interface Database {
   count(): Promise<number>
@@ -231,7 +231,7 @@ describe('MeoCordTestingModule.fromApp', () => {
     ['null', async () => null, 'null', ''],
     [
       'a module namespace, as `import * as App` gives',
-      async () => import('./snowflake.js'),
+      async () => import('@src/testing/snowflake.js'),
       'an object',
       ' An object here is often a module namespace, as `import * as App` gives: pass the class it exports.',
     ],

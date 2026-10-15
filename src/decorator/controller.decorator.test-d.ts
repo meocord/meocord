@@ -16,8 +16,8 @@ import {
   type UserContextMenuCommandInteraction,
   type UserSelectMenuInteraction,
 } from 'discord.js'
-import { Autocomplete, Command } from './controller.decorator.js'
-import { CommandBuilder } from './command-builder.decorator.js'
+import { Autocomplete, Command } from '@src/decorator/controller.decorator.js'
+import { CommandBuilder } from '@src/decorator/command-builder.decorator.js'
 import { CommandType } from '@src/enum/index.js'
 import type {
   CommandBuilderBase,

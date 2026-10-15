@@ -3,8 +3,8 @@ import { vi } from 'vitest'
 import { Client, Collection, type GuildMember, type Message, PermissionsBitField, Role, TextChannel, type User } from 'discord.js'
 import { Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createMock, createMockClient, createMockGuild, createMockMessage } from './mock-interaction.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { createMock, createMockClient, createMockGuild, createMockMessage } from '@src/testing/mock-interaction.js'
 
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'token' }) }))
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
@@ -75,12 +75,12 @@ describe('createMockMessage caches', () => {
   // Fixed, so a test that writes the id down, or a snapshot of it, passes in any order and on any run
   it('names the same bot whatever was mocked before it', async () => {
     vi.resetModules()
-    const first = await import('./mock-interaction.js')
+    const first = await import('@src/testing/mock-interaction.js')
     first.createMockUser()
     first.createMockMessage()
     const afterOthers = first.createMockClient().user.id
     vi.resetModules()
-    const second = await import('./mock-interaction.js')
+    const second = await import('@src/testing/mock-interaction.js')
 
     expect(second.createMockClient().user.id).toBe(afterOthers)
   })

@@ -5,8 +5,8 @@ import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { Command, Controller } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockChannel, createMockGuild, createMockInteraction, createMockMessage, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockChannel, createMockGuild, createMockInteraction, createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
 
 let warned: string[]
 beforeEach(() => {

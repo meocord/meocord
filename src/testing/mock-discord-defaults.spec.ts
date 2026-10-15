@@ -17,8 +17,8 @@ import {
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockChannel, createMockClient, createMockGuild, createMockInteraction, createMockMember, createMockMessage } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockChannel, createMockClient, createMockGuild, createMockInteraction, createMockMember, createMockMessage } from '@src/testing/index.js'
 
 afterEach(() => {
   forgetStrictMocks()

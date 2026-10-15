@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { vi } from 'vitest'
-import { createMockFn } from './mock-fn.js'
+import { createMockFn } from '@src/testing/mock-fn.js'
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
@@ -58,8 +58,8 @@ import {
   createMockChannel,
   createMockMessage,
   createMockMember,
-} from './mock-interaction.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
+} from '@src/testing/mock-interaction.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
 import { createTranslator } from '@src/common/translator.js'
 import { Guard, UseGuard } from '@src/decorator/guard.decorator.js'
 import { type GuardInterface } from '@src/interface/index.js'

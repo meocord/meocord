@@ -21,8 +21,8 @@ import {
 import { CommandType, ReactionHandlerAction } from '@src/enum/index.js'
 import { CommandNotFoundError, MessageUsageError, UserError } from '@src/common/errors.js'
 import { type DispatchObserver, type ExceptionFilter, type ReactionEvent } from '@src/interface/index.js'
-import { type DispatchedCall, MeoCordTestingModule } from './meocord-testing-module.js'
-import { resolveRoute } from './routing.js'
+import { type DispatchedCall, MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { resolveRoute } from '@src/testing/routing.js'
 import {
   createChatInputOptions,
   createMock,
@@ -30,7 +30,7 @@ import {
   createMockInteraction,
   createMockMessage,
   createMockUser,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 
 const calls: string[] = []
 

@@ -1,5 +1,5 @@
 import { ComponentType } from 'discord.js'
-import { nextSnowflake } from './snowflake.js'
+import { nextSnowflake } from '@src/testing/snowflake.js'
 
 type Json = Record<string, unknown>
 

@@ -3,8 +3,8 @@ import path from 'node:path'
 import ts from 'typescript'
 import * as discord from 'discord.js'
 import { Collection, TextChannel } from 'discord.js'
-import { returnsPromise } from './mock-interaction.js'
-import { createMockChannel, createMockGuild, createMockMember, createMockMessage } from './index.js'
+import { returnsPromise } from '@src/testing/mock-interaction.js'
+import { createMockChannel, createMockGuild, createMockMember, createMockMessage } from '@src/testing/index.js'
 import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 type Method = (...args: unknown[]) => unknown

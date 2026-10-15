@@ -3,8 +3,8 @@ import { ButtonInteraction, Role, SnowflakeUtil, TextChannel, ThreadChannel } fr
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockChannel, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockChannel, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from '@src/testing/mock-interaction.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 const NOW = Date.parse('2027-03-04T05:06:07.000Z')
 // A snowflake made in 2021

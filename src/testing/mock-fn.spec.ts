@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
-import { clearAllMocks, createMockFn, isMockFunction, type MockedFunction, resetAllMocks } from './mock-fn.js'
-import { createMockClient, createMockInteraction } from './mock-interaction.js'
+import { clearAllMocks, createMockFn, isMockFunction, type MockedFunction, resetAllMocks } from '@src/testing/mock-fn.js'
+import { createMockClient, createMockInteraction } from '@src/testing/mock-interaction.js'
 import { ButtonInteraction } from 'discord.js'
 
 /**

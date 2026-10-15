@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { vi } from 'vitest'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
 import { createToken } from '@src/common/token.js'
 import { Inject } from '@src/decorator/inject.decorator.js'
 import { Service } from '@src/decorator/service.decorator.js'
@@ -8,7 +8,7 @@ import { Command } from '@src/decorator/controller.decorator.js'
 import { Controller } from '@src/decorator/controller-class.decorator.js'
 import { CommandType } from '@src/enum/index.js'
 import { ButtonInteraction } from 'discord.js'
-import { createMockInteraction } from './mock-interaction.js'
+import { createMockInteraction } from '@src/testing/mock-interaction.js'
 
 // A double covers only the methods under test, and a class with a private member cannot be an
 // object literal. Types are checked in meocord-testing-module.test-d.ts; `providers` only at runtime.

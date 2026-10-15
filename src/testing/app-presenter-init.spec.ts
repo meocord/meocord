@@ -4,7 +4,7 @@ import { Command, Controller, Inject, MeoCord, Service } from '@src/decorator/in
 import { CommandType } from '@src/enum/index.js'
 import { type PresentedError, type ResponseContext, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
 import { appPresenterOf } from '@src/core/handler-pipeline.js'
-import { createMockInteraction, getResponse, MeoCordTestingModule } from './index.js'
+import { createMockInteraction, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
 
 const log: string[] = []
 beforeEach(() => void (log.length = 0))

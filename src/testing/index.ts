@@ -1,4 +1,4 @@
-export { MeoCordTestingModule, TestingModule, TestingModuleBuilder } from './meocord-testing-module.js'
+export { MeoCordTestingModule, TestingModule, TestingModuleBuilder } from '@src/testing/meocord-testing-module.js'
 export type {
   FromAppOptions,
   TestingModuleOptions,
@@ -8,7 +8,7 @@ export type {
   DispatchedCall,
   DispatchedHandler,
   EmitResult,
-} from './meocord-testing-module.js'
+} from '@src/testing/meocord-testing-module.js'
 
 export {
   createMock,
@@ -21,7 +21,7 @@ export {
   createMockRawMember,
   createMockChannel,
   createMockMessage,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 export type {
   DeepMocked,
   ChatInputOptions,
@@ -30,27 +30,27 @@ export type {
   MockMessageOverrides,
   MockProps,
   MockRawMemberOverrides,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 
-export { clearAllMocks, createMockFn, isMockFunction, resetAllMocks, useMockFn } from './mock-fn.js'
-export { useStrictMocks } from './strict-mocks.js'
-export { reportAllStartupErrors } from './startup-errors.js'
-export type { Mock, MockedFunction, MockFnFactory, MockInstance, MockResult, MockSettledResult, MockState, RunnerMock } from './mock-fn.js'
+export { clearAllMocks, createMockFn, isMockFunction, resetAllMocks, useMockFn } from '@src/testing/mock-fn.js'
+export { useStrictMocks } from '@src/testing/strict-mocks.js'
+export { reportAllStartupErrors } from '@src/testing/startup-errors.js'
+export type { Mock, MockedFunction, MockFnFactory, MockInstance, MockResult, MockSettledResult, MockState, RunnerMock } from '@src/testing/mock-fn.js'
 
-export { resolveRoute, findRouteConflicts } from './routing.js'
-export type { ComponentCommandType, MessageToResolve, ResolvedRoute, RouteConflict } from './routing.js'
+export { resolveRoute, findRouteConflicts } from '@src/testing/routing.js'
+export type { ComponentCommandType, MessageToResolve, ResolvedRoute, RouteConflict } from '@src/testing/routing.js'
 
-export { createModalFields } from './modal-fields.js'
+export { createModalFields } from '@src/testing/modal-fields.js'
 
-export { expectCompleteCatalog } from './catalog.js'
+export { expectCompleteCatalog } from '@src/testing/catalog.js'
 
-export { testCooldownStore } from './cooldown-store-suite.js'
-export type { CooldownStoreSuiteFramework } from './cooldown-store-suite.js'
+export { testCooldownStore } from '@src/testing/cooldown-store-suite.js'
+export type { CooldownStoreSuiteFramework } from '@src/testing/cooldown-store-suite.js'
 
-export { createExecutionContext } from './execution-context.js'
-export type { ExecutionContextOptions } from './execution-context.js'
+export { createExecutionContext } from '@src/testing/execution-context.js'
+export type { ExecutionContextOptions } from '@src/testing/execution-context.js'
 
-export { inspectHandler } from './inspect-handler.js'
+export { inspectHandler } from '@src/testing/inspect-handler.js'
 export type {
   HandlerInspection,
   InspectedFilter,
@@ -58,10 +58,10 @@ export type {
   InspectedGuard,
   InspectedInterceptor,
   InspectHandlerOptions,
-} from './inspect-handler.js'
+} from '@src/testing/inspect-handler.js'
 
-export { createDiscordError, getResponse } from './response.js'
-export type { ResponseReport } from './response.js'
+export { createDiscordError, getResponse } from '@src/testing/response.js'
+export type { ResponseReport } from '@src/testing/response.js'
 // The provider shapes the app takes, so a test lists what the app lists
 export type {
   ClassProvider,
@@ -71,4 +71,4 @@ export type {
   ValueProvider,
 } from '@src/interface/provider.interface.js'
 
-export { createMockTheme, withTheme } from './theme.js'
+export { createMockTheme, withTheme } from '@src/testing/theme.js'

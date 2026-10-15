@@ -28,8 +28,8 @@ import {
   type DeepMocked,
   type MockMessageOverrides,
   type MockProps,
-} from './mock-interaction.js'
-import type { MockedFunction } from './mock-fn.js'
+} from '@src/testing/mock-interaction.js'
+import type { MockedFunction } from '@src/testing/mock-fn.js'
 
 /**
  * Type-level assertions, run by `vitest --typecheck`. An unfulfilled `@ts-expect-error` fails, so a

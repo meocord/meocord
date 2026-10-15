@@ -1,10 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ButtonInteraction, type Client, type Message, type MessageReaction, type User } from 'discord.js'
-import { type DispatchedCall, type InvocationResult, MeoCordTestingModule, type TestingModule, type TestingModuleBuilder } from './meocord-testing-module.js'
+import { type DispatchedCall, type InvocationResult, MeoCordTestingModule, type TestingModule, type TestingModuleBuilder } from '@src/testing/meocord-testing-module.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
-import { createExecutionContext } from './execution-context.js'
-import { createMockClient } from './mock-interaction.js'
-import { getResponse } from './response.js'
+import { createExecutionContext } from '@src/testing/execution-context.js'
+import { createMockClient } from '@src/testing/mock-interaction.js'
+import { getResponse } from '@src/testing/response.js'
 
 /**
  * Runs under `vitest --typecheck`. The negative cases use `@ts-expect-error`,

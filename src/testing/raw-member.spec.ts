@@ -3,9 +3,9 @@ import { ChatInputCommandInteraction, PermissionFlagsBits, TextChannel, User } f
 import { Command, Controller, Guard, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createChatInputOptions, createMockChannel, createMockGuild, createMockInteraction, createMockRawMember, createMockUser } from './mock-interaction.js'
-import { getResponse } from './response.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { createChatInputOptions, createMockChannel, createMockGuild, createMockInteraction, createMockRawMember, createMockUser } from '@src/testing/mock-interaction.js'
+import { getResponse } from '@src/testing/response.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 

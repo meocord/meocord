@@ -14,9 +14,9 @@ import {
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockInteraction, createMockUser } from './mock-interaction.js'
-import { getResponse } from './response.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockInteraction, createMockUser } from '@src/testing/mock-interaction.js'
+import { getResponse } from '@src/testing/response.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 const ALREADY = 'The reply to this interaction has already been sent or deferred.'
 

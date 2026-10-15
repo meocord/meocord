@@ -8,8 +8,8 @@ import { translatorOfClient } from '@src/common/meocord-text.js'
 import { Command, Controller, MeoCord, On } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type PresentedError, type ResponsePresenter } from '@src/interface/index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockClient, createMockInteraction, getResponse, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockClient, createMockInteraction, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
 
 let warned: string[]
 beforeEach(() => {

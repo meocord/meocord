@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import * as testing from './index.js'
+import * as testing from '@src/testing/index.js'
 
 // Factories of values no discord.js or testing-module slot takes, so the composition matrix has nothing to pass them to
 const NOT_DISCORD_VALUES = new Set(['createMockFn', 'createMockTheme', 'createExecutionContext', 'createDiscordError'])
