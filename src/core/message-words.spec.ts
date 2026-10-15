@@ -13,8 +13,8 @@ describe('splitFlagWords', () => {
         { value: 'now', start: 28 },
       ],
       flags: [
-        { name: 'bots', value: undefined },
-        { name: 'from', value: '<@1>' },
+        { name: 'bots', value: undefined, at: 2 },
+        { name: 'from', value: '<@1>', at: 2 },
       ],
       cuts: [9, 15, 16, 27],
     })
@@ -22,11 +22,11 @@ describe('splitFlagWords', () => {
 
   it('reads a value in straight or curly quotes as one, and an empty value as empty', () => {
     expect(splitFlagWords('remind --note="buy milk" 10m --tag=“two words” --x=').flags).toEqual([
-      { name: 'note', value: 'buy milk' },
-      { name: 'tag', value: 'two words' },
-      { name: 'x', value: '' },
+      { name: 'note', value: 'buy milk', at: 1 },
+      { name: 'tag', value: 'two words', at: 2 },
+      { name: 'x', value: '', at: 2 },
     ])
-    expect(splitFlagWords('--note="never closed').flags).toEqual([{ name: 'note', value: '"never' }])
+    expect(splitFlagWords('--note="never closed').flags).toEqual([{ name: 'note', value: '"never', at: 0 }])
   })
 
   it('reads as words what is not a flag: quoted words, a bare --, a name not starting with a letter, and punctuation after a name', () => {
@@ -85,7 +85,7 @@ function rebuiltScan(text: string) {
     while (end < text.length && !(closers.includes(text[end]) && (end + 1 === text.length || isSpace(end + 1)))) end++
     return end < text.length ? end : -1
   }
-  const flags: { name: string; value: string | undefined }[] = []
+  const flags: { name: string; value: string | undefined; at: number }[] = []
   const spans: [number, number][] = []
   const starts: number[] = []
   const kept: string[] = []
@@ -118,7 +118,7 @@ function rebuiltScan(text: string) {
           value = text.slice(valueStart, j)
         }
       }
-      flags.push({ name: flag[1], value })
+      flags.push({ name: flag[1], value, at: starts.length })
       spans.push([start, j])
       kept.push(text.slice(from, start))
       from = i = j

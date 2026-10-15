@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { type EventHandlerMetadata } from '@src/decorator/event.decorator.js'
 import {
   ApplicationCommandType,
   type AutocompleteInteraction,
@@ -32,7 +33,7 @@ import { Logger } from '@src/common/logger.js'
 import { routeSpecificity } from '@src/core/route-specificity.js'
 import { choicesOf, isSegmentType, lookupTable, parseSegment, shortestSegment } from '@src/core/scalar-types.js'
 import { type Route, type RouteParams, type RouteValue, type RouteValues } from '@src/common/route.js'
-import { refuse, refuseOnClass, declaring } from '@src/util/refusal.util.js'
+import { declaring, decoratedName, refuse, refuseOnClass } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
 
@@ -44,6 +45,12 @@ function givenInstead(value: unknown): string {
 }
 
 const logger = new Logger('Command')
+
+/** The interaction types a method's `@Command` routes declare, each once. */
+function routeTypesOf(prototype: object, method: string): CommandType[] {
+  const metas = Object.values(getCommandMap(prototype) ?? {}).flat()
+  return [...new Set(metas.filter(meta => meta.methodName === method).map(meta => meta.type))]
+}
 
 /**
  * The class's own handler list, started from a copy of the inherited one, so a subclass's
@@ -75,6 +82,9 @@ const autocompleteRoute = (method: string, commandPath: string, optionName: stri
   label: `autocomplete of ${optionName === undefined ? 'every option' : `"${optionName}"`} in "${commandPath}"`,
 })
 
+/** An `@On` or `@Once` handler as a warning names its route; one event per method, as a subclass replaces it. */
+export const eventRoute = ({ method, event }: EventHandlerMetadata): HandlerRoute => ({ method, label: `event "${event}"` })
+
 /** Records a route a class's own decorator declares for a method, which the startup check reads. */
 function declareRoute(target: object, declared: HandlerRoute): void {
   const routes: HandlerRoute[] = Reflect.getOwnMetadata(META.declaredRoutes, target) ?? []
@@ -101,7 +111,7 @@ export function getHandlerRoutes(prototype: object): HandlerRoute[] {
  * Adds a handler the class's own decorator declares. One it inherits for the same method and route is replaced where
  * it stands, so the class's own options apply and the routes keep their order.
  */
-function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (other: T) => boolean): void {
+export function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (other: T) => boolean): void {
   const handlers = ownHandlerList<T>(key, target)
   const inherited: T[] = Reflect.getMetadata(key, Object.getPrototypeOf(target) as object) ?? []
   const index = handlers.findIndex(other => inherited.includes(other) && sameRoute(other))
@@ -110,14 +120,22 @@ function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRoute: (ot
   Reflect.defineMetadata(key, handlers, target)
 }
 
+/** The `@On` and `@Once` entries a class's own decorators declare, without those it inherits from its base. */
+export function ownEventHandlers(prototype: object): EventHandlerMetadata[] {
+  const inherited: EventHandlerMetadata[] = Reflect.getMetadata(META.eventHandlers, Object.getPrototypeOf(prototype) as object) ?? []
+  return ownHandlerList<EventHandlerMetadata>(META.eventHandlers, prototype).filter(entry => !inherited.includes(entry))
+}
+
 /**
  * Leaves each method the class's own decorators declare only those routes, of every kind, dropping the ones it inherits
  * for it: what `@Controller({ inheritedRoutes: 'replace' })` does once the class's method decorators have run.
  */
 export function dropInheritedRoutes(prototype: object): void {
-  const redeclared = new Set(getDeclaredRoutes(prototype).map(route => route.method))
-  if (redeclared.size === 0) return
   const base = Object.getPrototypeOf(prototype) as object
+  // The class's own @On and @Once re-declare their methods too
+  const ownEvents = ownEventHandlers(prototype)
+  const redeclared = new Set([...getDeclaredRoutes(prototype).map(route => route.method), ...ownEvents.map(entry => entry.method)])
+  if (redeclared.size === 0) return
   // An entry the class takes from its base, for a method it re-declares
   const inheritedFor = (inherited: readonly unknown[], method: (entry: never) => string) => (entry: unknown) =>
     inherited.includes(entry) && redeclared.has(method(entry as never))
@@ -135,6 +153,7 @@ export function dropInheritedRoutes(prototype: object): void {
     [META.messageHandlers, (entry: MessageHandlerMetadata) => entry.method],
     [META.reactionHandlers, (entry: ReactionHandlerMetadata) => entry.method],
     [META.autocompleteHandlers, (entry: AutocompleteMeta) => entry.methodName],
+    [META.eventHandlers, (entry: EventHandlerMetadata) => entry.method],
   ]
   for (const [key, method] of lists) {
     const inherited: unknown[] = Reflect.getMetadata(key, base) ?? []
@@ -312,12 +331,13 @@ export function MessageHandler<
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
   return declaring(function (target: object, propertyKey: string) {
     refuseOnClass('@MessageHandler', target, propertyKey)
-    // An empty pattern means every message, as no pattern does
-    if (pattern === '') {
-      warnDeprecatedBehaviour(logger, `@MessageHandler('') on ${target.constructor.name}.${propertyKey}`, 'is refused', '@MessageHandler()')
+    // An empty pattern, or one of spaces alone, means every message, as no pattern does
+    const blank = pattern !== undefined && pattern.trim() === ''
+    if (blank) {
+      warnDeprecatedBehaviour(logger, `@MessageHandler('${pattern}') on ${decoratedName(target, propertyKey)}`, 'is refused', '@MessageHandler()')
     }
     const method = propertyKey.toString()
-    const declared = { pattern: pattern || undefined, method, options }
+    const declared = { pattern: blank ? undefined : pattern, method, options }
     addOwnHandler<MessageHandlerMetadata>(META.messageHandlers, target, declared, other => other.method === method && other.pattern === declared.pattern)
     declareRoute(target, messageRoute(method, declared.pattern))
   })
@@ -741,16 +761,23 @@ export function Command<
     refuseOnClass('@Command', target, propertyKey)
     const originalMethod = _descriptor.value
     if (!originalMethod) {
-      throw refuse(new Error(`${target.constructor.name}.${propertyKey}: @Command is on something with no implementation.`))
+      throw refuse(new Error(`${decoratedName(target, propertyKey)}: @Command is on something with no implementation.`))
     }
 
     // Wrap original method for interaction type validation
     const declaredAs = typeof builderOrType === 'function' ? builderOrType.name : `CommandType.${builderOrType}`
     const checked: NonNullable<typeof _descriptor.value> = function (this: unknown, interaction, params) {
-      if (!matchesCommandType(commandType, interaction)) {
+      // Every type the method's routes declare, in the class the call is made on: each @Command wraps it, so one alone
+      // would refuse the others' interactions, and an override that adds a route type reaches this one through super
+      const called = typeof this === 'object' && this !== null && Object.prototype.isPrototypeOf.call(target, this) ? Object.getPrototypeOf(this) : target
+      const types = routeTypesOf(called as object, propertyKey)
+      if (!types.some(type => matchesCommandType(type, interaction))) {
         throw new Error(
-          `${target.constructor.name}.${propertyKey}: @Command('${commandName}', ${declaredAs}) takes ` +
-            `${interactionClassName(commandType)}${givenInstead(interaction)}.`,
+          types.length <= 1
+            ? `${decoratedName(target, propertyKey)}: @Command('${commandName}', ${declaredAs}) takes ` +
+                `${interactionClassName(commandType)}${givenInstead(interaction)}.`
+            : `${decoratedName(target, propertyKey)}: its @Command routes take ${types.map(interactionClassName).join(' or ')}` +
+                `${givenInstead(interaction)}.`,
         )
       }
 
@@ -770,7 +797,7 @@ export function Command<
 
     // Determine command type and builder
     if (typeof builderOrType === 'function') {
-      const where = `${target.constructor.name}.${propertyKey}`
+      const where = decoratedName(target, propertyKey)
       // A subcommand is part of its command's builder, which belongs on the command's own name
       const subcommandPath =
         Reflect.getMetadata(META.commandType, builderOrType) === CommandType.SLASH && commandName.includes(' ')
@@ -828,12 +855,12 @@ export function Command<
     if (isCustomIdRouted(commandType)) {
       // A route warned as it was made
       const braces = typeof name === 'string' ? literalBraces(commandName) : undefined
-      if (braces) logger.warn(`${target.constructor.name}.${propertyKey}: in the pattern "${commandName}", ${braces}`)
+      if (braces) logger.warn(`${decoratedName(target, propertyKey)}: in the pattern "${commandName}", ${braces}`)
       let pattern: ReturnType<typeof createRegexFromPattern>
       try {
         pattern = createRegexFromPattern(commandName)
       } catch (error) {
-        throw refuse(new Error(`${target.constructor.name}.${propertyKey}: ${(error as Error).message}`, { cause: error }))
+        throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${(error as Error).message}`, { cause: error }))
       }
       regex = pattern.regex
       dynamicParams = pattern.params
@@ -842,7 +869,7 @@ export function Command<
       if (pattern.shortest === 0 || pattern.shortest > MAX_CUSTOM_ID_LENGTH) {
         const length = pattern.shortest === 0 ? 'the pattern is empty' : `its shortest is ${pattern.shortest} characters`
         logger.warn(
-          `${target.constructor.name}.${propertyKey}: the pattern "${commandName}" matches no customId: Discord's customIds ` +
+          `${decoratedName(target, propertyKey)}: the pattern "${commandName}" matches no customId: Discord's customIds ` +
             `are 1 to ${MAX_CUSTOM_ID_LENGTH} characters, and ${length}, so the handler never runs.`,
         )
       }
@@ -887,7 +914,7 @@ function assertContextMenuKind(target: object, propertyKey: string, builderName:
   if (!declared || registered === undefined || declared.kind === registered) return
   const kind = registered === ApplicationCommandType.User ? 'user' : 'message'
   throw refuse(new Error(
-    `${target.constructor.name}.${propertyKey}: it takes a ${declared.name} context menu interaction, but ${builderName} ` +
+    `${decoratedName(target, propertyKey)}: it takes a ${declared.name} context menu interaction, but ${builderName} ` +
       `registers "${commandName}" as a ${kind} context menu command. Declare the handler's interaction as the kind the ` +
       `builder's setType() names.`,
   ))

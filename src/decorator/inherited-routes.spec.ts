@@ -1,10 +1,12 @@
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
-import { SlashCommandBuilder } from 'discord.js'
-import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, ReactionHandler } from '@src/decorator/index.js'
+import { type GuildMember, SlashCommandBuilder } from 'discord.js'
+import { Autocomplete, Command, CommandBuilder, Controller, MessageHandler, On, ReactionHandler } from '@src/decorator/index.js'
 import { getAutocompleteHandlers, getCommandMap, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { CommandType } from '@src/enum/index.js'
-import { inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
+import { createMock, inspectHandler, MeoCordTestingModule } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 
 const warnings = () =>
   vi
@@ -300,5 +302,185 @@ describe('inspectHandler', () => {
     expect(inspectHandler(Sub, 'page').inheritedRoutes).toEqual(['button "page/{n:int}"'])
     expect(inspectHandler(Sub, 'ping').inheritedRoutes).toEqual(['slash "ping"'])
     expect(inspectHandler(Base, 'ping').inheritedRoutes).toEqual([])
+  })
+
+  // The bot answers an inherited @On or @Once event, so a test reads it here; default mode keeps 4.2's list
+  describe('on an event the handler inherits', () => {
+    @Controller()
+    class Joins {
+      @On('guildCreate')
+      joined() {}
+    }
+    @Controller()
+    class Redecorated extends Joins {
+      @On('guildDelete')
+      override joined() {}
+    }
+    @Controller()
+    class Overridden extends Joins {
+      override joined() {}
+    }
+    const read = () => [Redecorated, Overridden, Joins].map(controller => inspectHandler(controller, 'joined').inheritedRoutes)
+    const inspectWarnings = () =>
+      vi
+        .mocked(Logger.prototype.warn)
+        .mock.calls.map(([line]) => String(line))
+        .filter(line => line.startsWith('inspectHandler() here'))
+
+    beforeEach(() => forgetDeprecationWarnings())
+    afterEach(() => forgetStrictMocks())
+
+    it('names it under useStrictMocks(), as the bot answers it', () => {
+      forgetStrictMocks()
+      useStrictMocks()
+
+      expect(read()).toEqual([['event "guildCreate"'], ['event "guildCreate"'], []])
+      expect(inspectWarnings()).toEqual([])
+    })
+
+    it('leaves it out in default mode, warning once for each handler that inherits one', () => {
+      expect([...read(), ...read()]).toEqual([[], [], [], [], [], []])
+      expect(inspectWarnings()).toEqual([
+        'inspectHandler() here leaves the @On and @Once events Redecorated.joined inherits out of inheritedRoutes, though the bot answers them; under useStrictMocks() it lists them.',
+        'inspectHandler() here leaves the @On and @Once events Overridden.joined inherits out of inheritedRoutes, though the bot answers them; under useStrictMocks() it lists them.',
+      ])
+    })
+
+    it("names none a subclass with inheritedRoutes: 'replace' re-declares, as the bot drops it", () => {
+      @Controller({ inheritedRoutes: 'replace' })
+      class Replaced extends Joins {
+        @On('guildDelete')
+        override joined() {}
+      }
+      forgetStrictMocks()
+      useStrictMocks()
+
+      expect(inspectHandler(Replaced, 'joined').inheritedRoutes).toEqual([])
+    })
+  })
+})
+
+// An event a subclass re-declares on a method it overrides is its own, as every other kind of route is
+describe('an event handler a subclass re-declares', () => {
+  const member = () => createMock<GuildMember>({ id: '1' })
+
+  it.each([
+    ['keeping inherited routes', {}],
+    ['replacing them', { inheritedRoutes: 'replace' as const }],
+  ])('runs once on the same event, %s', async (_, options) => {
+    const heard: string[] = []
+    @Controller()
+    class Base {
+      @On('guildMemberAdd')
+      greet() {
+        heard.push('base')
+      }
+    }
+    @Controller(options)
+    class Leaf extends Base {
+      @On('guildMemberAdd')
+      override greet() {
+        heard.push('leaf')
+      }
+    }
+
+    const { ran } = await start(Leaf).emit('guildMemberAdd', member())
+
+    expect([ran, heard]).toEqual([1, ['leaf']])
+  })
+
+  it("answers only its own event under inheritedRoutes: 'replace'", async () => {
+    const heard: string[] = []
+    @Controller()
+    class Base {
+      @On('guildMemberAdd')
+      greet() {
+        heard.push('add')
+      }
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Leaf extends Base {
+      @On('guildMemberRemove')
+      override greet() {
+        heard.push('remove')
+      }
+    }
+    const module = start(Leaf)
+
+    const runs = [(await module.emit('guildMemberAdd', member())).ran, (await module.emit('guildMemberRemove', member())).ran]
+
+    expect([runs, heard]).toEqual([[0, 1], ['remove']])
+  })
+
+  it('keeps the inherited event for a method overridden without decorators', async () => {
+    const heard: string[] = []
+    @Controller()
+    class Base {
+      @On('guildMemberAdd')
+      greet() {
+        heard.push('base')
+      }
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Leaf extends Base {
+      override greet() {
+        heard.push('leaf')
+      }
+    }
+
+    const { ran } = await start(Leaf).emit('guildMemberAdd', member())
+
+    expect([ran, heard]).toEqual([1, ['leaf']])
+  })
+
+  it('is named as the bot starts when it keeps the event it inherits, as a re-declared message handler is', () => {
+    @Controller()
+    class Base {
+      @MessageHandler('roll')
+      roll() {}
+
+      @On('guildCreate')
+      joined() {}
+    }
+    @Controller()
+    class Leaf extends Base {
+      @MessageHandler('dice')
+      override roll() {}
+
+      @On('guildDelete')
+      override joined() {}
+    }
+
+    start(Leaf)
+
+    expect(warnings()).toEqual([
+      '2 re-declared handlers still answer routes they inherit:\n' +
+        '  Leaf.roll answers message "roll", which it inherits, as well as its own message "dice".\n' +
+        '  Leaf.joined answers event "guildCreate", which it inherits, as well as its own event "guildDelete".\n' +
+        "In the next major version (5.0), a handler's own routes replace the ones it inherits. To keep an inherited route, " +
+        "declare it on the subclass's method as well; to drop it now, give the subclass @Controller({ inheritedRoutes: 'replace' }).",
+    ])
+  })
+
+  it("says nothing for an event re-declared as it was, or under inheritedRoutes: 'replace'", () => {
+    @Controller()
+    class Base {
+      @On('guildCreate')
+      joined() {}
+    }
+    @Controller()
+    class Same extends Base {
+      @On('guildCreate')
+      override joined() {}
+    }
+    @Controller({ inheritedRoutes: 'replace' })
+    class Replacing extends Base {
+      @On('guildDelete')
+      override joined() {}
+    }
+
+    start(Same, Replacing)
+
+    expect(warnings()).toEqual([])
   })
 })

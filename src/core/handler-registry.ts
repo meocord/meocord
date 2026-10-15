@@ -20,7 +20,8 @@ import {
   messageStarts,
   parseMessagePattern,
 } from '@src/core/message-routes.js'
-import { computeMessageHelp, effectiveScope, helpInvocation } from '@src/core/message-help.js'
+import { computeMessageHelp, helpInvocation } from '@src/core/message-help.js'
+import { effectiveScope } from '@src/core/message-params.js'
 import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
 import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
@@ -149,7 +150,10 @@ export interface MessageHandlerEntry extends HandlerEntryBase {
   aliases: readonly string[]
   /** What the command does, from its `description` option. */
   description: string | undefined
-  /** Where the command works: its `scope` option, narrowed to servers by a `member`, `role` or `channel` param or flag. */
+  /**
+   * Where the command works: its `scope` option, narrowed to servers by a `member`, `role` or `channel` param, or
+   * required flag.
+   */
   scope: MessageScope
   /** Whether its `hidden` option leaves it out of help's lists, including a parent's list of subcommands. */
   hidden: boolean

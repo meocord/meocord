@@ -1,21 +1,23 @@
 import path from 'path'
-import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
+import { warnDeprecatedBehaviour, warnOnce } from '@src/common/deprecation.js'
 import { isExplainedError } from '@src/common/explained-error.js'
 import { Logger } from '@src/common/logger.js'
 import { isBuiltApplication, STARTUP_ERRORS_KEY } from '@src/util/bundle-entry.util.js'
 import { comparablePath, framePath } from '@src/util/source-path.util.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 const REFUSAL = Symbol.for('meocord.refusal')
 
-/** Whether this process reports refusals yet; see `reportRefusals`. */
-let reporting = false
-
-/** Refusals someone else reports, and ends the process for, which `reportRefusals` leaves to them. */
-const handedOff = new WeakSet<object>()
+/**
+ * One per process for this meocord version, so the two builds report a refusal once: whether this process reports
+ * refusals yet (see `reportRefusals`), and the refusals someone else reports, and ends the process for, which it leaves
+ * to them.
+ */
+const refusals = shared('refusalReporting', () => ({ reporting: false, handedOff: new WeakSet<object>() }))
 
 /** Leaves a refusal to whoever reports it instead, such as a shard's manager: going uncaught, it is neither logged nor exits. */
 export function handOffRefusal(error: Error): void {
-  handedOff.add(error)
+  refusals.handedOff.add(error)
 }
 
 /**
@@ -25,22 +27,35 @@ export function handOffRefusal(error: Error): void {
 export function refuse<E extends Error>(error: E): E {
   if (Object.isExtensible(error)) Object.defineProperty(error, REFUSAL, { value: true, enumerable: false })
   // Before the error is thrown, so a built application reports it however the throw ends
-  if (!reporting && isBuiltApplication()) reportRefusals()
+  if (!refusals.reporting && isBuiltApplication()) reportRefusals()
   return error
 }
 
-/** What a decorator is applied to, as a refusal names it: `Class.method` on a method, `Class` on a class. */
+/** The name of the class a member decorator is applied in: a static member's target is the class itself. */
+export function ownerName(target: object): string {
+  return (typeof target === 'function' ? target : (target as { constructor: { name: string } }).constructor).name
+}
+
+/**
+ * What a decorator is applied to, as a refusal names it: `Class.method` on a method, a static one included, `Class` on
+ * a class.
+ */
 export function decoratedName(target: object, propertyKey?: string | symbol): string {
   if (propertyKey === undefined) return (target as { name?: string }).name || 'a class'
-  return `${(target as { constructor: { name: string } }).constructor.name}.${String(propertyKey)}`
+  return `${ownerName(target)}.${String(propertyKey)}`
 }
 
 /**
  * Refuses a decorator that goes only on a method, or on a member, where it is applied to a class, directly or through
- * `applyDecorators`, rather than store what nothing reads or fail on the method it lacks.
+ * `applyDecorators`, rather than store what nothing reads or fail on the method it lacks. On a static member, where
+ * nothing reads it either, it warns; the next major version (5.0) refuses it there too.
  */
 export function refuseOnClass(decorator: string, target: object, propertyKey: string | symbol | undefined, place = 'a method'): void {
   if (propertyKey === undefined) throw refuse(new Error(`${decoratedName(target)}: ${decorator} goes on ${place}, not on a class.`))
+  if (typeof target === 'function') {
+    const where = place === 'a method' ? 'an instance method, not a static one; it never runs' : 'an instance member, not a static one, where nothing reads it'
+    warnOnce(new Logger(decorator.slice(1)), `${decoratedName(target, propertyKey)}: ${decorator} goes on ${where}. The next major version (5.0) refuses it.`)
+  }
 }
 
 /** Refuses a decorator that goes only on a class where it is applied to a method, directly or through `applyDecorators`. */
@@ -260,9 +275,9 @@ export function reportRefusals(
   exit: (code: number) => void = code => process.exit(code),
   { bun = process.versions.bun !== undefined, reject = (reason: unknown) => void Promise.reject(reason) } = {},
 ): void {
-  reporting = true
+  refusals.reporting = true
   const report = (error: Error) => {
-    if (handedOff.has(error)) return
+    if (refusals.handedOff.has(error)) return
     if (!isExplainedError(error)) log(describeRefusal(error, process.cwd()))
     exit(1)
   }
