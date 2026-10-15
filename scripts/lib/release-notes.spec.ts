@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { NOTES_DIR, readNotes, writeReleaseNotes } from './release-notes.js'
+import { CHANGESET_DIR, checkNotesCoverChangesets, COVERED_FILE, NOTES_DIR, readNotes, writeReleaseNotes } from './release-notes.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -105,6 +105,64 @@ describe('writeReleaseNotes', () => {
 
     rmSync(path.join(folder, 'highlight.md'))
     expect(() => readNotes(folder)).toThrow('holds no notes')
+  })
+})
+
+describe('checkNotesCoverChangesets', () => {
+  const highlights = { 'highlights.md': '### Highlights\n\n- A change.\n' }
+
+  /** A repository at `version` with `changesets` pending beside the changesets README, and 4.2.3's notes listing `covered`. */
+  function pending(version: string, changesets: string[], covered: string): void {
+    repository(version, [version])
+    mkdirSync(path.join(root, CHANGESET_DIR), { recursive: true })
+    for (const file of [...changesets, 'README.md']) writeFileSync(path.join(root, CHANGESET_DIR, file), '---\n---\n')
+    notes('4.2.3', { ...highlights, [COVERED_FILE]: covered })
+  }
+
+  it('passes notes that list exactly the pending changesets, one with why it needs no line', () => {
+    pending('4.2.2', ['a.md', 'b.md'], '- a.md\n- b.md: Only the package metadata changes.\n')
+
+    expect(() => checkNotesCoverChangesets(root)).not.toThrow()
+  })
+
+  it.each(['4.2.2', '4.2.3-beta.1'])('names a changeset the notes leave out, from %s', version => {
+    pending(version, ['a.md', 'b.md'], '- a.md\n')
+
+    expect(() => checkNotesCoverChangesets(root)).toThrow(
+      `b.md isn't in ${path.join(NOTES_DIR, '4.2.3', COVERED_FILE)}: cover it in the notes and list it, ` +
+        'or list it with why it needs no line.',
+    )
+  })
+
+  it('names a listed file that is not a pending changeset', () => {
+    pending('4.2.2', ['a.md'], '- a.md\n- gone.md\n')
+
+    expect(() => checkNotesCoverChangesets(root)).toThrow(
+      `${path.join(NOTES_DIR, '4.2.3', COVERED_FILE)} lists gone.md, which is not a pending changeset: remove it.`,
+    )
+  })
+
+  it('refuses a line that is not a list item, and a file listed twice', () => {
+    pending('4.2.2', ['a.md'], '- a.md\nb.md\n')
+    expect(() => checkNotesCoverChangesets(root)).toThrow('"b.md" is not a "- <file>" or "- <file>: <why it needs no line>" item.')
+
+    pending('4.2.2', ['a.md'], '- a.md\n- a.md: Twice.\n')
+    expect(() => checkNotesCoverChangesets(root)).toThrow('lists a.md twice')
+  })
+
+  it.each(['4.2.3', '4.2.4'])("checks nothing at %s, when no version's notes are later", version => {
+    pending(version, ['a.md'], '')
+
+    expect(() => checkNotesCoverChangesets(root)).not.toThrow()
+  })
+
+  it('reads notes without the list, and deletes it with them', () => {
+    pending('4.2.3', ['a.md'], '- a.md\n')
+    const folder = path.join(root, NOTES_DIR, '4.2.3')
+
+    expect(readNotes(folder)).toBe('### Highlights\n\n- A change.')
+    expect(writeReleaseNotes(root)).toBe(true)
+    expect(existsSync(folder)).toBe(false)
   })
 })
 

@@ -82,6 +82,10 @@ jobs:
       - name: Check third-party notices
         run: bun run notices:check
 
+      # A stable release's curated notes replace its changesets' lines, so a changeset they leave out would be dropped.
+      - name: Check the release notes cover every changeset
+        run: bun run notes:check
+
   test:
     name: Test (node ${{ matrix.node }})
     runs-on: ubuntu-latest

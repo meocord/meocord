@@ -377,7 +377,10 @@ bun run changeset
 ```
 
 The prompt asks for a bump and a description, then writes a markdown file. Commit it with your
-change.
+change. While `.changeset/release-notes/<version>/` holds the notes of the next stable version, also
+give the change a line in those notes and list the file in the folder's `covered.md`, or list it as
+`- <file>: <reason>` with why it needs no line. `bun run notes:check` names a changeset the list
+leaves out.
 
 | Bump    | For                                                        |
 | ------- | ---------------------------------------------------------- |
@@ -447,15 +450,18 @@ bunx changeset pre exit
 and the next release pull request versions `4.0.0` from everything collected during the beta.
 
 That stable version's changelog entry comes from curated notes, not from every beta's changesets
-again. Write them before exiting, in `.changeset/release-notes/<version>/`, as any of six files joined
-in this order: `highlights.md`, `upgrading.md`, `features.md`, `deprecations.md`, `fixes.md` and
-`security.md`. Each holds only `### ` groups and their `- ` entries, continued by lines indented two
-spaces, which is the shape the docs site reads a changelog in; `scripts/lib/release-notes.spec.ts`
-checks the notes in the repository. When the release pull request is versioned,
-`scripts/release-notes.ts` puts the notes in place of the entry changesets wrote and deletes the
-folder. A stable version that follows its own prereleases without notes is refused, so the version
-step fails rather than repeat every beta's changes. A prerelease, and a patch release after a stable
-one, need no notes.
+again. Write them before exiting, in `.changeset/release-notes/<version>/`, as any of six files
+joined in this order: `highlights.md`, `upgrading.md`, `features.md`, `deprecations.md`, `fixes.md`
+and `security.md`. Each holds only `### ` groups and their `- ` entries, continued by lines indented
+two spaces, which is the shape the docs site reads a changelog in;
+`scripts/lib/release-notes.spec.ts` checks the notes in the repository. Beside them, `covered.md`
+lists each pending changeset as a `- <file>` item, or `- <file>: <reason>` for one that needs no
+line. `bun run notes:check` fails on a changeset it leaves out or a file it lists that isn't
+pending, in CI and before the release pull request is versioned, so no change is dropped silently.
+When the release pull request is versioned, `scripts/release-notes.ts` puts the notes in place of
+the entry changesets wrote and deletes the folder. A stable version that follows its own prereleases
+without notes is refused, so the version step fails rather than repeat every beta's changes. A
+prerelease, and a patch release after a stable one, need no notes.
 
 ## Reporting bugs
 
