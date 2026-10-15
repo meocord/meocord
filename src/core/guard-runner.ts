@@ -22,7 +22,8 @@ import {
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
-import { META } from '@src/util/metadata-keys.js'
+import { META, type MetaKey } from '@src/util/metadata-keys.js'
+import { wrapsMethod } from '@src/util/method-wrapper.util.js'
 
 export type GuardClass = new (...args: any[]) => GuardInterface
 
@@ -346,6 +347,34 @@ export function sourcePrototype(prototype: object, methodName: string): object |
 }
 
 /**
+ * The prototypes on the chain that declare `methodName` as written, base first: the handler and each override of it,
+ * looking through methods a class-level `@UseGuard` re-declared to wrap an inherited handler. A handler's method-level
+ * stages are read from each, so an override keeps its base method's, as it keeps its route.
+ */
+export function stageOwners(prototype: object, methodName: string): object[] {
+  const owners: object[] = []
+  for (let current: object | null = prototype; current && current !== Object.prototype; current = Object.getPrototypeOf(current)) {
+    if (!Object.prototype.hasOwnProperty.call(current, methodName)) continue
+    if (!Reflect.getOwnMetadata(META.inheritedFrom, current, methodName)) owners.push(current)
+  }
+  return owners.reverse()
+}
+
+/** The entries a method-level stage lists under `key` on each of a handler's {@link stageOwners}, base first. */
+export function methodStages<T>(prototype: object, methodName: string, key: MetaKey): T[] {
+  return stageOwners(prototype, methodName).flatMap(owner => (Reflect.getOwnMetadata(key, owner, methodName) as T[] | undefined) ?? [])
+}
+
+/** The value a method-level stage holds under `key` on the nearest of a handler's {@link stageOwners} that declares one. */
+export function nearestMethodStage<T>(prototype: object, methodName: string, key: MetaKey): T | undefined {
+  for (const owner of stageOwners(prototype, methodName).reverse()) {
+    const value = Reflect.getOwnMetadata(key, owner, methodName) as T | undefined
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
+/**
  * Caches a function of a class's prototype and one of its handlers. Handler metadata is fixed once
  * the classes are decorated, so dispatch resolves each handler's stages once, not on every call.
  */
@@ -414,52 +443,144 @@ export function handlerMethods(prototype: object): Set<string> {
  * the method's. A method that is no handler has only its own, since class guards apply to handlers.
  */
 export const handlerGuards = perHandler((prototype: object, methodName: string): readonly GuardEntry[] => {
-  const source = sourcePrototype(prototype, methodName)
-  if (!source) return []
+  if (!sourcePrototype(prototype, methodName)) return []
   return [
     ...(handlerMethods(prototype).has(methodName) ? stageClasses(prototype, methodName).flatMap(classLevelGuards) : []),
-    ...((Reflect.getOwnMetadata(META.methodGuards, source, methodName) as GuardEntry[]) ?? []),
+    ...methodStages<GuardEntry>(prototype, methodName, META.methodGuards),
   ]
 })
 
-const wrapperCount = perHandler((prototype: object, methodName: string): number => {
-  const owner = declaringPrototype(prototype, methodName)
-  return owner ? ((Reflect.getOwnMetadata(META.guardWrappers, owner, methodName) as number | undefined) ?? 0) : 0
+/**
+ * The type a direct call to a handler runs as, which is the one dispatch gives it: `'event'` for an `@On` or `@Once`
+ * handler, as its first argument may be a message or an interaction; otherwise read from the first argument.
+ */
+const directCallType = perHandler((prototype: object, methodName: string): ExecutionContextType | undefined => {
+  if (!getEventHandlers(prototype).some(handler => handler.method === methodName)) return undefined
+  const routed = [
+    ...Object.values(getCommandMap(prototype) ?? {})
+      .flat()
+      .map(command => command.methodName),
+    ...getMessageHandlers(prototype).map(handler => handler.method),
+    ...getReactionHandlers(prototype).map(handler => handler.method),
+    ...getAutocompleteHandlers(prototype).map(handler => handler.methodName),
+  ]
+  // A method dispatch also routes as a command, message or reaction has no one type
+  return routed.includes(methodName) ? undefined : 'event'
+})
+
+/** Whether `@UseGuard` wraps the method anywhere on the chain, an override's base included. */
+const isWrapped = perHandler((prototype: object, methodName: string): boolean => {
+  for (let current: object | null = prototype; current; current = Object.getPrototypeOf(current)) {
+    if (Object.prototype.hasOwnProperty.call(current, methodName) && Reflect.getOwnMetadata(META.guardWrappers, current, methodName)) return true
+  }
+  return false
 })
 
 /**
- * Calls dispatch has already guarded, keyed by first argument and method, counting the wrappers still
- * to pass. A user decorator that awaits between two wrappers leaves a pass pending during that await,
- * which a concurrent direct call with the same object and method could take; other overlaps fail closed.
- * An event whose first argument is not an object, such as `debug`'s string, is keyed by the instance.
+ * A call whose guards have run. Each wrapper it enters lets it through once, an overridden one reached through `super`
+ * included; entering one again is a new call, as when the handler calls itself, and runs the guards again.
  */
-const dispatched = new WeakMap<object, Map<string, number>>()
-
-/** The object a call's dispatch mark is kept on: its first argument, or the instance when that is not an object. */
-function markKey(first: unknown, instance: object): object {
-  return typeof first === 'object' && first !== null ? first : instance
+interface GuardedPass {
+  instance: object
+  methodName: string
+  first: unknown
+  entered: Set<object>
+  open: boolean
 }
 
-/** Takes one pass for the wrapper being entered, if dispatch left one for this call. */
-export function consumeDispatchMark(first: unknown, instance: object, methodName: string): boolean {
-  const marks = dispatched.get(markKey(first, instance))
-  const remaining = marks?.get(methodName)
-  if (!marks || !remaining) return false
+/**
+ * The pass of the guarded call running. Kept per call, so a concurrent call with the same object and method runs its own
+ * guards, and closed when the call returns, so work it leaves running, such as a timer, does not carry it.
+ */
+const guardedPasses = new AsyncLocalStorage<GuardedPass>()
 
-  if (remaining > 1) marks.set(methodName, remaining - 1)
-  else marks.delete(methodName)
+/** Takes the pass for `wrapper` when it belongs to a call whose guards have already run and has not let it through yet. */
+export function takeGuardedPass(wrapper: object, first: unknown, instance: object, methodName: string): boolean {
+  const pass = guardedPasses.getStore()
+  if (!pass?.open || pass.instance !== instance || pass.methodName !== methodName || pass.first !== first) return false
+  if (pass.entered.has(wrapper)) return false
+  pass.entered.add(wrapper)
   return true
+}
+
+/** Runs a call whose guards have run, with its pass; `wrapper` is the one that ran them, which it has entered. */
+async function runWithPass(
+  instance: object,
+  methodName: string,
+  args: readonly unknown[],
+  call: () => unknown,
+  wrapper?: object,
+): Promise<unknown> {
+  const pass: GuardedPass = { instance, methodName, first: args[0], entered: new Set(wrapper ? [wrapper] : []), open: true }
+  try {
+    return await guardedPasses.run(pass, call)
+  } finally {
+    pass.open = false
+  }
+}
+
+/**
+ * Adds guards to a method's class or method list, then republishes the effective list under
+ * `META.guards`, in the order they run: the bases' before the class's own, and within one class or method the
+ * latest decorator first, since it wraps outermost.
+ */
+export function recordGuards(key: MetaKey, guards: GuardEntry[], prototype: object, methodName: string): void {
+  const existing: GuardEntry[] = Reflect.getOwnMetadata(key, prototype, methodName) ?? []
+  const bases: number = key === META.classGuards ? (Reflect.getOwnMetadata(META.baseClassGuards, prototype, methodName) ?? 0) : 0
+  Reflect.defineMetadata(key, [...existing.slice(0, bases), ...guards, ...existing.slice(bases)], prototype, methodName)
+
+  const [classGuards, inheritedGuards] = [META.classGuards, META.inheritedGuards].map(
+    list => (Reflect.getOwnMetadata(list, prototype, methodName) as GuardEntry[] | undefined) ?? [],
+  )
+  // The method's guards and those of the methods it overrides, base first, as dispatch runs them
+  const methodGuards = methodStages<GuardEntry>(prototype, methodName, META.methodGuards)
+  Reflect.defineMetadata(META.guards, [...inheritedGuards, ...classGuards, ...methodGuards], prototype, methodName)
+}
+
+/** The classes {@link guardOwnHandlersWithBaseGuards} has handled, as `@Controller` and each app's startup both call it. */
+const guardedWithBases = new WeakSet<object>()
+
+/**
+ * Gives each handler a class declares itself the class-level guards of the classes it extends,
+ * as its inherited handlers have: recorded under `META.guards`, and wrapped so a direct call
+ * runs them when no other guard wraps the handler. `@Controller` calls this as it decorates, and
+ * {@link prepareDirectCalls} for every class an app runs, a service included. Once per class.
+ */
+export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: any[]) => unknown): void {
+  if (guardedWithBases.has(target)) return
+  guardedWithBases.add(target)
+  const prototype = target.prototype as object
+  for (const methodName of handlerMethods(prototype)) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName)
+    // Inherited handlers have the chain of the class that declares them
+    if (typeof descriptor?.value !== 'function' || Reflect.getOwnMetadata(META.inheritedFrom, prototype, methodName)) continue
+    // Base first, as dispatch runs them
+    const guards = classChain(prototype, prototype).slice(1).reverse().flatMap(classLevelGuards)
+    if (guards.length === 0) continue
+    if (!Reflect.getOwnMetadata(META.guardWrappers, prototype, methodName)) {
+      applyGuards(descriptor, prototype, methodName)
+      Object.defineProperty(prototype, methodName, descriptor)
+    }
+    recordGuards(META.inheritedGuards, guards, prototype, methodName)
+  }
 }
 
 /** The container that made each instance, so a direct call runs in its own app or testing module. */
 const instanceContainers = new WeakMap<object, Container>()
 
 /**
- * Records each instance `container` makes of `classes` as its own. Two testing modules made from one class each run a
- * direct call on their own instance in themselves, where the class's metadata names only the last.
+ * Readies direct calls to the handlers of the classes an app or testing module runs, controllers and services alike:
+ * - stamps each class with the container, and records each instance the container makes as its own, so two testing
+ *   modules made from one class each run a direct call on their own instance in themselves;
+ * - gives each handler a class declares itself the class-level guards of the classes it extends, and wraps each
+ *   override of a guarded handler, so a direct call to it runs the guards it inherits before its body.
  */
-export function recordInstanceContainers(container: Container, classes: Iterable<new (...args: any[]) => unknown>): void {
+export function prepareDirectCalls(container: Container, classes: readonly (new (...args: any[]) => unknown)[]): void {
   for (const cls of classes) {
+    Reflect.defineMetadata(META.container, container, cls)
+    // Each class on the chain, base first, so an override above the one the app runs is wrapped too
+    for (const owner of classesOf(cls).reverse()) guardOwnHandlersWithBaseGuards(owner)
+    wrapGuardedOverrides(cls.prototype as object)
     container.onActivation(cls, (_context, instance) => {
       if (typeof instance === 'object' && instance !== null) instanceContainers.set(instance, container)
       return instance
@@ -467,15 +588,58 @@ export function recordInstanceContainers(container: Container, classes: Iterable
   }
 }
 
+/** `cls` and the classes it extends, innermost first. */
+function classesOf(cls: abstract new (...args: any[]) => unknown): (abstract new (...args: any[]) => unknown)[] {
+  const classes: (abstract new (...args: any[]) => unknown)[] = []
+  for (let current: object | null = cls.prototype as object; current && current !== Object.prototype; current = Object.getPrototypeOf(current)) {
+    classes.push(current.constructor as abstract new (...args: any[]) => unknown)
+  }
+  return classes
+}
+
+/** Wraps each method on the chain that overrides a handler a base method guards and is not wrapped itself. */
+function wrapGuardedOverrides(prototype: object): void {
+  for (const methodName of handlerMethods(prototype)) {
+    let guardedBelow = false
+    for (const owner of stageOwners(prototype, methodName)) {
+      const descriptor = Object.getOwnPropertyDescriptor(owner, methodName)
+      if (guardedBelow && typeof descriptor?.value === 'function' && !Reflect.getOwnMetadata(META.guardWrappers, owner, methodName)) {
+        applyGuards(descriptor, owner, methodName)
+        Object.defineProperty(owner, methodName, descriptor)
+      }
+      if (((Reflect.getOwnMetadata(META.methodGuards, owner, methodName) as GuardEntry[] | undefined) ?? []).length > 0) guardedBelow = true
+    }
+  }
+}
+
 /**
- * Runs a direct call to a guarded handler: the handler's guards, as dispatch resolves them, then the
- * call with a pass for each wrapper inside the one entered, so no guard runs twice.
+ * Wraps a method so a direct call runs its guards first: the wrapper entered first runs the whole
+ * chain dispatch resolves for the handler, and lets the ones inside it through. A call from dispatch,
+ * which has already run the guards, passes through every wrapper.
+ */
+export function applyGuards(descriptor: PropertyDescriptor, prototype: object, propertyKey: string): void {
+  const originalMethod = descriptor.value as (...args: unknown[]) => unknown
+  // Which wrapper a call has passed, so it passes each once
+  const wrapper = {}
+  descriptor.value = wrapsMethod(async function (this: object, ...args: unknown[]) {
+    if (takeGuardedPass(wrapper, args[0], this, propertyKey)) return originalMethod.apply(this, args)
+    return runDirectCall(this, propertyKey, args, () => originalMethod.apply(this, args), wrapper)
+  }, originalMethod)
+
+  const wrappers: number = Reflect.getOwnMetadata(META.guardWrappers, prototype, propertyKey) ?? 0
+  Reflect.defineMetadata(META.guardWrappers, wrappers + 1, prototype, propertyKey)
+}
+
+/**
+ * Runs a direct call to a guarded handler: the handler's guards, as dispatch resolves and types them, then
+ * the call with a pass every wrapper inside the one entered takes, so no guard runs twice.
  */
 export async function runDirectCall(
   instance: object,
   methodName: string,
   args: unknown[],
   call: () => unknown,
+  wrapper?: object,
 ): Promise<unknown> {
   const prototype = Object.getPrototypeOf(instance) as object
   const controller = instance.constructor as new (...args: any[]) => unknown
@@ -488,40 +652,20 @@ export async function runDirectCall(
         `instance was made outside one. Inject ${controller.name}, or call it on an instance the app made.`,
     )
   }
-  if (!(await runGuards(handlerGuards(prototype, methodName), { container, controller, methodName, args }))) return undefined
-
-  const inner = wrapperCount(prototype, methodName) - 1
-  if (inner <= 0) return call()
-  const key = markKey(args[0], instance)
-  let marks = dispatched.get(key)
-  if (!marks) dispatched.set(key, (marks = new Map()))
-  marks.set(methodName, inner)
-  try {
-    return await call()
-  } finally {
-    marks.delete(methodName)
-  }
+  const type = directCallType(prototype, methodName)
+  if (!(await runGuards(handlerGuards(prototype, methodName), { container, controller, methodName, args, type }))) return undefined
+  return runWithPass(instance, methodName, args, call, wrapper)
 }
 
 /**
- * Calls a handler dispatch has already guarded. Its wrappers let this one call through; the passes
- * are removed afterwards, so a later direct call with the same (cached) object runs its guards.
+ * Calls a handler dispatch has already guarded. Its wrappers let this one call through; the pass
+ * closes afterwards, so a later direct call with the same (cached) object runs its guards.
  */
 export async function callGuardedHandler(
   instance: Record<string, (...args: unknown[]) => unknown>,
   methodName: string,
   args: unknown[],
 ): Promise<unknown> {
-  const count = wrapperCount(Object.getPrototypeOf(instance), methodName)
-  if (count === 0) return instance[methodName](...args)
-
-  const key = markKey(args[0], instance)
-  let marks = dispatched.get(key)
-  if (!marks) dispatched.set(key, (marks = new Map()))
-  marks.set(methodName, count)
-  try {
-    return await instance[methodName](...args)
-  } finally {
-    marks.delete(methodName)
-  }
+  if (!isWrapped(Object.getPrototypeOf(instance) as object, methodName)) return instance[methodName](...args)
+  return runWithPass(instance, methodName, args, () => instance[methodName](...args))
 }

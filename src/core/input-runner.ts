@@ -5,7 +5,7 @@ import { type StandardSchemaV1 } from '@src/interface/standard-schema.interface.
 import { ValidationError } from '@src/common/errors.js'
 import { type HandlerExecutionContext } from '@src/common/execution-context.js'
 import { prepareInterceptor } from '@src/core/interceptor-runner.js'
-import { perHandler, sourcePrototype } from '@src/core/guard-runner.js'
+import { methodStages, nearestMethodStage, perHandler } from '@src/core/guard-runner.js'
 import { consumeCooldowns, handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -38,17 +38,17 @@ function isPipeWithParams(entry: PipeEntry): entry is PipeWithParams {
 const asList = (entries: PipeEntry | readonly PipeEntry[]): readonly PipeEntry[] =>
   Array.isArray(entries) ? entries : [entries as PipeEntry]
 
-/** The validation and pipes that run on a handler's input: `@Validate`'s first, then `@UsePipe`'s. */
+/**
+ * The validation and pipes that run on a handler's input: `@Validate`'s first, then `@UsePipe`'s. The `@Validate` is the
+ * handler's own, or else that of the nearest method it overrides that has one; `@UsePipe`'s are every one's, base first.
+ */
 export const handlerInputStages = perHandler((prototype: object, methodName: string): {
   schema?: StandardSchemaV1
   pipes: { key: string; entry: PipeEntry }[]
 } => {
-  const source = sourcePrototype(prototype, methodName)
-  if (!source) return { pipes: [] }
-
-  const validation = Reflect.getOwnMetadata(META.methodValidation, source, methodName) as ValidationMetadata | undefined
+  const validation = nearestMethodStage<ValidationMetadata>(prototype, methodName, META.methodValidation)
   const inline = Object.entries(validation?.pipes ?? {}).flatMap(([key, entries]) => asList(entries).map(entry => ({ key, entry })))
-  const used = (Reflect.getOwnMetadata(META.methodPipes, source, methodName) as { key: string; entry: PipeEntry }[]) ?? []
+  const used = methodStages<{ key: string; entry: PipeEntry }>(prototype, methodName, META.methodPipes)
   return { schema: validation?.schema, pipes: [...inline, ...used] }
 })
 

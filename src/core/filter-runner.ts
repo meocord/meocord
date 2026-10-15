@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { type Container } from 'inversify'
 import { type ExceptionFilter } from '@src/interface/index.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
-import { perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
+import { perHandler, sourcePrototype, stageClasses, stageOwners } from '@src/core/guard-runner.js'
 import { bindShared } from '@src/core/interceptor-runner.js'
 import { startupError } from '@src/util/refusal.util.js'
 import { isConstructible } from '@src/util/value.util.js'
@@ -43,10 +43,12 @@ export function handlerFilterLevels(
 
 /** A handler's method and class filters, the classes innermost first, resolved once. */
 const ownFilterLevels = perHandler((prototype: object, methodName: string) => {
-  const source = sourcePrototype(prototype, methodName)
-  if (!source) return { method: [] as FilterEntry[], classes: [] as FilterEntry[] }
+  if (!sourcePrototype(prototype, methodName)) return { method: [] as FilterEntry[], classes: [] as FilterEntry[] }
   return {
-    method: (Reflect.getOwnMetadata(META.methodFilters, source, methodName) as FilterEntry[]) ?? [],
+    // An override's filters before those of the methods it overrides, innermost first as the classes are
+    method: stageOwners(prototype, methodName)
+      .reverse()
+      .flatMap(owner => (Reflect.getOwnMetadata(META.methodFilters, owner, methodName) as FilterEntry[]) ?? []),
     classes: [...stageClasses(prototype, methodName)]
       .reverse()
       .flatMap(cls => (Reflect.getOwnMetadata(META.classFilters, cls) as FilterEntry[]) ?? []),

@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { type InteractionResponse } from '@src/common/response/response-state.js'
-import { perHandler, sourcePrototype } from '@src/core/guard-runner.js'
+import { nearestMethodStage, perHandler } from '@src/core/guard-runner.js'
 import { getAutocompleteHandlers, getMessageHandlers, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { META } from '@src/util/metadata-keys.js'
@@ -59,11 +59,10 @@ export const AUTO_DEFER_AFTER_MS = 1500
 /** The latest `'auto'` acknowledges, counted from the interaction's creation: Discord allows three seconds. */
 export const AUTO_DEFER_LIMIT_MS = 2500
 
-/** The `@Defer` options of a handler, read where the handler is declared. */
-export const handlerDefer = perHandler((prototype: object, methodName: string): DeferOptions | undefined => {
-  const source = sourcePrototype(prototype, methodName)
-  return source ? (Reflect.getOwnMetadata(META.deferOptions, source, methodName) as DeferOptions | undefined) : undefined
-})
+/** The `@Defer` options of a handler: its own, or else those of the nearest method it overrides that has them. */
+export const handlerDefer = perHandler((prototype: object, methodName: string): DeferOptions | undefined =>
+  nearestMethodStage<DeferOptions>(prototype, methodName, META.deferOptions),
+)
 
 /** The kind of non-interaction handler a method is, if any: `@Defer` cannot apply to one. */
 export function nonInteractionHandler(prototype: object, methodName: string): string | undefined {

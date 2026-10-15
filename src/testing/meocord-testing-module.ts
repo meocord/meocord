@@ -22,7 +22,7 @@ import { ReactionHandlerAction } from '@src/enum/index.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { ExecutionContext, inferContextType } from '@src/common/execution-context.js'
 import { Translator } from '@src/common/translator.js'
-import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
+import { injectedTokens, prepareDirectCalls, singletonContextError } from '@src/core/guard-runner.js'
 import {
   appPresenterOf,
   appStages,
@@ -1408,9 +1408,7 @@ export class TestingModuleBuilder {
         // Every check has run, and touched only the container: from here the module is made, once none found an error
         stopOnStartupErrors()
         // Every class the module runs, so @UseGuard resolves guards on a direct call to any of them
-        for (const cls of [...(this.options.controllers ?? []), ...startup.classes]) Reflect.defineMetadata(META.container, container, cls)
-        // And each instance with the module that made it, as another module made from the same classes stamps them again
-        recordInstanceContainers(container, [...(this.options.controllers ?? []), ...startup.classes])
+        prepareDirectCalls(container, [...(this.options.controllers ?? []), ...startup.classes])
         prepareThemes(container, appClasses)
         // A handler with no builder is how a fixture is written, so only what is always a mistake is named
         warnUnregisteredCommands(this.options.controllers ?? [], { missingBuilders: false })

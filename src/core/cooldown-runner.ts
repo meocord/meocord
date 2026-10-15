@@ -5,7 +5,7 @@ import { CooldownError, type CooldownScope, CooldownStoreError } from '@src/comm
 import { type CooldownBatchVerdict, type CooldownEntry, CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { Logger } from '@src/common/logger.js'
 import { type ExecutionContext, type HandlerExecutionContext } from '@src/common/execution-context.js'
-import { perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
+import { methodStages, perHandler, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /** A value `@Cooldown`'s `by` counts under: calls with different values are counted apart. */
@@ -58,14 +58,13 @@ export interface CooldownOptions<P = Record<string, unknown>> {
 /** A `@Cooldown` as the decorator stores it, with its defaults filled in and its window in whole milliseconds. */
 export type StoredCooldown = CooldownOptions<any> & { uses: number; per: CooldownScope; windowMs: number }
 
-/** The cooldowns on a handler: each class's, base first, then the method's. */
+/** The cooldowns on a handler: each class's, base first, then the method's and its overrides', base first. */
 export const handlerCooldowns = perHandler((prototype: object, methodName: string): readonly StoredCooldown[] => {
-  const source = sourcePrototype(prototype, methodName)
-  if (!source) return []
+  if (!sourcePrototype(prototype, methodName)) return []
   return [
     // Base first, as guards run
     ...stageClasses(prototype, methodName).flatMap(cls => (Reflect.getOwnMetadata(META.classCooldowns, cls) as StoredCooldown[]) ?? []),
-    ...((Reflect.getOwnMetadata(META.methodCooldowns, source, methodName) as StoredCooldown[]) ?? []),
+    ...methodCooldowns(prototype, methodName),
   ]
 })
 
@@ -111,10 +110,9 @@ function countedCooldownsOf(cooldowns: readonly StoredCooldown[]): readonly Coun
   return counted
 }
 
-/** The cooldowns declared on a method itself. */
+/** The cooldowns declared on a method itself and on the methods it overrides, base first. */
 export function methodCooldowns(prototype: object, methodName: string): StoredCooldown[] {
-  const source = sourcePrototype(prototype, methodName)
-  return source ? ((Reflect.getOwnMetadata(META.methodCooldowns, source, methodName) as StoredCooldown[]) ?? []) : []
+  return methodStages<StoredCooldown>(prototype, methodName, META.methodCooldowns)
 }
 
 /** Who and where a call came from: an interaction's or a message's user, server and channel. */

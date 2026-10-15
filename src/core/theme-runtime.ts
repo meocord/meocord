@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
 import { type ThemeOverride } from '@src/interface/index.js'
-import { sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
+import { stageClasses, stageOwners } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import {
   attachThemeCache,
@@ -135,8 +135,10 @@ function handlerTheme(themes: AppThemes, prototype: object, methodName: string):
   for (const cls of stageClasses(prototype, methodName)) {
     theme = mergeTheme(theme, Reflect.getOwnMetadata(META.classTheme, cls) as ThemeOverride | undefined)
   }
-  const source = sourcePrototype(prototype, methodName)
-  if (source) theme = mergeTheme(theme, Reflect.getOwnMetadata(META.methodTheme, source, methodName) as ThemeOverride | undefined)
+  // The method's layer over its class's, and an override's over the method it overrides
+  for (const owner of stageOwners(prototype, methodName)) {
+    theme = mergeTheme(theme, Reflect.getOwnMetadata(META.methodTheme, owner, methodName) as ThemeOverride | undefined)
+  }
   byMethod.set(methodName, theme)
   return theme
 }

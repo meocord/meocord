@@ -12,7 +12,7 @@ import { Translator } from '@src/common/translator.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
-import { injectedTokens, recordInstanceContainers, singletonContextError } from '@src/core/guard-runner.js'
+import { injectedTokens, prepareDirectCalls, singletonContextError } from '@src/core/guard-runner.js'
 import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
 import { assertStartupClasses, lateGuardCheck, perCallEventWarnings, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { type EventSource, eventSources } from '@src/core/event-sources.js'
@@ -394,11 +394,8 @@ export class MeoCordFactory {
     for (const warning of perCallEventWarnings(runs, providers, options.presenter)) this.logger.warn(warning)
     const discordClient = container.get(Client)
     Reflect.set(discordClient, SHARD_CALL_KEY, shardCallHandler(container, () => callable, 'this app'))
-    // Stamp every class the app runs with the container, so @UseGuard resolves guards on a direct call to any of them
-    for (const cls of runs.classes) {
-      Reflect.defineMetadata(META.container, container, cls)
-    }
-    recordInstanceContainers(container, runs.classes)
+    // Every class the app runs, so @UseGuard resolves guards on a direct call to any of them
+    prepareDirectCalls(container, runs.classes)
     prepareThemes(container, appClasses)
 
     // Run by start() before it logs in: what may inject a provided value is resolved once every factory

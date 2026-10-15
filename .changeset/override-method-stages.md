@@ -1,0 +1,5 @@
+---
+'meocord': patch
+---
+
+An override keeps its base method's guards and other method-level stages, in a controller or a service. A method that overrides a handler, with or without decorators of its own, runs the `@UseGuard`, `@Cooldown`, `@UseInterceptor`, `@UseFilter`, `@Validate`, `@UsePipe`, `@Defer` and `@UseTheme` of the method it overrides, as it keeps its route. Its own decorators add to them, the base method's first, and its `@UseTheme` goes over the base method's; its own `@Validate` or `@Defer` takes the place of the base method's. A direct call to the override runs those guards, and the class-level guards of the classes it extends, before it, and each guard runs once per call when the override calls `super`. A direct call to an `@On` or `@Once` handler runs its guards for the `'event'` type, as dispatch does, so a guard's `types` decide the same way for both. A handler a service declares runs the class-level guards of the classes it extends on a direct call, as a controller's does.

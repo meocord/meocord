@@ -68,6 +68,7 @@
 - off-controller-warning-every-class.md
 - on-every-instance.md
 - optional-param-overlap.md
+- override-method-stages.md
 - package-keywords.md
 - pattern-refusals.md
 - platform-fields-as-npm.md

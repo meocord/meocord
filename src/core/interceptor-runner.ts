@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { type Container } from 'inversify'
 import { assertStartupChecked } from '@src/core/startup-checked.js'
 import { type InterceptorInterface } from '@src/interface/index.js'
-import { injectedTokens, perHandler, singletonContextError, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
+import { injectedTokens, methodStages, perHandler, singletonContextError, sourcePrototype, stageClasses } from '@src/core/guard-runner.js'
 import { ExecutionContext, type HandlerExecutionContext } from '@src/common/execution-context.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
@@ -45,14 +45,13 @@ export function interceptorClass(entry: InterceptorEntry): InterceptorClass {
 
 /**
  * The interceptors around a handler: each class's, base first, down to the controller it is dispatched on, then the
- * method's.
+ * method's and its overrides', base first.
  */
 export const handlerInterceptors = perHandler((prototype: object, methodName: string): readonly InterceptorEntry[] => {
-  const source = sourcePrototype(prototype, methodName)
-  if (!source) return []
+  if (!sourcePrototype(prototype, methodName)) return []
   return [
     ...stageClasses(prototype, methodName).flatMap(cls => (Reflect.getOwnMetadata(META.classInterceptors, cls) as InterceptorEntry[]) ?? []),
-    ...((Reflect.getOwnMetadata(META.methodInterceptors, source, methodName) as InterceptorEntry[]) ?? []),
+    ...methodStages<InterceptorEntry>(prototype, methodName, META.methodInterceptors),
   ]
 })
 

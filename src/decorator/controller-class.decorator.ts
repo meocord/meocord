@@ -1,6 +1,6 @@
 import { type ControllerOptions } from '@src/interface/index.js'
 import { dropInheritedRoutes } from '@src/decorator/controller.decorator.js'
-import { guardOwnHandlersWithBaseGuards } from '@src/decorator/guard.decorator.js'
+import { guardOwnHandlersWithBaseGuards } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { META } from '@src/util/metadata-keys.js'
 import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'

@@ -1,46 +1,12 @@
 import 'reflect-metadata'
 import { type GuardOptions } from '@src/interface/stage-options.interface.js'
 import { type GuardInterface } from '@src/interface/index.js'
-import { classChain, classLevelGuards, consumeDispatchMark, declaringPrototype, handlerMethods, type GuardEntry, runDirectCall } from '@src/core/guard-runner.js'
+import { applyGuards, classLevelGuards, declaringPrototype, type GuardEntry, handlerMethods, recordGuards } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
-import { wrapsMethod } from '@src/util/method-wrapper.util.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
-import { META, type MetaKey } from '@src/util/metadata-keys.js'
+import { META } from '@src/util/metadata-keys.js'
 import { declaring, decoratedName, deprecatedOnMethod } from '@src/util/refusal.util.js'
-
-/**
- * Adds guards to a method's class or method list, then republishes the effective list under
- * `META.guards`, in the order they run: the bases' before the class's own, and within one class or method the
- * latest decorator first, since it wraps outermost.
- */
-function recordGuards(key: MetaKey, guards: GuardEntry[], prototype: object, methodName: string): void {
-  const existing: GuardEntry[] = Reflect.getOwnMetadata(key, prototype, methodName) ?? []
-  const bases: number = key === META.classGuards ? (Reflect.getOwnMetadata(META.baseClassGuards, prototype, methodName) ?? 0) : 0
-  Reflect.defineMetadata(key, [...existing.slice(0, bases), ...guards, ...existing.slice(bases)], prototype, methodName)
-
-  const [classGuards, inheritedGuards, methodGuards] = [META.classGuards, META.inheritedGuards, META.methodGuards].map(
-    list => (Reflect.getOwnMetadata(list, prototype, methodName) as GuardEntry[] | undefined) ?? [],
-  )
-  Reflect.defineMetadata(META.guards, [...inheritedGuards, ...classGuards, ...methodGuards], prototype, methodName)
-}
-
-/**
- * Wraps a method so a direct call runs its guards first: the wrapper entered first runs the whole
- * chain dispatch resolves for the handler, and lets the ones inside it through. A call from dispatch,
- * which has already run the guards, passes through every wrapper.
- */
-function applyGuards(descriptor: PropertyDescriptor, prototype: object, propertyKey: string) {
-  const originalMethod = descriptor.value
-
-  descriptor.value = wrapsMethod(async function (this: object, ...args: unknown[]) {
-    if (consumeDispatchMark(args[0], this, propertyKey)) return originalMethod.apply(this, args)
-    return runDirectCall(this, propertyKey, args, () => originalMethod.apply(this, args))
-  }, originalMethod)
-
-  const wrappers: number = Reflect.getOwnMetadata(META.guardWrappers, prototype, propertyKey) ?? 0
-  Reflect.defineMetadata(META.guardWrappers, wrappers + 1, prototype, propertyKey)
-}
 
 /**
  * The class's own descriptor for a handler. An inherited handler gets one that calls the inherited
@@ -62,28 +28,6 @@ function ownHandlerDescriptor(prototype: object, methodName: string): PropertyDe
   Reflect.defineMetadata(META.baseClassGuards, baseClassGuards.length, prototype, methodName)
   Reflect.defineMetadata(META.inheritedFrom, owner, prototype, methodName)
   return { ...inherited }
-}
-
-/**
- * Gives each handler a controller declares itself the class-level guards of the classes it extends,
- * as its inherited handlers have: recorded under `META.guards`, and wrapped so a direct call
- * runs them when no other guard wraps the handler. `@Controller` calls this.
- */
-export function guardOwnHandlersWithBaseGuards(target: abstract new (...args: any[]) => unknown): void {
-  const prototype = target.prototype as object
-  for (const methodName of handlerMethods(prototype)) {
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, methodName)
-    // Inherited handlers have the chain of the class that declares them
-    if (typeof descriptor?.value !== 'function' || Reflect.getOwnMetadata(META.inheritedFrom, prototype, methodName)) continue
-    // Base first, as dispatch runs them
-    const guards = classChain(prototype, prototype).slice(1).reverse().flatMap(classLevelGuards)
-    if (guards.length === 0) continue
-    if (!Reflect.getOwnMetadata(META.guardWrappers, prototype, methodName)) {
-      applyGuards(descriptor, prototype, methodName)
-      Object.defineProperty(prototype, methodName, descriptor)
-    }
-    recordGuards(META.inheritedGuards, guards, prototype, methodName)
-  }
 }
 
 /**
