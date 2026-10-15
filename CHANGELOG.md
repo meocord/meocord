@@ -1,5 +1,135 @@
 # meocord
 
+## 4.2.3
+
+### Highlights
+
+- **Stopping during startup is clean.** A Ctrl+C, SIGTERM or `app.stop()` before the bot is online exits 0 (your own `app.stop()` once `main.ts` is updated, see Upgrading) and closes what the startup made, such as a connection pool a provider opened. A start that fails closes what it made too, so the process can end ([docs](https://meocord.dev/docs/4.2/lifecycle-hooks)).
+- **`@On` and `@Once` reach every instance the app makes,** including a service only a guard or the presenter injects, a provider's `useClass`, `useValue` or `useFactory`. They were never attached there ([docs](https://meocord.dev/docs/4.2/gateway-events)).
+- **Clearer message command replies.** The usage reply names the word a message left out or got wrong, quotes it as typed, and a pattern's own `--word` is matched where the pattern has it ([docs](https://meocord.dev/docs/4.2/message-commands)).
+- **Mocks closer to discord.js.** Mocks fill in more of what Discord always sends, in both modes, and `useStrictMocks()` covers about twenty more behaviours that 5.0 makes the default. Upgrading your tests, below, lists them ([docs](https://meocord.dev/docs/4.2/mocks)).
+- **One process, two builds.** A bot whose dependencies load both MeoCord's ES module and CommonJS builds shares one theme, one shutdown, one set of warnings and one exit code between them.
+
+### Upgrading from 4.2.2
+
+- **`main.ts` and exit codes.** A stop during startup now exits 0, and a built bot exits 1 when `MeoCordFactory.create` refuses its app. New apps' `main.ts` sets the exit code only for an error MeoCord didn't explain. In an existing app, have the catch in `src/main.ts` return early for `isExplainedError(error)`, from `meocord/common`, before it logs and sets `process.exitCode = 1`, or an `app.stop()` of your own during startup still exits with your catch's code ([docs](https://meocord.dev/docs/4.2/lifecycle-hooks)).
+- **`onShutdown` runs on a stop during startup,** for each class and provided value that was made and whose `onReady`, and that of everything it depends on, has finished or doesn't exist. If an `onShutdown` of yours assumed `onReady` had run, give the class an `onReady`, or guard the hook. A failed start closes what it made by the same rule; a `useValue` value stays open until the bot stops. A stop while a failed start shuts down waits for it, within one `shutdownTimeout` ([docs](https://meocord.dev/docs/4.2/lifecycle-hooks)).
+- **`@On` handlers that never ran now run,** on a service only a stage or the presenter injects and on provided instances. Check what they do before upgrading. Handlers of one event attach in lifecycle order, so two listeners of one event can swap ([docs](https://meocord.dev/docs/4.2/gateway-events)).
+- **`@On('interactionCreate')` stages get no `context.response`.** A guard, interceptor or filter there that answered through it should answer through `context.getInteraction()`; MeoCord also dispatches that interaction to its handler.
+- **A message command that works only in a server,** by its `scope`, a `member`, `role` or `channel` param, or such a required flag, answers a DM that starts with a prefix or mention with "This command works in a server only." whatever words it gives, and gives no reply to one without. One with no such param and only optional such flags is listed in a DM's help, and `HandlerRegistry` gives it `scope: 'any'` ([docs](https://meocord.dev/docs/4.2/message-params)).
+- **Observer durations for message and reaction handlers** start when dispatch received the message or reaction, as for interactions, so a listener that waited behind another one reports that wait ([docs](https://meocord.dev/docs/4.2/observers)).
+- **Guards and observers, as now documented.** A guard with `types: ['interaction']` doesn't run before `@Autocomplete` handlers; declare `types: ['interaction', 'autocomplete']` to run it there. `deniedBy` also comes with `outcome: 'error'` when the answer to a denial fails to build, so an observer that counts denials checks `outcome` too ([docs](https://meocord.dev/docs/4.2/guards)).
+- **New startup warnings to act on.** A missing `clientOptions.partials` entry that an `@On` handler's event needs now names the partial to add; without it, discord.js drops the event. `app.registerCommands()` before the bot is online says why it registers nothing; run `meocord register` instead.
+- **`meocord start --prod` and `register` exit 128 plus the signal** when the bot is killed by one the CLI didn't pass on, such as 137 for SIGKILL, where `start --prod` exited 0. A process supervisor now sees the crash ([docs](https://meocord.dev/docs/4.2/cli)).
+- **A referenced TypeScript project's files** resolve imports through the root `tsconfig.json`'s `paths`, not their own. A bot that references another project builds now; one that relied on a referenced project's own `paths` moves them to the root ([docs](https://meocord.dev/docs/4.2/project-structure#imports)).
+
+### Upgrading your tests
+
+- **More behaviours under `useStrictMocks()`.** Each warns in default mode and becomes the default in 5.0. Call `useStrictMocks()` in your test setup to see your suite's results under them now ([docs](https://meocord.dev/docs/4.2/mocks)):
+  - an autocomplete's `respond()` a test set marks it `responded`, a second one is refused, and `getResponse()` reports it as `'replied'`;
+  - `launchActivity()` and `sendPremiumRequired()` count as the first answer, and `update()` on a modal submitted from a command is refused;
+  - `followUp()` and `editReply()` mark the interaction `replied` once they land;
+  - an autocomplete's entity options read as ids, `getMentionable()` returns the member in a server, and the focused option is read by name;
+  - a user context menu's `targetMember` is its `targetUser`'s member;
+  - `client.users.createDM()` gives each user their own DM channel, on the user's client, and `client.users.send()` resolves to the message sent;
+  - `guild.channels.create()` makes the type named, `create()` and `edit()` apply `name`, and `edit(id)` resolves to that item;
+  - a thread made by a channel's thread manager puts that channel in its server's `channels.cache`, a channel's `messages.cache` holds the messages made or sent in it, and `messages.fetch()` with no id lists them, newest first;
+  - a member's `joinedTimestamp` and a client's `readyTimestamp` are when the mock was made;
+  - a testing module without a presenter answers with the default on a client another module used, and `emit()` sets the module's presenter, theme and translator on the client;
+  - `dispatch()` reports a call whose answer can't be built once, as `'error'`, and `invoke()` runs an unrouted `@On` handler as an `'event'`;
+  - `compile()` refuses an app whose own providers give `Client`, `CooldownStore`, or `Translator` with `i18n`, as the bot does;
+  - `inspectHandler()` lists only the guards, interceptors and observers dispatch runs for the handler's context types, and its `inheritedRoutes` names an inherited `@On` or `@Once` event;
+  - `resolveRoute` reads a message without `dm` as sent in a server, and returns `undefined` with `dm: true` for a command that works in servers only.
+- **Mocks fill in more of what Discord sends, in both modes.** A component interaction has the bot's message holding its component, a modal has empty `fields`, a user's `dmChannel` and its `recipient` are set, a mock given only a `guildId` reads a placeholder server with that id, `messages.fetch(id)` finds a message made with that id, and channel types, display colours and `roles.resolve()` read as discord.js gives them. Promise-returning mock methods such as `member.kick()` resolve. A test that asserted a placeholder there sees the real value ([docs](https://meocord.dev/docs/4.2/mocks)).
+- **The testing module matches the bot more closely.** `init()` makes the app's presenter, after the providers; `close()` shuts down what it injects. `overrideProvider(ShardContext)` and `overrideProvider(HandlerRegistry)` replace MeoCord's binding. An app providing `HandlerRegistry` or `ShardContext` is refused at `compile()` with the bot's message ([docs](https://meocord.dev/docs/4.2/testing)).
+- **Routing in tests.** `invoke()` checks an autocomplete against the `@Autocomplete` handler it names, warning in default mode and rejecting under `useStrictMocks()` where dispatch would pick another. A controller replaced with `overrideProvider(Controller).useValue(stub)` now gets its autocompletes. `dispatch()` of a mock message made without `content` runs no handler, where it threw ([docs](https://meocord.dev/docs/4.2/invoke-and-dispatch)).
+- **Changed texts and types.** `fromApp()`, `resolveRoute()` and `findRouteConflicts()` name an `undefined` or module-namespace app, often a circular import, where each threw an empty `TypeError`. `invoke` on a patterned `@MessageHandler` with an empty message says to give the mock content; `respond()`'s dropped-flag warning and the theme refusal reword their advice. `ResponseCall['method']` gains `'respond'`, `'launchActivity'` and `'sendPremiumRequired'`, and `MockResult['type']` gains `'incomplete'`, so an exhaustive `switch` gains those cases ([docs](https://meocord.dev/docs/4.2/invoke-and-dispatch)).
+
+### Deprecations
+
+- **Warned now, refused in 5.0.** Each runs as before with a warning at startup or when the class is decorated; 5.0 stops the bot or the command there. Fix the setup the warning names:
+  - a handler decorator such as `@Command`, `@MessageHandler` or `@On` on a static method, or `@Inject` on a static property, which never runs: move it to an instance member;
+  - a pattern of spaces alone, `@MessageHandler('   ')`, which runs for every message as `@MessageHandler('')` does: write `@MessageHandler()`;
+  - two message patterns that differ only in which params are optional: the one with required params ahead answers, and startup names both;
+  - two flags whose names differ only in case on a command that reads flags in any case, such as `{--v}` and `{--V}`: rename one, or set `caseSensitive: true`;
+  - on a class the app only makes (one only a stage or the presenter injects, or a provider's `useClass`, `useValue` or `useFactory` instance), a handler a listed service's would be refused for, such as `@Cooldown` on an `@On`, or an `@Once` on a class that shares another's name; and an `@On` on a class made for each call because it injects `ExecutionContext`: move it to a service;
+  - `messages.deleteUsageRepliesAfter` over 2,147,483 seconds (about 24.8 days), which now keeps usage replies;
+  - with `bundleDependencies`, two installed copies of one native addon that bundled code imports, of which one is packed: install one version ([docs](https://meocord.dev/docs/4.2/self-contained-builds)).
+- **Changing in 5.0, warned now:**
+  - a static `prefix: []` takes messages with no prefix; in 5.0 it starts no command. Write `''` for no prefix;
+  - a `@CommandBuilder` subclass that gives no `guilds` inherits its base's; in 5.0 it registers in the configured scope. Declare `guilds` on the subclass to keep them;
+  - a subclass that re-decorates an inherited handler keeps the routes and `@On`/`@Once` events it inherits, and startup names them; in 5.0, `inheritedRoutes: 'replace'` is the default and drops them. Set it now to see that;
+  - a builder whose `guilds` holds no id, such as an unset environment variable, isn't registered, and `meocord register` still exits 0; in 5.0 it exits 1 ([docs](https://meocord.dev/docs/4.2/slash-commands)).
+
+### Fixes to 4.2.2 behaviour
+
+- **Running the bot**
+  - A failed start is no longer among the apps a signal stops, so a later Ctrl+C stops only the running ones.
+  - With process sharding, `stop()` during the start ends it: a registration already sending the commands finishes, nothing more asks Discord, no shard is spawned, and `start()` resolves; a failed shard-count request no longer exits the process.
+  - A controller whose constructor throws fails only its own handlers; other controllers' message and reaction handlers still run, and the error goes to the filters.
+  - One method with `@Command`s of two interaction types, such as a slash command and a button, runs for each route, including an override that adds a route type and calls its base method through `super`; it threw.
+  - A subclass that re-declares `@On` or `@Once` for the same event runs once per event, not twice.
+  - A `Translator` given through `@MeoCord({ providers })` is accepted wherever it sits in the list.
+  - `@Inject` on a method parameter is refused with MeoCord's message, naming the method, not inversify's.
+  - With both builds loaded, one shutdown and one pair of signal listeners stop every app, a failed shard ends once, and a later login clears an earlier failed login's exit code.
+- **Message commands**
+  - The usage reply names the word a message left out or replaced, such as `close is missing`, and a missing required flag beside it, such as `--in is missing`, and quotes a word with its spaces as typed. With no reason MeoCord has a text for, it's the usage line alone.
+  - A pattern's own word starting with `--`, such as `--force` in `deploy --force {env} {--dry}`, is matched where the pattern has it.
+  - A refused pattern names the rule it breaks and quotes its params as written.
+  - `!"help" mute` answers as `!help mute` does.
+  - A `{name:duration}` too long to add up is a usage error, not `Infinity`; `number` and `duration` words are read in time linear in their length.
+  - A pattern over 16 words type-checks the handler's params past the sixteenth.
+  - A param or flag named like an `Object` member, such as `{__proto__}`, `{constructor:int?}` or `{toString?}`, is its own key in the handler's params; `{__proto__:int}` and a left-out `{constructor:int?}` threw on every message.
+  - `@MeoCord({ controllers })` is typed as a list of classes, so a string or symbol there is a type error rather than a stop at startup.
+- **Components**
+  - The warning about a customId param that shares a name with a modal field or choice is given per handler, as `Controller.method`.
+  - A component pattern whose shortest customId is over 100 characters is warned about, counting each typed param's shortest value.
+  - `{café}` in a customId pattern is literal text in the types, as at runtime, so `build({ café })` no longer compiles and then throws.
+- **Themes and translations**
+  - A call keeps its theme for its whole run when another app in the process claims the theme outside calls.
+  - `@On('messageReactionAdd')`, `messageReactionRemove` and other events about a `User` run with that user's `themeFor.user` theme.
+  - A `themeFor` result that throws while being read is left out with a warning and cached, rather than failing every call.
+  - A translation is read by the default catalog's shapes, so a group with an `other` message isn't taken for a plural, while plural forms given for a plain default message are still read as plurals; an empty translation of MeoCord's own text falls back to English.
+  - `expectCompleteCatalog` reports a `null` translation as missing, where it threw.
+- **Cooldowns**
+  - A built-in store's `consume()` refusal carries `retryTimestamp`, so a custom store built on it no longer DMs a cooldown twice in one wait.
+  - A `ShardedCooldownStore` verdict's `release()` undoes its call once, however often it's called.
+  - `testCooldownStore` passes a correct store built from the other module format.
+- **Logging**
+  - Log lines escape U+061C, U+200E and U+200F in text a user wrote, as they escape other bidirectional controls.
+- **Builds and the CLI**
+  - An `externals` pattern with the `g` or `y` flag keeps every matching import out of the bundle.
+  - With `bundleDependencies`, `os`, `cpu` and `libc` are read as npm reads them, and the bot registers its commands in the mode the `meocord` command runs in.
+  - `build` reads `tsconfig.json` as `tsc` does: `extends` on Windows or naming a package, `${configDir}` in `baseUrl`, and `references` now build. One the CLI can't read is reported as `tsconfig.json`.
+  - A `tsconfig.json` or `package.json` with a UTF-8 byte order mark is read.
+  - A runtime that can't be started is reported and exits 1, not an unhandled error.
+  - A config that fails to load is told whether it can't be parsed or its own code threw, on Node and Bun alike; a leftover `webpack` hook gets one message.
+  - On Bun, a `.env` value Bun expanded is no longer passed to the bot as a shell variable, so `start --dev` picks up edits to it.
+  - `start --dev` runs reloads one at a time, and with `bundleDependencies` no longer runs packages a previous `build` packed.
+  - Every `meocord` command prints its help after a usage error.
+  - A new app from `meocord create` starts on the latest stable releases of its tools that are at least a day old, such as vitest 5.0.4, eslint 10.12.0 and typescript-eslint 8.71.2; TypeScript stays at 6.0.3, the newest typescript-eslint supports.
+  - The package lists `discord-bot-framework` and `discord-framework` among its npm keywords.
+- **Testing**
+  - `createMockFn`'s `mock.results` follows call order for a call that calls the mock again inside it.
+  - Without strict mocks, a mock channel without a server reads its permissions as `undefined` with a warning, where `permissionsFor()` threw.
+  - A mentioned channel or role in a mock message is a full mock of the message's server.
+  - `HandlerRegistry.messageHelp()` lists only controllers' message commands from the start.
+  - The startup warning about a handler on a class that isn't a controller covers every class the app makes, in the testing module too.
+  - Default-mode warnings stay quiet when MeoCord itself reads a mock to answer, such as a mock's `guildId` for the reply or a DM channel MeoCord sends a cooldown DM through.
+- **Documentation**
+  - `Jsonified` and `ShardContext.call` say an object arrives with its own fields only: JSON leaves a class's getters out. Return a plain object, or give the class a `toJSON`.
+  - `sourceMappedStacks` says what it maps under Bun: `error.stack`, and so every trace the `Logger` prints, not what Bun prints itself.
+  - `ExecutionContext.getMessage()` says it reads an event's first argument when that is a message: for `@On('messageUpdate')`, the message as it was before the edit. A reaction event returns `undefined`.
+  - `createMockGuild()` says what the @everyone role may do in each mode: nothing by default, and a new server's permissions under `useStrictMocks()`.
+  - `MessageParamTypes`' `role` says an optional `role` param that another optional param follows takes a mention or an ID, not a role's name. Ask for a mention or an ID, or move the role param to the end.
+  - `resolveRoute`'s `dm` says dispatch answers a server-only command in a DM with "This command works in a server only." when the message used a prefix or a mention, and with nothing otherwise.
+
+### Security
+
+- **A handler a subclass overrides keeps its base method's guards and other method-level stages** ([GHSA-r9qr-grw6-8jpx](https://github.com/meocord/meocord/security/advisories/GHSA-r9qr-grw6-8jpx)). In 4.1.0 to 4.2.2, a controller or service subclass that overrode a decorated handler method kept the base method's route but lost its method-level stages. A base `@UseGuard` didn't run for the subclass's route, so the handler ran for users the guard was meant to refuse, and the base method's `@Cooldown`, `@Defer`, `@UseInterceptor`, `@UseFilter`, `@UsePipe` and `@Validate` didn't apply either. This happened whether or not the override had decorators of its own. In 4.0.x, the override's own body ran without the base guard, though a `super` call into the base method still ran it. Class-level and global stages were never affected.
+  4.2.3 runs the base method's stages for an override, base first, with the override's own added after them, on dispatch and on a direct call. Only a bot that extends a controller or service and overrides one of its decorated handlers is affected. Upgrade; until then, repeat the base method's decorators on the override, or move the guard to the base class with a class-level `@UseGuard`, which subclasses inherit.
+- **Other behaviour the fix brings.** An override's own `@UseTheme` goes over the base method's, and its own `@Validate` or `@Defer` takes the place of the base method's; when the override calls `super`, each guard still runs once per call. A direct call to an `@On` or `@Once` handler runs its guards for the `'event'` context type, as dispatch does, so a guard's `types` decide the same way for both. A handler a service declares runs the class-level guards of the classes it extends on a direct call, as a controller's does.
+
 ## 4.2.2
 
 ### Patch Changes
