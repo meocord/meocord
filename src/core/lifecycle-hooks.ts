@@ -6,7 +6,7 @@ import { storeOperationsSettled } from '@src/core/cooldown-runner.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { RunningCalls } from '@src/core/running-calls.js'
 
-/** A unit whose `onReady` stage was reached, so its `onShutdown` runs when the app closes. */
+/** A unit a shutdown closes, with the instance whose `onShutdown` runs. */
 export interface LifecycleEntry {
   name: string
   instance: Partial<OnReady & OnShutdown>
@@ -101,15 +101,14 @@ export class ReadyPass {
 
 /**
  * Resolves each unit and runs its `onReady` one at a time, in the units' dependency order. A failure is
- * reported and the next unit still runs. Each unit whose `onReady` settled, or that has none, is pushed
- * to `entries` as it finishes, so a shutdown that starts meanwhile closes exactly those.
+ * reported and the next unit still runs. `settled` hears of each unit as its `onReady` settles, or once it is found
+ * to have none, which is what a shutdown that starts meanwhile reads.
  */
 export async function runReadyHooks(
   container: Container,
   units: readonly LifecycleUnit[],
   client: Client<true>,
   info: ReadyInfo,
-  entries: LifecycleEntry[],
   report: ReadyHooksReport,
   { stopped = () => false, slowAfterMs, settled, runOnReady }: ReadyHooksOptions = {},
 ): Promise<void> {
@@ -148,11 +147,7 @@ export async function runReadyHooks(
       continue
     }
     firstToken.set(instance, unit.token)
-    const entry = lifecycleEntry(unit, instance)
-    // Only a unit whose onReady has settled, or that has none, is shut down: a stop mid-ready waits for the one still
-    // starting, within its time, and skips those not reached yet
     if (typeof instance.onReady !== 'function') {
-      entries.push(entry)
       settled?.(unit)
       continue
     }
@@ -169,7 +164,6 @@ export async function runReadyHooks(
     } finally {
       clearTimeout(slow)
     }
-    entries.push(entry)
     settled?.(unit)
   }
 }

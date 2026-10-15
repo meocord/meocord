@@ -3,12 +3,11 @@ import { COOLDOWN_POLICY, cooldownPolicyFrom } from '@src/core/cooldown-runner.j
 import { Container, type ServiceIdentifier } from 'inversify'
 import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
-import { MeoCordApp } from '@src/core/meocord.app.js'
+import { MeoCordApp, type StartAttempt } from '@src/core/meocord.app.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
-import { warnOnce } from '@src/common/deprecation.js'
 import { Translator } from '@src/common/translator.js'
 import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
@@ -26,9 +25,12 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import {
   assertProvided,
   assertProvidedServices,
+  appProviderRefusal,
   bindProvider,
   bindsOwnToken,
+  forgetFactoryValues,
   isClassProvider,
+  isValueProvider,
   providerMap,
   type ProviderMap,
   resolutionOrder,
@@ -57,7 +59,7 @@ import {
 } from '@src/util/sharding-mode.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import { prepareLateThemes, registerClientTheme } from '@src/core/theme-runtime.js'
-import { ThemeCache, themeResolverClass } from '@src/core/theme-resolvers.js'
+import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import {
   allDeclaredErrors,
@@ -179,8 +181,8 @@ export class MeoCordFactory {
     } catch (error) {
       // A shard ends, so its manager restarts it, or stops every shard for a refusal, which it logs
       if (shard) endFailedShard(error)
-      // Reported here in a built application, so it reads the same whether main.ts catches it or not; main.ts, or the
-      // report of an uncaught refusal, exits 1. A test or script gets the error as it is.
+      // Reported here in a built application, so it reads the same whether main.ts catches it or not. A test or script
+      // gets the error as it is.
       else if (isRefusal(error) && !isExplainedError(error)) {
         // Every startup error found together is logged, in a test too; a lone one is logged in a built application
         if (logStartupErrors(error, text => this.logger.error(text), 'the bot did not start')) markExplained(error)
@@ -188,6 +190,10 @@ export class MeoCordFactory {
           this.logger.error(describeRefusal(error, process.cwd()))
           markExplained(error)
         }
+      }
+      // A built bot that refuses its app exits 1, as one whose start fails does, whatever main.ts does with the error
+      if (!shard && isBuiltApplication() && isRefusal(error) && (process.exitCode === undefined || process.exitCode === 0)) {
+        process.exitCode = 1
       }
       throw error
     }
@@ -312,16 +318,9 @@ export class MeoCordFactory {
     // After MeoCord's own tokens, which a provider may not replace, and before the app's classes, so
     // a class token that is provided is not also bound as itself
     for (const [token, provider] of providers) {
-      // Bound later, or for each call, so not caught below; supported until 5.0 refuses it
-      if (token === ThemeCache || token === ExecutionContext) {
-        warnOnce(
-          this.logger,
-          `${(target as { name?: string }).name}: @MeoCord({ providers }) provides ${tokenName(token)}, which MeoCord binds itself; ` +
-            'the next major version (5.0) refuses it. Remove the provider.',
-        )
-      }
-      if (container.isBound(token as ServiceIdentifier)) {
-        startupError(new Error(`${(target as { name?: string }).name}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`))
+      const refusal = appProviderRefusal(`${(target as { name?: string }).name}`, token, own => container.isBound(own as ServiceIdentifier), this.logger)
+      if (refusal) {
+        startupError(refusal)
         continue
       }
       bindProvider(container, provider, cls => bindDependencies(container, cls, providers))
@@ -454,7 +453,32 @@ export class MeoCordFactory {
       // In development only, unless the app says otherwise
       options.warnUnanswered ?? process.env.NODE_ENV === 'development',
       shard,
+      startAttempt(container, lifecycle, providers),
     )
     })
   }
+}
+
+/**
+ * What the app's starts make: each lifecycle unit is recorded as the container constructs it, as the testing module
+ * records them, and a container snapshot marks where a start begins, so a failed start drops every singleton it made,
+ * the values factory providers keep included.
+ */
+function startAttempt(container: Container, lifecycle: readonly LifecycleUnit[], providers: ProviderMap): StartAttempt {
+  const constructed = new Set<unknown>()
+  for (const { token } of lifecycle) {
+    container.onActivation(token as ServiceIdentifier, (_context, instance) => {
+      constructed.add(token)
+      return instance
+    })
+  }
+  const drop = () => {
+    container.restore()
+    forgetFactoryValues(container)
+  }
+  const given = new Set(lifecycle.map(({ token }) => token).filter(token => {
+    const provider = providers.get(token)
+    return provider !== undefined && isValueProvider(provider)
+  }))
+  return { constructed, given, begin: () => container.snapshot(), drop }
 }

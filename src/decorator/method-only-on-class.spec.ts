@@ -1,5 +1,8 @@
 import { ChatInputCommandInteraction } from 'discord.js'
 import { z } from 'zod'
+import { vi } from 'vitest'
+import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { applyDecorators, createMetadata } from '@src/common/index.js'
 import {
   Autocomplete,
@@ -129,5 +132,62 @@ describe('a decorator that goes on a class or a method, applied to a controller 
     expect(inspected.filters).toEqual([Fallback])
     expect(inspected.cooldowns.map(cooldown => cooldown.seconds)).toEqual([5])
     expect(inspected.get(Tag)).toBe('staff')
+  })
+})
+
+// A static member's metadata lands on the class, where nothing reads it
+describe('a method decorator on a static method', () => {
+  afterEach(() => {
+    forgetDeprecationWarnings()
+    vi.restoreAllMocks()
+  })
+
+  it('warns that the handler never runs, naming the class and the method', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+    @Controller()
+    class St {
+      @Command('sping', CommandType.SLASH)
+      static ping(_interaction: ChatInputCommandInteraction) {}
+
+      @On('guildMemberAdd')
+      static joined() {}
+
+      @Command('fine', CommandType.SLASH)
+      fine(_interaction: ChatInputCommandInteraction) {}
+    }
+    void St
+
+    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+      'St.ping: @Command goes on an instance method, not a static one; it never runs. The next major version (5.0) refuses it.',
+      'St.joined: @On goes on an instance method, not a static one; it never runs. The next major version (5.0) refuses it.',
+    ])
+  })
+
+  // Its types refuse a static property, so it is applied as JavaScript applies it there
+  it('warns that @Inject on a static property is never injected', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    class St {}
+
+    ;(Inject('dependency') as (target: object, propertyKey: string) => void)(St, 'dependency')
+
+    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+      'St.dependency: @Inject goes on an instance member, not a static one, where nothing reads it. The next major version (5.0) refuses it.',
+    ])
+  })
+
+  it('names the class, not Function, in a refusal', () => {
+    let refusal: unknown
+    try {
+      class St {
+        @UseTheme({ colors: { primary: 'nope' as never } })
+        static m() {}
+      }
+      void St
+    } catch (error) {
+      refusal = error
+    }
+
+    expect(String((refusal as Error).message).startsWith('St.m: @UseTheme')).toBe(true)
   })
 })

@@ -5,6 +5,8 @@ import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as CommonModule from '@src/common/index.js'
 import type * as TestingModule from '@src/testing/index.js'
 import type * as EnumModule from '@src/enum/index.js'
+import { forgetProcessState } from '@src/core/process-state.js'
+import { WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { warned } = vi.hoisted(() => ({ warned: [] as string[] }))
 
@@ -26,6 +28,7 @@ vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () =>
 /** Fresh modules per test, as a new process would have. */
 async function load() {
   vi.resetModules()
+  forgetProcessState()
   const discord = await import('discord.js')
   const factory: typeof FactoryModule = await import('@src/core/meocord-factory.js')
   const decorators: typeof DecoratorModule = await import('@src/decorator/index.js')
@@ -34,6 +37,13 @@ async function load() {
   const enums: typeof EnumModule = await import('@src/enum/index.js')
   return { discord, ...factory, ...decorators, ...common, ...testing, ...enums }
 }
+
+// Compiles discord.js and the framework once, keeping nothing, so the first test isn't timed on compiling them;
+// each test still imports fresh
+beforeAll(async () => {
+  await load()
+}, WARM_UP_TIMEOUT_MS)
+
 type Loaded = Awaited<ReturnType<typeof load>>
 
 /** A bot with handlers that answer, forget to, defer without following up, are denied, or fail. */

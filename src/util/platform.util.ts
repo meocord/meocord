@@ -16,9 +16,12 @@ export interface BuildPlatform {
   libc?: 'glibc' | 'musl'
 }
 
+/** The one operating system whose binaries are built against a C library of its choosing, glibc or musl. */
+export const LIBC_PLATFORM = 'linux'
+
 /** The C library this process runs against, when the runtime can say. */
 function detectLibc(): BuildPlatform['libc'] {
-  if (process.platform !== 'linux') return undefined
+  if (process.platform !== LIBC_PLATFORM) return undefined
   try {
     const report = process.report?.getReport?.() as { header?: { glibcVersionRuntime?: string } } | undefined
     if (!report?.header) return undefined

@@ -3,7 +3,7 @@ import { type ThemeOverride } from '@src/interface/index.js'
 import { assertValidTheme } from '@src/core/theme-validation.js'
 import { THEMED_CLASSES } from '@src/core/theme-runtime.js'
 import { copyLayer } from '@src/core/theme-scope.js'
-import { refuse, declaring } from '@src/util/refusal.util.js'
+import { declaring, decoratedName, refuse } from '@src/util/refusal.util.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /**
@@ -39,8 +39,9 @@ import { META } from '@src/util/metadata-keys.js'
 export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator {
   return declaring(function (target: object, propertyKey?: string | symbol) {
     const onClass = propertyKey === undefined
-    const owner = (onClass ? target : target.constructor) as { name: string }
-    const where = `${owner.name}${onClass ? '' : `.${String(propertyKey)}`}: @UseTheme`
+    // The class it themes: the target itself on a class or a static member, else the target's constructor
+    const owner: object = onClass || typeof target === 'function' ? target : target.constructor
+    const where = `${decoratedName(target, propertyKey)}: @UseTheme`
     assertValidTheme(theme, where)
     const key = onClass ? META.classTheme : META.methodTheme
     const existing = onClass ? Reflect.getOwnMetadata(key, target) : Reflect.getOwnMetadata(key, target, propertyKey!)

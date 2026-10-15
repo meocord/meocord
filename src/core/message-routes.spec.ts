@@ -1,4 +1,7 @@
+import { vi } from 'vitest'
 import { Controller, MessageHandler } from '@src/decorator/index.js'
+import { Logger } from '@src/common/logger.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { buildMessageRoutes, matchMessageCommand, matchMessageRoute, parseMessagePattern, type MessageStarts } from '@src/core/message-routes.js'
 
 const RAW: MessageStarts = { prefixes: [''] }
@@ -49,7 +52,7 @@ describe('message patterns', () => {
     expect(matchMessageRoute(routes, '!"roll" 20', starts)?.params).toEqual({ sides: '20' })
     expect(matchMessageRoute(routes, '!“roll” 20', starts)?.params).toEqual({ sides: '20' })
     expect(matchMessageRoute(routes, '!“purge” 5 --bots', starts)?.params).toEqual({ count: '5', bots: '' })
-    expect(matchMessageCommand(routes, '!“roll”', starts)).toMatchObject({ route: { method: 'roll' }, given: 0 })
+    expect(matchMessageCommand(routes, '!“roll”', starts)).toMatchObject({ route: { method: 'roll' }, given: { words: [{ value: 'roll' }], flags: [] } })
   })
 
   it('reads an unclosed quote as an ordinary character', () => {
@@ -177,6 +180,30 @@ describe('message patterns', () => {
     expect(() => parseMessagePattern('auth {--x2_y}')).not.toThrow()
   })
 
+  // A whole brace pair is refused for the rule its name or type breaks, and only text around braces as not a whole word
+  it.each([
+    ['show {user-id}', `"{user-id}" is not a param: a param's name is ASCII letters, digits and _, such as {user_id}.`],
+    ['cafe {café}', `"{café}" is not a param: a param's name is ASCII letters, digits and _, such as {caf_}.`],
+    ['deploy {--dry-run}', `"{--dry-run}" is not a flag: a flag's name starts with a letter, then letters, digits or _, such as {--dry_run}.`],
+    ['pick {m:a|}', `"{m:a|}" is not a param: a type is a name, or words to choose from joined by |, such as {m:on|off}.`],
+    ['pick {--m:a|}', `"{--m:a|}" is not a flag: a type is a name, or words to choose from joined by |, such as {--m:on|off}.`],
+    ['show {user.id}', `"{user.id}" is not a param: a param's name is ASCII letters, digits and _, such as {user_id}.`],
+    ['show {a?b}', `"{a?b}" is not a param: a param's name is ASCII letters, digits and _, such as {a_b}.`],
+    ['say {--x...}', `"{--x...}" is not a flag: a flag doesn't take the rest of the message; a param does, such as {x...}.`],
+    ['say {a?...}', `"{a?...}" is not a param: its marks go last, ... then ?, as in {a...?}.`],
+    ['say {a...:int}', `"{a...:int}" is not a param: its marks go last, ... then ?, as in {a:int...}.`],
+    ['say {--x?:int}', `"{--x?:int}" is not a flag: its ? goes last, as in {--x:int?}.`],
+    ['say a{b}', `"a{b}" is not a param: a param is a whole word, such as {name}, {name:type}, {name...}, {name?} or a flag, {--name}.`],
+  ])('refuses %j, naming the rule it breaks', (pattern, refusal) => {
+    expect(() => parseMessagePattern(pattern)).toThrow(refusal)
+  })
+
+  it('quotes each param of the optional-order refusal as the pattern writes it', () => {
+    expect(() => parseMessagePattern('x {a:int?} {b...}')).toThrow(`{a:int?} is optional, so only optional params may follow it; "{b...}" is not.`)
+    expect(() => parseMessagePattern('x {a:int?} {b:int}')).toThrow(`{a:int?} is optional, so only optional params may follow it; "{b:int}" is not.`)
+    expect(() => parseMessagePattern('x {a:int?} done')).toThrow(`{a:int?} is optional, so only optional params may follow it; "done" is not.`)
+  })
+
   it('refuses an untyped flag marked optional, a name a param and a flag share, and a pattern of flags alone', () => {
     expect(() => parseMessagePattern('purge {--bots?}')).toThrow(/\{--bots\?\}: a flag without a type is optional already/)
     expect(() => parseMessagePattern('warn {user} {--user:user}')).toThrow(/\{user\} appears twice/)
@@ -205,7 +232,7 @@ describe('message patterns', () => {
     expect(() => parseMessagePattern('ban {reason?} {user}')).toThrow(/\{reason\?\} is optional, so only optional params may follow it; "\{user\}" is not/)
     expect(() => parseMessagePattern('ban {reason?} now')).toThrow(/only optional params may follow it; "now" is not/)
     expect(() => parseMessagePattern('roll d{sides}')).toThrow(/"d\{sides\}".*a whole word/)
-    expect(() => parseMessagePattern('roll {si-des}')).toThrow(/"\{si-des\}".*a whole word/)
+    expect(() => parseMessagePattern('roll {si-des}')).toThrow(/"\{si-des\}" is not a param: a param's name is ASCII letters, digits and _/)
   })
 })
 
@@ -286,6 +313,64 @@ describe('message route ranking', () => {
     expect(() => buildMessageRoutes([First, Second])).toThrow(
       /First\.roll: "roll \{sides\}" and "ROLL \{count\}" in Second\.alsoRoll match the same messages/,
     )
+  })
+
+  // A required and an optional param in one position both take a word there, so the two can answer the same messages
+  describe('two patterns that differ only in which params are optional', () => {
+    @Controller()
+    class Plain {
+      @MessageHandler('a {x} {y?}')
+      plain() {}
+    }
+    @Controller()
+    class Typed {
+      @MessageHandler('a {x:int?} {y:int?}')
+      typed() {}
+    }
+
+    afterEach(() => {
+      forgetDeprecationWarnings()
+      vi.restoreAllMocks()
+    })
+
+    it('warn, naming both and the one that runs', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      buildMessageRoutes([Typed, Plain])
+
+      expect(warn.mock.calls).toEqual([
+        [
+          'Plain.plain: "a {x} {y?}" and "a {x:int?} {y:int?}" in Typed.typed can take the same messages, as one takes a word where ' +
+            'the other has an optional param; Plain.plain answers those. Change one pattern, or give one its own prefix. ' +
+            'The next major version (5.0) stops the bot at startup for these.',
+        ],
+      ])
+    })
+
+    it('run the one with the required param, whatever the controllers\' order', () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+      expect([[Plain, Typed], [Typed, Plain]].map(order => matchMessageRoute(buildMessageRoutes(order), 'a 5', RAW)?.route.method)).toEqual([
+        'plain',
+        'plain',
+      ])
+    })
+  })
+
+  it('leaves two patterns alone that take different messages', () => {
+    @Controller()
+    class Words {
+      @MessageHandler('a {x} {y}')
+      both() {}
+
+      @MessageHandler('b {x:int?}')
+      maybe() {}
+    }
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+    expect(buildMessageRoutes([Words]).map(route => route.method).sort()).toEqual(['both', 'maybe'])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   it('keeps one route for a handler declared under two spellings of one pattern', () => {
@@ -383,7 +468,7 @@ describe('message route ranking', () => {
     expect(build('ban {target}', { scope: 'server' })).toThrow(/scope is 'guild', 'dm' or 'any', not "server"/)
     expect(build('ban {target:member}', { scope: 'dm' })).toThrow(/scope is 'dm', but \{target:member\} is found only in a server/)
     expect(build('whois {target:user}', { scope: 'dm' })).not.toThrow()
-    expect(build('whois {--in:channel?}', { scope: 'dm' })).toThrow(/scope is 'dm', but \{--in:channel\} is found only in a server/)
+    expect(build('whois {--in:channel?}', { scope: 'dm' })).toThrow(/scope is 'dm', but \{--in:channel\?\} is found only in a server/)
     expect(build('status', { mention: true })).toThrow(/mention is 'only', not true/)
     expect(build('status', { mention: 'only', prefix: '?' })).not.toThrow()
     expect(build('status', { mention: 'only' })).not.toThrow()

@@ -5,7 +5,7 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'child_process'
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { AppGeneratorHelper } from '../../src/bin/helper/app-generator.helper.js'
@@ -46,15 +46,61 @@ export function outputOf(result: Pick<SpawnSyncReturns<string>, 'stdout' | 'stde
 }
 
 /**
- * Runs a command to completion, throwing with its full output when it fails. On Windows, npm is a
- * `.cmd` script, which Node starts only through a shell.
+ * How long one setup step, such as an install, may run before it is stopped. The whole setup has taken up to 290 s on
+ * CI's Windows runners, so a step past this is stuck, not slow.
  */
-export function mustRun(label: string, command: string, args: string[], cwd: string, env = cleanEnv()): void {
-  const shell = process.platform === 'win32' && command === 'npm'
-  const result = spawnSync(command, args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env, shell })
-  if (result.status !== 0) {
-    throw new Error(`${label} failed (${[command, ...args].join(' ')}, in ${cwd}):\n\n${outputOf(result) || String(result.error)}`)
+export const SETUP_BUDGET_MS = 600_000
+
+/** Runs a step as one group and stops the whole group at its budget, or with its caller; see the script for why. */
+export const boundedStep = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bounded-step.mjs')
+
+/** The descriptor the step's runner reports a stop at the budget on, which the step itself doesn't inherit. */
+const STOP_REPORT_FD = 3
+
+/**
+ * Runs a command to completion, throwing with its full output when it fails. When it outlasts `budgetMs`, it and every
+ * process it started are stopped, and it throws with its label and how long it ran. On Windows, npm is a `.cmd`
+ * script, which Node starts only through a shell.
+ */
+export function mustRun(label: string, command: string, args: string[], cwd: string, env = cleanEnv(), budgetMs = SETUP_BUDGET_MS): void {
+  const how = process.platform === 'win32' && command === 'npm' ? 'shell' : 'direct'
+  const started = performance.now()
+  const result = spawnSync(process.execPath, [boundedStep, String(budgetMs), how, command, ...args], {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    env,
+    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+  })
+  const ran = [command, ...args].join(' ')
+  if (result.output[STOP_REPORT_FD]) {
+    const seconds = ((performance.now() - started) / 1000).toFixed(1)
+    throw new Error(`${label} did not finish within its ${budgetMs / 1000}s budget, stopped at ${seconds}s (${ran}, in ${cwd}):\n\n${outputOf(result)}`)
   }
+  if (result.status !== 0) {
+    throw new Error(`${label} failed (${ran}, in ${cwd}):\n\n${outputOf(result) || String(result.error)}`)
+  }
+}
+
+/** Whether a process is running: on Windows too, where a process that has exited answers as gone. */
+export function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // Running as another user: there, but not ours to signal
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** The script an application's own ESLint runs from, as its package names it for `eslint`, as the generator finds it. */
+export function eslintScriptOf(appDir: string): string {
+  const manifest = path.join(appDir, 'node_modules', 'eslint', 'package.json')
+  if (!existsSync(manifest)) throw new Error(`${appDir} has no ESLint installed`)
+  const { bin } = JSON.parse(readFileSync(manifest, 'utf8')) as { bin?: string | Record<string, string> }
+  const script = typeof bin === 'string' ? bin : bin?.eslint
+  if (!script) throw new Error(`${manifest} names no eslint script`)
+  return path.resolve(path.dirname(manifest), script)
 }
 
 /**

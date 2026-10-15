@@ -1,13 +1,14 @@
-import { type Message } from 'discord.js'
+import { type Guild, type Message, type Role } from 'discord.js'
 import { MessageUsageError, type MessageUsageIssue } from '@src/common/errors.js'
 import { type TextParam, usageIssue } from '@src/common/meocord-text.js'
-import { type EntityRef, type MessageParamType } from '@src/interface/index.js'
+import { type EntityRef, type MessageParamType, type MessageScope } from '@src/interface/index.js'
 import { type EntityKind, MessageEntityRef, resolveRefs } from '@src/core/message-entities.js'
 import { type FlagToken, type MessageRoute, type PatternToken } from '@src/core/message-routes.js'
-import { type GivenFlag, splitFlagWords, splitWords } from '@src/core/message-words.js'
+import { caseKey, type GivenFlag, type GivenWords, isLiteralFlag, literalFlags, splitFlagWords, splitWords } from '@src/core/message-words.js'
 import { type RunOptions } from '@src/core/handler-pipeline.js'
 import { bool, choicesOf, duration, lookupTable, number } from '@src/core/scalar-types.js'
 import { userWords } from '@src/util/user-text.util.js'
+import { ownValue, setOwn, shadowInherited } from '@src/util/value.util.js'
 
 type ParamToken = Extract<PatternToken, { param: string }>
 
@@ -19,6 +20,12 @@ function idOf(word: string, mention: RegExp): string | undefined {
 const USER_MENTION = /^<@!?(\d{17,20})>$/
 const ROLE_MENTION = /^<@&(\d{17,20})>$/
 const CHANNEL_MENTION = /^<#(\d{17,20})>$/
+
+/** The server's role a word names: its mention or ID, else its name in any case. */
+function roleNamed(guild: Guild, word: string): Role | undefined {
+  const id = idOf(word, ROLE_MENTION)
+  return id ? guild.roles.cache.get(id) : guild.roles.cache.find(candidate => candidate.name.toLowerCase() === word.toLowerCase())
+}
 
 /** The scalar types, each turning a word into its value or `undefined`, and the Discord ones, which resolve below. */
 export const BUILT_IN_TYPES = lookupTable({
@@ -51,9 +58,25 @@ const GUILD_TYPES = new Set(['member', 'role', 'channel'])
 /** Whether a param type is found only in a server. */
 export const isGuildType = (type: string): boolean => GUILD_TYPES.has(type)
 
-/** Whether a route's pattern takes a param found only in a server, so a DM gets its usage instead. */
-export const needsGuild = (route: MessageRoute): boolean =>
+/** Whether a route's pattern takes a `member`, `role` or `channel` param, optional or not. */
+export const takesGuildParam = (route: Pick<MessageRoute, 'tokens'>): boolean =>
   route.tokens.some(token => 'param' in token && token.type !== undefined && GUILD_TYPES.has(token.type))
+
+/**
+ * Whether a route works only in a server, as dispatch decides it: a `member`, `role` or `channel` param, optional or
+ * not, or a required flag of one of those types. An optional flag of those types refuses a DM only when it is given.
+ */
+export const needsGuild = (route: Pick<MessageRoute, 'tokens' | 'flags'>): boolean =>
+  takesGuildParam(route) || route.flags.some(flag => !flag.optional && flag.type !== undefined && GUILD_TYPES.has(flag.type))
+
+/**
+ * Where a route works: its scope, narrowed to servers by a `member`, `role` or `channel` param, or required flag, as
+ * dispatch narrows it.
+ */
+export function effectiveScope(route: Pick<MessageRoute, 'scope' | 'tokens' | 'flags'>): MessageScope {
+  if (route.scope !== 'any') return route.scope
+  return needsGuild(route) ? 'guild' : 'any'
+}
 
 
 /** Whether a pattern's `{name:type}` names a type: built in, words to choose from, or one the app adds. */
@@ -124,12 +147,24 @@ export function paramTypeLabel(type: string | undefined, types: Record<string, M
 export function assertMessageScope(route: MessageRoute, message: Message, start: string): void {
   const inGuild = message.guildId !== null && message.guildId !== undefined
   if (route.scope === 'guild' && !inGuild) {
-    throw new MessageUsageError(usageOf(route, start), [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet: start === '' })
+    throw serverOnly(usageOf(route, start), start === '')
   }
   if (route.scope === 'dm' && inGuild) {
     throw new MessageUsageError(usageOf(route, start), [usageIssue({ key: 'meocord.usage.dmOnly' })], { dmOnly: true, quiet: start === '' })
   }
 }
+
+/** The usage error for a message sent outside a server to a command, or with a flag, that only a server has. */
+const serverOnly = (usage: string, quiet: boolean): MessageUsageError =>
+  new MessageUsageError(usage, [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet })
+
+/** Whether a message gives one of a route's flags of a type only a server has, such as `--in=#general`. */
+const givesGuildFlag = (route: MessageRoute, flags: readonly GivenFlag[]): boolean =>
+  flags.some(given =>
+    route.flags.some(
+      flag => flag.type !== undefined && GUILD_TYPES.has(flag.type) && caseKey(flag.flag, route.caseSensitive) === caseKey(given.name, route.caseSensitive),
+    ),
+  )
 
 /** One word to turn into a value, a param's, a flag's or a list item's, and where the value goes. */
 interface Item {
@@ -188,24 +223,26 @@ export async function parseMessageParams(
   const issues: MessageUsageIssue[] = []
   const items: Item[] = []
   for (const token of route.tokens) {
-    if (!('param' in token) || token.type === undefined || raw[token.param] === undefined) continue
+    // Only a word the message gave is typed: an own one, never what Object.prototype has under the param's name
+    const word = 'param' in token ? ownValue(raw, token.param) : undefined
+    if (!('param' in token) || token.type === undefined || word === undefined) continue
     if (!token.rest) {
-      items.push({ key: token.param, label: token.param, type: token.type, word: raw[token.param] })
+      items.push({ key: token.param, label: token.param, type: token.type, word })
       continue
     }
-    const words = splitWords(raw[token.param])
-    params[token.param] = new Array(words.length)
+    const words = splitWords(word)
+    setOwn(params, token.param, new Array(words.length))
     words.forEach(({ value }, index) => items.push({ key: token.param, label: token.param, type: token.type!, word: value, index }))
   }
   const flagIssues = route.flags.length > 0 ? readFlags(route, message, start, params, items) : []
+  // readFlags takes out each flag's key, so one left out whose name Object.prototype has reads as left out again
+  if (route.inheritedNames.length > 0) shadowInherited(params, route.inheritedNames)
 
   const guild = message.guild
-  if (!guild && (needsGuild(route) || items.some(item => GUILD_TYPES.has(item.type)))) {
-    throw new MessageUsageError(usage, [usageIssue({ key: 'meocord.usage.serverOnly' })], { serverOnly: true, quiet })
-  }
+  if (!guild && (needsGuild(route) || items.some(item => GUILD_TYPES.has(item.type)))) throw serverOnly(usage, quiet)
 
   const put = (item: Item, value: unknown) => {
-    if (item.index === undefined) params[item.key] = value
+    if (item.index === undefined) setOwn(params, item.key, value)
     else (params[item.key] as unknown[])[item.index] = value
   }
   const refs: RefSlot[] = []
@@ -235,8 +272,7 @@ export async function parseMessageParams(
       }
     } else if (type === 'role') {
       // Roles are cached with the Guilds intent, so a role is known here or not at all
-      const id = idOf(word, ROLE_MENTION)
-      const role = id ? guild!.roles.cache.get(id) : guild!.roles.cache.find(candidate => candidate.name.toLowerCase() === word.toLowerCase())
+      const role = roleNamed(guild!, word)
       if (role) {
         refer(item, 'role', new MessageEntityRef('role', role.id, message.client, guild))
         continue
@@ -269,7 +305,7 @@ export async function fetchMessageParams(parsed: ParsedMessageParams, checkCoold
 
   const found = await resolveRefs(entities)
   const params: Record<string, unknown> = { ...parsed.params }
-  for (const [key, value] of Object.entries(params)) if (Array.isArray(value)) params[key] = [...value]
+  for (const [key, value] of Object.entries(params)) if (Array.isArray(value)) setOwn(params, key, [...value])
   const issues: MessageUsageIssue[] = []
   for (const slot of refs) {
     const value = slot.ref instanceof MessageEntityRef ? found.get(slot.ref) : await slot.ref.resolve()
@@ -277,7 +313,7 @@ export async function fetchMessageParams(parsed: ParsedMessageParams, checkCoold
       issues.push(missingEntity(slot))
       continue
     }
-    if (slot.index === undefined) params[slot.key] = value
+    if (slot.index === undefined) setOwn(params, slot.key, value)
     else (params[slot.key] as unknown[])[slot.index] = value
   }
   if (issues.length > 0) throw new MessageUsageError(usage, issues, { quiet })
@@ -328,14 +364,18 @@ export function messageCommandHooks(
   params: Record<string, string>,
   message: Message,
   start: string,
-  given: number | undefined,
+  given: GivenWords | undefined,
   types: Record<string, MessageParamType> | undefined,
 ): Pick<RunOptions, 'parseArgs' | 'fetchArgs'> {
   let parsed: ParsedMessageParams | undefined
   return {
     parseArgs: async args => {
       assertMessageScope(route, message, start)
-      if (given !== undefined) throw new MessageUsageError(usageOf(route, start), missingParams(route, given))
+      if (given !== undefined) {
+        // A DM to a command only a server has is told so before what its words lack, as one whose words fit is
+        if (!message.guild && (needsGuild(route) || givesGuildFlag(route, given.flags))) throw serverOnly(usageOf(route, start), start === '')
+        throw new MessageUsageError(usageOf(route, start), missingParams(route, given, types, message.guild))
+      }
       if (!hasTypedParams(route)) return args
       parsed = await parseMessageParams(route, params, message, start, types)
       return [args[0], parsed.params]
@@ -382,7 +422,11 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
   const given = new Map<string, GivenFlag>()
   const unknown = new Set<string>()
   const text = (message.content ?? '').trim()
-  for (const flag of splitFlagWords(text.slice(start.length)).flags) {
+  const split = splitFlagWords(text.slice(start.length))
+  // A flag the pattern's own `--` word took is that word, and neither one of its flags nor unknown
+  const literal = literalFlags(route.tokens, route.caseSensitive, split.words, split.flags)
+  for (const [index, flag] of split.flags.entries()) {
+    if (literal.has(index)) continue
     const declared = route.flags.find(candidate => key(candidate.flag) === key(flag.name))
     if (declared) given.set(declared.flag, flag)
     else if (!unknown.has(flag.name)) {
@@ -397,7 +441,7 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
     if (flag.type === undefined) {
       const on = value === undefined ? given.has(flag.flag) : bool(value)
       if (on === undefined) issues.push(usageIssue({ key: 'meocord.usage.notYesNo', params: { label, value: userWords(value!) } }, flag.flag))
-      else params[flag.flag] = on
+      else setOwn(params, flag.flag, on)
     } else if (!given.has(flag.flag)) {
       if (!flag.optional) issues.push(usageIssue({ key: 'meocord.usage.missing', params: { param: label } }, flag.flag))
     } else if (!value) {
@@ -410,18 +454,73 @@ function readFlags(route: MessageRoute, message: Message, start: string, params:
 }
 
 /**
- * What is wrong with a command whose words a message named but whose pattern it does not fit, given how many
- * words followed the command words: each required param it left out, or words beyond what the pattern takes.
+ * What is wrong with a command whose words a message named but whose pattern it does not fit, read word by word
+ * against the pattern: each word or required param it left out, a word given another in its place, else words
+ * beyond what the pattern takes, else the first word its param's built-in type does not take; and then each required
+ * flag it left out, as a message whose words fit is told. With none of those true, there are none, and the usage stands
+ * alone.
  */
-export function missingParams(route: MessageRoute, given: number): MessageUsageIssue[] {
-  const firstParam = route.tokens.findIndex(token => !('literal' in token))
-  const after = firstParam === -1 ? [] : route.tokens.slice(firstParam)
-  const missing = after
-    .slice(given)
-    .filter((token): token is ParamToken => 'param' in token && !token.optional)
-    .map(token => usageIssue({ key: 'meocord.usage.missing', params: { param: token.param } }, token.param))
-  if (missing.length > 0) return missing
-  return [usageIssue({ key: 'meocord.usage.tooManyWords' })]
+export function missingParams(
+  route: MessageRoute,
+  given: GivenWords,
+  types: Record<string, MessageParamType> | undefined,
+  guild: Guild | null,
+): MessageUsageIssue[] {
+  const { words, flags } = given
+  const missing: MessageUsageIssue[] = []
+  // The flags given bare in place of the pattern's own `--` words, which are those words and set no flag
+  const literal = new Set<GivenFlag>()
+  let unfit: Item | undefined
+  let w = 0
+  for (const token of route.tokens) {
+    if ('literal' in token) {
+      if (w < words.length && caseKey(words[w].value, route.caseSensitive) === caseKey(token.literal, route.caseSensitive)) {
+        w++
+        continue
+      }
+      // A pattern's own `--` word given bare in its place takes no word; another word in its place is not taken
+      const word = flags.find(flag => !literal.has(flag) && isLiteralFlag(flag, token.literal, w, route.caseSensitive))
+      if (word) literal.add(word)
+      else missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.literal } }))
+    } else if (w === words.length) {
+      if (!token.optional) missing.push(usageIssue({ key: 'meocord.usage.missing', params: { param: token.param } }, token.param))
+    } else if (token.rest) {
+      w = words.length
+    } else {
+      // Words fill the params in order, as the usage shows them
+      const word = words[w++].value
+      const type = token.type
+      if (!unfit && type !== undefined && isUnfit(type, word, route.caseSensitive, guild)) {
+        unfit = { key: token.param, label: token.param, type, word }
+      }
+    }
+  }
+  // With none of these, the reason may be one MeoCord has no text for, as a role's name the matcher takes only as a
+  // mention or an ID
+  const reasons =
+    missing.length > 0 ? missing
+    : w < words.length ? [usageIssue({ key: 'meocord.usage.tooManyWords' })]
+    : unfit ? [wrongType(unfit, types)]
+    : []
+  // So one reply names all the message lacks, rather than the flags only once its words fit
+  const missingFlags = route.flags
+    .filter(
+      flag =>
+        flag.type !== undefined &&
+        !flag.optional &&
+        !flags.some(sent => !literal.has(sent) && caseKey(sent.name, route.caseSensitive) === caseKey(flag.flag, route.caseSensitive)),
+    )
+    .map(flag => usageIssue({ key: 'meocord.usage.missing', params: { param: `--${flag.flag}` } }, flag.flag))
+  return [...reasons, ...missingFlags]
+}
+
+/**
+ * Whether a param of a type is known not to take a word: a built-in type or words to choose from that the word doesn't
+ * fit. A role is also found by its name, so only a word that names none of the server's roles is unfit.
+ */
+function isUnfit(type: string, word: string, caseSensitive: boolean, guild: Guild | null): boolean {
+  if (type === 'role') return guild !== null && roleNamed(guild, word) === undefined
+  return (type in BUILT_IN_TYPES || Boolean(choicesOf(type))) && !fitsParamType(type, word, caseSensitive)
 }
 
 /** Whether a route's params need resolving: it declares a type for one, or has flags. */

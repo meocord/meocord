@@ -34,9 +34,24 @@ export function describeValue(value: unknown): string {
 export const withArticle = (name: string): string => `${/^[AEIO]/i.test(name) ? 'an' : 'a'} ${name}`
 
 /**
- * Sets `key` on `target` as an own, enumerable data property: unlike `target[key] = value`, a key named `__proto__`
- * is a key like any other rather than the object's prototype.
+ * Sets `key` on a plain object `target` as an own, enumerable data property: unlike `target[key] = value`, a key
+ * named `__proto__` is a key like any other rather than the object's prototype, and a key such as `toString` is set
+ * even where `Object.prototype` is frozen.
  */
 export function setOwn(target: Record<string, unknown>, key: string, value: unknown): void {
-  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
+  // An assignment would call __proto__'s setter, and throw for a member of a frozen Object.prototype. Any other key
+  // assigned is an own data property already; defining each would cost V8 its fast object shape
+  if (key in Object.prototype) Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
+  else target[key] = value
+}
+
+/** `target`'s own value for `key`, never one it inherits, such as `Object.prototype.toString` for `toString`. */
+export const ownValue = <T>(target: Record<string, T>, key: string): T | undefined => (Object.hasOwn(target, key) ? target[key] : undefined)
+
+/**
+ * Gives each of `keys`, names `Object.prototype` has such as `toString` or `constructor`, that `target` doesn't hold
+ * an own `undefined`, so reading one left out gives `undefined` rather than the inherited member.
+ */
+export function shadowInherited(target: Record<string, unknown>, keys: readonly string[]): void {
+  for (const key of keys) if (!Object.hasOwn(target, key)) setOwn(target, key, undefined)
 }

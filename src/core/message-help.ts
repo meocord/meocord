@@ -5,10 +5,9 @@ import {
   type MessageHelpOptions,
   type MessageHelpParam,
   type MessageParamType,
-  type MessageScope,
 } from '@src/interface/index.js'
 import { afterStart, commandWordsOf, fitsScope, type MessageRoute, type MessageStarts } from '@src/core/message-routes.js'
-import { isGuildType, paramTypeLabel, primaryFirst, usageOf } from '@src/core/message-params.js'
+import { effectiveScope, paramTypeLabel, primaryFirst, usageOf } from '@src/core/message-params.js'
 import { splitWords } from '@src/core/message-words.js'
 import { usageHeading } from '@src/common/errors.js'
 import { type TextParam, textRenderer } from '@src/common/meocord-text.js'
@@ -63,15 +62,6 @@ function displayStart(route: MessageRoute, start: string, starts: MessageStarts)
   if (route.prefix === false) return ''
   if (route.prefix !== undefined) return route.prefix[0] ?? ''
   return start
-}
-
-/** Where a route works: its scope, narrowed to servers by a `member`, `role` or `channel` param or flag. */
-export function effectiveScope(route: Pick<MessageRoute, 'scope' | 'tokens' | 'flags'>): MessageScope {
-  if (route.scope !== 'any') return route.scope
-  const guildOnly =
-    route.tokens.some(token => 'param' in token && token.type !== undefined && isGuildType(token.type)) ||
-    route.flags.some(flag => flag.type !== undefined && isGuildType(flag.type))
-  return guildOnly ? 'guild' : 'any'
 }
 
 /** Renders MeoCord's texts in the language a help reply is in. */

@@ -89,9 +89,10 @@ export function notifyStart(container: Container, context: ExecutionContext): Pr
 
 /**
  * Where an interaction's answer stands: a repliable one's `ResponseState`, and an autocomplete answered
- * or not. `undefined` for anything that is not an interaction.
+ * or not. `undefined` for anything that is not an interaction's call, an event carrying one included.
  */
 export function responsePhaseOf(context: ExecutionContext): ResponsePhase | undefined {
+  if (context.getType() === 'event') return undefined
   const interaction = context.getInteraction()
   if (!interaction) return undefined
   if (interaction.isAutocomplete()) return interaction.responded ? 'replied' : 'unanswered'
