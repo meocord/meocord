@@ -345,6 +345,18 @@ describe('inspectHandler', () => {
         'inspectHandler() here leaves the @On and @Once events Overridden.joined inherits out of inheritedRoutes, though the bot answers them; under useStrictMocks() it lists them.',
       ])
     })
+
+    it("names none a subclass with inheritedRoutes: 'replace' re-declares, as the bot drops it", () => {
+      @Controller({ inheritedRoutes: 'replace' })
+      class Replaced extends Joins {
+        @On('guildDelete')
+        override joined() {}
+      }
+      forgetStrictMocks()
+      useStrictMocks()
+
+      expect(inspectHandler(Replaced, 'joined').inheritedRoutes).toEqual([])
+    })
   })
 })
 
