@@ -8,6 +8,7 @@ import {
   getMessageHandlers,
   getReactionHandlers,
   type HandlerRoute,
+  ownEventHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
 import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
@@ -337,13 +338,6 @@ function unasked(
 /** An `@On` or `@Once` handler as the inherited-routes warning names it; one event per method, as a subclass replaces it. */
 const eventRoute = ({ method, event }: EventHandlerMetadata): HandlerRoute => ({ method, label: `event "${event}"` })
 
-/** The `@On` and `@Once` routes a class's own decorators declare, without the entries it inherits from `base`. */
-function ownEventRoutes(prototype: object, base: object): HandlerRoute[] {
-  const inherited = getEventHandlers(base)
-  const own: EventHandlerMetadata[] = Reflect.getOwnMetadata(META.eventHandlers, prototype) ?? []
-  return own.filter(entry => !inherited.includes(entry)).map(eventRoute)
-}
-
 /**
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for
  * `@Command`, `@MessageHandler`, `@ReactionHandler`, `@Autocomplete`, `@On` and `@Once` alike. The next major version
@@ -360,7 +354,7 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
     for (let prototype = controllerClass.prototype as object | null; prototype && prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype) as object | null) {
       const base = Object.getPrototypeOf(prototype) as object | null
       if (!base) continue
-      const declared = [...getDeclaredRoutes(prototype), ...ownEventRoutes(prototype, base)]
+      const declared = [...getDeclaredRoutes(prototype), ...ownEventHandlers(prototype).map(eventRoute)]
       if (declared.length === 0) continue
       if (Reflect.getOwnMetadata(META.replacesInheritedRoutes, prototype)) for (const route of declared) cut.add(route.method)
       const inherited = [...getHandlerRoutes(base), ...getEventHandlers(base).map(eventRoute)].filter(route => !cut.has(route.method))

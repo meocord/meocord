@@ -117,15 +117,20 @@ export function addOwnHandler<T>(key: MetaKey, target: object, entry: T, sameRou
   Reflect.defineMetadata(key, handlers, target)
 }
 
+/** The `@On` and `@Once` entries a class's own decorators declare, without those it inherits from its base. */
+export function ownEventHandlers(prototype: object): EventHandlerMetadata[] {
+  const inherited: EventHandlerMetadata[] = Reflect.getMetadata(META.eventHandlers, Object.getPrototypeOf(prototype) as object) ?? []
+  return ownHandlerList<EventHandlerMetadata>(META.eventHandlers, prototype).filter(entry => !inherited.includes(entry))
+}
+
 /**
  * Leaves each method the class's own decorators declare only those routes, of every kind, dropping the ones it inherits
  * for it: what `@Controller({ inheritedRoutes: 'replace' })` does once the class's method decorators have run.
  */
 export function dropInheritedRoutes(prototype: object): void {
   const base = Object.getPrototypeOf(prototype) as object
-  // The class's own @On and @Once, those that are not entries it inherits, re-declare their methods too
-  const inheritedEvents: EventHandlerMetadata[] = Reflect.getMetadata(META.eventHandlers, base) ?? []
-  const ownEvents = ownHandlerList<EventHandlerMetadata>(META.eventHandlers, prototype).filter(entry => !inheritedEvents.includes(entry))
+  // The class's own @On and @Once re-declare their methods too
+  const ownEvents = ownEventHandlers(prototype)
   const redeclared = new Set([...getDeclaredRoutes(prototype).map(route => route.method), ...ownEvents.map(entry => entry.method)])
   if (redeclared.size === 0) return
   // An entry the class takes from its base, for a method it re-declares
