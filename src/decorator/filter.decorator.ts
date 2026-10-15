@@ -8,7 +8,7 @@ import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
 import { describeValue, isConstructible } from '@src/util/value.util.js'
 import { META } from '@src/util/metadata-keys.js'
-import { refuseOnMethod, declaring } from '@src/util/refusal.util.js'
+import { declaring, decoratedName, refuseOnMethod } from '@src/util/refusal.util.js'
 
 /**
  * Marks a class as an exception filter for the given error types.
@@ -96,7 +96,7 @@ export function UseFilter<const T extends readonly unknown[]>(
   ...filters: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => ExceptionFilter<any>> }
 ): ClassDecorator & MethodDecorator {
   return declaring(function (target: object, propertyKey?: string | symbol) {
-    const where = propertyKey === undefined ? (target as { name: string }).name : `${target.constructor.name}.${String(propertyKey)}`
+    const where = decoratedName(target, propertyKey)
     assertStageEntries('@UseFilter', 'filter', where, filters)
     // Decorators apply bottom-up, so a higher decorator's filters are tried first.
     if (propertyKey === undefined) {

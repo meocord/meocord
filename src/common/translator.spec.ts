@@ -122,6 +122,20 @@ describe('plurals', () => {
 
     expect(items.locale('ru')('items', { count: 3 })).toBe('3 items')
   })
+
+  // As a catalog loaded from JSON may: the default language has one form, and the translation's needs several
+  it('reads a translation that gives a plural where the default has a plain message as that plural', () => {
+    const items = createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': { items: '{count} items' },
+        pl: { items: { one: '{count} rzecz', few: '{count} rzeczy', many: '{count} rzeczy', other: '{count} rzeczy' } },
+      },
+    } as never) as unknown as { locale: (locale: string) => (key: string, params: object) => string }
+    const pl = items.locale('pl')
+
+    expect([pl('items', { count: 1 }), pl('items', { count: 2 }), pl('items', { count: 5 })]).toEqual(['1 rzecz', '2 rzeczy', '5 rzeczy'])
+  })
 })
 
 describe('interpolation', () => {
@@ -293,14 +307,14 @@ describe('a key with no message, in development', () => {
     const own = createTranslator({
       default: 'en-US',
       locales: {
-        'en-US': { grp: { other: 'Other', label: 'Label' }, hi: 'Hi' },
-        ru: { grp: { other: 'Другое' }, hi: { other: 'Привет' }, extra: { other: 'Ещё' } },
+        'en-US': { grp: { other: 'Other', label: 'Label' } },
+        ru: { grp: { other: 'Другое' }, extra: { other: 'Ещё' } },
       },
     } as never) as unknown as { locale: (locale: string) => (key: string) => string }
     const ru = own.locale('ru')
 
     // A key the default lacks is read by its own shape: `extra` is a plural
-    expect([ru('grp'), ru('grp.other'), ru('grp.label'), ru('hi'), ru('extra')]).toEqual(['grp', 'Другое', 'Label', 'Hi', 'Ещё'])
+    expect([ru('grp'), ru('grp.other'), ru('grp.label'), ru('extra')]).toEqual(['grp', 'Другое', 'Label', 'Ещё'])
     expect(warned).toEqual(['"grp" names a group of messages, not one, so the key is shown in its place.'])
   })
 })

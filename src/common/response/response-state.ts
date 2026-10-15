@@ -22,7 +22,7 @@ import { UserError } from '@src/common/errors.js'
 import { textFor } from '@src/common/meocord-text.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
 import { describeInteraction } from '@src/util/interaction.util.js'
-import { getInstallContext, type InstallContext } from '@src/common/response/install-context.js'
+import { getInstallContext, type InstallContext, isBotInstalled } from '@src/common/response/install-context.js'
 import {
   droppedFlagsWarning,
   hasComponentsV2,
@@ -457,7 +457,10 @@ export interface ResponseState {
 
 /** The response state behind `respond()`, with what `@Defer` and the testing helpers use besides. */
 export class InteractionResponse implements ResponseState {
-  readonly location: InstallContext
+  // An own key, where it has always been, made a getter by the constructor: it reads the interaction's guildId, which
+  // MeoCord's own answering doesn't need, so it is read on demand
+  readonly location!: InstallContext
+  #location?: InstallContext
 
   private phase: ResponsePhase = 'unanswered'
   private acknowledging?: Promise<void>
@@ -496,7 +499,11 @@ export class InteractionResponse implements ResponseState {
   private pendingLock?: ResponseLockOptions
 
   constructor(readonly interaction: RepliableInteraction) {
-    this.location = getInstallContext(interaction)
+    Object.defineProperty(this, 'location', {
+      get: () => (this.#location ??= getInstallContext(interaction)),
+      enumerable: true,
+      configurable: true,
+    })
     const message = 'message' in interaction ? interaction.message : undefined
     this.v2 = Boolean(message?.flags?.has(MessageFlags.IsComponentsV2))
   }
@@ -1043,7 +1050,7 @@ export class InteractionResponse implements ResponseState {
     } catch (error) {
       const message = this.message
       const expired = Date.now() - this.interaction.createdTimestamp >= TOKEN_EXPIRED_AFTER_MS
-      if (!TOKEN_EXPIRED.has(errorCode(error) as number) || !expired || !this.location.botInstalled || !message) throw error
+      if (!TOKEN_EXPIRED.has(errorCode(error) as number) || !expired || !isBotInstalled(this.interaction) || !message) throw error
       this.lastMessage = await this.call('message.edit', sent, () => message.edit(sent as never))
     }
     this.phase = 'replied'

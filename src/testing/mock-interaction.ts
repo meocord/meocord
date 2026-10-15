@@ -39,7 +39,7 @@ import {
   ChannelSelectMenuInteraction,
   Client,
   ClientUser,
-  type ChannelType,
+  ChannelType,
   Collection,
   DiscordjsErrorCodes,
   DiscordjsError,
@@ -93,6 +93,9 @@ import {
   type CacheType,
   type CommandInteractionOption,
   DMChannel,
+  CategoryChannel,
+  DirectoryChannel,
+  StageChannel,
   BaseGuildVoiceChannel,
   ForumChannel,
   GuildForumThreadManager,
@@ -202,8 +205,15 @@ const stubReadWarnings = new WeakMap<object, Map<string, () => void>>()
 
 type StubValue = Mock | object | string | number | boolean | null
 
+// When each mock was made, which what Discord stamps when a structure arrives, such as a member's join, reads
+const madeTimes = new WeakMap<object, number>()
+
+/** When `mock` was made: the time a value Discord stamps as it sends the structure reads. */
+export const madeAt = (mock: object): number => madeTimes.get(mock) ?? Date.now()
+
 function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSet?: (prop: string | symbol, value: unknown) => void): object {
   noteMockMade()
+  const made = Date.now()
   const stubs = externalStubs ?? new Map<string, StubValue>()
   // Placeholders read so far, by the value strict mocks give: a read of a kept one still warns, once
   const placeholders = new Map<string, string>()
@@ -306,6 +316,7 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
     },
   })
   mockTargets.set(proxy, instance)
+  madeTimes.set(proxy, made)
   return proxy
 }
 
@@ -526,15 +537,65 @@ const COLLECTING_METHODS = new Set(['awaitMessages', 'awaitReactions'])
 
 // The DM channel of each user, made once, as Discord keeps one per user
 const dmChannels = new WeakMap<object, object>()
+/**
+ * A user's one DM channel: its recipient is the user, and it is the user's `dmChannel`. Under strict mocks its client
+ * is the user's; default mode keeps a client of its own, and a read of it warns once where it isn't the user's.
+ */
 function dmChannelOf(user: object): object {
   let channel = dmChannels.get(user)
   if (!channel) {
-    channel = createMockChannel(DMChannel)
-    // A getter in discord.js, so set through the mock, which defines it
-    ;(channel as Record<string, unknown>).recipientId = (user as User).id
+    const made = createMockChannel(DMChannel) as unknown as Record<string, unknown>
+    // Getters in discord.js, so set through the mock, which defines them
+    made.recipientId = (user as User).id
+    if (user instanceof User) {
+      // Not enumerated, so a DM channel's own keys, and a user's, stay those a test may compare
+      const place = (target: object, key: string, value: unknown) => Object.defineProperty(target, key, { value, writable: true, configurable: true })
+      place(made, 'recipient', user)
+      place(user, 'dmChannel', made)
+      if (user.client instanceof Client) {
+        if (strictMocks()) place(made, 'client', user.client)
+        else warnOnClientRead(made, user.client)
+      }
+    }
+    channel = made
     dmChannels.set(user, channel)
   }
   return channel
+}
+
+/**
+ * Has a read of a default-mode DM channel's `client`, its own where strict mocks give the user's, warn once, so a test
+ * that reads it hears of the difference and the mock's own reads, as a send through the channel makes, stay quiet.
+ */
+function warnOnClientRead(channel: Record<string, unknown>, userClient: Client): void {
+  if (readPlaceQuietly(() => channel.client) === userClient) return
+  // The read is answered by the channel's stub, which warns by the mock's own instance
+  warnOnRead((mockTargets.get(channel) ?? channel) as Record<string, unknown>, 'client', () => {
+    if (readingPlace > 0) return
+    warnOnce(
+      mockLogger,
+      "A mock user's DM channel here has a client of its own, not the user's; under useStrictMocks() it shares the user's " +
+        'client.',
+    )
+  })
+}
+
+// What default mode's user manager DMs do apart from discord.js's, warned of once each
+const USER_MANAGER_DM_WARNINGS = {
+  createDM:
+    'UserManager.createDM() here gives every user the same DM channel; under useStrictMocks() each user has their own, ' +
+    'as Discord keeps one per user.',
+  send:
+    "UserManager.send() here resolves to a message that doesn't hold what was sent; under useStrictMocks() it sends " +
+    "through the user's DM channel, as discord.js does.",
+}
+
+/** A user made for a manager, on the manager's client, as discord.js makes one. */
+function userOf(manager: object, id: string | undefined): User {
+  const user = createMockUser(id ? { id } : {})
+  const client = (manager as { client?: unknown }).client
+  if (client instanceof Client) Object.defineProperty(user, 'client', { value: client, writable: true, configurable: true })
+  return user as unknown as User
 }
 
 /** The guild a manager belongs to, when it is a mock guild's. */
@@ -543,9 +604,62 @@ const guildOf = (manager: object): Guild | undefined => {
   return guild instanceof Guild ? guild : undefined
 }
 
+// The class discord.js makes for each type of channel a server's channel manager creates; a text channel by default
+const CHANNEL_CLASSES: Partial<Record<ChannelType, InteractionClass<BaseChannel>>> = {
+  [ChannelType.GuildText]: TextChannel,
+  [ChannelType.GuildVoice]: VoiceChannel,
+  [ChannelType.GuildCategory]: CategoryChannel,
+  [ChannelType.GuildAnnouncement]: NewsChannel,
+  [ChannelType.GuildStageVoice]: StageChannel,
+  [ChannelType.GuildDirectory]: DirectoryChannel,
+  [ChannelType.GuildForum]: ForumChannel,
+  [ChannelType.GuildMedia]: MediaChannel,
+}
+
+/**
+ * The class of a channel a server's channel manager makes for `type`: under strict mocks the one discord.js makes,
+ * while default mode keeps a text channel and warns once for another type.
+ */
+function createdChannelClass(type: ChannelType | undefined): InteractionClass<BaseChannel> {
+  const Class = CHANNEL_CLASSES[type ?? ChannelType.GuildText] ?? TextChannel
+  if (Class === TextChannel || strictMocks()) return Class
+  warnOnce(
+    mockLogger,
+    'GuildChannelManager.create() here makes a text channel whatever type its options name; under useStrictMocks() it ' +
+      'makes the channel discord.js makes for that type.',
+  )
+  return TextChannel
+}
+
+/** A thread a channel's thread manager makes: in that channel, as its parent, and in its server. */
+function threadIn(id: string | undefined, manager: object): object {
+  const channel = (manager as { channel?: unknown }).channel
+  if (!(channel instanceof GuildChannel)) return createMockChannel(ThreadChannel, id ? { id } : {})
+  const guild: unknown = channel.guild
+  const thread = createMockChannel(ThreadChannel, id ? { id } : {})
+  // Not enumerated, so a mock thread's own keys stay those of one made alone, as a test may compare
+  const place = (key: string, value: unknown) => Object.defineProperty(thread, key, { value, writable: true, configurable: true })
+  place('parentId', channel.id)
+  if (!(guild instanceof Guild)) return thread
+  place('guild', guild)
+  place('guildId', guild.id)
+  // The parent is found through its server's channels, as discord.js finds it, by the thread's parentId. Strict mocks
+  // cache the channel there; default mode leaves the server's cache as it was and reads the channel itself
+  if (strictMocks()) cached(cacheOf(guild.channels), channel.id, () => channel)
+  Object.defineProperty(thread, 'parent', {
+    get: () => {
+      const parentId = (thread as unknown as ThreadChannel).parentId ?? ''
+      return cacheOf(guild.channels)?.get(parentId) ?? (parentId === channel.id ? channel : null)
+    },
+    configurable: true,
+  })
+  return thread
+}
+
 // The item each manager fetches, creates and edits: with the id asked for, but for a ban or a thread member, and a
-// member or channel in the manager's guild
-const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: object) => object][] = [
+// member or channel in the manager's guild; a channel created is of the type its options name
+type ManagerItem = (id: string | undefined, manager: object, options?: { type?: ChannelType }) => object
+const MANAGER_ITEMS: [{ prototype: object }, ManagerItem][] = [
   [UserManager, id => createMockUser(id ? { id } : {})],
   [GuildManager, id => createMockGuild(id ? { id } : {})],
   [
@@ -558,15 +672,23 @@ const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: o
   [RoleManager, (id, manager) => createMockInteraction(Role, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
   [GuildBanManager, () => createMockInteraction(GuildBan)],
   // A message fetched from a channel is in it, and another user's
-  [GuildMessageManager, (id, manager) => createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
-  [DMMessageManager, (id, manager) => createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
-  [GuildTextThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
-  [GuildForumThreadManager, id => createMockChannel(ThreadChannel, id ? { id } : {})],
+  // A message made in the channel is the one fetched by its id, as Discord has it
+  [GuildMessageManager, (id, manager) => madeIn(manager, id) ?? createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
+  [DMMessageManager, (id, manager) => madeIn(manager, id) ?? createMockMessage({ ...(id ? { id } : {}), ...channelOfManager(manager) })],
+  [GuildTextThreadManager, threadIn],
+  [GuildForumThreadManager, threadIn],
   [ThreadMemberManager, () => createMockInteraction(ThreadMember)],
   [ReactionUserManager, id => createMockUser(id ? { id } : {})],
   [ApplicationCommandManager, id => createMockInteraction(ApplicationCommand, id ? { id } : {})],
   [ChannelManager, id => createMockChannel(TextChannel, id ? { id } : {})],
-  [GuildChannelManager, (id, manager) => createMockChannel(TextChannel, { ...(id ? { id } : {}), ...(guildOf(manager) ? { guild: guildOf(manager) } : {}) } as never)],
+  [
+    GuildChannelManager,
+    (id, manager, options) =>
+      createMockChannel(createdChannelClass(options?.type), {
+        ...(id ? { id } : {}),
+        ...(guildOf(manager) ? { guild: guildOf(manager) } : {}),
+      } as never),
+  ],
   [GuildEmojiManager, (id, manager) => itemInGuild(GuildEmoji, { id: id ?? nextSnowflake() }, manager)],
   [GuildStickerManager, (id, manager) => itemInGuild(Sticker, { id: id ?? nextSnowflake() }, manager)],
   [GuildScheduledEventManager, (id, manager) => itemInGuild(GuildScheduledEvent, { id: id ?? nextSnowflake() }, manager)],
@@ -579,6 +701,27 @@ const MANAGER_ITEMS: [{ prototype: object }, (id: string | undefined, manager: o
 function itemInGuild(Class: object, props: object, manager: object): object {
   const guild = guildOf(manager)
   return createMockInteraction(Class as never, { ...props, ...(guild ? { guild, guildId: guild.id } : {}) } as never)
+}
+
+/**
+ * Names what a manager's create() or edit() made the `name` its options give, as discord.js does, under strict mocks;
+ * default mode keeps the name it has, with a warning once.
+ */
+function withName(manager: object, method: 'create' | 'edit', item: object, options: unknown): object {
+  const name = (options as { name?: unknown } | undefined)?.name
+  const current = (item as { name?: unknown }).name
+  if (typeof name !== 'string' || current === name) return item
+  if (strictMocks()) {
+    ;(item as { name?: unknown }).name = name
+    return item
+  }
+  const Manager = (Object.getPrototypeOf(manager) as { constructor: { name: string } }).constructor.name
+  warnOnce(
+    mockLogger,
+    `${Manager}.${method}() here leaves the item with the mock's name, not the name its options give, as discord.js names it; ` +
+      'in the next major version (5.0) the mock names it so. Call useStrictMocks() to have it named now.',
+  )
+  return item
 }
 
 /** Whether a discord.js method on `target` returns a promise: an async one, or one the lists above name. */
@@ -609,6 +752,31 @@ function fetchedIds(args: unknown[]): string | string[] | undefined {
   return undefined
 }
 
+// How many messages discord.js's MessageManager.fetch() asks Discord for when its options give no limit
+const DEFAULT_FETCH_LIMIT = 50
+
+/** Which of two messages is newer, by snowflake id, else by when the mock was made: negative when `a` is. */
+function newerFirst(a: { id: string; createdTimestamp: number }, b: { id: string; createdTimestamp: number }): number {
+  if (isSnowflake(a.id) && isSnowflake(b.id) && a.id !== b.id) return BigInt(b.id) > BigInt(a.id) ? 1 : -1
+  return b.createdTimestamp - a.createdTimestamp
+}
+
+/**
+ * A channel's messages as `messages.fetch(options)` lists them under strict mocks: those its cache holds, newest first,
+ * before, after or around the message `options` names, at most `limit` of them.
+ */
+function recentMessages(manager: object, options: unknown): Collection<string, Message> {
+  const { limit = DEFAULT_FETCH_LIMIT, before, after, around } = (options ?? {}) as { limit?: number; before?: string; after?: string; around?: string }
+  const all = [...(cacheOf(manager)?.values() ?? [])] as Message[]
+  const sorted = all.sort(newerFirst)
+  const at = (id: string) => sorted.findIndex(message => message.id === id)
+  let window = sorted
+  if (before !== undefined) window = at(before) === -1 ? [] : sorted.slice(at(before) + 1)
+  else if (after !== undefined) window = at(after) === -1 ? [] : sorted.slice(0, at(after)).slice(-limit)
+  else if (around !== undefined) window = at(around) === -1 ? [] : sorted.slice(Math.max(0, at(around) - Math.floor(limit / 2)))
+  return new Collection(window.slice(0, limit).map(message => [message.id, message]))
+}
+
 /**
  * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
  * `createDM` to the user's DM channel, `send` and its kin to a message, `awaitMessages` and `awaitReactions` to an
@@ -622,6 +790,20 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   // A member's DMs go through its user, and a user's through its one DM channel, as discord.js sends them
   if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
     return createMockFn(async (...args: unknown[]) => ((receiver() as GuildMember).user[key] as (...args: unknown[]) => unknown)(...args))
+  }
+  // Under strict mocks a user manager's DMs go to the user named, its cached one or one made and cached, as discord.js
+  // resolves it; default mode keeps one DM channel for the manager and a send that resolves to an empty message
+  if (target instanceof UserManager && (key === 'createDM' || key === 'send')) {
+    return createMockFn(async (user: unknown, ...args: unknown[]) => {
+      if (!strictMocks()) {
+        warnOnce(mockLogger, USER_MANAGER_DM_WARNINGS[key])
+        return key === 'createDM' ? dmChannelOf(receiver()) : createMockMessage()
+      }
+      const named = user instanceof GuildMember ? user.user : user
+      const id = typeof named === 'string' ? named : (named as { id?: string } | undefined)?.id
+      const resolved = (named instanceof User ? named : cached(cacheOf(receiver()), id ?? nextSnowflake(), () => userOf(receiver(), id))) as User
+      return key === 'createDM' ? resolved.createDM() : (resolved.send as (...rest: unknown[]) => unknown)(...args)
+    })
   }
   if (key === 'createDM') return createMockFn(async () => dmChannelOf(receiver()))
   if (key === 'send' && target instanceof User) {
@@ -642,10 +824,32 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
         const ids = fetchedIds(args)
         const one = (id: string) => cached(cacheOf(receiver()), id, () => item(id, receiver()))
         if (Array.isArray(ids)) return new Collection(ids.map(id => [id, one(id)]))
-        return ids === undefined ? new Collection() : one(ids)
+        if (ids !== undefined) return one(ids)
+        // Under strict mocks a channel's fetch() lists the messages it holds, as discord.js lists its recent ones;
+        // default mode resolves to none, and warns once for a channel that strict mocks would list messages of
+        const messages = target instanceof GuildMessageManager || target instanceof DMMessageManager
+        if (messages && strictMocks()) return recentMessages(receiver(), args[0])
+        if (messages) warnUnlisted(receiver())
+        return new Collection()
       })
     }
-    if (item && key === 'edit') return createMockFn(async () => item(undefined, receiver()))
+    // Under strict mocks an edit reaches the item named, the cached one or one made and cached under its id, as
+    // discord.js patches it; default mode resolves to a new item and warns once
+    if (item && key === 'edit') {
+      return createMockFn(async (named?: unknown, options?: unknown) => {
+        const id = typeof named === 'string' ? named : (named as { id?: string } | undefined)?.id
+        if (id !== undefined && !strictMocks()) {
+          warnOnce(
+            mockLogger,
+            `${(Object.getPrototypeOf(receiver()) as { constructor: { name: string } }).constructor.name}.edit() here ` +
+              'resolves to a new item with an id of its own, not the item named; under useStrictMocks() it resolves to ' +
+              'the item with that id, the cached one or one made under it.',
+          )
+        }
+        const edited = id === undefined || !strictMocks() ? item(undefined, receiver()) : cached(cacheOf(receiver()), id, () => item(id, receiver()))
+        return withName(receiver(), 'edit', edited, options)
+      })
+    }
     // A ban resolves to the member, user or id it was given, as discord.js's does, and caches nothing
     if (key === 'create' && target instanceof GuildBanManager) {
       return createMockFn(async (user?: unknown) => {
@@ -666,8 +870,8 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
     // Every other manager here caches what its create() makes, as discord.js's does; check a manager's create when
     // adding it to MANAGER_ITEMS
     if (item && key === 'create') {
-      return createMockFn(async () => {
-        const made = item(undefined, receiver()) as { id?: unknown }
+      return createMockFn(async (options?: unknown) => {
+        const made = withName(receiver(), 'create', item(undefined, receiver(), options as { type?: ChannelType }), options) as { id?: unknown }
         if (typeof made.id === 'string') cacheOf(receiver())?.set(made.id, made)
         return made
       })
@@ -1743,6 +1947,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       instance.guildId = null
       if (unset('guild')) Object.defineProperty(instance, 'guild', { value: null, writable: true, configurable: true })
     }
+    // Default mode reads a guildId alone as a placeholder server with that id, as its warning says, answered in place of
+    // the mock's own stub, so where the interaction is still reads as given. Strict mocks read null, as discord.js does
+    if (strictPlace?.given === 'guildId' && !strictMocks() && unset('guild')) stubs.set('guild', guildPlaceholder(own('guildId') as string) as never)
     // The channel it came from, as the gateway caches it for an interaction: its server's cached one, looked up on each
     // read so a channel the test caches later is the one read, or the user's DM
     let channel: unknown
@@ -1774,6 +1981,11 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     // and in a server that user's member; each read live, so a targetId set later picks its user, and assignable
     if (UserContextMenuCommandInteraction.prototype.isPrototypeOf(instance)) {
       if (unset('targetId')) instance.targetId = (own('targetUser') as User | undefined)?.id ?? nextSnowflake()
+      // Under strict mocks a target user given is the client's cached one, as discord.js resolves it, so its member is
+      // that user's; default mode keeps the member's own user, and a read of targetMember warns once
+      const givenTarget = own('targetUser') as User | undefined
+      const users = cacheOf((instance.client as Client).users)
+      if (strictMocks() && typeof givenTarget === 'object' && givenTarget !== null) users?.set(givenTarget.id, givenTarget)
       const targetUser = (): User => {
         const id = own('targetId') as string
         return cached(cacheOf((instance.client as Client).users), id, () => mockUser(id)) as User
@@ -1787,7 +1999,19 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         })
       if (unset('targetUser')) live('targetUser', targetUser)
       if (unset('targetMember')) {
-        live('targetMember', () => (own('guildId') ? memberFor(own('guild'), targetUser(), true, own('guildId') as string) : null))
+        live('targetMember', () => {
+          if (!own('guildId')) return null
+          const member = memberFor(own('guild'), targetUser(), true, own('guildId') as string) as GuildMember
+          // Only the mock reads this for the test, so the warning comes at the test's read
+          if (givenTarget && member.user !== givenTarget) {
+            warnOnce(
+              mockLogger,
+              "UserContextMenuCommandInteraction.targetMember here is the member of another user with the targetUser's " +
+                "id; under useStrictMocks() the targetUser given is cached on the client, so targetMember is that user's member.",
+            )
+          }
+          return member
+        })
       }
     }
     // A message context menu's target: the message given, else one made for its targetId. The message is the one
@@ -2134,12 +2358,19 @@ const holdsOf = (prototype: object): object | undefined =>
 
 /**
  * A manager whose `cache` is a real collection of `items`, by id, empty without them, and whose methods are stubs but
- * for `resolve` and `resolveId`, which read the cache. Its `client` is the one its guild or channel has.
+ * for `resolve` and `resolveId`, which read the cache. Its `client` is the one its guild or channel has. `onCacheRead`,
+ * when given, runs on each read of `cache`, before it is returned.
  */
-function managerWith(prototype: object, items: readonly { id: string; user?: { id: string } }[] | undefined): object {
+function managerWith(prototype: object, items: readonly { id: string; user?: { id: string } }[] | undefined, onCacheRead?: () => void): object {
   const manager = Object.create(prototype) as Record<string, unknown>
   const cache = new Collection((items ?? []).map(item => [String(item.id ?? item.user?.id), item]))
-  Object.defineProperty(manager, 'cache', { value: cache, writable: true })
+  if (onCacheRead) {
+    let current: unknown = cache
+    Object.defineProperty(manager, 'cache', {
+      get: () => (onCacheRead(), current),
+      set: (value: unknown) => void (current = value),
+    })
+  } else Object.defineProperty(manager, 'cache', { value: cache, writable: true })
   // The same collection where discord.js's own methods read it past a subclass's `cache`, as `super.cache` does
   Object.defineProperty(manager, '_cache', { value: cache, writable: true })
   const holds = holdsOf(prototype)
@@ -2155,6 +2386,65 @@ function managerWith(prototype: object, items: readonly { id: string; user?: { i
     configurable: true,
   })
   return stubDeep(manager)
+}
+
+// Set while the mock reads a manager's cache itself
+let readingOwnCache = 0
+// The messages made in each channel, by its messages manager, for a fetch to find and strict mocks to cache
+const messagesMade = new WeakMap<object, Map<string, object>>()
+const madeIn = (manager: object, id: string | undefined): object | undefined => (id === undefined ? undefined : messagesMade.get(manager)?.get(id))
+// The message managers whose cache read has warned
+const uncachedWarned = new WeakSet<object>()
+
+/**
+ * A channel's empty messages manager. Default mode caches none of the messages made in the channel, where strict mocks
+ * and discord.js cache each, so a test's first read of the cache warns once while one of them is missing from it.
+ */
+function messageManager(prototype: object): object {
+  const manager: object = managerWith(prototype, undefined, () => {
+    const made = messagesMade.get(manager)
+    if (readingOwnCache > 0 || !made || strictMocks() || uncachedWarned.has(manager)) return
+    // Read as the mock's own, so this check doesn't call itself
+    const cache = cacheOf(manager)
+    if (![...made.values()].some(each => !cache?.has((each as { id: string }).id))) return
+    uncachedWarned.add(manager)
+    mockLogger.warn(
+      `${(prototype as { constructor: { name: string } }).constructor.name}.cache here lacks messages made in its channel, where ` +
+        'discord.js caches each message as it arrives and each one the bot sends; in the next major version (5.0) the mock caches ' +
+        'them. Fetch the message, or call useStrictMocks() to have them cached now.',
+    )
+  })
+  return manager
+}
+
+// The message managers whose fetch() with no id has warned
+const unlistedWarned = new WeakSet<object>()
+
+/**
+ * Warns once for a channel whose messages.fetch() with no id resolves to none in default mode, though strict mocks
+ * would list messages there: those its cache holds, read as the mock's own, and those made or sent in it, which they
+ * cache.
+ */
+function warnUnlisted(manager: object): void {
+  if (unlistedWarned.has(manager)) return
+  if (!cacheOf(manager)?.size && !messagesMade.get(manager)?.size) return
+  unlistedWarned.add(manager)
+  mockLogger.warn(
+    `${(Object.getPrototypeOf(manager) as { constructor: { name: string } }).constructor.name}.fetch() here resolves to no ` +
+      "messages, though messages were made, sent or cached in its channel, where discord.js lists a channel's recent " +
+      'messages; under useStrictMocks() fetch() lists them.',
+  )
+}
+
+/** Notes a message made in a channel, and caches it there under strict mocks, as discord.js caches what arrives. */
+function noteMadeIn(channel: unknown, message: { id: string }): void {
+  if (!(channel instanceof BaseChannel)) return
+  const manager = Reflect.getOwnPropertyDescriptor(channel, 'messages')?.value as object | undefined
+  const cache = manager && cacheOf(manager)
+  if (!manager || !cache) return
+  if (!messagesMade.has(manager)) messagesMade.set(manager, new Map())
+  messagesMade.get(manager)!.set(message.id, message)
+  if (strictMocks()) cache.set(message.id, message)
 }
 
 /** An empty manager of `prototype` that `owner` names its own, such as `{ message }` for a message's reactions. */
@@ -2178,14 +2468,16 @@ export function ownedManager(prototype: object, owner: Record<string, object>): 
  * A manager's `fetch(id)` resolves to its cached item with that id, as discord.js looks there first, or to a new one it
  * caches under that id: a member, channel, emoji, sticker, scheduled event or AutoMod rule in this guild, a role with
  * that id, a ban, or an invite with that code. `members.fetch({ user: ids })` resolves to a collection of each of those
- * members, found or made the same way; `create()` and `edit()` resolve to a mock of its item, which `create()` caches
- * as discord.js does, but for an invite, made for the channel given and cached nowhere; a list fetch resolves to an
- * empty collection. Members, roles and channels given are put in
- * their managers' caches, where dispatch looks first when it resolves a message's typed params; a member
- * {@link createMockMember} made without a server is in this one. Its `roles.everyone` is the role given with the
- * guild's id, or else an @everyone role of its own at position 0 with no permissions, in `roles.cache` as Discord has
- * it. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given, so `t.forGuild(guild)`
- * translates as for a new English server.
+ * members, found or made the same way; `create()` resolves to a mock of its item, a channel of the type its options
+ * name under `useStrictMocks()`, which it caches as discord.js does, but for an invite, made for the channel given and
+ * cached nowhere; `edit()` resolves under `useStrictMocks()` to the item with the id given, found or made the same way,
+ * and under `useStrictMocks()` either takes the `name` its options give. A list fetch resolves to an empty collection.
+ * Members, roles and channels given are put in their managers' caches, where dispatch looks first when it resolves a
+ * message's typed params; a member {@link createMockMember} made without a server is in this one. Its `roles.everyone`
+ * is the role given with the guild's id, or else an @everyone role of its own at position 0, in `roles.cache` as
+ * Discord has it. That role has no permissions in default mode; under `useStrictMocks()` it has the ones Discord
+ * gives @everyone in a new server. The guild is named `'Guild'` and its `preferredLocale` is `'en-US'` unless given,
+ * so `t.forGuild(guild)` translates as for a new English server.
  *
  * The mock makes a member for any id it's asked for, so a test of an id that isn't a member rejects the fetch, as
  * `guild.members.fetch.mockRejectedValue(createDiscordError(10007))`, or resolves a collection without that member.
@@ -2267,7 +2559,7 @@ export function createMockChannel<T extends BaseChannel>(
 
   // Text and announcement channels: messages, and threads made in the channel
   if (is(TextChannel) || is(NewsChannel)) {
-    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.messages = messageManager(GuildMessageManager.prototype)
     instance.threads = managerWith(GuildTextThreadManager.prototype, undefined)
   }
   // Forum and media channels hold posts, each a thread started with its first message
@@ -2277,15 +2569,15 @@ export function createMockChannel<T extends BaseChannel>(
   }
   // Voice and stage channels carry a text chat of their own, and a bitrate, which discord.js tells them apart by
   if (is(BaseGuildVoiceChannel)) {
-    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.messages = messageManager(GuildMessageManager.prototype)
     instance.bitrate = 64_000
     instance.userLimit = 0
   }
   if (is(DMChannel)) {
-    instance.messages = managerWith(DMMessageManager.prototype, undefined)
+    instance.messages = messageManager(DMMessageManager.prototype)
   }
   if (is(ThreadChannel)) {
-    instance.messages = managerWith(GuildMessageManager.prototype, undefined)
+    instance.messages = messageManager(GuildMessageManager.prototype)
     instance.members = managerWith(ThreadMemberManager.prototype, undefined)
   }
   // A server's channel has its overwrites, none until a test puts some in the cache, which its permissions read
@@ -2694,7 +2986,7 @@ function strictPlaceOf(own: (key: string) => unknown): StrictPlace | undefined {
 let readingPlace = 0
 
 /** Runs `read` as the mock's own read of where a mock is, which warns about no placement. */
-function readPlaceQuietly<T>(read: () => T): T {
+export function readPlaceQuietly<T>(read: () => T): T {
   readingPlace++
   try {
     return read()
@@ -2744,7 +3036,7 @@ function placeWarning(name: string, key: string, place: StrictPlace): string {
       "Give the member's guild too, or call useStrictMocks() to place it there now.",
     ],
     guildId: [
-      'a server the bot is in, though the mock was given only a guildId',
+      'a placeholder server with that id, though the mock was given only a guildId',
       "a guildId alone is a server the bot isn't in: guild and channel are null, and the member is a raw one",
       'Give a guild too, or call useStrictMocks() to read it so now.',
     ],
@@ -2966,8 +3258,22 @@ function mentionedIds(content: string | undefined): { users: string[]; roles: st
 
 /** A cache's collection, or undefined for a stub a test put in place of the manager. */
 const cacheOf = (manager: unknown): Collection<string, unknown> | undefined => {
-  const cache = (manager as { cache?: unknown } | undefined)?.cache
-  return cache instanceof Collection ? (cache as Collection<string, unknown>) : undefined
+  // The mock's own read, which a message cache's warning leaves to the test's reads
+  readingOwnCache++
+  try {
+    const cache = (manager as { cache?: unknown } | undefined)?.cache
+    return cache instanceof Collection ? (cache as Collection<string, unknown>) : undefined
+  } finally {
+    readingOwnCache--
+  }
+}
+
+// The managers of a server whose caches a placeholder one holds empty
+const PLACEHOLDER_GUILD_MANAGERS = ['members', 'roles', 'channels', 'emojis', 'stickers', 'bans', 'invites', 'scheduledEvents', 'autoModerationRules']
+
+/** A server default mode reads for a guildId alone: no `Guild`, so it answers no server checks, but with that id and empty caches. */
+function guildPlaceholder(id: string): object {
+  return stubDeep({ id, ...Object.fromEntries(PLACEHOLDER_GUILD_MANAGERS.map(key => [key, stubDeep({ cache: new Collection() })])) })
 }
 
 /** The cached item under `id`, put there by `make` when the cache lacks it. */
@@ -3334,6 +3640,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
 
   if (sentBy) warnOnSentReads(instance, stubs, sentBy)
   const message = stubDeep(instance, stubs) as MockMessage
+  if (channel) noteMadeIn(channel, message as unknown as { id: string })
   return message
 }
 
@@ -3383,7 +3690,8 @@ function warnOnSentReads(instance: Record<string, unknown>, stubs: Map<string, M
  * a DM send in a server of its own and keeps another author, with a warning when read.
  */
 function sentMessage(held: HeldMessage, channel: unknown, client?: unknown, fields: MockMessageOverrides = {}, made?: MadePlace): MockMessage {
-  const by = (client ?? (channel as { client?: unknown } | null | undefined)?.client) as Client | undefined
+  // The mock's own read of where the message was sent
+  const by = (client ?? readPlaceQuietly(() => (channel as { client?: unknown } | null | undefined)?.client)) as Client | undefined
   const inChannel = channel instanceof BaseChannel
   const dm = inChannel && channel.isDMBased()
   const strict = strictMocks()

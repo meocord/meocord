@@ -5,12 +5,16 @@ import {
   BaseGuildVoiceChannel,
   BaseChannel,
   BaseInteraction,
+  ButtonStyle,
+  CategoryChannel,
   ChatInputCommandInteraction,
   ChannelType,
   Client,
   ClientUser,
   Collection,
   CommandInteraction,
+  ComponentType,
+  DirectoryChannel,
   DMChannel,
   ForumChannel,
   Guild,
@@ -19,6 +23,7 @@ import {
   GuildScheduledEvent,
   GuildMember,
   GuildMemberFlagsBitField,
+  GuildMemberRoleManager,
   GuildNSFWLevel,
   GuildPremiumTier,
   GuildVerificationLevel,
@@ -29,14 +34,17 @@ import {
   MessageMentions,
   MessageReaction,
   ModalSubmitInteraction,
+  MessageComponentInteraction,
   MessageType,
   NewsChannel,
+  PartialGroupDMChannel,
   PermissionFlagsBits,
   PermissionsBitField,
   PresenceManager,
   ReactionManager,
   ReactionUserManager,
   Role,
+  StageChannel,
   Sticker,
   TextChannel,
   ThreadChannel,
@@ -54,11 +62,14 @@ import {
   heldChannelOf,
   isRawMember,
   isUnsetEveryone,
+  madeAt,
   memberRoles,
   NEW_SERVER_EVERYONE_PERMISSIONS,
   ownedManager,
   readPlaceAs,
+  readPlaceQuietly,
 } from './mock-interaction.js'
+import { createModalFields } from './modal-fields.js'
 import { nextSnowflake } from './snowflake.js'
 import { strictMocks } from './strict-mocks.js'
 import { Logger } from '@src/common/logger.js'
@@ -165,6 +176,20 @@ type Default<T, K extends keyof T> = typeof REAL_GETTER | ((mock: T) => T[K])
 /** The defaults of one class's data properties, each checked against the type discord.js gives the property. */
 type Defaults<T> = { readonly [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]?: Default<T, K> }
 
+/**
+ * A member's join or a client's ready time: under strict mocks when the mock was made, as Discord sends it, so time a
+ * test advances afterwards counts. Default mode stamps it at the first read and warns once.
+ */
+function stampedAt(mock: object, name: string): number {
+  if (strictMocks()) return madeAt(mock)
+  warnOnce(
+    mockLogger,
+    `${name} here is the time it was first read; under useStrictMocks() it is the time the mock was made, so time a ` +
+      'test advances afterwards counts.',
+  )
+  return Date.now()
+}
+
 /** A class and its defaults, typed together so a default that stops fitting its property fails to compile. */
 const defaultsOf = <T>(Class: { prototype: T }, defaults: Defaults<T>) => [Class.prototype as object, defaults as Defaults<unknown>] as const
 
@@ -173,6 +198,40 @@ const defaultsOf = <T>(Class: { prototype: T }, defaults: Defaults<T>) => [Class
  * such as `'en-US'` for a locale, `null` for what may be absent and `false` for a flag, or the property's own getter
  * for one discord.js computes. The classes a mock descends from are read nearest first.
  */
+/** A channel's or thread's server id, its guild's, as discord.js sets it; one of its own for a guild the mock lacks. */
+const guildIdOf = (channel: GuildChannel | ThreadChannel): string => (typeof channel.guild?.id === 'string' ? channel.guild.id : nextSnowflake())
+
+/**
+ * The server of a channel or thread made without one: the one its own guildId names, else one of its own. Its own
+ * value is read, not its default, which reads the guild in turn.
+ */
+function guildFromOwnId(channel: GuildChannel | ThreadChannel): Guild {
+  const id: unknown = Object.getOwnPropertyDescriptor(channel, 'guildId')?.value
+  return createMockGuild(typeof id === 'string' ? { id } : {}) as unknown as Guild
+}
+
+/** The bot's message a component interaction was used on, in the interaction's channel, holding that component. */
+function clickedMessage(interaction: MessageComponentInteraction): Message {
+  const channel = readPlaceQuietly(() => interaction.channel)
+  const bot: unknown = interaction.client?.user
+  const { componentType: type } = interaction
+  // A placeholder customId, for an interaction made without one, has no place in the component's data
+  const customId = typeof interaction.customId === 'string' ? interaction.customId : undefined
+  const component =
+    type === ComponentType.Button
+      ? { type, custom_id: customId, style: ButtonStyle.Primary }
+      : type === ComponentType.StringSelect
+        ? { type, custom_id: customId, options: [] }
+        : typeof type === 'number'
+          ? { type, custom_id: customId }
+          : undefined
+  return createMockMessage({
+    ...(channel ? { channel: channel as never } : {}),
+    ...(bot instanceof User ? { author: bot } : {}),
+    components: (component ? [{ type: ComponentType.ActionRow, components: [component] }] : []) as never,
+  }) as unknown as Message
+}
+
 const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(Guild, {
     name: () => 'Guild',
@@ -217,8 +276,7 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     id: REAL_GETTER,
     nickname: () => null,
     avatar: () => null,
-    // In the server since the mock was made, as a member Discord sends always is
-    joinedTimestamp: () => Date.now(),
+    joinedTimestamp: member => stampedAt(member, 'GuildMember.joinedTimestamp'),
     joinedAt: REAL_GETTER,
     partial: REAL_GETTER,
     premiumSince: REAL_GETTER,
@@ -228,6 +286,9 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
     pending: () => false,
     flags: () => new GuildMemberFlagsBitField().freeze(),
     displayName: REAL_GETTER,
+    // The colour of its highest coloured role, as discord.js computes it from the roles in its cache
+    displayColor: REAL_GETTER,
+    displayHexColor: REAL_GETTER,
     roles: member => memberRoles(member, []),
     permissions: REAL_GETTER,
   }),
@@ -281,6 +342,11 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(CommandInteraction, { commandId: nextSnowflake, commandGuildId: () => null }),
   defaultsOf(AutocompleteInteraction, { commandId: nextSnowflake, commandGuildId: () => null, options: () => createChatInputOptions() as never }),
   defaultsOf(MessageReaction, { users: reaction => ownedManager(ReactionUserManager.prototype, { reaction }) }),
+  // The bot's message the component was used on, holding it, in the interaction's channel, as Discord always sends it;
+  // the component discord.js finds there by its customId
+  defaultsOf(MessageComponentInteraction, { message: clickedMessage, component: REAL_GETTER }),
+  // A modal submitted with no fields given has none
+  defaultsOf(ModalSubmitInteraction, { fields: () => createModalFields({}), components: () => [] }),
   defaultsOf(BaseInteraction, {
     applicationId: nextSnowflake,
     token: () => 'mock-interaction-token',
@@ -326,17 +392,24 @@ const DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(VoiceChannel, { type: () => ChannelType.GuildVoice as const, nsfw: () => false }),
   defaultsOf(ForumChannel, { type: () => ChannelType.GuildForum as const, nsfw: () => false, topic: () => null }),
   defaultsOf(MediaChannel, { type: () => ChannelType.GuildMedia as const, nsfw: () => false, topic: () => null }),
-  defaultsOf(ThreadChannel, { type: () => ChannelType.PublicThread as const, name: () => 'thread' }),
+  defaultsOf(StageChannel, { type: () => ChannelType.GuildStageVoice as const, nsfw: () => false, topic: () => null }),
+  defaultsOf(CategoryChannel, { type: () => ChannelType.GuildCategory as const }),
+  defaultsOf(DirectoryChannel, { type: () => ChannelType.GuildDirectory as const }),
+  // A thread's server is its guild's, as discord.js sets it from the thread's guild
+  defaultsOf(ThreadChannel, { type: () => ChannelType.PublicThread as const, name: () => 'thread', guildId: guildIdOf }),
   defaultsOf(DMChannel, { type: () => ChannelType.DM as const }),
+  defaultsOf(PartialGroupDMChannel, { type: () => ChannelType.GroupDM as const }),
   defaultsOf(GuildChannel, {
     name: () => 'channel',
-    guildId: channel => (typeof channel.guild?.id === 'string' ? channel.guild.id : nextSnowflake()),
+    guildId: guildIdOf,
     position: () => 0,
     rawPosition: () => 0,
     parentId: () => null,
   }),
   defaultsOf(BaseChannel, { createdTimestamp: REAL_GETTER, createdAt: REAL_GETTER }),
-  defaultsOf(Client, { readyTimestamp: () => Date.now(), readyAt: REAL_GETTER, uptime: REAL_GETTER, token: () => null }),
+  defaultsOf(Client, { readyTimestamp: client => stampedAt(client, 'Client.readyTimestamp'), readyAt: REAL_GETTER, uptime: REAL_GETTER, token: () => null }),
+  // What a member's roles show, computed from the roles in the cache as discord.js does
+  defaultsOf(GuildMemberRoleManager, { color: REAL_GETTER, hoist: REAL_GETTER, icon: REAL_GETTER }),
   defaultsOf(BaseGuild, { nameAcronym: REAL_GETTER }),
 ])
 
@@ -352,7 +425,7 @@ const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
   defaultsOf(GuildMember, { presence: REAL_GETTER }),
   defaultsOf(ModalSubmitInteraction, { message: () => null }),
   defaultsOf(ThreadChannel, {
-    guild: () => createMockGuild(),
+    guild: guildFromOwnId,
     guildId: thread => thread.guild.id,
     parentId: thread => {
       const parent = createMockChannel(TextChannel, { guild: thread.guild } as never)
@@ -365,7 +438,7 @@ const STRICT_DEFAULTS = new Map<object, Defaults<unknown>>([
     archived: () => false,
     locked: () => false,
   }),
-  defaultsOf(GuildChannel, { guild: () => createMockGuild(), parent: REAL_GETTER }),
+  defaultsOf(GuildChannel, { guild: guildFromOwnId, parent: REAL_GETTER }),
   // Full once its members reach a user limit, which a voice channel has none of unless given one
   defaultsOf(BaseGuildVoiceChannel, { userLimit: () => 0, full: REAL_GETTER }),
   // A reaction's message, as discord.js always has one, is a whole one

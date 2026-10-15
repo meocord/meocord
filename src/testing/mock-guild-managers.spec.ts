@@ -27,7 +27,7 @@ const CACHING = [
 describe.each([
   ['default', () => {}],
   ['strict', () => useStrictMocks()],
-])("a mock guild's emoji, sticker, scheduled event, AutoMod rule and invite managers, in %s mode", (_mode, setUp) => {
+])("a mock guild's emoji, sticker, scheduled event, AutoMod rule and invite managers, in %s mode", (mode, setUp) => {
   beforeEach(() => setUp())
 
   it.each(CACHING)("%s.create() resolves its item in the guild and caches it, as discord.js's does", async (key, Item) => {
@@ -63,6 +63,7 @@ describe.each([
     expect((await guild.invites.fetch(invite.code)).code).toBe(invite.code)
   })
 
+  // Strict mocks name an item what its create() options name it, as discord.js does; default mode keeps the mock's names
   it('name their items, and format them as discord.js does', async () => {
     const guild = createMockGuild()
     const emoji = await guild.emojis.create({ attachment: 'emoji.png', name: 'party' })
@@ -70,9 +71,10 @@ describe.each([
     const invite = await guild.invites.create(createMockChannel(TextChannel, { guild } as never))
     const [sticker, rule] = [await guild.stickers.create({ file: 'sticker.png', name: 's', tags: 't' }), await guild.autoModerationRules.create({ name: 'r' } as never)]
 
-    expect([String(emoji), emoji.identifier]).toEqual([`<:emoji:${emoji.id}>`, `emoji:${emoji.id}`])
+    const [emojiName, eventName, stickerName, ruleName] = mode === 'strict' ? ['party', 'Game night', 's', 'r'] : ['emoji', 'event', 'sticker', 'rule']
+    expect([String(emoji), emoji.identifier]).toEqual([`<:${emojiName}:${emoji.id}>`, `${emojiName}:${emoji.id}`])
     expect([event.url, invite.url, String(invite)]).toEqual([`https://discord.com/events/${guild.id}/${event.id}`, `https://discord.gg/${invite.code}`, `https://discord.gg/${invite.code}`])
-    expect([event.name, sticker.name, rule.name]).toEqual(['event', 'sticker', 'rule'])
+    expect([event.name, sticker.name, rule.name]).toEqual([eventName, stickerName, ruleName])
   })
 
   it("are a message's guild's too", async () => {

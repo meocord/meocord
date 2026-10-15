@@ -57,9 +57,11 @@ export abstract class ExecutionContext {
   /**
    * The response state of the interaction being handled, the same one `respond(interaction)` returns,
    * or `undefined` for anything that cannot be answered: a message, a reaction, an event or
-   * autocomplete.
+   * autocomplete. An `@On('interactionCreate')` handler's call has none either, as MeoCord answers that interaction
+   * through the handler it dispatches it to.
    */
   get response(): ResponseState | undefined {
+    if (this.getType() === 'event') return undefined
     const interaction = this.getInteraction()
     return interaction?.isRepliable() ? respond(interaction) : undefined
   }
@@ -104,13 +106,21 @@ export abstract class ExecutionContext {
    */
   abstract getArgs(): readonly unknown[]
 
-  /** The interaction being handled, or `undefined` for a message, reaction or event. */
+  /**
+   * The interaction being handled, or `undefined` for a message or a reaction. For an event, the interaction it
+   * carries, as `@On('interactionCreate')` does; `undefined` for any other event.
+   */
   abstract getInteraction(): Interaction | undefined
 
-  /** The message being handled, or `undefined` for anything else. */
+  /**
+   * The message being handled, or an event's first argument when it is a message, as in `@On('messageCreate')`;
+   * `undefined` for anything else, a reaction's message included. For `@On('messageUpdate')`, that is the message as it
+   * was before the edit, which may be partial; the edited one is the event's second argument, from
+   * {@link ExecutionContext.getArgs}.
+   */
   abstract getMessage(): Message | undefined
 
-  /** The reaction being handled, or `undefined` for anything else. */
+  /** The reaction being handled, or the one an event carries; `undefined` for anything else. */
   abstract getReaction(): MessageReaction | PartialMessageReaction | undefined
 
   /** What is being handled: an interaction, an autocomplete request, a message, a reaction or an event. */

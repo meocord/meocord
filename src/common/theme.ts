@@ -4,6 +4,7 @@ import { Logger } from '@src/common/logger.js'
 import { setLegacyThemeLayer, useTheme } from '@src/core/theme-scope.js'
 import { themeProblems } from '@src/core/theme-validation.js'
 import { type ThemeColors } from '@src/interface/index.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 type LegacyColor = 'primaryColor' | 'successColor' | 'infoColor' | 'errorColor' | 'warningColor'
 /** Only MeoCord's own roles, whatever an app adds to ThemeColors. */
@@ -19,7 +20,8 @@ const ROLES: Readonly<Record<LegacyColor, LegacyRole>> = {
 }
 
 const logger = new Logger('Theme')
-const assigned: Partial<Record<LegacyRole, ColorResolvable>> = {}
+// One per process for this meocord version, so a static set through one build keeps those set through the other
+const assigned = shared('legacyThemeColors', (): Partial<Record<LegacyRole, ColorResolvable>> => ({}))
 
 /** Reads a role of the theme where it is read, warning once a run for each static read. */
 function read(name: LegacyColor): ColorResolvable {
