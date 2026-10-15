@@ -1,5 +1,8 @@
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { ExecutionContext } from '@src/common/execution-context.js'
+import { type Logger } from '@src/common/logger.js'
+import { warnOnce } from '@src/common/deprecation.js'
+import { ThemeCache } from '@src/core/theme-resolvers.js'
 import { injectedTokens, undecoratedConstructor, untypedParameter } from '@src/core/guard-runner.js'
 import { meocordClassAdvice, meocordClasses } from '@src/core/meocord-classes.js'
 import { isAppClassToken } from '@src/core/lifecycle-order.js'
@@ -32,6 +35,24 @@ export function tokenName(token: unknown): string {
 
 const isToken = (value: unknown): value is ProviderToken =>
   typeof value === 'function' || typeof value === 'string' || typeof value === 'symbol'
+
+/**
+ * Checks one of an app's own `@MeoCord({ providers })` as the bot does. A provider of a token MeoCord binds later, or
+ * for each call, is warned about until 5.0 refuses it; one of a token `isOwn` names, which MeoCord binds before the
+ * providers, is refused.
+ *
+ * @returns The refusal, for the caller to report, or `undefined`.
+ */
+export function appProviderRefusal(appName: string, token: unknown, isOwn: (token: unknown) => boolean, logger: Logger): Error | undefined {
+  if (token === ThemeCache || token === ExecutionContext) {
+    warnOnce(
+      logger,
+      `${appName}: @MeoCord({ providers }) provides ${tokenName(token)}, which MeoCord binds itself; ` +
+        'the next major version (5.0) refuses it. Remove the provider.',
+    )
+  }
+  return isOwn(token) ? new Error(`${appName}: @MeoCord({ providers }) cannot provide ${tokenName(token)}, which MeoCord binds itself.`) : undefined
+}
 
 /**
  * Checks each provider's shape and indexes them by token, reporting each that cannot be bound, such as one with no
@@ -99,6 +120,14 @@ export function providerMap(providers: readonly Provider[], where: string): Prov
   return map
 }
 
+/** For each container, how to forget the value each factory provider made, so a start that failed is made afresh. */
+const madeValues = new WeakMap<Container, (() => void)[]>()
+
+/** Forgets every value `container`'s factory providers made, so the next resolve runs each factory again. */
+export function forgetFactoryValues(container: Container): void {
+  for (const forget of madeValues.get(container) ?? []) forget()
+}
+
 /**
  * Binds one provider into `container` as a singleton. `bindClass` binds a class a provider depends
  * on, as the app binds its own, so a provided class or a factory's `inject` can name any class.
@@ -120,6 +149,7 @@ export function bindProvider(container: Container, provider: Provider, bindClass
   // Made once, as a singleton, but kept only once made: a factory that throws or rejects runs again on the next
   // resolve, so a start() after it failed tries it again. Resolves while one is pending share it.
   let kept: { value: unknown } | undefined
+  madeValues.set(container, [...(madeValues.get(container) ?? []), () => (kept = undefined)])
   container.bind(token).toDynamicValue(context => {
     if (kept) return kept.value
     // Resolved in dependency order before anything needs it, so each injected value is already made

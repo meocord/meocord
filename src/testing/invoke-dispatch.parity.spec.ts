@@ -52,11 +52,18 @@ function controllersFor(r: ReturnType<typeof random>): ControllerClass[] {
   return controllers
 }
 
+// The seeds run, SEEDS_PER_TEST to a test, so no one test holds the whole run and a failure names its seeds
+const SEEDS = 150
+const SEEDS_PER_TEST = 10
+// Handlers compared in each test, at the least: fewer means the generator mostly makes route sets dispatch refuses
+const MIN_COMPARED_PER_TEST = 400
+const seedRanges = Array.from({ length: SEEDS / SEEDS_PER_TEST }, (_, i) => ({ first: i * SEEDS_PER_TEST + 1, last: (i + 1) * SEEDS_PER_TEST }))
+
 describe("invoke's message check", () => {
-  it('accepts a message for exactly the handler dispatch gives it to', async () => {
+  it.for(seedRanges)('accepts a message for exactly the handler dispatch gives it to, seeds $first to $last', async ({ first, last }) => {
     const options: MessageCommandOptions = { prefix: '!', mention: true }
     let compared = 0
-    for (let seed = 1; seed <= 150; seed++) {
+    for (let seed = first; seed <= last; seed++) {
       const r = random(seed)
       const controllers = controllersFor(r)
       let routes
@@ -88,6 +95,6 @@ describe("invoke's message check", () => {
         }
       }
     }
-    expect(compared).toBeGreaterThan(10_000)
+    expect(compared).toBeGreaterThanOrEqual(MIN_COMPARED_PER_TEST)
   })
 })

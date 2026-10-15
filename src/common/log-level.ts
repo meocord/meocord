@@ -1,6 +1,7 @@
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { isBuiltApplication } from '@src/util/bundle-entry.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** A `logLevel`: the least severe line `Logger` prints. */
 export type LogLevel = NonNullable<MeoCordConfig['logLevel']>
@@ -13,8 +14,8 @@ export const LOG_LEVEL_RANK: Readonly<Record<LogLevel, number>> = { debug: 0, lo
 
 const isLogLevel = (value: unknown): value is LogLevel => typeof value === 'string' && Object.hasOwn(LOG_LEVEL_RANK, value)
 
-let threshold: number | undefined
-let rejectedEnv: string | undefined
+// One per process for this meocord version, so both builds print at one level and warn about a bad variable once
+const level = shared('logLevel', () => ({ threshold: undefined as number | undefined, rejectedEnv: undefined as string | undefined }))
 
 /**
  * The rank a line needs to print. Resolved on first use and kept, so logging reads neither the
@@ -23,17 +24,17 @@ let rejectedEnv: string | undefined
  * it from whatever `dist` a previous build left.
  */
 export function logThreshold(): number {
-  if (threshold === undefined) {
+  if (level.threshold === undefined) {
     // The config first: loading it runs its dotenv call, which may set the variable
     const configured = isBuiltApplication() ? loadMeoCordConfig()?.logLevel : undefined
     const raw = process.env[LOG_LEVEL_ENV]
     // An environment variable is often written in capitals, DEBUG for debug
     const fromEnv = raw?.toLowerCase()
-    rejectedEnv = raw && !isLogLevel(fromEnv) ? raw : undefined
-    const level = isLogLevel(fromEnv) ? fromEnv : isLogLevel(configured) ? configured : process.env.NODE_ENV === 'development' ? 'debug' : 'log'
-    threshold = LOG_LEVEL_RANK[level]
+    level.rejectedEnv = raw && !isLogLevel(fromEnv) ? raw : undefined
+    const chosen = isLogLevel(fromEnv) ? fromEnv : isLogLevel(configured) ? configured : process.env.NODE_ENV === 'development' ? 'debug' : 'log'
+    level.threshold = LOG_LEVEL_RANK[chosen]
   }
-  return threshold
+  return level.threshold
 }
 
 /**
@@ -41,13 +42,13 @@ export function logThreshold(): number {
  * about it; undefined afterwards.
  */
 export function takeRejectedLogLevel(): string | undefined {
-  const rejected = rejectedEnv
-  rejectedEnv = undefined
+  const rejected = level.rejectedEnv
+  level.rejectedEnv = undefined
   return rejected
 }
 
 /** Forgets the resolved level, so the next line resolves it again: for specs that change the environment. */
 export function resetLogLevel(): void {
-  threshold = undefined
-  rejectedEnv = undefined
+  level.threshold = undefined
+  level.rejectedEnv = undefined
 }

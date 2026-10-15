@@ -50,9 +50,15 @@ export const RENDERED_CONTAINER_ID = 0x4d43
 // Shared by both builds of this version, so either answers with the app's presenter
 const presenters = shared('clientPresenters', () => new WeakMap<object, ResponsePresenter>())
 
-/** Sets the presenter for the interactions a client receives. */
-export function setPresenter(client: object, presenter: ResponsePresenter): void {
-  presenters.set(client, presenter)
+/** Sets the presenter for the interactions a client receives; without one, they take the default. */
+export function setPresenter(client: object, presenter: ResponsePresenter | undefined): void {
+  if (presenter) presenters.set(client, presenter)
+  else presenters.delete(client)
+}
+
+/** The presenter set on a client, if any. */
+export function clientPresenter(client: object): ResponsePresenter | undefined {
+  return presenters.get(client)
 }
 
 /** The presenter for an interaction's client, or the default one. */

@@ -60,12 +60,14 @@ import {
   matchMessageSubcommands,
   matchMessageRoute,
   type MessageRoute,
+  messageRouteWarnings,
   type MessageStarts,
   messageStarts,
   messageStartsFor,
   usesAppPrefix,
 } from '@src/core/message-routes.js'
 import { messageCommandHooks, subcommandUsageError } from '@src/core/message-params.js'
+import { type GivenWords } from '@src/core/message-words.js'
 import { CommandNotFoundError } from '@src/common/errors.js'
 import { existingResponse } from '@src/common/response/response-state.js'
 
@@ -102,10 +104,14 @@ function answered(interaction: Interaction): boolean {
 
 type ControllerClass = new (...args: any[]) => any
 
-/** Told what one dispatched call did: each handler it ran, as it settled, and each error that reached the fallback. */
+/**
+ * Told what one dispatched call did: each handler it ran, as it settled, each error that reached the fallback, and the
+ * fault that kept the fallback from answering one, which the call then ends in.
+ */
 export interface DispatchRecorder {
   settled(controller: ControllerClass, method: string, outcome: HandlerOutcome): void
   unhandled(error: unknown): void
+  unanswered(error: unknown, failure: unknown): void
 }
 
 /** What a dispatcher routes over and how it answers. */
@@ -171,6 +177,8 @@ export class Dispatcher {
     // The app's own help command reads this table too, so it lists the commands dispatch reaches
     if (this.container.isBound(HandlerRegistry)) shareMessageRoutes(this.container.get(HandlerRegistry), this.messageRoutes)
     this.warnUnreachableHelp()
+    // Here, where the routes are built once, rather than in buildMessageRoutes, which startup runs twice
+    for (const warning of messageRouteWarnings(this.messageRoutes, this.messageOptions)) this.logger.warn(warning)
     this.messageListeners = this.controllerClasses.flatMap(controllerClass =>
       getMessageHandlers(controllerClass.prototype)
         .filter(handler => handler.pattern === undefined)
@@ -218,7 +226,9 @@ export class Dispatcher {
     const fallback: Fallback = record
       ? async (error, context) => {
           record.unhandled(error)
-          return this.fallback(error, context)
+          const failure = await this.fallback(error, context)
+          if (failure !== undefined) record.unanswered(error, failure)
+          return failure
         }
       : this.fallback
     return { startedAt: performance.now(), fallback, record }
@@ -475,7 +485,7 @@ export class Dispatcher {
     if (message.author.bot || !hasMessageText(message.content)) return
     const call = this.callFor(record)
 
-    let target: { route: MessageRoute; params: Record<string, string>; start: string; given?: number } | undefined
+    let target: { route: MessageRoute; params: Record<string, string>; start: string; given?: GivenWords } | undefined
     try {
       if (this.messageRoutes.length > 0) {
         const starts = await messageStartsFor(this.messageRoutes, this.messageOptions, message, this.options.botUserId(message))
@@ -536,7 +546,18 @@ export class Dispatcher {
     const reports = runs.map(() => [] as Parameters<DispatchRecorder['settled']>[])
     const results = await Promise.allSettled(
       runs.map(({ run }, index) =>
-        run(record ? { ...call, record: { settled: (...report) => reports[index].push(report), unhandled: error => record.unhandled(error) } } : call),
+        run(
+          record
+            ? {
+                ...call,
+                record: {
+                  settled: (...report) => reports[index].push(report),
+                  unhandled: error => record.unhandled(error),
+                  unanswered: (error, failure) => record.unanswered(error, failure),
+                },
+              }
+            : call,
+        ),
       ),
     )
     for (const report of reports.flat()) record?.settled(...report)

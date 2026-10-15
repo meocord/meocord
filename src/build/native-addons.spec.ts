@@ -697,6 +697,26 @@ describe('isBuiltFor', () => {
 
     expect(isBuiltFor(dir, linux)).toBe(expected)
   })
+
+  // A platform with no C library, as npm-install-checks 8.0.0's checkPlatform answers for darwin and win32
+  it.each([
+    ['a list naming a C library', { libc: ['glibc'] }, false],
+    ['a string naming a C library', { libc: 'musl' }, false],
+    ["['any']", { libc: ['any'] }, false],
+    ['an exclusion of a C library', { libc: ['!musl'] }, false],
+    ['an empty list', { libc: [] }, false],
+    ['an empty string', { libc: '' }, true],
+    ['null', { libc: null }, true],
+    ['no libc field', {}, true],
+    ['a C library beside this platform in os', { os: ['darwin', 'win32'], libc: ['glibc'] }, false],
+  ])('reads %s as npm does on a platform without libc', (_, fields, expected) => {
+    const dir = path.join(root, 'node_modules', 'addon')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'addon', version: '1.0.0', ...fields }))
+
+    expect(isBuiltFor(dir, { platform: 'darwin', arch: 'arm64' })).toBe(expected)
+    expect(isBuiltFor(dir, { platform: 'win32', arch: 'x64' })).toBe(expected)
+  })
 })
 
 describe('otherCopiesWarning', () => {

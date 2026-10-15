@@ -47,20 +47,34 @@ export interface InstallContext {
  * @group Utilities
  */
 export function getInstallContext(interaction: BaseInteraction): InstallContext {
-  const owners = interaction.authorizingIntegrationOwners ?? {}
-  const guildInstalled = owners[ApplicationIntegrationType.GuildInstall] !== undefined
-  const userInstalled = owners[ApplicationIntegrationType.UserInstall] !== undefined
-
+  const botInstalled = isBotInstalled(interaction)
   switch (interaction.context) {
     case InteractionContextType.BotDM:
-      return { where: 'bot-dm', botInstalled: true }
+      return { where: 'bot-dm', botInstalled }
     case InteractionContextType.PrivateChannel:
-      return { where: 'private-channel', botInstalled: false }
+      return { where: 'private-channel', botInstalled }
     case InteractionContextType.Guild:
-      // With no owners reported, the interaction came through the bot, as every interaction did before user installs.
-      return { where: 'guild', botInstalled: guildInstalled || !userInstalled }
+      return { where: 'guild', botInstalled }
     default:
-      // Discord omits the context for interactions it created before contexts existed, which reached only the bot.
-      return interaction.guildId ? { where: 'guild', botInstalled: true } : { where: 'bot-dm', botInstalled: true }
+      return { where: interaction.guildId ? 'guild' : 'bot-dm', botInstalled }
+  }
+}
+
+/**
+ * Whether the bot is present where an interaction happened, as {@link getInstallContext} reports it, read from Discord's
+ * `context` and the integrations that authorized it alone: no `guildId`, which only `where` needs.
+ */
+export function isBotInstalled(interaction: BaseInteraction): boolean {
+  switch (interaction.context) {
+    case InteractionContextType.PrivateChannel:
+      return false
+    case InteractionContextType.Guild: {
+      const owners = interaction.authorizingIntegrationOwners ?? {}
+      // With no owners reported, the interaction came through the bot, as every interaction did before user installs
+      return owners[ApplicationIntegrationType.GuildInstall] !== undefined || owners[ApplicationIntegrationType.UserInstall] === undefined
+    }
+    default:
+      // A DM with the bot, or an interaction from before contexts existed, which reached only the bot
+      return true
   }
 }

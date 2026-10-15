@@ -1,0 +1,53 @@
+### Fixes to 4.2.2 behaviour
+
+- **Running the bot**
+  - A failed start is no longer among the apps a signal stops, so a later Ctrl+C stops only the running ones.
+  - With process sharding, `stop()` during the start ends it: a registration already sending the commands finishes, nothing more asks Discord, no shard is spawned, and `start()` resolves; a failed shard-count request no longer exits the process.
+  - A controller whose constructor throws fails only its own handlers; other controllers' message and reaction handlers still run, and the error goes to the filters.
+  - One method with `@Command`s of two interaction types, such as a slash command and a button, runs for each route, including an override that adds a route type and calls its base method through `super`; it threw.
+  - A subclass that re-declares `@On` or `@Once` for the same event runs once per event, not twice.
+  - A `Translator` given through `@MeoCord({ providers })` is accepted wherever it sits in the list.
+  - `@Inject` on a method parameter is refused with MeoCord's message, naming the method, not inversify's.
+  - With both builds loaded, one shutdown and one pair of signal listeners stop every app, a failed shard ends once, and a later login clears an earlier failed login's exit code.
+- **Message commands**
+  - The usage reply names the word a message left out or replaced, such as `close is missing`, and a missing required flag beside it, such as `--in is missing`, and quotes a word with its spaces as typed. With no reason MeoCord has a text for, it's the usage line alone.
+  - A pattern's own word starting with `--`, such as `--force` in `deploy --force {env} {--dry}`, is matched where the pattern has it.
+  - A refused pattern names the rule it breaks and quotes its params as written.
+  - `!"help" mute` answers as `!help mute` does.
+  - A `{name:duration}` too long to add up is a usage error, not `Infinity`; `number` and `duration` words are read in time linear in their length.
+  - A pattern over 16 words type-checks the handler's params past the sixteenth.
+  - A param or flag named like an `Object` member, such as `{__proto__}`, `{constructor:int?}` or `{toString?}`, is its own key in the handler's params; `{__proto__:int}` and a left-out `{constructor:int?}` threw on every message.
+  - `@MeoCord({ controllers })` is typed as a list of classes, so a string or symbol there is a type error rather than a stop at startup.
+- **Components**
+  - The warning about a customId param that shares a name with a modal field or choice is given per handler, as `Controller.method`.
+  - A component pattern whose shortest customId is over 100 characters is warned about, counting each typed param's shortest value.
+  - `{café}` in a customId pattern is literal text in the types, as at runtime, so `build({ café })` no longer compiles and then throws.
+- **Themes and translations**
+  - A call keeps its theme for its whole run when another app in the process claims the theme outside calls.
+  - `@On('messageReactionAdd')`, `messageReactionRemove` and other events about a `User` run with that user's `themeFor.user` theme.
+  - A `themeFor` result that throws while being read is left out with a warning and cached, rather than failing every call.
+  - A translation is read by the default catalog's shapes, so a group with an `other` message isn't taken for a plural, while plural forms given for a plain default message are still read as plurals; an empty translation of MeoCord's own text falls back to English.
+  - `expectCompleteCatalog` reports a `null` translation as missing, where it threw.
+- **Cooldowns**
+  - A built-in store's `consume()` refusal carries `retryTimestamp`, so a custom store built on it no longer DMs a cooldown twice in one wait.
+  - A `ShardedCooldownStore` verdict's `release()` undoes its call once, however often it's called.
+  - `testCooldownStore` passes a correct store built from the other module format.
+- **Logging**
+  - Log lines escape U+061C, U+200E and U+200F in text a user wrote, as they escape other bidirectional controls.
+- **Builds and the CLI**
+  - An `externals` pattern with the `g` or `y` flag keeps every matching import out of the bundle.
+  - With `bundleDependencies`, `os`, `cpu` and `libc` are read as npm reads them, and the bot registers its commands in the mode the `meocord` command runs in.
+  - `build` reads `tsconfig.json` as `tsc` does: `extends` on Windows or naming a package, `${configDir}` in `baseUrl`, and `references` now build. One the CLI can't read is reported as `tsconfig.json`.
+  - A `tsconfig.json` or `package.json` with a UTF-8 byte order mark is read.
+  - A runtime that can't be started is reported and exits 1, not an unhandled error.
+  - A config that fails to load is told whether it can't be parsed or its own code threw, on Node and Bun alike; a leftover `webpack` hook gets one message.
+  - On Bun, a `.env` value Bun expanded is no longer passed to the bot as a shell variable, so `start --dev` picks up edits to it.
+  - `start --dev` runs reloads one at a time, and with `bundleDependencies` no longer runs packages a previous `build` packed.
+  - Every `meocord` command prints its help after a usage error.
+- **Testing**
+  - `createMockFn`'s `mock.results` follows call order for a call that calls the mock again inside it.
+  - Without strict mocks, a mock channel without a server reads its permissions as `undefined` with a warning, where `permissionsFor()` threw.
+  - A mentioned channel or role in a mock message is a full mock of the message's server.
+  - `HandlerRegistry.messageHelp()` lists only controllers' message commands from the start.
+  - The startup warning about a handler on a class that isn't a controller covers every class the app makes, in the testing module too.
+  - Default-mode warnings stay quiet when MeoCord itself reads a mock to answer, such as a mock's `guildId` for the reply or a DM channel MeoCord sends a cooldown DM through.

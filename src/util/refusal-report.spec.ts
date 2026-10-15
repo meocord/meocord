@@ -1,5 +1,6 @@
 import { markExplained } from '@src/common/explained-error.js'
 import { handOffRefusal, refuse, reportRefusals } from '@src/util/refusal.util.js'
+import { sharedKey } from '@src/util/shared-state.util.js'
 
 describe('reportRefusals', () => {
   const monitors = () => process.listeners('uncaughtExceptionMonitor')
@@ -44,6 +45,19 @@ describe('reportRefusals', () => {
     expect(exit).not.toHaveBeenCalled()
   })
 
+  it('leaves a refusal the other build of this version handed off', async () => {
+    const { log, exit, uncaught } = watch()
+    vi.resetModules()
+    const other = await import('@src/util/refusal.util.js')
+    const error = refuse(new Error('Stats: two classes have this name'))
+    other.handOffRefusal(error)
+
+    uncaught(error)
+
+    expect(log).not.toHaveBeenCalled()
+    expect(exit).not.toHaveBeenCalled()
+  })
+
   it('exits 1 without reporting a refusal MeoCord has already explained', () => {
     const { log, exit, uncaught } = watch()
     const error = refuse(new Error('Two handlers take one command'))
@@ -72,6 +86,8 @@ describe('refuse', () => {
 
   beforeEach(() => {
     before = process.listeners('uncaughtExceptionMonitor')
+    // A process that reports no refusals yet, as one starting
+    Reflect.deleteProperty(globalThis, sharedKey('refusalReporting'))
     vi.resetModules()
   })
 
@@ -88,6 +104,19 @@ describe('refuse', () => {
 
     fresh(new Error('one'))
     fresh(new Error('two'))
+
+    expect(listeners()).toBe(count + 1)
+  })
+
+  it('starts reporting once for both builds of this version', async () => {
+    Reflect.set(globalThis, BUNDLE_ENTRY, '/bots/shop/dist/main.js')
+    const { refuse: ours } = await import('@src/util/refusal.util.js')
+    vi.resetModules()
+    const { refuse: theirs } = await import('@src/util/refusal.util.js')
+    const count = listeners()
+
+    ours(new Error('one'))
+    theirs(new Error('two'))
 
     expect(listeners()).toBe(count + 1)
   })

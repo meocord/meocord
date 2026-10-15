@@ -4,6 +4,7 @@ import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@sr
 import { themeProblems } from '@src/core/theme-validation.js'
 import { copyLayer, outsideThemeScope } from '@src/core/theme-scope.js'
 import { quoteForLog } from '@src/util/user-text.util.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** How long a resolver's result is kept, in seconds, unless `themeCache.ttlSeconds` says otherwise. */
 export const DEFAULT_THEME_TTL_SECONDS = 300
@@ -328,7 +329,8 @@ export function lookupLayers(
   return [guild, user]
 }
 
-const stores = new WeakMap<ThemeCache, ThemeResolverCaches>()
+// One per process for this meocord version, as the rest of an app's theme state is
+const stores = shared('themeCaches', () => new WeakMap<ThemeCache, ThemeResolverCaches>())
 
 /**
  * An app's cache of the themes `@MeoCord({ themeFor })` looked up, by server and by user.

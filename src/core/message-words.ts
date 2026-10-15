@@ -52,10 +52,12 @@ function quoteEnd(text: string, i: number, before: number): number {
   return end < text.length ? end : -2
 }
 
-/** A flag as a message gives it: its name, and its value, or `undefined` when given bare. */
+/** A flag as a message gives it: its name, its value, or `undefined` when given bare, and where it stands. */
 export interface GivenFlag {
   name: string
   value: string | undefined
+  /** How many of the message's other words come before it, so a pattern's own `--` word can be matched in its place. */
+  at: number
 }
 
 const isFlagNameChar = (code: number, first: boolean) =>
@@ -69,6 +71,9 @@ export interface FlagWords {
   /** Where each flag starts and ends in the text, in pairs, to leave out of a rest. */
   cuts: number[]
 }
+
+/** The words and flags a message gives a command, as its routes read them: the flags taken out of the words when it has flags. */
+export type GivenWords = Pick<FlagWords, 'words' | 'flags'>
 
 /**
  * A message's words and flags in one pass: `--name` or `--name=value`, with the value in quotes when it has
@@ -113,7 +118,7 @@ export function splitFlagWords(text: string): FlagWords {
             value = text.slice(valueStart, j)
           }
         }
-        flags.push({ name, value })
+        flags.push({ name, value, at: words.length })
         cuts.push(start, j)
         i = j
         continue
@@ -141,4 +146,45 @@ export function restFrom(text: string, start: number, cuts: readonly number[]): 
     from = cuts[c + 1]
   }
   return (rest + text.slice(from)).trimEnd()
+}
+
+/** A pattern's word as {@link literalFlags} reads it: a literal word, or a param. */
+type PatternWord = { literal: string } | { param: string; rest: boolean; optional: boolean }
+
+export const caseKey = (word: string, caseSensitive: boolean) => (caseSensitive ? word : word.toLowerCase())
+
+/** Whether a flag, given bare in place `at` among the other words, is a pattern's own `--` word `literal`. */
+export const isLiteralFlag = (flag: GivenFlag, literal: string, at: number, caseSensitive: boolean): boolean =>
+  flag.at === at && flag.value === undefined && caseKey(`--${flag.name}`, caseSensitive) === caseKey(literal, caseSensitive)
+
+/**
+ * The flags a pattern's own `--` words take from a message, as indexes into `flags`: where the pattern has such a word,
+ * a flag of that name given bare in that place among the message's other words is the word, not a flag. A word typed in
+ * quotes is matched as any word is, and is taken first.
+ */
+export function literalFlags(
+  tokens: readonly PatternWord[],
+  caseSensitive: boolean,
+  words: readonly { value: string }[],
+  flags: readonly GivenFlag[],
+): Set<number> {
+  const taken = new Set<number>()
+  if (flags.length === 0) return taken
+  let w = 0
+  for (const token of tokens) {
+    if (!('literal' in token)) {
+      // Literal words come before the optional and rest params, which a pattern ends with
+      if (token.rest || token.optional) break
+      w++
+      continue
+    }
+    if (w < words.length && caseKey(words[w].value, caseSensitive) === caseKey(token.literal, caseSensitive)) {
+      w++
+      continue
+    }
+    const index = flags.findIndex((flag, i) => !taken.has(i) && isLiteralFlag(flag, token.literal, w, caseSensitive))
+    if (index === -1) break
+    taken.add(index)
+  }
+  return taken
 }

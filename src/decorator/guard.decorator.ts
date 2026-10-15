@@ -7,7 +7,7 @@ import { wrapsMethod } from '@src/util/method-wrapper.util.js'
 import { type CheckedEntry } from '@src/decorator/stage-entry.js'
 import { assertStageEntries, defineStageTypes } from '@src/core/stage-scope.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
-import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
+import { declaring, decoratedName, deprecatedOnMethod } from '@src/util/refusal.util.js'
 
 /**
  * Adds guards to a method's class or method list, then republishes the effective list under
@@ -166,7 +166,7 @@ export function UseGuard<const T extends readonly unknown[]>(
 ): any {
   const guards = entries as unknown as GuardEntry[]
   return declaring(function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) {
-    const where = propertyKey === undefined ? String(target?.name) : `${target.constructor.name}.${String(propertyKey)}`
+    const where = decoratedName(target, propertyKey)
     assertStageEntries('@UseGuard', 'guard', where, guards)
     if (descriptor && propertyKey) {
       // Method Decorator
