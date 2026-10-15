@@ -1,6 +1,6 @@
 // Relative, and nothing else imported: the bundle's pre-entry, which is copied rather than compiled, loads this module
-import { sendToParent } from '@src/util/parent-send.util.js'
-import { isShardProcess } from '@src/util/shard-process.util.js'
+import { sendToParent } from './parent-send.util.js'
+import { isShardProcess } from './shard-process.util.js'
 
 /** Set by `meocord start --dev` on the application it runs, which it gives an IPC channel. */
 export const DEV_RUNNER_ENV = 'MEOCORD_DEV_RUNNER'
