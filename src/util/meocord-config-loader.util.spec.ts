@@ -167,6 +167,6 @@ describe('loadMeoCordConfig', () => {
 
     expect(imports).not.toContain('jiti')
     // bundle-entry imports only node:fs
-    expect(imports.filter(specifier => /^(@src\/|\.)/.test(specifier))).toEqual(['@src/interface/index.js', '@src/util/bundle-entry.util.js'])
+    expect(imports.filter(specifier => /^(@src\/|\.)/.test(specifier))).toEqual(['@src/interface/index.js', './bundle-entry.util.js'])
   })
 })

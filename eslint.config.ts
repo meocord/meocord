@@ -119,19 +119,12 @@ const BUN_ONLY = 'MeoCord runs on Node.js as well as Bun; use a Node API instead
 // Code under src imports itself through @src; a file outside src that no alias covers stays relative
 const RELATIVE_IMPORT = "Import from '@src/…', as the rest of src does."
 const RELATIVE_SPECIFIER = String.raw`^\.\.?/(?!(?:\.\./)*(?:package\.json$|meocord\.eslint\.mjs$|scripts/))`
+const BUN_IMPORTS = { group: ['bun', 'bun:*'], message: BUN_ONLY }
 const nodeCompatibleConfig = {
   files: ['src/**/*.ts'],
   rules: {
     'no-restricted-globals': ['error', { name: 'Bun', message: BUN_ONLY }],
-    'no-restricted-imports': [
-      'error',
-      {
-        patterns: [
-          { group: ['bun', 'bun:*'], message: BUN_ONLY },
-          { regex: RELATIVE_SPECIFIER, message: RELATIVE_IMPORT },
-        ],
-      },
-    ],
+    'no-restricted-imports': ['error', { patterns: [BUN_IMPORTS, { regex: RELATIVE_SPECIFIER, message: RELATIVE_IMPORT }] }],
     'no-restricted-syntax': [
       'error',
       {
@@ -139,6 +132,20 @@ const nodeCompatibleConfig = {
         message: `${BUN_ONLY} (import.meta.dirname and import.meta.filename work on both.)`,
       },
     ],
+  },
+}
+
+// The application's bundler compiles the config pre-entry and what it imports, and @src is the application's alias there
+const preEntryImportsConfig = {
+  files: [
+    'src/build/load-config.pre-entry.js',
+    'src/build/stack-remap.ts',
+    'src/util/dev-runner.util.ts',
+    'src/util/meocord-config-loader.util.ts',
+    'src/util/platform.util.ts',
+  ],
+  rules: {
+    'no-restricted-imports': ['error', { patterns: [BUN_IMPORTS] }],
   },
 }
 
@@ -151,6 +158,7 @@ export default [
   typescriptConfig,
   specConfig,
   nodeCompatibleConfig,
+  preEntryImportsConfig,
   javaScriptConfig,
   preEntryConfig,
 ]
