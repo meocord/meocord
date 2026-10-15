@@ -82,6 +82,9 @@ const autocompleteRoute = (method: string, commandPath: string, optionName: stri
   label: `autocomplete of ${optionName === undefined ? 'every option' : `"${optionName}"`} in "${commandPath}"`,
 })
 
+/** An `@On` or `@Once` handler as a warning names its route; one event per method, as a subclass replaces it. */
+export const eventRoute = ({ method, event }: EventHandlerMetadata): HandlerRoute => ({ method, label: `event "${event}"` })
+
 /** Records a route a class's own decorator declares for a method, which the startup check reads. */
 function declareRoute(target: object, declared: HandlerRoute): void {
   const routes: HandlerRoute[] = Reflect.getOwnMetadata(META.declaredRoutes, target) ?? []

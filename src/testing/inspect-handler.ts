@@ -11,6 +11,9 @@ import {
   getHandlerRoutes,
   getMessageHandlers,
   getReactionHandlers,
+  eventRoute,
+  type HandlerRoute,
+  ownEventHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { appliesTo } from '@src/core/stage-scope.js'
@@ -88,8 +91,10 @@ export interface HandlerInspection {
   readonly pattern: string | undefined
   /**
    * The routes the handler answers because a class its controller extends declares them, such as `slash "ping"`:
-   * those its own class doesn't declare for it. Empty for a handler that declares all it answers. A test reads it;
-   * `toEqual` doesn't compare it, so an assertion on the other fields holds either way.
+   * those its own class doesn't declare for it. Empty for a handler that declares all it answers. Under
+   * `useStrictMocks()` it names an inherited `@On` or `@Once` event too, such as `event "guildCreate"`; default mode
+   * leaves events out, with a warning once where it would name one. A test reads it; `toEqual` doesn't compare it, so
+   * an assertion on the other fields holds either way.
    */
   readonly inheritedRoutes: readonly string[]
   /**
@@ -228,8 +233,20 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
     getAll: (metadata: MetadataDecorator<unknown> | string | symbol) => context.getAll(metadata as string),
   }
   // Read by a test but not compared by toEqual, so an assertion on the result's other fields holds
+  const routes = Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName, false))
+  const withEvents = Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName, true))
   Object.defineProperty(inspection, 'inheritedRoutes', {
-    value: Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName)),
+    get: () => {
+      if (strictMocks()) return withEvents
+      if (withEvents.length > routes.length) {
+        warnOnce(
+          new Logger('inspectHandler'),
+          `inspectHandler() here leaves the @On and @Once events ${controller.name}.${methodName} inherits out of ` +
+            'inheritedRoutes, though the bot answers them; under useStrictMocks() it lists them.',
+        )
+      }
+      return routes
+    },
     enumerable: false,
   })
   return inspection as unknown as HandlerInspection
@@ -283,12 +300,16 @@ function runStages<T extends { guards: readonly Stage[]; interceptors: readonly 
   return all
 }
 
-/** The routes `methodName` answers that the class declaring it last doesn't declare for it: those it inherits. */
-function inheritedRoutesOf(prototype: object, methodName: string): string[] {
-  const answered = [...new Set(getHandlerRoutes(prototype).filter(route => route.method === methodName).map(route => route.label))]
+/**
+ * The routes `methodName` answers that the class declaring it last doesn't declare for it: those it inherits, its
+ * `@On` and `@Once` events among them when `events` is set.
+ */
+function inheritedRoutesOf(prototype: object, methodName: string, events: boolean): string[] {
+  const labels = (routes: readonly HandlerRoute[]) => routes.filter(route => route.method === methodName).map(route => route.label)
+  const answered = [...new Set(labels([...getHandlerRoutes(prototype), ...(events ? getEventHandlers(prototype).map(eventRoute) : [])]))]
   // The nearest class with its own decorators on the method; a class that only overrides it declares none
   for (let at: object | null = prototype; at && at !== Object.prototype; at = Object.getPrototypeOf(at) as object | null) {
-    const own = getDeclaredRoutes(at).filter(route => route.method === methodName).map(route => route.label)
+    const own = labels([...getDeclaredRoutes(at), ...(events ? ownEventHandlers(at).map(eventRoute) : [])])
     if (own.length > 0) return at === prototype ? answered.filter(label => !own.includes(label)) : answered
   }
   return []
