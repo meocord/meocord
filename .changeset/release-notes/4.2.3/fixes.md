@@ -44,6 +44,8 @@
   - On Bun, a `.env` value Bun expanded is no longer passed to the bot as a shell variable, so `start --dev` picks up edits to it.
   - `start --dev` runs reloads one at a time, and with `bundleDependencies` no longer runs packages a previous `build` packed.
   - Every `meocord` command prints its help after a usage error.
+  - A new app from `meocord create` starts on the latest stable releases of its tools that are at least a day old, such as vitest 5.0.4, eslint 10.12.0 and typescript-eslint 8.71.2; TypeScript stays at 6.0.3, the newest typescript-eslint supports.
+  - The package lists `discord-bot-framework` and `discord-framework` among its npm keywords.
 - **Testing**
   - `createMockFn`'s `mock.results` follows call order for a call that calls the mock again inside it.
   - Without strict mocks, a mock channel without a server reads its permissions as `undefined` with a warning, where `permissionsFor()` threw.
@@ -51,3 +53,10 @@
   - `HandlerRegistry.messageHelp()` lists only controllers' message commands from the start.
   - The startup warning about a handler on a class that isn't a controller covers every class the app makes, in the testing module too.
   - Default-mode warnings stay quiet when MeoCord itself reads a mock to answer, such as a mock's `guildId` for the reply or a DM channel MeoCord sends a cooldown DM through.
+- **Documentation**
+  - `Jsonified` and `ShardContext.call` say an object arrives with its own fields only: JSON leaves a class's getters out. Return a plain object, or give the class a `toJSON`.
+  - `sourceMappedStacks` says what it maps under Bun: `error.stack`, and so every trace the `Logger` prints, not what Bun prints itself.
+  - `ExecutionContext.getMessage()` says it reads an event's first argument when that is a message: for `@On('messageUpdate')`, the message as it was before the edit. A reaction event returns `undefined`.
+  - `createMockGuild()` says what the @everyone role may do in each mode: nothing by default, and a new server's permissions under `useStrictMocks()`.
+  - `MessageParamTypes`' `role` says an optional `role` param that another optional param follows takes a mention or an ID, not a role's name. Ask for a mention or an ID, or move the role param to the end.
+  - `resolveRoute`'s `dm` says dispatch answers a server-only command in a DM with "This command works in a server only." when the message used a prefix or a mention, and with nothing otherwise.
