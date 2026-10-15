@@ -7,7 +7,9 @@ import {
   getHandlerRoutes,
   getMessageHandlers,
   getReactionHandlers,
+  type HandlerRoute,
 } from '@src/decorator/controller.decorator.js'
+import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
 import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
 import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
@@ -332,11 +334,21 @@ function unasked(
   return `"${commandPath}" has no option "${optionName}"${others}. Correct the option name.`
 }
 
+/** An `@On` or `@Once` handler as the inherited-routes warning names it; one event per method, as a subclass replaces it. */
+const eventRoute = ({ method, event }: EventHandlerMetadata): HandlerRoute => ({ method, label: `event "${event}"` })
+
+/** The `@On` and `@Once` routes a class's own decorators declare, without the entries it inherits from `base`. */
+function ownEventRoutes(prototype: object, base: object): HandlerRoute[] {
+  const inherited = getEventHandlers(base)
+  const own: EventHandlerMetadata[] = Reflect.getOwnMetadata(META.eventHandlers, prototype) ?? []
+  return own.filter(entry => !inherited.includes(entry)).map(eventRoute)
+}
+
 /**
  * Warns about a handler a subclass re-declares on other routes while it still answers the ones it inherits, for
- * `@Command`, `@MessageHandler`, `@ReactionHandler` and `@Autocomplete` alike. The next major version (5.0) drops
- * the inherited routes. Every class a listed controller extends is checked, a base that is not listed included, for
- * the methods the controller still inherits through it.
+ * `@Command`, `@MessageHandler`, `@ReactionHandler`, `@Autocomplete`, `@On` and `@Once` alike. The next major version
+ * (5.0) drops the inherited routes. Every class a listed controller extends is checked, a base that is not listed
+ * included, for the methods the controller still inherits through it.
  */
 export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[]): void {
   // A set, so a class two listed controllers extend is named once, for the routes either of them still answers
@@ -346,11 +358,12 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
     // nothing of them from above it, so a class above is not named for them
     const cut = new Set<string>()
     for (let prototype = controllerClass.prototype as object | null; prototype && prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype) as object | null) {
-      const declared = getDeclaredRoutes(prototype)
       const base = Object.getPrototypeOf(prototype) as object | null
-      if (declared.length === 0 || !base) continue
+      if (!base) continue
+      const declared = [...getDeclaredRoutes(prototype), ...ownEventRoutes(prototype, base)]
+      if (declared.length === 0) continue
       if (Reflect.getOwnMetadata(META.replacesInheritedRoutes, prototype)) for (const route of declared) cut.add(route.method)
-      const inherited = getHandlerRoutes(base).filter(route => !cut.has(route.method))
+      const inherited = [...getHandlerRoutes(base), ...getEventHandlers(base).map(eventRoute)].filter(route => !cut.has(route.method))
       for (const method of new Set(declared.map(route => route.method))) {
         const own = [...new Set(declared.filter(route => route.method === method).map(route => route.label))]
         const kept = [...new Set(inherited.filter(route => route.method === method).map(route => route.label))].filter(label => !own.includes(label))
