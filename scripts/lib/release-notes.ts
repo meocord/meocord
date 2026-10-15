@@ -1,14 +1,31 @@
 /**
  * Puts a stable release's curated notes in CHANGELOG.md in place of the entry `changeset version` wrote from the
  * release's changesets, so a release that leaves prereleases reads as one story rather than every beta's changes again.
- * The notes sit in `.changeset/release-notes/<version>/`, one file per section, and are deleted once written.
+ * The notes sit in `.changeset/release-notes/<version>/`, one file per section, and are deleted once written. As they
+ * replace the changesets' entry whole, the folder's `covered.md` lists every pending changeset, and a check refuses one
+ * it leaves out, so a change can't be dropped from the notes silently.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 
+/** Where the pending changesets sit, relative to the repository root. */
+export const CHANGESET_DIR = '.changeset'
+
+/** The file in the changesets folder that is not a changeset. */
+const CHANGESET_README = 'README.md'
+
 /** Where each version's notes sit, relative to the repository root. */
-export const NOTES_DIR = path.join('.changeset', 'release-notes')
+export const NOTES_DIR = path.join(CHANGESET_DIR, 'release-notes')
+
+/**
+ * The file in a version's notes that lists the changesets they cover, one `- <file>` item each, or
+ * `- <file>: <reason>` for one that needs no line in the notes.
+ */
+export const COVERED_FILE = 'covered.md'
+
+/** A line of `covered.md`: `- <file>`, or `- <file>: <reason>`, capturing the file. */
+const COVERED_ITEM = /^- ([^\s:]+\.md)(?::[ \t]+\S.*)?$/
 
 /** The section files a version's notes may hold, in the order they're written. */
 export const SECTIONS = ['highlights', 'upgrading', 'features', 'deprecations', 'fixes', 'security'].map(name => `${name}.md`)
@@ -22,6 +39,13 @@ interface Version {
 export function parseVersion(version: string): Version | undefined {
   const match = /^(\d+\.\d+\.\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version)
   return match ? { core: match[1], prerelease: match[2] } : undefined
+}
+
+/** Whether a stable `a` is a later version than `b`, by semver precedence. */
+function isLater(a: Version, b: Version): boolean {
+  const [x, y] = [a.core, b.core].map(core => core.split('.').map(Number))
+  const differs = x.findIndex((part, index) => part !== y[index])
+  return differs >= 0 ? x[differs] > y[differs] : b.prerelease !== undefined
 }
 
 /** The versions CHANGELOG.md has an entry for, newest first. */
@@ -48,10 +72,12 @@ export function strayLines(markdown: string): string[] {
 
 /** A version's notes, its section files joined in order; throws for a file that isn't a section or that the site would cut. */
 export function readNotes(folder: string): string {
-  const files = readdirSync(folder)
+  const files = readdirSync(folder).filter(file => file !== COVERED_FILE)
   const unknown = files.filter(file => !SECTIONS.includes(file))
   if (unknown.length > 0) {
-    throw new Error(`${folder}: ${unknown.join(', ')} is not a section; name each file one of ${SECTIONS.join(', ')}.`)
+    throw new Error(
+      `${folder}: ${unknown.join(', ')} is not a section; name each file one of ${SECTIONS.join(', ')}, or ${COVERED_FILE}.`,
+    )
   }
   const sections = SECTIONS.filter(file => files.includes(file)).map(file => {
     const markdown = readFileSync(path.join(folder, file), 'utf8').trim()
@@ -66,6 +92,63 @@ export function readNotes(folder: string): string {
   })
   if (sections.length === 0) throw new Error(`${folder} holds no notes.`)
   return sections.join('\n\n')
+}
+
+/** The changeset files `covered.md` lists; throws for a line that isn't a `- <file>` item, and for a file listed twice. */
+export function readCovered(file: string): string[] {
+  const listed: string[] = []
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    if (line.trim() === '') continue
+    const item = COVERED_ITEM.exec(line)
+    if (!item) throw new Error(`${file}: "${line}" is not a "- <file>" or "- <file>: <why it needs no line>" item.`)
+    if (listed.includes(item[1])) throw new Error(`${file} lists ${item[1]} twice.`)
+    listed.push(item[1])
+  }
+  return listed
+}
+
+/** The version package.json holds, as written and as semver splits it; throws for anything that isn't a version. */
+function packageVersion(root: string): { version: string; parsed: Version } {
+  const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string }
+  const parsed = parseVersion(version)
+  if (!parsed) throw new Error(`package.json's version, "${version}", is not a version.`)
+  return { version, parsed }
+}
+
+/**
+ * Checks that the `covered.md` of each version's notes later than package.json's lists exactly the pending changesets:
+ * `writeReleaseNotes` puts the notes in place of every changeset's line, so one they leave out would be dropped. Run
+ * before `changeset version`, which deletes the changesets and moves package.json to the notes' version.
+ */
+export function checkNotesCoverChangesets(root: string): void {
+  const notesRoot = path.join(root, NOTES_DIR)
+  if (!existsSync(notesRoot)) return
+  const current = packageVersion(root).parsed
+  const pending = readdirSync(notesRoot).filter(version => {
+    const parsed = parseVersion(version)
+    if (!parsed || parsed.prerelease !== undefined) {
+      throw new Error(`${path.join(NOTES_DIR, version)} is not named for a stable version, the only kind with notes.`)
+    }
+    return isLater(parsed, current)
+  })
+  if (pending.length === 0) return
+
+  const changesets = readdirSync(path.join(root, CHANGESET_DIR))
+    .filter(file => file.endsWith('.md') && file !== CHANGESET_README)
+    .sort()
+  const problems = pending.flatMap(version => {
+    const covered = path.join(NOTES_DIR, version, COVERED_FILE)
+    const listed = existsSync(path.join(root, covered)) ? readCovered(path.join(root, covered)) : []
+    return [
+      ...changesets
+        .filter(file => !listed.includes(file))
+        .map(file => `${file} isn't in ${covered}: cover it in the notes and list it, or list it with why it needs no line.`),
+      ...listed
+        .filter(file => !changesets.includes(file))
+        .map(file => `${covered} lists ${file}, which is not a pending changeset: remove it.`),
+    ]
+  })
+  if (problems.length > 0) throw new Error(problems.join('\n'))
 }
 
 /** `changelog` with the body of `version`'s entry replaced by `notes`. */
@@ -86,9 +169,7 @@ export function replaceEntry(changelog: string, version: string, notes: string):
  * @returns Whether notes were written.
  */
 export function writeReleaseNotes(root: string): boolean {
-  const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string }
-  const parsed = parseVersion(version)
-  if (!parsed) throw new Error(`package.json's version, "${version}", is not a version.`)
+  const { version, parsed } = packageVersion(root)
   if (parsed.prerelease !== undefined) return false
 
   const changelogPath = path.join(root, 'CHANGELOG.md')
