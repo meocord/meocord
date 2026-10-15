@@ -17,7 +17,7 @@ import {
 } from 'discord.js'
 import { existingResponse, type ResponseCall, type ResponsePhase } from '@src/common/response/response-state.js'
 import { callOrder } from '@src/common/response/call-order.js'
-import { RESPONSE_LOG } from './mock-interaction.js'
+import { RESPONSE_LOG } from '@src/testing/response-log.js'
 
 /**
  * How an interaction was answered, as {@link getResponse} reports it.
