@@ -6,8 +6,8 @@ import { Autocomplete, Command, Controller, Guard, Interceptor, MeoCord, Message
 import { CommandType } from '@src/enum/index.js'
 import { type CallHandler, type DispatchObserver, type GuardInterface, type InterceptorInterface } from '@src/interface/index.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
-import { inspectHandler } from './index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { inspectHandler } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

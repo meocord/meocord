@@ -3,8 +3,8 @@ import { ButtonInteraction, ChatInputCommandInteraction, PermissionFlagsBits, Te
 import { type Mock, vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockChannel, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from './mock-interaction.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockChannel, createMockGuild, createMockInteraction, createMockMessage, createMockUser } from '@src/testing/mock-interaction.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 beforeEach(() => {
   forgetStrictMocks()

@@ -3,9 +3,9 @@ import { ChannelType, ChatInputCommandInteraction } from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import { Cooldown, Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
-import { createMockClient, createMockGuild, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from './index.js'
+import { createMockClient, createMockGuild, createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 let warned: string[]
 beforeEach(() => {

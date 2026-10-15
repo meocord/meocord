@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { ChatInputCommandInteraction, DMChannel, GuildMember, PermissionFlagsBits, PermissionsBitField, Role, User } from 'discord.js'
-import { createMockGuild, createMockInteraction, createMockMember, createMockMessage, createMockUser } from './mock-interaction.js'
+import { createMockGuild, createMockInteraction, createMockMember, createMockMessage, createMockUser } from '@src/testing/mock-interaction.js'
 
 const role = (permissions: bigint[] = [], position = 0) => createMockInteraction(Role, { permissions: new PermissionsBitField(permissions), position })
 

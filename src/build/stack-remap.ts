@@ -3,7 +3,7 @@ import path from 'node:path'
 import { types } from 'node:util'
 import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
 // Relative: the pre-entry that imports this file is bundled from its source, where no alias resolves
-import { comparablePath, framePath } from '../util/source-path.util.js'
+import { comparablePath, framePath } from '@src/util/source-path.util.js'
 
 type PrepareStackTrace = (error: Error, sites: NodeJS.CallSite[]) => unknown
 

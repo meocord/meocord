@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it, vi } from 'vitest'
-import { type MockFnFactory, useMockFn } from './mock-fn.js'
+import { type MockFnFactory, useMockFn } from '@src/testing/mock-fn.js'
 
 describe('useMockFn', () => {
   it("takes Vitest's vi.fn", () => {

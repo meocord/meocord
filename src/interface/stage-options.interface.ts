@@ -1,6 +1,6 @@
 import { type ExecutionContextType } from '@src/common/execution-context.js'
-import { type PipeInterface } from './index.js'
-import { type InferSchemaOutput, type StandardSchemaV1 } from './standard-schema.interface.js'
+import { type PipeInterface } from '@src/interface/index.js'
+import { type InferSchemaOutput, type StandardSchemaV1 } from '@src/interface/standard-schema.interface.js'
 
 /**
  * What `@Guard` takes: the context types the guard runs for.

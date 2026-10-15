@@ -5,9 +5,9 @@ import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { Autocomplete, Command, Controller } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { createChatInputOptions, createMockChannel, createMockInteraction, createMockMember, createMockUser } from './mock-interaction.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createChatInputOptions, createMockChannel, createMockInteraction, createMockMember, createMockUser } from '@src/testing/mock-interaction.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 // Discord sends an autocomplete's options unresolved: an entity option is its id, and discord.js's getters find nothing.
 

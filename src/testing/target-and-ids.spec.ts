@@ -15,9 +15,9 @@ import {
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockChannel, createMockClient, createMockGuild, createMockInteraction, createMockMessage } from './mock-interaction.js'
-import { createModalFields } from './modal-fields.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockChannel, createMockClient, createMockGuild, createMockInteraction, createMockMessage } from '@src/testing/mock-interaction.js'
+import { createModalFields } from '@src/testing/modal-fields.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 const NOW = Date.parse('2027-03-04T05:06:07.000Z')
 const snowflake = /^\d{17,20}$/

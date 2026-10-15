@@ -13,7 +13,7 @@ import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { Autocomplete, Command, Controller } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { createMockInteraction, createMockMessage, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

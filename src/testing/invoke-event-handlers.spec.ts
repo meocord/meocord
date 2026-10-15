@@ -15,8 +15,8 @@ import { Logger } from '@src/common/logger.js'
 import { createTranslator, defineCatalog, ExecutionContext } from '@src/common/index.js'
 import { translatorOfClient } from '@src/common/meocord-text.js'
 import { Controller, Guard, MeoCord, MessageHandler, On, Once, UseGuard } from '@src/decorator/index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockInteraction, createMockMessage, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 const seen: string[] = []
 

@@ -19,7 +19,7 @@ import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import { appliesTo } from '@src/core/stage-scope.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce } from '@src/common/deprecation.js'
-import { strictMocks } from './strict-mocks.js'
+import { strictMocks } from '@src/testing/strict-mocks.js'
 import { appObservers } from '@src/core/observer-runner.js'
 import { type CooldownScope } from '@src/common/errors.js'
 

@@ -2,9 +2,9 @@ import 'reflect-metadata'
 import { types } from 'node:util'
 import { vi, type Mock as VitestMock } from 'vitest'
 import { ButtonInteraction } from 'discord.js'
-import { clearAllMocks, createMockFn, forgetMockFn, resetAllMocks, useMockFn } from './mock-fn.js'
-import { createMock, createMockInteraction } from './mock-interaction.js'
-import { createDiscordError, getResponse } from './response.js'
+import { clearAllMocks, createMockFn, forgetMockFn, resetAllMocks, useMockFn } from '@src/testing/mock-fn.js'
+import { createMock, createMockInteraction } from '@src/testing/mock-interaction.js'
+import { createDiscordError, getResponse } from '@src/testing/response.js'
 
 // As jest's and bun's mocks do, a reset drops the implementation the mock was created with
 const droppingOnReset = (impl?: (...args: any[]) => any) => {

@@ -6,7 +6,7 @@ import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { respond } from '@src/common/index.js'
 import { Command, Controller } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { createMockGuild, createMockInteraction, MeoCordTestingModule } from './index.js'
+import { createMockGuild, createMockInteraction, MeoCordTestingModule } from '@src/testing/index.js'
 
 let warned: string[]
 beforeEach(() => {

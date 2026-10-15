@@ -5,8 +5,8 @@ import { CommandType, ReactionHandlerAction } from '@src/enum/index.js'
 import { type CallHandler, type GuardInterface, type InterceptorInterface } from '@src/interface/index.js'
 import { type ReactionEvent } from '@src/interface/index.js'
 import { Logger } from '@src/common/logger.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMock, createMockUser, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMock, createMockUser, MeoCordTestingModule } from '@src/testing/index.js'
 
 const starred: string[] = []
 

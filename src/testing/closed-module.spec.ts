@@ -2,7 +2,7 @@ import { ChatInputCommandInteraction, type GuildMember } from 'discord.js'
 import { Command, Controller, On } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { Logger } from '@src/common/logger.js'
-import { createMock, createMockInteraction, MeoCordTestingModule, type TestingModule } from './index.js'
+import { createMock, createMockInteraction, MeoCordTestingModule, type TestingModule } from '@src/testing/index.js'
 
 @Controller()
 class Ping {

@@ -3,8 +3,8 @@ import { ButtonInteraction, ChatInputCommandInteraction, DMChannel, TextChannel 
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockChannel, createMockGuild, createMockInteraction, createMockMember, createMockMessage } from './mock-interaction.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockChannel, createMockGuild, createMockInteraction, createMockMember, createMockMessage } from '@src/testing/mock-interaction.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

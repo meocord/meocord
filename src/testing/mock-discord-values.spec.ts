@@ -24,9 +24,9 @@ import {
   createMockMember,
   createMockMessage,
   createMockUser,
-} from './mock-interaction.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+} from '@src/testing/mock-interaction.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

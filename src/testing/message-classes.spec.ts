@@ -13,7 +13,7 @@ import {
   StringSelectMenuComponent,
   TextDisplayComponent,
 } from 'discord.js'
-import { createMockInteraction, createMockMessage } from './mock-interaction.js'
+import { createMockInteraction, createMockMessage } from '@src/testing/mock-interaction.js'
 
 const row = () => new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('b').setLabel('B').setStyle(ButtonStyle.Primary))
 const ROW_JSON = { type: ComponentType.ActionRow, components: [{ type: ComponentType.StringSelect, custom_id: 'pick', options: [{ label: 'A', value: 'a' }] }] }

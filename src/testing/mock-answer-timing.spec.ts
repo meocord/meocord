@@ -7,7 +7,7 @@ import { Command, Controller, Guard, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { createMockInteraction, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

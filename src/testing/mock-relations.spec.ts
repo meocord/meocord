@@ -8,7 +8,7 @@ import {
   createMockMember,
   createMockMessage,
   createMockUser,
-} from './mock-interaction.js'
+} from '@src/testing/mock-interaction.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 

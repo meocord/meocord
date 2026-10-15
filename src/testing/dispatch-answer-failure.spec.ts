@@ -7,8 +7,8 @@ import { GuardDeniedError, UserError } from '@src/common/index.js'
 import { Command, Controller, Guard, MeoCord, MessageHandler, Observer, UseGuard } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type DispatchResult, type PresentedError, type ResponsePresenter } from '@src/interface/index.js'
-import { createMockInteraction, createMockMessage, MeoCordTestingModule } from './index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockInteraction, createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 const heard: { outcome: string; deniedBy?: string; error?: string }[] = []
 let logged: string[]

@@ -1435,9 +1435,9 @@ export interface CommandBuilderOptions {
 }
 
 export type { CooldownOptions, CooldownStoreFailure } from '@src/core/cooldown-runner.js'
-export type { DispatchObserver, DispatchOutcome, DispatchResult } from './observer.interface.js'
-export type { StageParams } from './stage-params.interface.js'
-export type { GuardOptions, InterceptorOptions, ObserverOptions, ValidateOptions, ValidatePipes } from './stage-options.interface.js'
+export type { DispatchObserver, DispatchOutcome, DispatchResult } from '@src/interface/observer.interface.js'
+export type { StageParams } from '@src/interface/stage-params.interface.js'
+export type { GuardOptions, InterceptorOptions, ObserverOptions, ValidateOptions, ValidatePipes } from '@src/interface/stage-options.interface.js'
 export type {
   InferSchemaOutput,
   PIPED_BRAND,
@@ -1446,7 +1446,7 @@ export type {
   StandardSchemaV1Issue,
   StandardSchemaV1Props,
   StandardSchemaV1Result,
-} from './standard-schema.interface.js'
+} from '@src/interface/standard-schema.interface.js'
 export type {
   AutocompleteMetadata,
   BuildableCommandType,
@@ -1456,7 +1456,7 @@ export type {
   CommandInteractionType,
   CommandMetadata,
   PrimaryEntryPointCommandData,
-} from './command-decorator.interface.js'
+} from '@src/interface/command-decorator.interface.js'
 export type {
   ClassProvider,
   FactoryProvider,
@@ -1480,4 +1480,4 @@ export type {
   ThemeResolver,
   ThemeResolvers,
   UserThemeTarget,
-} from './theme.interface.js'
+} from '@src/interface/theme.interface.js'

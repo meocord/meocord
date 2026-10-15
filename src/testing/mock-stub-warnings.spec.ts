@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { DMChannel, GuildMember, TextChannel, ThreadChannel, VoiceChannel } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { createMockChannel, createMockInteraction, createMockMessage } from './mock-interaction.js'
+import { createMockChannel, createMockInteraction, createMockMessage } from '@src/testing/mock-interaction.js'
 
 let warned: string[]
 beforeEach(() => {

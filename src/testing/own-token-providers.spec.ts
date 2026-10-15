@@ -11,8 +11,8 @@ import { ShardContext } from '@src/core/shard-context.js'
 import { ThemeCache } from '@src/core/theme-resolvers.js'
 import { Command, Controller, MeoCord } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { createMockInteraction, MeoCordTestingModule } from './index.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
+import { createMockInteraction, MeoCordTestingModule } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 let warned: string[]
 beforeEach(() => {

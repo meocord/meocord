@@ -1,8 +1,8 @@
 import { AutocompleteInteraction } from 'discord.js'
 import { Autocomplete, Controller } from '@src/decorator/index.js'
 import { Logger } from '@src/common/logger.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createChatInputOptions, createMockInteraction, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createChatInputOptions, createMockInteraction, MeoCordTestingModule } from '@src/testing/index.js'
 
 const ran: string[] = []
 

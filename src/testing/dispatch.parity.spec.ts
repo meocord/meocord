@@ -3,8 +3,8 @@ import { vi } from 'vitest'
 import { Client, type GuildMember, type Message } from 'discord.js'
 import { Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
-import { MeoCordTestingModule } from './meocord-testing-module.js'
-import { createMockClient, createMockGuild, createMockMessage } from './mock-interaction.js'
+import { MeoCordTestingModule } from '@src/testing/meocord-testing-module.js'
+import { createMockClient, createMockGuild, createMockMessage } from '@src/testing/mock-interaction.js'
 
 vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: () => ({ discordToken: 'token' }) }))
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))

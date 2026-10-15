@@ -116,11 +116,22 @@ const specConfig = {
 // The shipped code runs on whichever runtime the application picks, so it uses no Bun-only API;
 // Bun remains the repository's own tooling, in scripts/ and package.json.
 const BUN_ONLY = 'MeoCord runs on Node.js as well as Bun; use a Node API instead.'
+// Code under src imports itself through @src; a file outside src that no alias covers stays relative
+const RELATIVE_IMPORT = "Import from '@src/…', as the rest of src does."
+const RELATIVE_SPECIFIER = String.raw`^\.\.?/(?!(?:\.\./)*(?:package\.json$|meocord\.eslint\.mjs$|scripts/))`
 const nodeCompatibleConfig = {
   files: ['src/**/*.ts'],
   rules: {
     'no-restricted-globals': ['error', { name: 'Bun', message: BUN_ONLY }],
-    'no-restricted-imports': ['error', { patterns: [{ group: ['bun', 'bun:*'], message: BUN_ONLY }] }],
+    'no-restricted-imports': [
+      'error',
+      {
+        patterns: [
+          { group: ['bun', 'bun:*'], message: BUN_ONLY },
+          { regex: RELATIVE_SPECIFIER, message: RELATIVE_IMPORT },
+        ],
+      },
+    ],
     'no-restricted-syntax': [
       'error',
       {

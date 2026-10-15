@@ -1,8 +1,8 @@
 import { type Message } from 'discord.js'
 import { Controller, MessageHandler } from '@src/decorator/index.js'
 import { Logger } from '@src/common/logger.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockMessage, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockMessage, MeoCordTestingModule } from '@src/testing/index.js'
 
 const received: string[] = []
 

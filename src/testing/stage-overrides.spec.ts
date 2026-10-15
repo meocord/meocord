@@ -4,8 +4,8 @@ import { CommandType } from '@src/enum/index.js'
 import { type CallHandler, type ExceptionFilter, type GuardInterface, type InterceptorInterface } from '@src/interface/index.js'
 import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
-import { forgetStrictMocks, useStrictMocks } from './strict-mocks.js'
-import { createMockInteraction, MeoCordTestingModule } from './index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { createMockInteraction, MeoCordTestingModule } from '@src/testing/index.js'
 
 const ran: string[] = []
 
