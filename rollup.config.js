@@ -83,10 +83,19 @@ const external = id => {
   return true
 }
 
-/** Suppress expected warnings for type-only barrel files, and fail on a public type no entry exports */
+const sourceRoot = path.resolve(__dirname, 'src') + path.sep
+
+/**
+ * Suppress expected warnings for type-only barrel files, and fail on a public type no entry exports and on a circular
+ * import among MeoCord's own files
+ */
 const onwarn = (warning, warn) => {
   if (warning.code === 'EMPTY_BUNDLE' && warning.message.includes('interface/index')) {
     return // Type-only files produce empty bundles by design
+  }
+  // A binding read as one module loads would be uninitialised in whichever bundle evaluates the cycle in the other order
+  if (warning.code === 'CIRCULAR_DEPENDENCY' && warning.ids?.every(id => id.startsWith(sourceRoot))) {
+    throw new Error(warning.message)
   }
   // Consumers would get TS2742 naming a hashed chunk, where the type needs an entry to export it
   if (warning.message.includes('private shared type exports with no public re-export')) {
