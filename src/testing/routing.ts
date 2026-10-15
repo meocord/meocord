@@ -47,13 +47,14 @@ export interface MessageToResolve {
   botId?: string
   /**
    * Whether the message is a direct message, where `mention: 'only'` does not apply, and a handler that works only in
-   * a server, by its scope or a `member`, `role` or `channel` param in its pattern, is not reached, as dispatch answers
-   * it "This command works in a server only." and never runs it. Under `useStrictMocks()` a handler with a required
-   * flag of those types, or one the message gives, is not reached either, as dispatch answers it the same way; default
-   * mode resolves it, with a warning. Without it, a mention alone starts what it starts in a server, and a handler of
-   * any scope may answer, with a warning where one that works only in a DM does. Under `useStrictMocks()`, the message
-   * is read as sent in a server, as dispatch reads one: such a handler is passed over for one that works there, or
-   * resolves to `undefined`.
+   * a server, by its scope or a `member`, `role` or `channel` param in its pattern, is not reached, as dispatch never
+   * runs it: it answers "This command works in a server only." to a message sent with a prefix or a mention, and
+   * nothing to one without, which may be chat. Under `useStrictMocks()` a handler with a required flag of those types,
+   * or one the message gives, is not reached either, as dispatch refuses it the same way; default mode resolves it,
+   * with a warning. Without it, a mention alone starts what it starts in a server, and a handler of any scope may
+   * answer, with a warning where one that works only in a DM does. Under `useStrictMocks()`, the message is read as
+   * sent in a server, as dispatch reads one: such a handler is passed over for one that works there, or resolves to
+   * `undefined`.
    */
   dm?: boolean
 }
@@ -214,7 +215,7 @@ export function resolveRoute(
     }
     if (!matched) return undefined
     const { route, params } = matched
-    // Dispatch answers a route that does not work in a DM "This command works in a server only.", and never runs it
+    // Dispatch never runs a route that does not work in a DM; one sent with a prefix or mention is told it works in a server only
     if (starts.inGuild === false && (!fitsScope(route.scope, false) || takesGuildParam(route))) return undefined
     // Nor one with a required flag only a server has, or given one: refused under strict mocks, warned about otherwise
     if (starts.inGuild === false && (needsGuild(route) || givesGuildFlag(route, params))) {
