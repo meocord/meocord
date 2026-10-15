@@ -196,6 +196,8 @@
     "discord.js",
     "typescript",
     "bot-framework",
+    "discord-bot-framework",
+    "discord-framework",
     "decorator",
     "dependency-injection",
     "inversify",
