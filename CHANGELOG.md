@@ -120,7 +120,7 @@
   - `Jsonified` and `ShardContext.call` say an object arrives with its own fields only: JSON leaves a class's getters out. Return a plain object, or give the class a `toJSON`.
   - `sourceMappedStacks` says what it maps under Bun: `error.stack`, and so every trace the `Logger` prints, not what Bun prints itself.
   - `ExecutionContext.getMessage()` says it reads an event's first argument when that is a message: for `@On('messageUpdate')`, the message as it was before the edit. A reaction event returns `undefined`.
-  - `createMockGuild()` says what the @everyone role may do in each mode: nothing by default, and a new server's permissions under `useStrictMocks()`.
+  - `createMockGuild()` says what the `@everyone` role may do in each mode: nothing by default, and a new server's permissions under `useStrictMocks()`.
   - `MessageParamTypes`' `role` says an optional `role` param that another optional param follows takes a mention or an ID, not a role's name. Ask for a mention or an ID, or move the role param to the end.
   - `resolveRoute`'s `dm` says dispatch answers a server-only command in a DM with "This command works in a server only." when the message used a prefix or a mention, and with nothing otherwise.
 
