@@ -27,6 +27,12 @@ export const COVERED_FILE = 'covered.md'
 /** A line of `covered.md`: `- <file>`, or `- <file>: <reason>`, capturing the file. */
 const COVERED_ITEM = /^- ([^\s:]+\.md)(?::[ \t]+\S.*)?$/
 
+/** Where GitHub reads no mention in a line: a code span, a link's target, and a bare URL. */
+const NOT_PROSE = /(`+).*?\1|\]\([^)]*\)|https?:\/\/\S+/g
+
+/** What GitHub turns into a mention of a user: `@` and a username, unless a word character comes first, as in `a@b.c`. */
+const MENTION = /(?<!\w)@[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?/g
+
 /** The section files a version's notes may hold, in the order they're written. */
 export const SECTIONS = ['highlights', 'upgrading', 'features', 'deprecations', 'fixes', 'security'].map(name => `${name}.md`)
 
@@ -70,6 +76,13 @@ export function strayLines(markdown: string): string[] {
   return stray
 }
 
+/** Each word in `markdown` that GitHub would turn into a mention of a user, with its line number. */
+function mentions(markdown: string): { line: number; word: string }[] {
+  return markdown
+    .split('\n')
+    .flatMap((text, index) => [...text.replace(NOT_PROSE, ' ').matchAll(MENTION)].map(([word]) => ({ line: index + 1, word })))
+}
+
 /** A version's notes, its section files joined in order; throws for a file that isn't a section or that the site would cut. */
 export function readNotes(folder: string): string {
   const files = readdirSync(folder).filter(file => file !== COVERED_FILE)
@@ -80,7 +93,16 @@ export function readNotes(folder: string): string {
     )
   }
   const sections = SECTIONS.filter(file => files.includes(file)).map(file => {
-    const markdown = readFileSync(path.join(folder, file), 'utf8').trim()
+    const raw = readFileSync(path.join(folder, file), 'utf8')
+    // A release's notes become its GitHub release, which lists each user they mention among its contributors
+    const mentioned = mentions(raw)
+    if (mentioned.length > 0) {
+      throw new Error(
+        `${path.join(folder, file)} has words GitHub turns into a mention of a user; write each in backticks:\n` +
+          mentioned.map(({ line, word }) => `  line ${line}: ${word}`).join('\n'),
+      )
+    }
+    const markdown = raw.trim()
     const stray = strayLines(markdown)
     if (stray.length > 0) {
       throw new Error(
