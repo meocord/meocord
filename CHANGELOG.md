@@ -184,7 +184,7 @@
   - **A service listed by a string or symbol token** that no provider provides is refused as the app is created, naming the token.
   - **Stage entries** given to `@UseGuard`, `@UseInterceptor`, `@UseFilter`, `@UsePipe` and `@MeoCord({ guards, interceptors, filters })` refuse an arrow function, a method, an async function or a generator function: "a function is not a class". A `function` declaration still works as a class.
   - **`@Catch`** warns about an arrow function, as it already does for any other value that isn't a class, and treats it as matching no error. Before this fix, every call whose error reached that filter rejected with a `TypeError` from `instanceof`. A bound error class still matches.
-  - **A testing module** refuses a controller or an observer that isn't a class, and reports the refusal together with the other startup errors. After `reportAllStartupErrors()`, `fromApp()` on an app whose `@MeoCord` was refused throws the reason, not "is not a @MeoCord app".
+  - **A testing module** refuses a controller or an observer that isn't a class, and reports the refusal together with the other startup errors. After `reportAllStartupErrors()`, `fromApp()` on an app whose `@MeoCord` was refused throws the reason, not "is not a `@MeoCord` app".
 
   A bot that started before starts unchanged.
 
@@ -343,7 +343,7 @@
   - a thread takes its parent's overwrites;
   - a raw member's permissions are kept as given.
 
-  In default mode `memberPermissions` is still the member's own permissions. Where strict mocks would read otherwise, because of the channel's overwrites or an Administrator's or owner's every permission, reading it warns once, naming the permissions strict mocks read without or with. It, and `appPermissions`, also warn once where the server's @everyone role has no permissions set, since strict mocks give @everyone the permissions Discord gives it in a new server; set `guild.roles.everyone.permissions` to read the same in both modes. The next major version (5.0) applies the overwrites without the call.
+  In default mode `memberPermissions` is still the member's own permissions. Where strict mocks would read otherwise, because of the channel's overwrites or an Administrator's or owner's every permission, reading it warns once, naming the permissions strict mocks read without or with. It, and `appPermissions`, also warn once where the server's `@everyone` role has no permissions set, since strict mocks give `@everyone` the permissions Discord gives it in a new server; set `guild.roles.everyone.permissions` to read the same in both modes. The next major version (5.0) applies the overwrites without the call.
 
 - [#613](https://github.com/meocord/meocord/pull/613) [`6f54ab0`](https://github.com/meocord/meocord/commit/6f54ab0cacbb3b7cd7926feadf8f42a18874bd51) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A mock message's `components` and `embeds` are discord.js's classes, as a real message holds them. `createMockMessage({ components, embeds })`, and the messages `editReply()` and `fetchReply()` return, used to keep each one as a bare `{ toJSON }`, so `message.components[0].type` and `message.embeds[0].title` read `undefined`.
 
@@ -517,7 +517,7 @@
   To give those values what Discord would, strict mocks:
 
   - cache the bot's member in its server from the start;
-  - give @everyone the permissions Discord gives it in a new server;
+  - give `@everyone` the permissions Discord gives it in a new server;
   - give a channel or thread made without a server one of its own.
 
   So a default message from another user is not `editable` or `deletable`, and a member is not `kickable` until the bot's member has a role above theirs with the permission. A value a test sets on a mock still wins. The next major version (5.0) computes these values by default. See https://meocord.dev/docs/4.2/mocks.
@@ -566,7 +566,7 @@
 
 - [#430](https://github.com/meocord/meocord/pull/430) [`1d0c0cf`](https://github.com/meocord/meocord/commit/1d0c0cf7d9755e5d24a0f218809a2f95fe403ccc) Thanks [@l7aromeo](https://github.com/l7aromeo)! - Mocks from `meocord/testing` now compute what discord.js computes from them, where they returned `undefined` or a placeholder object:
 
-  - **Lookups:** a manager's `resolve()` and `resolveId()` read its cache, so `guild.members.resolve(id)` finds a member given to `createMockGuild`. `guild.members.me` is the bot's member, the cached one or one with @everyone. A guild's roles and channels, and the guilds of a client's messages and interactions, belong where discord.js puts them, and everything in a guild shares its client.
+  - **Lookups:** a manager's `resolve()` and `resolveId()` read its cache, so `guild.members.resolve(id)` finds a member given to `createMockGuild`. `guild.members.me` is the bot's member, the cached one or one with `@everyone`. A guild's roles and channels, and the guilds of a client's messages and interactions, belong where discord.js puts them, and everything in a guild shares its client.
   - **Ranking and permissions:** `role.comparePositionTo()`, `channel.permissionsFor()`, `member.permissionsIn()` and an interaction's `appPermissions` compute from the roles, the channel's `permissionOverwrites` and the bot's member. Being real, they keep working after `resetAllMocks()`.
   - **Messages:** `message.member` reads the guild's member cache, so a test that removes the author's member there gets `null`, as discord.js gives for an author it hasn't cached. A default message now caches its author and the author's member, as Discord's message event does. `message.mentions.has(user)` answers from what the content mentions.
   - **Defaults:** a role is not hoisted, managed or mentionable, with no icon, tags or colours. A member's `joinedTimestamp` is when the mock was made, so `partial` is `false`. A message has no `reference`, `poll` or stickers. `avatarURL()` and `iconURL()` are `null` without an avatar or icon, `displayAvatarURL()` is Discord's default avatar, and a mock client `isReady()`.
@@ -628,7 +628,7 @@
 
 - **Mocks have distinct snowflake ids.** Pass `{ user: first.user }` to share a user. A mock without `guildId` is a DM, a given channel sets `channelId`, `guildId` and `guild`, and a member given to `createChatInputOptions` fills a `User` param with the `User`, where 4.0 passed the `GuildMember` ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
 - **Handler arguments are type-checked.** Select menu choices and plain-string customId params that never matched now fail to compile ([guide](https://meocord.dev/docs/4.1/migrating#smaller-changes)).
-- **Changed messages.** Load-time refusals start with `Class.method:`, and a `@Command` given the wrong interaction names the handler, not "Invalid interaction type passed to @Command". A modal mock's `isFromMessage()` needs a `message`, and autocomplete `respond()` rejects over 25 choices.
+- **Changed messages.** Load-time refusals start with `Class.method:`, and a `@Command` given the wrong interaction names the handler, not "Invalid interaction type passed to `@Command`". A modal mock's `isFromMessage()` needs a `message`, and autocomplete `respond()` rejects over 25 choices.
 - **Option mocks resolve as Discord's.** `getMember()` returns the member, `null` in a DM. A getter of another type, `getInteger()` on a fraction (use `getNumber()`), `getChannel()` on a channel type the option doesn't allow, or `getSubcommand()` with no subcommand throws discord.js's error, where 4.0's mock returned `null` (`getSubcommand(false)` reads none as `null`); only a user or member read as a role, or the reverse, stays `null`.
 - **Load `.env` in tests yourself,** in the vitest setup or with `dotenv`, if a suite relied on an earlier build for it.
 
@@ -952,9 +952,9 @@
 
 - [#291](https://github.com/meocord/meocord/pull/291) [`836e026`](https://github.com/meocord/meocord/commit/836e02680218d9374f6aa75feed3cf85d761f522) Thanks [@l7aromeo](https://github.com/l7aromeo)! - `meocord/testing` adds `createMockMember({ user, guild, roles, nickname })`, and its mock users and members answer as discord.js does.
 
-  - `createMockMember()` makes a member with the roles given. `roles.cache` holds the server's @everyone role, then those roles; `roles.add()`, `remove()` and `set()` change them and resolve to the member; `roles.highest` is the role that ranks highest, by position, then the lower id. `permissions` are its roles' permissions combined, @everyone's included, or every permission for the server's owner. Pass the member to `createMockGuild({ members })`, and an interaction or a message from its user in that server has it as its `member`. See [Mocks](https://meocord.dev/docs/4.1/mocks).
-  - Every mock member has a `roles` manager and `permissions`, with only @everyone unless given roles (for an interaction with a `guildId` but no `guild`, an @everyone with that id), instead of stubs that threw on `roles.cache.has()` or `permissions.has()`. A mock role has an id, `position` 1, above @everyone, and no permissions unless given.
-  - A mock guild has an @everyone role, `roles.everyone`, in `roles.cache`: the role given to `createMockGuild({ roles })` with the guild's id, or one at position 0 with no permissions. A guild's `roles.cache` therefore holds one more role than the roles given, unless one of them has the guild's id.
+  - `createMockMember()` makes a member with the roles given. `roles.cache` holds the server's `@everyone` role, then those roles; `roles.add()`, `remove()` and `set()` change them and resolve to the member; `roles.highest` is the role that ranks highest, by position, then the lower id. `permissions` are its roles' permissions combined, `@everyone`'s included, or every permission for the server's owner. Pass the member to `createMockGuild({ members })`, and an interaction or a message from its user in that server has it as its `member`. See [Mocks](https://meocord.dev/docs/4.1/mocks).
+  - Every mock member has a `roles` manager and `permissions`, with only `@everyone` unless given roles (for an interaction with a `guildId` but no `guild`, an `@everyone` with that id), instead of stubs that threw on `roles.cache.has()` or `permissions.has()`. A mock role has an id, `position` 1, above `@everyone`, and no permissions unless given.
+  - A mock guild has an `@everyone` role, `roles.everyone`, in `roles.cache`: the role given to `createMockGuild({ roles })` with the guild's id, or one at position 0 with no permissions. A guild's `roles.cache` therefore holds one more role than the roles given, unless one of them has the guild's id.
   - An interaction in a server has the member's permissions as `memberPermissions`, and `null` in a DM, instead of a stub whose `has()` threw.
   - Every mock user is a person, `bot: false`, however it is made. `createMockInteraction(User)` gave a truthy `bot`, so a message from that user reached no handler.
   - A DM sent to a member goes through its user's `send()`, and a user's through its one DM channel, so `user.send`, `member.send` and `(await user.createDM()).send` each see it. `createDM()` resolves to that channel; it returned `undefined`.
