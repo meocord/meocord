@@ -99,6 +99,18 @@ describe('writeReleaseNotes', () => {
     expect(changelog()).toBe(before)
   })
 
+  it('refuses a word GitHub turns into a mention, naming its line, and takes one in code, a link target, a URL or an address', () => {
+    const folder = notes('4.1.0', {
+      'fixes.md':
+        '### Fixes\n\n- `@On` and `@everyone` read as code.\n' +
+        '- [The page](https://github.com/@foo), [its copy](/users/@foo), https://example.com/@bar and a@b.c mention no one.\n',
+    })
+    expect(readNotes(folder)).toContain('`@everyone`')
+
+    writeFileSync(path.join(folder, 'fixes.md'), '### Fixes\n\n- What the @everyone role may do.\n')
+    expect(() => readNotes(folder)).toThrow(/fixes\.md has words GitHub turns into a mention[^]*  line 3: @everyone$/)
+  })
+
   it('refuses a file that is not a section, and a folder with none', () => {
     const folder = notes('4.1.0', { 'highlight.md': '### Highlights\n\n- Message commands.\n' })
     expect(() => readNotes(folder)).toThrow('highlight.md is not a section')
