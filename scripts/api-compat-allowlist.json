@@ -1,3 +1,1 @@
-{
-  "decorator MeoCordOptions.controllers": "Narrowed from ServiceIdentifier[] to classes, abstract ones included: the only values it no longer accepts are strings and symbols, which @MeoCord refuses as it decorates the app (\"@MeoCord({ controllers }) takes classes, not …\"), whatever the providers bind, so no bot that runs today is affected."
-}
+{}
