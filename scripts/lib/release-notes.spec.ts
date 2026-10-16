@@ -111,6 +111,21 @@ describe('writeReleaseNotes', () => {
     expect(() => readNotes(folder)).toThrow(/fixes\.md has words GitHub turns into a mention[^]*  line 3: @everyone$/)
   })
 
+  it('takes a mention in a fenced code block, and refuses one after the fence closes', () => {
+    // Each block holds a shorter run of its own fence, then a longer run of the other's, neither of which closes it
+    const blocks = [
+      '### Upgrading\n',
+      '- Name the commands:',
+      '  ````ts\n  ```\n  @Command(\'ping\')\n  ````',
+      '  ~~~ts\n  ````\n  @Command(\'pong\')\n  ~~~\n',
+    ].join('\n')
+    const folder = notes('4.1.0', { 'upgrading.md': blocks })
+    expect(readNotes(folder)).toContain("@Command('pong')")
+
+    writeFileSync(path.join(folder, 'upgrading.md'), blocks + '- Then @Command runs.\n')
+    expect(() => readNotes(folder)).toThrow(/upgrading\.md has words GitHub turns into a mention[^]*:\n  line 12: @Command$/)
+  })
+
   it('refuses a file that is not a section, and a folder with none', () => {
     const folder = notes('4.1.0', { 'highlight.md': '### Highlights\n\n- Message commands.\n' })
     expect(() => readNotes(folder)).toThrow('highlight.md is not a section')
