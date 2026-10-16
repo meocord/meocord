@@ -30,6 +30,9 @@ const COVERED_ITEM = /^- ([^\s:]+\.md)(?::[ \t]+\S.*)?$/
 /** Where GitHub reads no mention in a line: a code span, a link's target, and a bare URL. */
 const NOT_PROSE = /(`+).*?\1|\]\([^)]*\)|https?:\/\/\S+/g
 
+/** A line that opens or closes a fenced code block, where GitHub reads no mention, capturing its fence. */
+const FENCE = /^\s*(`{3,}|~{3,})/
+
 /** What GitHub turns into a mention of a user: `@` and a username, unless a word character comes first, as in `a@b.c`. */
 const MENTION = /(?<!\w)@[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?/g
 
@@ -78,9 +81,17 @@ export function strayLines(markdown: string): string[] {
 
 /** Each word in `markdown` that GitHub would turn into a mention of a user, with its line number. */
 function mentions(markdown: string): { line: number; word: string }[] {
-  return markdown
-    .split('\n')
-    .flatMap((text, index) => [...text.replace(NOT_PROSE, ' ').matchAll(MENTION)].map(([word]) => ({ line: index + 1, word })))
+  let fence: string | undefined
+  return markdown.split('\n').flatMap((text, index) => {
+    const marker = FENCE.exec(text)?.[1]
+    // A fence closes only on a run of its own character at least as long as the one that opened it
+    if (marker && (fence === undefined || (marker[0] === fence[0] && marker.length >= fence.length))) {
+      fence = fence === undefined ? marker : undefined
+      return []
+    }
+    if (fence !== undefined) return []
+    return [...text.replace(NOT_PROSE, ' ').matchAll(MENTION)].map(([word]) => ({ line: index + 1, word }))
+  })
 }
 
 /** A version's notes, its section files joined in order; throws for a file that isn't a section or that the site would cut. */
