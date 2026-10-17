@@ -32,9 +32,13 @@ console.log(JSON.stringify({ keys: Object.keys(params), toString, constructor, p
   )
   const ran = spawnSync(bun, [script], { encoding: 'utf8', timeout: CHILD_PROCESS_TIMEOUT_MS })
 
-  // A child that hung is killed at the bound: its ETIMEDOUT error and signal, not stdout it never wrote, report it
-  expect({ error: ran.error, status: ran.status, signal: ran.signal }).toEqual({ error: undefined, status: 0, signal: null })
-  expect(ran.stderr).toBe('')
+  // Checked before stdout: a hung child's ETIMEDOUT error and signal, or a failing child's own error on stderr, report it
+  expect({ error: ran.error, status: ran.status, signal: ran.signal, stderr: ran.stderr }).toEqual({
+    error: undefined,
+    status: 0,
+    signal: null,
+    stderr: '',
+  })
   expect(JSON.parse(ran.stdout)).toEqual({
     keys: ['toString', 'constructor', '__proto__', 'name', 'valueOf'],
     toString: 'a',
