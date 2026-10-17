@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'fs'
+import { isBuiltin } from 'module'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import ts from 'typescript'
 import { parse } from 'yaml'
 
 interface Job {
@@ -10,7 +12,9 @@ interface Job {
   if?: string
   'timeout-minutes'?: number
   outputs?: Record<string, string>
-  steps?: { id?: string; name?: string; if?: string; run?: string }[]
+  permissions?: Record<string, string>
+  environment?: string
+  steps?: { id?: string; name?: string; if?: string; run?: string; uses?: string; with?: Record<string, unknown> }[]
 }
 
 interface Workflow {
@@ -40,6 +44,17 @@ const PUBLISHERS = ['pack', 'publish']
 /** The condition, among those every publisher requires, that npm doesn't have the committed version */
 const UNPUBLISHED = `needs.${RELEASE}.outputs.unpublished == 'true'`
 
+/** The job that packs the tarball every check installs, and its artifact */
+const BUILD = 'build'
+const PACKAGE_ARTIFACT = 'package'
+
+/** The read-only job that holds a release to the tarball Build packed, and the script it runs */
+const CHECK_PACKAGE = 'check-package'
+const CHECK_SCRIPT = path.join('scripts', 'check-packed-tarball.ts')
+
+/** A step that installs dependencies or builds, which the read-only check must not run */
+const INSTALLS = /\b(?:bun|npm|pnpm|yarn)\s+(?:install|ci|add|run build)\b/
+
 /** The pull request events a label change sends */
 const LABEL_EVENTS = ['labeled', 'unlabeled']
 
@@ -67,6 +82,23 @@ const requiresSuccess = (job: Job, need: string) =>
 const conjunctsOf = (job: Job) => {
   const condition = (job.if ?? '').replace(/\s+/g, ' ')
   return condition.includes('||') ? undefined : condition.split('&&').map(part => part.trim())
+}
+
+// Every job a job waits for, directly or through another
+const needsClosure = (id: string): string[] =>
+  needsOf(jobs[id]!).flatMap(need => [need, ...needsClosure(need)])
+
+// A script's imports, and the imports of the scripts' own modules it imports: static, type-only, re-exported and
+// dynamic, as TypeScript reads them
+function importsOf(file: string, seen = new Set<string>()): string[] {
+  if (seen.has(file)) return []
+  seen.add(file)
+  const { importedFiles } = ts.preProcessFile(readFileSync(file, 'utf8'), true, true)
+  return importedFiles.map(({ fileName }) => fileName).flatMap(specifier =>
+    specifier.startsWith('.')
+      ? importsOf(path.resolve(path.dirname(file), specifier.replace(/\.js$/, '.ts')), seen)
+      : [specifier],
+  )
 }
 
 const reporterOf = (check: string) => Object.keys(jobs).find(id => jobs[id]!.name === check)
@@ -134,6 +166,37 @@ describe('the Release workflow', () => {
       group: 'ci-${{ github.workflow }}-${{ github.ref }}',
       'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
     })
+  })
+
+  it('gives every job that installs the packed package the build that packed it to wait for', () => {
+    const downloaders = Object.keys(jobs).filter(id =>
+      (jobs[id]!.steps ?? []).some(
+        step => step.uses?.startsWith('actions/download-artifact@') && step.with?.name === PACKAGE_ARTIFACT,
+      ),
+    )
+
+    expect(downloaders).toEqual(expect.arrayContaining(['runners', 'release-checks', CHECK_PACKAGE]))
+    expect(downloaders.filter(id => !needsClosure(id).includes(BUILD))).toEqual([])
+  })
+
+  it('checks the package before publishing, in a read-only job that installs and builds nothing', () => {
+    const check = jobs[CHECK_PACKAGE]!
+
+    expect(check.permissions).toEqual({ contents: 'read' })
+    expect(check.environment).toBeUndefined()
+    expect((check.steps ?? []).filter(step => INSTALLS.test(step.run ?? '')).map(step => step.name)).toEqual([])
+    expect(check.steps!.find(step => step.uses?.startsWith('actions/checkout@'))?.with).toEqual({
+      'persist-credentials': false,
+    })
+    expect(check.steps!.some(step => step.run?.includes(`bun --no-install ${CHECK_SCRIPT}`))).toBe(true)
+    expect(conjunctsOf(jobs.publish!)).toContain(`needs.${CHECK_PACKAGE}.result == 'success'`)
+  })
+
+  it("compares the tarballs with Node's own modules only, as the check installs nothing", () => {
+    const imports = importsOf(path.resolve(workflowsDir, '..', '..', CHECK_SCRIPT))
+
+    expect(imports.length).toBeGreaterThan(0)
+    expect(imports.filter(specifier => !isBuiltin(specifier))).toEqual([])
   })
 
   it('runs every job that follows the release only once it succeeded', () => {

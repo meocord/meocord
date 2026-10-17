@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { boundedStep, eslintScriptOf, isRunning, mustRun } from './packed-app.js'
+import { boundedStep, eslintScriptOf, isRunning, mustRun, pack, TARBALL_ENV } from './packed-app.js'
 
 let root: string
 
@@ -98,5 +98,28 @@ describe("an application's ESLint", () => {
 
     manifest({ other: './x.js' })
     expect(() => eslintScriptOf(root)).toThrow('names no eslint script')
+  })
+})
+
+describe('packing the framework', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('uses the tarball MEOCORD_TARBALL names, so a check installs the bytes CI packed once', () => {
+    const given = path.join(root, 'given', 'meocord-9.9.9.tgz')
+    mkdirSync(path.dirname(given))
+    writeFileSync(given, 'the packed bytes')
+    mkdirSync(path.join(root, 'work'))
+    vi.stubEnv(TARBALL_ENV, given)
+
+    const tarball = pack(path.join(root, 'work'))
+
+    expect(tarball).toBe(path.join(root, 'work', 'meocord-9.9.9.tgz'))
+    expect(readFileSync(tarball, 'utf8')).toBe('the packed bytes')
+  })
+
+  it('refuses a MEOCORD_TARBALL that does not exist rather than packing another', () => {
+    vi.stubEnv(TARBALL_ENV, path.join(root, 'missing.tgz'))
+
+    expect(() => pack(root)).toThrow(`${TARBALL_ENV} names ${path.join(root, 'missing.tgz')}, which does not exist`)
   })
 })

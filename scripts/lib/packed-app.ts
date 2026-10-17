@@ -5,13 +5,19 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { AppGeneratorHelper } from '../../src/bin/helper/app-generator.helper.js'
 import { assertFreshBuild } from './build-stamp.js'
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+/**
+ * The variable naming a tarball already packed, which `pack()` then uses instead of packing: in CI, the one Build
+ * packed, so every check installs the bytes that are published.
+ */
+export const TARBALL_ENV = 'MEOCORD_TARBALL'
 
 /** The CLI as the repository built it. */
 export const builtCli = path.join(repoRoot, 'dist', 'esm', 'bin', 'meocord.js')
@@ -105,9 +111,17 @@ export function eslintScriptOf(appDir: string): string {
 
 /**
  * Packs the framework as npm would publish it, so an application installs the tarball rather than a
- * link to the repository: only what `files` ships, resolved through `exports`.
+ * link to the repository: only what `files` ships, resolved through `exports`. With `MEOCORD_TARBALL`
+ * set, it copies that tarball into `into` instead.
  */
 export function pack(into: string): string {
+  const given = process.env[TARBALL_ENV]
+  if (given) {
+    if (!existsSync(given)) throw new Error(`${TARBALL_ENV} names ${given}, which does not exist`)
+    const tarball = path.join(into, path.basename(given))
+    copyFileSync(given, tarball)
+    return tarball
+  }
   // A dist built before the source changed would pass for the current code, and fail later on what it lacks
   assertFreshBuild(repoRoot)
   mustRun('pack the framework', 'npm', ['pack', '--ignore-scripts', '--silent', '--pack-destination', into], repoRoot)
