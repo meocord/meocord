@@ -1,0 +1,72 @@
+name: AGENTS.md
+
+# AGENTS.md changes only with the maintainer's `agents-md-approved` label, and stays short. The guard is a workflow of
+# its own so that a label change re-runs it alone, leaving the code checks' results on the commit as they are.
+on:
+  pull_request:
+    # `labeled` and `unlabeled` re-run it when the approval label changes, `edited` when the base branch changes
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+    branches:
+      - main
+      - beta
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agents-md-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: AGENTS.md
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # A queued merge reads its pull request's labels as they are now
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # On a pull request, HEAD is it merged into its base as the base is now, and its first parent is that base; in the
+      # queue, the base is everything queued ahead of it. Either way their diff is the pull request's own change. The
+      # labels come from the event on a pull request, and from the pull request itself in the queue, so one removed
+      # after queueing fails the queued merge.
+      - name: Guard AGENTS.md
+        env:
+          APPROVAL_LABEL: agents-md-approved
+          MAX_LINES: 234
+          GH_TOKEN: ${{ github.token }}
+          EVENT_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          if [ -n "$QUEUE_BASE" ]; then
+            git fetch --quiet --depth=1 origin "$QUEUE_BASE"
+            base=$QUEUE_BASE
+          else
+            git fetch --quiet --depth=2 origin "$GITHUB_SHA"
+            base=HEAD^1
+          fi
+          if git diff --quiet "$base" HEAD -- AGENTS.md; then exit 0; fi
+          if [ -n "$QUEUE_BASE" ]; then
+            pr=${QUEUE_REF##*/pr-}
+            labels=$(gh pr view "${pr%%-*}" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+          else
+            labels=$(jq -r '.[]' <<< "$EVENT_LABELS")
+          fi
+          if ! grep -qxF "$APPROVAL_LABEL" <<< "$labels"; then
+            echo "::error file=AGENTS.md::AGENTS.md changed without the maintainer's '$APPROVAL_LABEL' label."
+            exit 1
+          fi
+          lines=$(wc -l < AGENTS.md)
+          if [ "$lines" -gt "$MAX_LINES" ]; then
+            echo "::error file=AGENTS.md::AGENTS.md has $lines lines; keep it at $MAX_LINES or fewer."
+            exit 1
+          fi

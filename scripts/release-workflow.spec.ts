@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse } from 'yaml'
@@ -10,6 +10,11 @@ interface Job {
   if?: string
   'timeout-minutes'?: number
   steps?: { name?: string; if?: string; run?: string }[]
+}
+
+interface Workflow {
+  on: Record<string, { types?: string[] } | null>
+  jobs: Record<string, Job>
 }
 
 /** The checks branch protection requires on main, by the name of the job reporting each, as the settings list them */
@@ -27,8 +32,12 @@ const WAIT_FOR_NPM = 'Wait for npm to serve the version'
 /** The job that versions, which `pack` and `publish` follow */
 const RELEASE = 'release'
 
-const workflowPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows', 'release.yml')
-const { jobs } = parse(readFileSync(workflowPath, 'utf8')) as { jobs: Record<string, Job> }
+/** The pull request events that can change the AGENTS.md guard's verdict: a new commit or the approval label */
+const GUARD_EVENTS = ['opened', 'synchronize', 'reopened', 'labeled', 'unlabeled']
+
+const workflowsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows')
+const readWorkflow = (file: string) => parse(readFileSync(path.join(workflowsDir, file), 'utf8')) as Workflow
+const { jobs } = readWorkflow('release.yml')
 
 const needsOf = (job: Job) => [job.needs ?? []].flat()
 
@@ -68,10 +77,6 @@ describe('the Release workflow', () => {
     expect(unchecked).toEqual([])
   })
 
-  it('limits how long every job runs', () => {
-    expect(Object.keys(jobs).filter(id => jobs[id]!['timeout-minutes'] === undefined)).toEqual([])
-  })
-
   it('bounds every registry request in the wait for npm, connecting included', () => {
     const wait = jobs['docs-sync']!.steps!.find(step => step.name === WAIT_FOR_NPM)!.run!
     const npm = wait.match(/^.*\bnpm view\b.*$/gm) ?? []
@@ -93,5 +98,29 @@ describe('the Release workflow', () => {
 
     expect(followers).toEqual(expect.arrayContaining(['pack', 'publish']))
     expect(followers.filter(id => !requiresSuccess(jobs[id]!, RELEASE))).toEqual([])
+  })
+})
+
+describe('the AGENTS.md guard', () => {
+  it('runs on every pull request event that can change its verdict, and in the merge queue', () => {
+    const guard = readWorkflow('agents-md.yml')
+
+    expect(guard.on.pull_request?.types).toEqual(expect.arrayContaining(GUARD_EVENTS))
+    expect(guard.on).toHaveProperty('merge_group')
+    expect(Object.values(guard.jobs).map(job => job.name)).toEqual(['AGENTS.md'])
+  })
+})
+
+describe('every workflow', () => {
+  it('limits how long each of its jobs runs', () => {
+    const unlimited = readdirSync(workflowsDir)
+      .filter(file => file.endsWith('.yml'))
+      .flatMap(file =>
+        Object.entries(readWorkflow(file).jobs)
+          .filter(([, job]) => job['timeout-minutes'] === undefined)
+          .map(([id]) => `${file}: ${id}`),
+      )
+
+    expect(unlimited).toEqual([])
   })
 })
