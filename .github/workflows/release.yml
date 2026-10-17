@@ -475,9 +475,9 @@ jobs:
           EOF
 
   # The checks that run code from outside the lockfile (a generated app's dependency tree, its bot, bundling, sharding),
-  # for a push to main or beta or a manual re-run, in a read-only job, so that code never runs where the publishing
-  # identity can be requested. Needs are named one by one: the implicit success() also reads the slow scenarios job,
-  # which "Test" reports and a push skips.
+  # for a push to main or beta or a manual re-run, in a read-only job where the publishing identity can't be requested.
+  # It starts only once every required check has passed, so a failed one stops the release. Needs are named one by one:
+  # the implicit success() also reads the slow scenarios job, which "Test" reports and a push skips.
   release-checks:
     name: Release checks
     if: >-
@@ -485,8 +485,8 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.lint.result == 'success' && needs.test-result.result == 'success' &&
       needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success' &&
-      needs.runners.result == 'success'
-    needs: [lint, test-result, coverage, build, windows, runners]
+      needs.runners.result == 'success' && needs.redis.result == 'success'
+    needs: [lint, test-result, coverage, build, windows, runners, redis]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -618,8 +618,9 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.lint.result == 'success' && needs.test-result.result == 'success' &&
       needs.coverage.result == 'success' && needs.build.result == 'success' && needs.windows.result == 'success' &&
-      needs.runners.result == 'success' && needs.release-checks.result == 'success'
-    needs: [lint, test-result, coverage, build, windows, runners, release-checks]
+      needs.runners.result == 'success' && needs.redis.result == 'success' &&
+      needs.release-checks.result == 'success'
+    needs: [lint, test-result, coverage, build, windows, runners, redis, release-checks]
     runs-on: ubuntu-latest
     # For RELEASE_TOKEN, a secret of this environment. Without `id-token` the job cannot request npm's credentials.
     environment: Production
