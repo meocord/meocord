@@ -32,9 +32,13 @@ env:
   BUN_VERSION: 1.4.x
 
 jobs:
+  # Each job's timeout is twice its slowest successful run, or that run plus ten minutes if more, rounded up to five,
+  # so a slow runner or a stalled install still finishes and a hang holds the queue no longer. Gates that only read
+  # their needs get five.
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,6 +93,7 @@ jobs:
   test:
     name: Test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +132,7 @@ jobs:
   test-result:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [test, slow-scenarios]
     if: always()
     steps:
@@ -154,6 +160,7 @@ jobs:
     name: Slow CLI scenarios
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:
@@ -188,6 +195,7 @@ jobs:
   redis:
     name: Redis
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       redis:
         image: redis:7-alpine
@@ -223,6 +231,7 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -249,6 +258,7 @@ jobs:
   windows:
     name: Windows
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -305,6 +315,7 @@ jobs:
   build:
     name: Build and pack
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -431,6 +442,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -479,6 +491,7 @@ jobs:
   build-result:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [build, package-dry-run]
     if: always()
     steps:
@@ -512,6 +525,7 @@ jobs:
       needs.windows.result == 'success' && needs.runners.result == 'success' && needs.redis.result == 'success'
     needs: [lint, test-result, coverage, build-result, windows, runners, redis]
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     permissions:
       contents: read
     steps:
@@ -626,6 +640,7 @@ jobs:
     name: Real Discord (not run for forks)
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -646,6 +661,7 @@ jobs:
       needs.release-checks.result == 'success'
     needs: [lint, test-result, coverage, build-result, windows, runners, redis, release-checks]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # For RELEASE_TOKEN, a secret of this environment. Without `id-token` the job cannot request npm's credentials.
     environment: Production
     outputs:
@@ -699,6 +715,7 @@ jobs:
     if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.pending == 'false' }}
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       artifact-id: ${{ steps.pack.outputs.pack-dir-artifact-id }}
     steps:
@@ -740,6 +757,8 @@ jobs:
       needs.pack.result == 'success'
     needs: [release, pack]
     runs-on: ubuntu-latest
+    # Longer than the rule: a cut after npm accepts the tarball leaves the version untagged (CONTRIBUTING.md)
+    timeout-minutes: 30
     environment: Production
     outputs:
       published: ${{ steps.publish.outputs.published }}
@@ -801,6 +820,7 @@ jobs:
     # Named directly, with !cancelled(): the implicit success() also reads the skipped slow scenarios job on a push
     if: ${{ !cancelled() && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
     runs-on: ubuntu-latest
+    # Below the rule, whose slowest run is the wait for npm: that wait ends within WAIT_SECONDS and one poll
     timeout-minutes: 15
     environment: Production
     permissions: {}
@@ -817,6 +837,8 @@ jobs:
           VERSION: ${{ needs.publish.outputs.version }}
           WAIT_SECONDS: 600
           POLL_SECONDS: 15
+          # Each request's limit, with no retry of its own: the next poll is the retry
+          REQUEST_SECONDS: 30
         run: |
           if [ -z "$VERSION" ]; then
             echo "::error title=Docs sync not started::The publish job reported no version of meocord."
@@ -824,10 +846,12 @@ jobs:
           fi
           # Names the first of what the sync fetches that npm doesn't serve yet, and nothing once it serves all of it
           unserved() {
-            tarball=$(npm view "meocord@$VERSION" dist.tarball --prefer-online 2>/dev/null)
+            tarball=$(npm view "meocord@$VERSION" dist.tarball --prefer-online \
+              --fetch-timeout "$((REQUEST_SECONDS * 1000))" --fetch-retries 0 2>/dev/null)
             if [ -z "$tarball" ]; then echo "meocord@$VERSION"; return; fi
             for url in "$tarball" "https://registry.npmjs.org/-/npm/v1/attestations/meocord@$VERSION"; do
-              if [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" != 200 ]; then echo "$url"; return; fi
+              status=$(curl -s --max-time "$REQUEST_SECONDS" -o /dev/null -w '%{http_code}' "$url")
+              if [ "$status" != 200 ]; then echo "$url"; return; fi
             done
           }
           deadline=$((SECONDS + WAIT_SECONDS))
