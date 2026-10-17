@@ -9,7 +9,7 @@ interface Job {
   needs?: string | string[]
   if?: string
   'timeout-minutes'?: number
-  steps?: { if?: string }[]
+  steps?: { name?: string; if?: string; run?: string }[]
 }
 
 /** The checks branch protection requires on main, by the name of the job reporting each, as the settings list them */
@@ -20,6 +20,9 @@ const ADVISORY_JOBS = ['e2e', 'e2e-fork']
 
 /** The jobs that start a release: they run only once every required check has passed on the commit they release */
 const RELEASE_GATES = ['release-checks', 'release']
+
+/** Docs sync's step that polls the registry until it serves a published version */
+const WAIT_FOR_NPM = 'Wait for npm to serve the version'
 
 /** The job that versions, which `pack` and `publish` follow */
 const RELEASE = 'release'
@@ -67,6 +70,16 @@ describe('the Release workflow', () => {
 
   it('limits how long every job runs', () => {
     expect(Object.keys(jobs).filter(id => jobs[id]!['timeout-minutes'] === undefined)).toEqual([])
+  })
+
+  it('bounds every registry request in the wait for npm, connecting included', () => {
+    const wait = jobs['docs-sync']!.steps!.find(step => step.name === WAIT_FOR_NPM)!.run!
+    const npm = wait.match(/^.*\bnpm view\b.*$/gm) ?? []
+    const curl = wait.match(/^.*\bcurl\b.*$/gm) ?? []
+
+    expect([npm.length, curl.length]).toEqual([1, 1])
+    expect(npm.filter(line => !line.includes('timeout "$REQUEST_SECONDS" npm view'))).toEqual([])
+    expect(curl.filter(line => !line.includes('--max-time "$REQUEST_SECONDS"'))).toEqual([])
   })
 
   it.each(RELEASE_GATES)('runs %s only once every required check has passed', gate => {
