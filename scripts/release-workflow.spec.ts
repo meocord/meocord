@@ -41,6 +41,9 @@ const GUARD_EVENTS = ['opened', 'synchronize', 'reopened', ...LABEL_EVENTS]
 /** The label that approves a change to AGENTS.md */
 const APPROVAL_LABEL = 'agents-md-approved'
 
+/** The AGENTS.md workflow's step that checks the approval label */
+const GUARD_STEP = 'Guard AGENTS.md'
+
 const workflowsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows')
 const readWorkflow = (file: string) => parse(readFileSync(path.join(workflowsDir, file), 'utf8')) as Workflow
 const release = readWorkflow('release.yml')
@@ -122,6 +125,15 @@ describe('the AGENTS.md guard', () => {
     expect(guard.on.pull_request?.types).toEqual(expect.arrayContaining(GUARD_EVENTS))
     expect(guard.on).toHaveProperty('merge_group')
     expect(Object.values(guard.jobs).map(job => job.name)).toEqual(['AGENTS.md'])
+  })
+
+  // An event's labels are those it was sent with, and a re-run replays them, label added since or not
+  it('reads the approval label from the pull request when it runs, never from the event', () => {
+    const guard = readWorkflow('agents-md.yml')
+    const step = Object.values(guard.jobs).flatMap(job => job.steps ?? []).find(step => step.name === GUARD_STEP)!
+
+    expect(JSON.stringify(guard)).not.toContain('pull_request.labels')
+    expect(step.run!.match(/^\s*labels=.*$/gm)).toEqual([expect.stringContaining('gh pr view')])
   })
 })
 
