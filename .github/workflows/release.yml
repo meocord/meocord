@@ -837,7 +837,7 @@ jobs:
           VERSION: ${{ needs.publish.outputs.version }}
           WAIT_SECONDS: 600
           POLL_SECONDS: 15
-          # Each request's limit, with no retry of its own: the next poll is the retry
+          # Each request's limit, connecting included, with no retry of its own: the next poll is the retry
           REQUEST_SECONDS: 30
         run: |
           if [ -z "$VERSION" ]; then
@@ -846,8 +846,9 @@ jobs:
           fi
           # Names the first of what the sync fetches that npm doesn't serve yet, and nothing once it serves all of it
           unserved() {
-            tarball=$(npm view "meocord@$VERSION" dist.tarball --prefer-online \
-              --fetch-timeout "$((REQUEST_SECONDS * 1000))" --fetch-retries 0 2>/dev/null)
+            # npm's own fetch timeout leaves out connecting, so `timeout` bounds the whole call
+            tarball=$(timeout "$REQUEST_SECONDS" npm view "meocord@$VERSION" dist.tarball --prefer-online \
+              --fetch-retries 0 2>/dev/null)
             if [ -z "$tarball" ]; then echo "meocord@$VERSION"; return; fi
             for url in "$tarball" "https://registry.npmjs.org/-/npm/v1/attestations/meocord@$VERSION"; do
               status=$(curl -s --max-time "$REQUEST_SECONDS" -o /dev/null -w '%{http_code}' "$url")
