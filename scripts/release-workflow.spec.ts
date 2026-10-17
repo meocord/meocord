@@ -50,7 +50,7 @@ const PACKAGE_ARTIFACT = 'package'
 
 /** The read-only job that holds a release to the tarball Build packed, and the script it runs */
 const CHECK_PACKAGE = 'check-package'
-const CHECK_SCRIPT = path.join('scripts', 'check-packed-tarball.ts')
+const CHECK_SCRIPT = 'scripts/check-packed-tarball.ts'
 
 /** A step that installs dependencies or builds, which the read-only check must not run */
 const INSTALLS = /\b(?:bun|npm|pnpm|yarn)\s+(?:install|ci|add|run build)\b/
