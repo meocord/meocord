@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      # A queued merge reads its pull request's labels as they are now
+      # The guard reads its pull request's labels as they are when it runs
       pull-requests: read
     steps:
       - name: Checkout code
@@ -36,14 +36,14 @@ jobs:
 
       # On a pull request, HEAD is it merged into its base as the base is now, and its first parent is that base; in the
       # queue, the base is everything queued ahead of it. Either way their diff is the pull request's own change. The
-      # labels come from the event on a pull request, and from the pull request itself in the queue, so one removed
-      # after queueing fails the queued merge.
+      # labels are read from the pull request, never from the event, which a re-run replays as it was sent: a re-run
+      # sees an approval added since, and a label removed after queueing fails the queued merge.
       - name: Guard AGENTS.md
         env:
           APPROVAL_LABEL: agents-md-approved
           MAX_LINES: 234
           GH_TOKEN: ${{ github.token }}
-          EVENT_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
           QUEUE_REF: ${{ github.event.merge_group.head_ref }}
         run: |
@@ -57,10 +57,11 @@ jobs:
           if git diff --quiet "$base" HEAD -- AGENTS.md; then exit 0; fi
           if [ -n "$QUEUE_BASE" ]; then
             pr=${QUEUE_REF##*/pr-}
-            labels=$(gh pr view "${pr%%-*}" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
+            pr=${pr%%-*}
           else
-            labels=$(jq -r '.[]' <<< "$EVENT_LABELS")
+            pr=$PR_NUMBER
           fi
+          labels=$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" --json labels --jq '.labels[].name')
           if ! grep -qxF "$APPROVAL_LABEL" <<< "$labels"; then
             echo "::error file=AGENTS.md::AGENTS.md changed without the maintainer's '$APPROVAL_LABEL' label."
             exit 1
