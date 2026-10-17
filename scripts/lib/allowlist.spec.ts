@@ -1,8 +1,21 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { ALLOWLIST_FILE, type Allowlist, compareVersions, parseAllowlist, stampAllowlist, stampAllowlistFile } from './allowlist.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  ALLOWLIST_FILE,
+  type Allowlist,
+  compareVersions,
+  latestRelease,
+  NPM_VIEW_TIMEOUT_MS,
+  parseAllowlist,
+  stampAllowlist,
+  stampAllowlistFile,
+} from './allowlist.js'
+
+// latestRelease's own npm call, which the cases below read without reaching the registry
+const { execFileSync } = vi.hoisted(() => ({ execFileSync: vi.fn(() => '4.2.3\n') }))
+vi.mock('child_process', async original => ({ ...(await original<typeof import('child_process')>()), execFileSync }))
 
 describe('compareVersions', () => {
   it.each([
@@ -106,5 +119,28 @@ describe('stampAllowlistFile', () => {
     const root = repository('4.2.4', { 'core C.d': { reason: 'Shipped.', version: '4.2.3' } })
     expect(stampAllowlistFile(root, '')).toBe(false)
     expect(JSON.parse(read(root))).toEqual({ 'core C.d': { reason: 'Shipped.', version: '4.2.3' } })
+  })
+})
+
+describe('latestRelease', () => {
+  it("bounds npm's own call by the timeout", () => {
+    expect(latestRelease()).toBe('4.2.3')
+    expect(execFileSync).toHaveBeenCalledWith('npm', ['view', 'meocord', 'dist-tags.latest'], expect.objectContaining({ timeout: NPM_VIEW_TIMEOUT_MS }))
+  })
+
+  it('asks npm within the timeout and returns the version it names', () => {
+    const asked: number[] = []
+    expect(latestRelease(NPM_VIEW_TIMEOUT_MS, timeout => (asked.push(timeout), '4.2.3\n'))).toBe('4.2.3')
+    expect(asked).toEqual([NPM_VIEW_TIMEOUT_MS])
+  })
+
+  it.each([
+    ['times out', () => {
+      throw Object.assign(new Error('spawnSync npm ETIMEDOUT'), { code: 'ETIMEDOUT' })
+    }],
+    ['answers with nothing', () => ''],
+    ['answers with something other than a version', () => 'undefined'],
+  ])('says nothing when npm %s, so the allowlist is only stamped', (_, view) => {
+    expect(latestRelease(NPM_VIEW_TIMEOUT_MS, view)).toBeUndefined()
   })
 })
