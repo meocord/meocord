@@ -6,8 +6,8 @@ on:
       - main
       - beta
   pull_request:
-    # `labeled` and `unlabeled` re-run the AGENTS.md guard when its approval label changes.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # Not on a label change: the AGENTS.md workflow guards the approval label, and these checks stay as they ran
+    types: [opened, synchronize, reopened]
     branches:
       - main
       - beta
@@ -58,28 +58,6 @@ jobs:
 
       - name: Run lint
         run: bun run lint
-
-      # AGENTS.md changes only with the maintainer's `agents-md-approved` label, and stays short.
-      # A queued merge carries no labels; its pull request passed this check to be queued.
-      - name: Guard AGENTS.md
-        if: github.event_name == 'pull_request'
-        env:
-          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'agents-md-approved') }}
-          MAX_LINES: 234
-        # HEAD is the pull request merged into its base as the base is now, and its first parent is that base, so
-        # their diff is the pull request's own change. The base SHA the event names can predate later merges.
-        run: |
-          git fetch --quiet --depth=2 origin "$GITHUB_SHA"
-          if git diff --quiet HEAD^1 HEAD -- AGENTS.md; then exit 0; fi
-          if [ "$APPROVED" != "true" ]; then
-            echo "::error file=AGENTS.md::AGENTS.md changed without the maintainer's 'agents-md-approved' label."
-            exit 1
-          fi
-          lines=$(wc -l < AGENTS.md)
-          if [ "$lines" -gt "$MAX_LINES" ]; then
-            echo "::error file=AGENTS.md::AGENTS.md has $lines lines; keep it at $MAX_LINES or fewer."
-            exit 1
-          fi
 
       # Generated from the installed packages, so a dependency added without regenerating it
       # fails here rather than shipping a notice that leaves it out.

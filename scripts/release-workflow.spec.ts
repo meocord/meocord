@@ -17,7 +17,7 @@ interface Workflow {
   jobs: Record<string, Job>
 }
 
-/** The checks branch protection requires on main, by the name of the job reporting each, as the settings list them */
+/** The checks branch protection requires on main that this workflow reports, by job name; AGENTS.md's is the other */
 const REQUIRED_CHECKS = ['Lint', 'Test', 'Build', 'Coverage', 'Windows', 'Redis', 'Test runners']
 
 /** Pull request jobs that block no merge by design: real Discord, so its outages can't, and its fork notice */
@@ -32,12 +32,19 @@ const WAIT_FOR_NPM = 'Wait for npm to serve the version'
 /** The job that versions, which `pack` and `publish` follow */
 const RELEASE = 'release'
 
+/** The pull request events a label change sends */
+const LABEL_EVENTS = ['labeled', 'unlabeled']
+
 /** The pull request events that can change the AGENTS.md guard's verdict: a new commit or the approval label */
-const GUARD_EVENTS = ['opened', 'synchronize', 'reopened', 'labeled', 'unlabeled']
+const GUARD_EVENTS = ['opened', 'synchronize', 'reopened', ...LABEL_EVENTS]
+
+/** The label that approves a change to AGENTS.md */
+const APPROVAL_LABEL = 'agents-md-approved'
 
 const workflowsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows')
 const readWorkflow = (file: string) => parse(readFileSync(path.join(workflowsDir, file), 'utf8')) as Workflow
-const { jobs } = readWorkflow('release.yml')
+const release = readWorkflow('release.yml')
+const { jobs } = release
 
 const needsOf = (job: Job) => [job.needs ?? []].flat()
 
@@ -102,6 +109,13 @@ describe('the Release workflow', () => {
 })
 
 describe('the AGENTS.md guard', () => {
+  it('lives in its own workflow alone, so a label change re-runs none of the code checks', () => {
+    const triggers = release.on.pull_request?.types ?? []
+
+    expect(triggers.filter(type => LABEL_EVENTS.includes(type))).toEqual([])
+    expect(Object.keys(jobs).filter(id => JSON.stringify(jobs[id]).includes(APPROVAL_LABEL))).toEqual([])
+  })
+
   it('runs on every pull request event that can change its verdict, and in the merge queue', () => {
     const guard = readWorkflow('agents-md.yml')
 

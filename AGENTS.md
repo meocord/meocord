@@ -166,7 +166,7 @@ Releases happen only on the maintainer's explicit go-ahead, performed by the sup
   explaining what was wrong, what changed and how it was verified.
 - Open a PR against `main` using the PR template; link the issue it closes (`Closes #n`).
 - Branch protection: linear history, required checks `Lint`, `Test`, `Build`, `Coverage`, `Windows`, `Redis`,
-  `Test runners`. PRs land through the merge queue, which rebases them onto `main`, re-runs the checks and merges.
+  `Test runners`, `AGENTS.md`. PRs land through the merge queue, which rebases them onto `main`, re-runs the checks and merges.
 - No AI residue — see below.
 - Commits, PRs and code say nothing about how the work was organised — see section 9.
 - Never force-push `main`, and never rewrite a branch someone else is working on.
