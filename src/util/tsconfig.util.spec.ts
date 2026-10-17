@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import path from 'path'
 import { tmpdir } from 'os'
 import { spawnSync } from 'child_process'
+import { CHILD_PROCESS_CASE_TIMEOUT_MS, CHILD_PROCESS_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 const { mockExistsSync, mockReadFileSync, mockWriteFileSync, mockMkdtempSync, mockReaddirSync, mockRmSync, mockHostname, mockReadlinkSync } =
   vi.hoisted(() => {
@@ -44,6 +45,13 @@ const { prepareModifiedTsConfig } = await import('@src/util/tsconfig.util.js')
 async function freshModule() {
   vi.resetModules()
   return import('@src/util/tsconfig.util.js')
+}
+
+/** The PID of a process that has ended: a child started here and waited for. */
+function endedPid() {
+  const ended = spawnSync(process.execPath, ['-e', '0'], { timeout: CHILD_PROCESS_TIMEOUT_MS })
+  if (ended.error) throw ended.error
+  return ended.pid!
 }
 
 function mockTsConfig(config: object) {
@@ -142,7 +150,7 @@ describe('prepareModifiedTsConfig', () => {
   it("on Linux, judges only its own PID namespace's directories", async () => {
     mockTsConfig({ compilerOptions: {} })
     mockReadlinkSync.mockReturnValueOnce('pid:[4026531836]')
-    const ended = spawnSync(process.execPath, ['-e', '0']).pid!
+    const ended = endedPid()
     const left = `meocord-tsconfig-build_01.local_4026531836-${ended}-a1b2c3`
     const kept = [`meocord-tsconfig-build_01.local_4026532999-${ended}-d4e5f6`, `meocord-tsconfig-build_01.local-${ended}-g7h8i9`]
     mockReaddirSync.mockReturnValueOnce([left, ...kept])
@@ -153,13 +161,13 @@ describe('prepareModifiedTsConfig', () => {
 
     expect(mockRmSync.mock.calls).toEqual([[path.join(tmpdir(), left), { recursive: true, force: true }]])
     expect(dir).toMatch(new RegExp(`^meocord-tsconfig-build_01\\.local_4026531836-${process.pid}-`))
-  })
+  }, CHILD_PROCESS_CASE_TIMEOUT_MS)
 
   // A process killed, or one that crashes, never runs its exit hook, and its directory would stay forever
   it("removes a directory this host's ended process left, and keeps the rest", async () => {
     mockTsConfig({ compilerOptions: {} })
     const host = 'build_01.local'
-    const ended = spawnSync(process.execPath, ['-e', '0']).pid!
+    const ended = endedPid()
     const left = `meocord-tsconfig-${host}-${ended}-a1b2c3`
     const kept = [
       `meocord-tsconfig-${host}-${process.ppid}-d4e5f6`,
@@ -175,7 +183,7 @@ describe('prepareModifiedTsConfig', () => {
 
     expect(mockRmSync.mock.calls).toEqual([[path.join(tmpdir(), left), { recursive: true, force: true }]])
     expect(mockReaddirSync).toHaveBeenLastCalledWith(tmpdir())
-  })
+  }, CHILD_PROCESS_CASE_TIMEOUT_MS)
 
   it('reads the comments, trailing commas and $schema URL tsconfig.json allows', () => {
     mockExistsSync.mockReturnValue(true)

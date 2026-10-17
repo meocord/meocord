@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { CHILD_PROCESS_CASE_TIMEOUT_MS, CHILD_PROCESS_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 /**
  * A bot whose provider's factory fails, in a real process: what the start made before it, such as a pool whose open
@@ -11,8 +12,6 @@ import path from 'node:path'
 const bun = process.versions.bun ? process.execPath : 'bun'
 const source = (file: string) => JSON.stringify(path.resolve(import.meta.dirname, '..', file))
 const bot = mkdtempSync(path.join(tmpdir(), 'meocord-failed-start-'))
-/** How long the bot may take to end; one that stays alive is killed after it. */
-const BOUND_MS = 15_000
 
 afterAll(() => rmSync(bot, { recursive: true, force: true }))
 
@@ -55,9 +54,10 @@ MeoCordFactory.create(App).start().catch(error => {
   let output = ''
   child.stdout.on('data', chunk => (output += chunk))
   child.stderr.on('data', chunk => (output += chunk))
-  const killed = setTimeout(() => child.kill('SIGKILL'), BOUND_MS)
+  // A bot that stays alive is killed at the bound, and its exit code shows it
+  const killed = setTimeout(() => child.kill('SIGKILL'), CHILD_PROCESS_TIMEOUT_MS)
   const code = await new Promise<number | null>(resolve => child.once('exit', resolve))
   clearTimeout(killed)
 
   expect({ code, closed: output.includes('pool closed') }).toEqual({ code: 1, closed: true })
-}, BOUND_MS + 5_000)
+}, CHILD_PROCESS_CASE_TIMEOUT_MS)
