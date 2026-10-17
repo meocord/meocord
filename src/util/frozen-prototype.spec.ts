@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { CHILD_PROCESS_CASE_TIMEOUT_MS, CHILD_PROCESS_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 /**
  * Params named like an Object.prototype member, written where Object.prototype is frozen, as SES's lockdown() or a
@@ -29,8 +30,10 @@ const { toString, constructor, name } = params
 console.log(JSON.stringify({ keys: Object.keys(params), toString, constructor, proto: params['__proto__'], name, valueOf: params.valueOf === undefined, plain: Object.getPrototypeOf(params) === Object.prototype }))
 `,
   )
-  const ran = spawnSync(bun, [script], { encoding: 'utf8' })
+  const ran = spawnSync(bun, [script], { encoding: 'utf8', timeout: CHILD_PROCESS_TIMEOUT_MS })
 
+  // A child that hung is killed at the bound: its ETIMEDOUT error and signal, not stdout it never wrote, report it
+  expect({ error: ran.error, status: ran.status, signal: ran.signal }).toEqual({ error: undefined, status: 0, signal: null })
   expect(ran.stderr).toBe('')
   expect(JSON.parse(ran.stdout)).toEqual({
     keys: ['toString', 'constructor', '__proto__', 'name', 'valueOf'],
@@ -41,4 +44,4 @@ console.log(JSON.stringify({ keys: Object.keys(params), toString, constructor, p
     valueOf: true,
     plain: true,
   })
-})
+}, CHILD_PROCESS_CASE_TIMEOUT_MS)
