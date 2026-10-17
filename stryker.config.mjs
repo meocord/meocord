@@ -7,8 +7,14 @@
  * The vitest runner runs only the tests that cover each mutant. On Vitest 5 it reports covered mutants
  * as survived (stryker-mutator/stryker-js#6210), since Vitest 5 joins test names with ' > '.
  * patches/ carries that fix from stryker-mutator/stryker-js#6220; drop the patch once #6220 or #6214 ships.
- * It does not re-run module-level code per mutant, so a static mutant (a decorator body, a top-level
- * constant) may show as survived: verify those by hand, or with `testRunner: 'command'`.
+ * A static mutant (a decorator body, a top-level constant) runs after a reload against the whole
+ * suite, most of a module's run time. `ignoreStatic` stays off: it runs a static mutant that tests also
+ * cover against those tests alone, without the reload, so the mutated module-level code never runs and
+ * the mutant reads as survived or timed out.
+ *
+ * Runs are incremental: each module keeps its results in reports/mutation/<module>.incremental.json, and
+ * a run tests only the mutants whose source or covering tests changed. Changes elsewhere (a module the
+ * code imports, a dependency, the setup) go unseen; `bun run test:mutation -- --force` reruns everything.
  */
 
 /** Each module: the files it mutates. */
@@ -54,9 +60,11 @@ export default {
   testRunner: 'vitest',
   vitest: { configFile: 'vitest.mutation.config.ts' },
   coverageAnalysis: 'perTest',
-  // Each runner keeps a Vitest with workers of its own; more at once only starves them into timeouts.
-  concurrency: 4,
+  // Concurrency stays at Stryker's default, one test runner per core but one; the vitest runner gives
+  // each a single Vitest worker, so that is the whole parallelism.
   timeoutMS: 30_000,
+  incremental: true,
+  incrementalFile: `reports/mutation/${name}.incremental.json`,
   mutate: module.mutate,
   reporters: ['clear-text', 'progress-append-only', 'html', 'json'],
   htmlReporter: { fileName: `reports/mutation/${name}.html` },

@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 
 // For `bun run test:mutation`: the specs of the framework's runtime, set up as in vitest.config.ts but
 // without the type tests, which a mutated source cannot affect, the build, CLI and util specs, which
-// build whole applications or read files outside Stryker's sandbox, or coverage.
+// build whole applications or read files outside Stryker's sandbox, or coverage. Worker counts are left
+// out: Stryker's vitest runner runs one worker per test runner and sets its own pool.
 export default defineConfig({
   plugins: [
     swc.vite({
@@ -26,7 +27,6 @@ export default defineConfig({
     setupFiles: ['reflect-metadata', './vitest.setup.ts'],
     clearMocks: true,
     restoreMocks: false,
-    maxWorkers: 3,
     include: ['src/{common,core,decorator,testing}/**/*.spec.ts'],
   },
 })
