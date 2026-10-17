@@ -155,17 +155,18 @@ describe('judgeBreaks', () => {
     const narrowing = { id, file: 'dist/types/decorator/index.d.ts', path: 'MeoCordOptions.controllers', problem: 'narrowed: unknown[] → object[]' }
 
     it.each([
-      ['retires an entry its baseline ships', [], '4.2.3', '4.2.3', { allowed: [], stale: [], retired: [id] }],
-      ['allows an entry no release has stamped', [narrowing], undefined, '4.2.3', { allowed: [id], stale: [], retired: [] }],
-      ['allows an entry the release pull request stamped', [narrowing], '4.2.4', '4.2.3', { allowed: [id], stale: [], retired: [] }],
-      ['refuses an unreleased entry that names no break', [], '4.2.4', '4.2.3', { allowed: [], stale: [id], retired: [] }],
-      ['refuses an unstamped entry that names no break', [], undefined, '4.2.3', { allowed: [], stale: [id], retired: [] }],
-      ['keeps a prerelease entry while its stable release is unpublished', [narrowing], '4.3.0-beta.1', '4.2.3', { allowed: [id], stale: [], retired: [] }],
-      ['retires a prerelease entry once its stable release is the baseline', [], '4.3.0-beta.1', '4.3.0', { allowed: [], stale: [], retired: [id] }],
-      ['keeps an entry while an older line publishes a hotfix', [narrowing], '4.2.4', '4.0.9', { allowed: [id], stale: [], retired: [] }],
+      ['retires an entry its baseline ships', [], '4.2.3', '4.2.3', { unlisted: [], allowed: [], stale: [], retired: [id] }],
+      ['allows nothing by a retired entry, so a break the baseline lacks is refused', [narrowing], '4.2.3', '4.2.3', { unlisted: [id], allowed: [], stale: [], retired: [id] }],
+      ['allows an entry no release has stamped', [narrowing], undefined, '4.2.3', { unlisted: [], allowed: [id], stale: [], retired: [] }],
+      ['allows an entry the release pull request stamped', [narrowing], '4.2.4', '4.2.3', { unlisted: [], allowed: [id], stale: [], retired: [] }],
+      ['refuses an unreleased entry that names no break', [], '4.2.4', '4.2.3', { unlisted: [], allowed: [], stale: [id], retired: [] }],
+      ['refuses an unstamped entry that names no break', [], undefined, '4.2.3', { unlisted: [], allowed: [], stale: [id], retired: [] }],
+      ['keeps a prerelease entry while its stable release is unpublished', [narrowing], '4.3.0-beta.1', '4.2.3', { unlisted: [], allowed: [id], stale: [], retired: [] }],
+      ['retires a prerelease entry once its stable release is the baseline', [], '4.3.0-beta.1', '4.3.0', { unlisted: [], allowed: [], stale: [], retired: [id] }],
+      ['keeps an entry while an older line publishes a hotfix', [narrowing], '4.2.4', '4.0.9', { unlisted: [], allowed: [id], stale: [], retired: [] }],
     ])('%s', (_, breaks, version, baseline, expected) => {
-      const { allowed, stale, retired } = judgeBreaks(breaks, { [id]: { reason: 'Deliberate.', ...(version && { version }) } }, false, baseline)
-      expect({ allowed: [...allowed], stale, retired }).toEqual(expected)
+      const { unlisted, allowed, stale, retired } = judgeBreaks(breaks, { [id]: { reason: 'Deliberate.', ...(version && { version }) } }, false, baseline)
+      expect({ unlisted: unlisted.map(entry => entry.id), allowed: [...allowed], stale, retired }).toEqual(expected)
     })
   })
 })

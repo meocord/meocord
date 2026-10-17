@@ -5,6 +5,7 @@
  * retired: the check no longer reads it, and the next release removes it.
  */
 
+import { execFileSync } from 'child_process'
 import { readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 
@@ -101,4 +102,25 @@ export function stampAllowlistFile(root: string, latest: string | undefined): bo
   if (JSON.stringify(stamped) === JSON.stringify(allowlist)) return false
   writeFileSync(file, `${JSON.stringify(stamped, null, 2)}\n`)
   return true
+}
+
+/**
+ * How long `release:version` waits for npm to name its latest release. Tidying the allowlist is optional, and npm's own
+ * retries can take minutes when the registry stalls, so it gives up soon and the entries are only stamped.
+ */
+export const NPM_VIEW_TIMEOUT_MS = 15_000
+
+/** Asks npm for meocord's dist-tag `latest`, within `timeout` milliseconds. */
+type ViewLatest = (timeout: number) => string
+
+const viewLatest: ViewLatest = timeout => execFileSync('npm', ['view', 'meocord', 'dist-tags.latest'], { encoding: 'utf8', timeout })
+
+/** npm's latest meocord, or `undefined` when npm can't say in time or answers with something other than a version. */
+export function latestRelease(timeout = NPM_VIEW_TIMEOUT_MS, view: ViewLatest = viewLatest): string | undefined {
+  try {
+    const latest = view(timeout).trim()
+    return partsOf(latest) ? latest : undefined
+  } catch {
+    return undefined
+  }
 }
