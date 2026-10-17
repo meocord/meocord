@@ -13,5 +13,8 @@ export const WARM_UP_TIMEOUT_MS = 30_000
  */
 export const CHILD_PROCESS_TIMEOUT_MS = WARM_UP_TIMEOUT_MS
 
+/** How long a case outlasts its child's bound: room for the case to report a child killed at the bound. */
+export const CHILD_PROCESS_CASE_MARGIN_MS = 5_000
+
 /** The budget of a case that runs such a child: past the child's own, so a hung child fails with its own message. */
-export const CHILD_PROCESS_CASE_TIMEOUT_MS = CHILD_PROCESS_TIMEOUT_MS + 5_000
+export const CHILD_PROCESS_CASE_TIMEOUT_MS = CHILD_PROCESS_TIMEOUT_MS + CHILD_PROCESS_CASE_MARGIN_MS
