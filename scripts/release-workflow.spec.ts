@@ -8,6 +8,7 @@ interface Job {
   name?: string
   needs?: string | string[]
   if?: string
+  'timeout-minutes'?: number
   steps?: { if?: string }[]
 }
 
@@ -62,6 +63,10 @@ describe('the Release workflow', () => {
     )
 
     expect(unchecked).toEqual([])
+  })
+
+  it('limits how long every job runs', () => {
+    expect(Object.keys(jobs).filter(id => jobs[id]!['timeout-minutes'] === undefined)).toEqual([])
   })
 
   it.each(RELEASE_GATES)('runs %s only once every required check has passed', gate => {
