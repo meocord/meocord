@@ -368,7 +368,28 @@ describe('interceptors shared across calls', () => {
   })
 })
 
+/**
+ * Runs each case of the enclosing describe on a fake clock. A case runs its calls to the end, so a timer still pending
+ * after it is work it stopped waiting for, which would otherwise finish, and warn, during a later case.
+ */
+function onFakeClock() {
+  beforeEach(() => void vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }))
+  afterEach(() => {
+    const pending = vi.getTimerCount()
+    vi.useRealTimers()
+    expect(pending).toBe(0)
+  })
+}
+
+/** Runs the fake clock until no timer is left, then lets the turn end, as Node reports a rejection left unhandled then. */
+async function runToEnd() {
+  await vi.runAllTimersAsync()
+  await new Promise(resolve => setImmediate(resolve))
+}
+
+// The handlers' work: slow ends with the interceptors' 20 ms timeout, late after it
 const slow = () => new Promise(resolve => setTimeout(resolve, 20))
+const late = () => new Promise(resolve => setTimeout(resolve, 40))
 
 // Each starts the rest of the call with next.handle() and returns before it ends
 @Interceptor()
@@ -494,21 +515,21 @@ class UnawaitedController {
   @Command('throwsAfterTimeout', CommandType.SLASH)
   @UseInterceptor(TimesOut)
   async throwsAfterTimeout() {
-    await new Promise(resolve => setTimeout(resolve, 40))
+    await late()
     throw new Error('database down')
   }
 
   @Command('rethrowsAfterTimeout', CommandType.SLASH)
   @UseInterceptor(RethrowsLate)
   async rethrowsAfterTimeout() {
-    await new Promise(resolve => setTimeout(resolve, 40))
+    await late()
     throw new Error('database down')
   }
 
   @Command('wrapsAfterTimeout', CommandType.SLASH)
   @UseInterceptor(WrapsLate)
   async wrapsAfterTimeout() {
-    await new Promise(resolve => setTimeout(resolve, 40))
+    await late()
     throw new Error('database down')
   }
 
@@ -587,12 +608,22 @@ class UnawaitedController {
 
 describe('an interceptor that returns before the call it started ends', () => {
   const module = () => MeoCordTestingModule.create({ controllers: [UnawaitedController] }).compile()
+  onFakeClock()
   beforeEach(() => {
     log.length = 0
   })
 
+  /** Invokes `name` and runs the clock to the end, so the call and the work it left behind have finished. */
+  const invokeToEnd = async (name: keyof UnawaitedController) => {
+    const call = module().invoke(UnawaitedController, name, slash(name))
+    // Handled here too, so a rejection while the clock runs isn't reported as unhandled before the caller awaits it
+    call.catch(() => undefined)
+    await runToEnd()
+    return call
+  }
+
   it('leaves the call to end when the handler does', async () => {
-    const { ran } = await module().invoke(UnawaitedController, 'dropsOk', slash('dropsOk'))
+    const { ran } = await invokeToEnd('dropsOk')
 
     expect(ran).toBe(true)
     expect(log).toEqual(['handler done'])
@@ -601,28 +632,25 @@ describe('an interceptor that returns before the call it started ends', () => {
   it.each(['drops', 'chains', 'finally'] as const)(
     'fails the call with what the handler throws when %s leaves it uncaught',
     async name => {
-      await expect(module().invoke(UnawaitedController, name, slash(name))).rejects.toThrow('database down')
+      await expect(invokeToEnd(name)).rejects.toThrow('database down')
       expect(log).toEqual({ drops: [], chains: [], finally: ['finally'] }[name])
     },
   )
 
   it('leaves an error it catches, awaited or not, to it', async () => {
-    const results = [
-      await module().invoke(UnawaitedController, 'catches', slash('catches')),
-      await module().invoke(UnawaitedController, 'swallows', slash('swallows')),
-    ]
+    const results = [await invokeToEnd('catches'), await invokeToEnd('swallows')]
 
     expect(results.map(({ ran }) => ran)).toEqual([true, true])
     expect(log).toEqual(['caught database down', 'swallowed database down'])
   })
 
   it('leaves a call to end with the interceptor when it took the run on, even one that never settles', async () => {
-    const startedAt = performance.now()
+    const call = module().invoke(UnawaitedController, 'hangTimesOut', slash('hangTimesOut'))
+    await runToEnd()
 
-    const { ran } = await module().invoke(UnawaitedController, 'hangTimesOut', slash('hangTimesOut'))
-
-    expect(ran).toBe(true)
-    expect(performance.now() - startedAt).toBeLessThan(200)
+    // The clock has run past the timeout with nothing left to run, so a call still going waits on the handler
+    const stillRunning = 'still running'
+    await expect(Promise.race([call, Promise.resolve(stillRunning)])).resolves.toMatchObject({ ran: true })
   })
 
   it.each([
@@ -632,8 +660,7 @@ describe('an interceptor that returns before the call it started ends', () => {
   ] as const)('warns of a run it took on that throws once the call has ended, passed on %s', async (_how, interceptor, name) => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 
-    await module().invoke(UnawaitedController, name, slash(name))
-    await new Promise(resolve => setTimeout(resolve, 60))
+    await invokeToEnd(name)
 
     expect(warn).toHaveBeenCalledWith(
       `${interceptor} returned before UnawaitedController.${name} finished, which then threw; nothing caught it, so the ` +
@@ -649,8 +676,7 @@ describe('an interceptor that returns before the call it started ends', () => {
   ] as const)('leaves a run it took on and catches itself, with %s, to it, warning of nothing', async (_how, name, caught) => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
 
-    await module().invoke(UnawaitedController, name, slash(name))
-    await new Promise(resolve => setTimeout(resolve, 40))
+    await invokeToEnd(name)
 
     expect(log).toEqual([caught])
     expect(warn).not.toHaveBeenCalled()
@@ -662,8 +688,7 @@ describe('an interceptor that returns before the call it started ends', () => {
     const collect = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', collect)
     try {
-      await module().invoke(UnawaitedController, 'startsLate', slash('startsLate'))
-      await new Promise(resolve => setTimeout(resolve, 20))
+      await invokeToEnd('startsLate')
     } finally {
       process.off('unhandledRejection', collect)
     }
@@ -676,8 +701,7 @@ describe('an interceptor that returns before the call it started ends', () => {
     const collect = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', collect)
     try {
-      await module().invoke(UnawaitedController, 'catchesCallback', slash('catchesCallback'))
-      await new Promise(resolve => setTimeout(resolve, 20))
+      await invokeToEnd('catchesCallback')
     } finally {
       process.off('unhandledRejection', collect)
     }
@@ -701,7 +725,9 @@ describe('an interceptor that returns before the call it started ends', () => {
     await new MeoCordApp([UnawaitedController], container, client as never, 'token').start()
     const interaction = slash('drops')
 
-    await listeners.get('interactionCreate')?.(interaction)
+    const dispatched = listeners.get('interactionCreate')?.(interaction)
+    await runToEnd()
+    await dispatched
 
     expect(interaction.reply).toHaveBeenCalledOnce()
   })
@@ -709,6 +735,8 @@ describe('an interceptor that returns before the call it started ends', () => {
 
 // The unanswered warning blames the interceptor it was last told of, which ended the call only if it is the outermost
 describe('runInterceptors, with nested interceptors that both return before the handler finishes', () => {
+  onFakeClock()
+
   it('tells of the outermost last, though the inner one settles after it', async () => {
     const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
     @Interceptor()
@@ -727,7 +755,9 @@ describe('runInterceptors, with nested interceptors that both return before the 
     const context = { withParams: () => context, getHandlerName: () => 'slow', getController: () => Outer }
     const told: string[] = []
 
-    await runInterceptors([Outer, Inner], new Container(), context as never, () => pause(40), cls => told.push(cls.name))
+    const run = runInterceptors([Outer, Inner], new Container(), context as never, () => pause(40), cls => told.push(cls.name))
+    await runToEnd()
+    await run
 
     expect(told.at(-1)).toBe('Outer')
   })
