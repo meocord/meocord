@@ -408,8 +408,9 @@ something you have to arrange.
 Publishing uses npm trusted publishing — the registry issues short-lived credentials to the
 workflow, so no npm token is stored anywhere — and every release carries a provenance attestation.
 The package is built and packed in a job of its own, which cannot publish; the job that publishes
-receives that tarball and publishes it as it was packed. On a pull request, the `Package dry run`
-check publishes the same kind of tarball with `--dry-run` and compares its files with packing in place.
+receives that tarball and publishes it as it was packed. On a pull request and in the merge queue,
+the `Package dry run` job publishes the same kind of tarball with `--dry-run` and compares its files
+with packing in place; the required `Build` check reports it, so a failure blocks the merge.
 
 If a version reaches npm but its tag or GitHub release is missing, re-running the Release workflow
 does not repair it: the version is already on npm, so nothing is packed or published, and no tag or

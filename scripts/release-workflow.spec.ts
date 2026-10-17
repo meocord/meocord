@@ -8,10 +8,14 @@ interface Job {
   name?: string
   needs?: string | string[]
   if?: string
+  steps?: { if?: string }[]
 }
 
 /** The checks branch protection requires on main, by the name of the job reporting each, as the settings list them */
 const REQUIRED_CHECKS = ['Lint', 'Test', 'Build', 'Coverage', 'Windows', 'Redis', 'Test runners']
+
+/** Pull request jobs that block no merge by design: real Discord, so its outages can't, and its fork notice */
+const ADVISORY_JOBS = ['e2e', 'e2e-fork']
 
 /** The jobs that start a release: they run only once every required check has passed on the commit they release */
 const RELEASE_GATES = ['release-checks', 'release']
@@ -30,9 +34,34 @@ const requiresSuccess = (job: Job, need: string) =>
 
 const reporterOf = (check: string) => Object.keys(jobs).find(id => jobs[id]!.name === check)
 
+// Confined to pushes and manual runs by its own condition, or by a job it needs
+const runsOnlyOnPush = (id: string): boolean => {
+  const condition = jobs[id]!.if ?? ''
+  const confined = condition.includes('github.event_name') && !/'pull_request'|'merge_group'/.test(condition)
+  return confined || needsOf(jobs[id]!).some(runsOnlyOnPush)
+}
+
+// A gate that needs the job and fails a step when it doesn't succeed, so the check the gate reports fails with it
+const reportsOn = (gate: Job, id: string) =>
+  needsOf(gate).includes(id) &&
+  (gate.steps ?? []).some(step => step.if?.replace(/\s+/g, ' ').includes(`needs.${id}.result != 'success'`))
+
 describe('the Release workflow', () => {
   it('has a job reporting each required check', () => {
     expect(REQUIRED_CHECKS.filter(check => reporterOf(check) === undefined)).toEqual([])
+  })
+
+  it('blocks a merge on every job a pull request or a queued merge runs, other than the advisory ones', () => {
+    const reporters = REQUIRED_CHECKS.map(check => reporterOf(check)!)
+    const unchecked = Object.keys(jobs).filter(
+      id =>
+        !runsOnlyOnPush(id) &&
+        !ADVISORY_JOBS.includes(id) &&
+        !reporters.includes(id) &&
+        !reporters.some(reporter => reportsOn(jobs[reporter]!, id)),
+    )
+
+    expect(unchecked).toEqual([])
   })
 
   it.each(RELEASE_GATES)('runs %s only once every required check has passed', gate => {
