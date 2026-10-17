@@ -55,6 +55,16 @@ const CHECK_SCRIPT = 'scripts/check-packed-tarball.ts'
 /** A step that installs dependencies or builds, which the read-only check must not run */
 const INSTALLS = /\b(?:bun|npm|pnpm|yarn)\s+(?:install|ci|add|run build)\b/
 
+/** The checks a push runs once each, against the tarball Build packed */
+const ONCE_PER_PUSH = [
+  'Check the public API against the latest release',
+  'Verify generated applications',
+  'Run the slow CLI scenarios',
+]
+
+/** The jobs that run code from outside the lockfile, which keep no token in their checkout */
+const OUTSIDE_LOCKFILE = ['build', 'slow-scenarios', 'release-checks']
+
 /** The pull request events a label change sends */
 const LABEL_EVENTS = ['labeled', 'unlabeled']
 
@@ -109,6 +119,96 @@ const runsOnlyOnPush = (id: string): boolean => {
   const confined = condition.includes('github.event_name') && !/'pull_request'|'merge_group'/.test(condition)
   return confined || needsOf(jobs[id]!).some(runsOnlyOnPush)
 }
+
+/** The event a push run evaluates its conditions for */
+const PUSH = 'push'
+
+/** A condition's tokens: the ${{ }} wrapper, operators, parentheses, single-quoted strings and context paths */
+const TOKEN = /\s*(\$\{\{|\}\}|&&|\|\||==|!=|!|\(|\)|'[^']*'|[A-Za-z_][\w.*-]*)/y
+
+/** Values a run only learns as it goes: outputs, step outcomes and repository variables */
+const RUNTIME_VALUE = /\b(?:needs\.[\w-]+\.outputs\.|steps\.[\w-]+\.(?:outputs\.|outcome\b)|vars\.)/
+
+/**
+ * Whether a job or step condition holds on a push: a need's result is `success` when that job runs on a push and
+ * `skipped` when it doesn't, a value only the run learns is taken as true, so the step may run, and a pull request's
+ * fields are absent. Any other shape throws, so a new kind of condition extends this rather than passing unread.
+ */
+function holdsOnPush(condition: string): boolean {
+  const tokens: string[] = []
+  TOKEN.lastIndex = 0
+  while (TOKEN.lastIndex < condition.trimEnd().length) {
+    const from = TOKEN.lastIndex
+    const match = TOKEN.exec(condition)
+    if (!match) throw new Error(`Unreadable condition from ${JSON.stringify(condition.slice(from))}: ${condition}`)
+    if (match[1] !== '${{' && match[1] !== '}}') tokens.push(match[1]!)
+  }
+  let at = 0
+  const take = (expected?: string) => {
+    const token = tokens[at++]
+    if (token === undefined || (expected !== undefined && token !== expected)) {
+      throw new Error(`Expected ${expected ?? 'more'} in: ${condition}`)
+    }
+    return token
+  }
+  const or = (): boolean => {
+    let value = and()
+    while (tokens[at] === '||') take() && (value = and() || value)
+    return value
+  }
+  const and = (): boolean => {
+    let value = unary()
+    while (tokens[at] === '&&') take() && (value = unary() && value)
+    return value
+  }
+  const unary = (): boolean => (tokens[at] === '!' ? (take(), !unary()) : primary())
+  const primary = (): boolean => {
+    if (tokens[at] === '(') {
+      take()
+      const value = or()
+      take(')')
+      return value
+    }
+    const left = take()
+    if (tokens[at] === '(') {
+      take()
+      take(')')
+      const status: Record<string, boolean> = { always: true, success: true, cancelled: false, failure: false }
+      if (!(left in status)) throw new Error(`Unsupported function ${left}() in: ${condition}`)
+      return status[left]!
+    }
+    const op = take()
+    const right = take()
+    if (op !== '==' && op !== '!=') throw new Error(`Unsupported operator ${op} in: ${condition}`)
+    const literal = right.startsWith("'") ? right.slice(1, -1) : undefined
+    const equal = (value: string | null) => (value === literal) === (op === '==')
+    if (left === 'github.event_name' && literal !== undefined) return equal(PUSH)
+    const need = /^needs\.([\w-]+)\.result$/.exec(left)?.[1]
+    if (need && literal !== undefined) return equal(runsOnPush(need) ? 'success' : 'skipped')
+    if (/^github\.event\.pull_request\./.test(left)) return equal(null)
+    if (RUNTIME_VALUE.test(left)) return true
+    throw new Error(`Unsupported comparison ${left} ${op} ${right} in: ${condition}`)
+  }
+  const value = or()
+  if (at !== tokens.length) throw new Error(`Unread ${tokens.slice(at).join(' ')} in: ${condition}`)
+  return value
+}
+
+/** Whether GitHub's implicit success() applies, which skips a job when a job it needs was skipped */
+const STATUS_FUNCTION = /\b(?:always|success|cancelled|failure)\(\)/
+
+// Runs on a push: its condition holds, and, under the implicit success(), every job it needs runs too
+function runsOnPush(id: string): boolean {
+  const condition = jobs[id]!.if ?? ''
+  if (condition && !holdsOnPush(condition)) return false
+  return STATUS_FUNCTION.test(condition) || needsOf(jobs[id]!).every(runsOnPush)
+}
+
+// Whether a step's running on a push depends only on what the workflow says, not on a value its run learns
+const certainOnPush = (id: string, step: { if?: string }): boolean =>
+  [step.if, jobs[id]!.if, ...needsClosure(id).map(need => jobs[need]!.if)].every(
+    condition => condition === undefined || !RUNTIME_VALUE.test(condition),
+  )
 
 // A gate that needs the job and fails a step when it doesn't succeed, so the check the gate reports fails with it
 const reportsOn = (gate: Job, id: string) =>
@@ -197,6 +297,30 @@ describe('the Release workflow', () => {
 
     expect(imports.length).toBeGreaterThan(0)
     expect(imports.filter(specifier => !isBuiltin(specifier))).toEqual([])
+  })
+
+  it('reads every job and step condition for a push', () => {
+    const conditions = Object.values(jobs).flatMap(job => [job.if, ...(job.steps ?? []).map(step => step.if)])
+
+    expect(() => conditions.filter(condition => condition !== undefined).forEach(holdsOnPush)).not.toThrow()
+  })
+
+  it.each(ONCE_PER_PUSH)('runs "%s" once on a push, whatever the run learns', check => {
+    const running = Object.keys(jobs).flatMap(id =>
+      runsOnPush(id)
+        ? (jobs[id]!.steps ?? [])
+            .filter(step => step.name === check && (step.if === undefined || holdsOnPush(step.if)))
+            .map(step => ({ id, certain: certainOnPush(id, step) }))
+        : [],
+    )
+
+    expect(running).toEqual([{ id: expect.any(String), certain: true }])
+  })
+
+  it('keeps no token in the checkout of a job that runs code from outside the lockfile', () => {
+    const checkoutOf = (id: string) => jobs[id]!.steps!.find(step => step.uses?.startsWith('actions/checkout@'))
+
+    expect(OUTSIDE_LOCKFILE.filter(id => checkoutOf(id)?.with?.['persist-credentials'] !== false)).toEqual([])
   })
 
   it('runs every job that follows the release only once it succeeded', () => {

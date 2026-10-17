@@ -295,8 +295,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # Without the token in .git/config, as the generated applications' dependencies run here and nothing here pushes
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The generated application's tools run through their node shebangs, and the CLI
       # needs the Node its engines field names, not whichever one the image carries.
@@ -499,10 +502,11 @@ jobs:
           echo "The package dry run failed: ${{ needs.package-dry-run.result }}"
           exit 1
 
-  # The checks that run code from outside the lockfile (a generated app's dependency tree, its bot, bundling, sharding),
-  # for a push to main or beta or a manual re-run, in a read-only job where the publishing identity can't be requested.
-  # It starts only once every required check has passed, so a failed one stops the release. Needs are named one by one:
-  # the implicit success() also reads the slow scenarios job, which "Test" reports and a push skips.
+  # The slow CLI scenarios, which run code from outside the lockfile (a generated app's dependency tree, its bot,
+  # bundling, sharding), for a push to main or beta or a manual re-run, in a read-only job where the publishing identity
+  # can't be requested; Build runs the push's other checks. It starts only once every required check has passed, so a
+  # failed one stops the release. Needs are named one by one: the implicit success() also reads the slow scenarios job,
+  # which "Test" reports and a push skips.
   release-checks:
     name: Release checks
     if: >-
@@ -537,7 +541,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The CLI scenarios run the repository's own build; the applications install the tarball below
+      # The CLI scenarios run the repository's own build; the applications they make install the tarball below
       - name: Build package
         run: bun run build
 
@@ -550,29 +554,6 @@ jobs:
 
       - name: Use the packed package
         run: echo "MEOCORD_TARBALL=$(ls "$RUNNER_TEMP"/package/meocord-*.tgz)" >> "$GITHUB_ENV"
-
-      - name: Find the latest release
-        id: published
-        run: echo "version=$(npm view meocord dist-tags.latest)" >> "$GITHUB_OUTPUT"
-
-      # Its unpacked declarations, which a version never changes
-      - name: Cache the latest release's declarations
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: node_modules/.cache/api-compat/${{ steps.published.outputs.version }}
-          key: api-compat-${{ steps.published.outputs.version }}
-
-      # Against the release this one follows, before anything is published
-      - name: Check the public API against the latest release
-        env:
-          AGAINST: ${{ steps.published.outputs.version }}
-        run: bun run check:api-compat --against "$AGAINST"
-
-      # Installs an application from the packed build and runs its own lint, typecheck,
-      # tests, coverage and builds. Rendering a template says nothing about whether the
-      # code it produces passes any of them.
-      - name: Verify generated applications
-        run: bun run verify:generated
 
       # The CLI scenarios that install with npm, run on bun, bundle, shard and send signals, on the
       # commit that is released; pull requests and queued merges run them in their own job.
