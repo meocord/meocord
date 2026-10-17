@@ -4,6 +4,7 @@
  * addition is compatible. Run by check-api-compat.ts.
  */
 import ts from 'typescript'
+import { type Allowlist, isRetired } from './allowlist.js'
 
 /** A change that can break code written against the old declarations, at a path such as `CommandMetadata.specificity`. */
 export interface ApiBreak {
@@ -261,15 +262,19 @@ export interface EntryBreak extends ApiBreak {
 const narrowsMember = ({ path, problem }: ApiBreak) => path.includes('.') && problem.startsWith('narrowed: ')
 
 /**
- * The breaks judged against the allowlist: those it doesn't name, the entries that name no break, and, unless the
- * release is a major one, the entries that allow a break other than a narrowed member type.
+ * The breaks judged against the allowlist, compared with `baseline`: the entries the baseline has retired, which are
+ * not read; the breaks no other entry names; the entries that name no break; and, unless the release is a major one,
+ * the entries that allow a break other than a narrowed member type.
  */
-export function judgeBreaks(breaks: EntryBreak[], allowlist: Record<string, string>, major: boolean) {
-  const allowed = new Set(breaks.filter(({ id }) => allowlist[id]).map(({ id }) => id))
+export function judgeBreaks(breaks: EntryBreak[], allowlist: Allowlist, major: boolean, baseline: string) {
+  const retired = Object.keys(allowlist).filter(id => isRetired(allowlist[id], baseline))
+  const active = new Set(Object.keys(allowlist).filter(id => !retired.includes(id)))
+  const allowed = new Set(breaks.filter(({ id }) => active.has(id)).map(({ id }) => id))
   return {
-    unlisted: breaks.filter(({ id }) => !allowlist[id]),
+    unlisted: breaks.filter(({ id }) => !active.has(id)),
     allowed,
-    stale: Object.keys(allowlist).filter(id => !allowed.has(id)),
-    majorOnly: major ? [] : [...new Set(breaks.filter(entry => allowlist[entry.id] && !narrowsMember(entry)).map(({ id }) => id))],
+    stale: [...active].filter(id => !allowed.has(id)),
+    majorOnly: major ? [] : [...new Set(breaks.filter(entry => active.has(entry.id) && !narrowsMember(entry)).map(({ id }) => id))],
+    retired,
   }
 }
