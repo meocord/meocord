@@ -134,7 +134,7 @@ describe('judgeBreaks', () => {
   function judged(before: string, after: string, major: boolean) {
     const breaks = compared(before, after).breaks.map(found => ({ ...found, id: `core ${found.path}`, file: 'dist/types/core/index.d.ts' }))
     expect(breaks).toHaveLength(1)
-    const { unlisted, stale, majorOnly } = judgeBreaks(breaks, { [breaks[0]!.id]: 'Deliberate.' }, major)
+    const { unlisted, stale, majorOnly } = judgeBreaks(breaks, { [breaks[0]!.id]: { reason: 'Deliberate.' } }, major, '4.2.3')
     return [...unlisted.map(({ id }) => id), ...stale, ...majorOnly]
   }
 
@@ -147,5 +147,25 @@ describe('judgeBreaks', () => {
     ['a narrowed parameter in a patch', 'export declare function f(a: string | number): void', 'export declare function f(a: string): void', false, ['core f']],
   ])('judges an allowlist entry for %s', (_, before, after, major, refused) => {
     expect(judged(before, after, major)).toEqual(refused)
+  })
+
+  describe("by the entry's version and the baseline", () => {
+    // The narrowing 4.2.3 shipped: once 4.2.3 was the baseline its entry named a break no longer there (#922)
+    const id = 'decorator MeoCordOptions.controllers'
+    const narrowing = { id, file: 'dist/types/decorator/index.d.ts', path: 'MeoCordOptions.controllers', problem: 'narrowed: unknown[] → object[]' }
+
+    it.each([
+      ['retires an entry its baseline ships', [], '4.2.3', '4.2.3', { allowed: [], stale: [], retired: [id] }],
+      ['allows an entry no release has stamped', [narrowing], undefined, '4.2.3', { allowed: [id], stale: [], retired: [] }],
+      ['allows an entry the release pull request stamped', [narrowing], '4.2.4', '4.2.3', { allowed: [id], stale: [], retired: [] }],
+      ['refuses an unreleased entry that names no break', [], '4.2.4', '4.2.3', { allowed: [], stale: [id], retired: [] }],
+      ['refuses an unstamped entry that names no break', [], undefined, '4.2.3', { allowed: [], stale: [id], retired: [] }],
+      ['keeps a prerelease entry while its stable release is unpublished', [narrowing], '4.3.0-beta.1', '4.2.3', { allowed: [id], stale: [], retired: [] }],
+      ['retires a prerelease entry once its stable release is the baseline', [], '4.3.0-beta.1', '4.3.0', { allowed: [], stale: [], retired: [id] }],
+      ['keeps an entry while an older line publishes a hotfix', [narrowing], '4.2.4', '4.0.9', { allowed: [id], stale: [], retired: [] }],
+    ])('%s', (_, breaks, version, baseline, expected) => {
+      const { allowed, stale, retired } = judgeBreaks(breaks, { [id]: { reason: 'Deliberate.', ...(version && { version }) } }, false, baseline)
+      expect({ allowed: [...allowed], stale, retired }).toEqual(expected)
+    })
   })
 })

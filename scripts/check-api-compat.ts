@@ -2,7 +2,8 @@
  * Checks, after `bun run build`, that the built public declarations break nothing code written against the latest
  * published release compiled with: each entry's `.d.ts` and `.d.cts`, export by export and member by member (see
  * lib/api-compat.ts). Additions pass. A deliberate break is named in api-compat-allowlist.json with its reason;
- * outside a major release, an entry may allow only a narrowed member type.
+ * outside a major release, an entry may allow only a narrowed member type. `release:version` stamps each entry with the
+ * version that ships it, and once the baseline is that version or later the entry is retired (see lib/allowlist.ts).
  *
  *   bun scripts/check-api-compat.ts [--against <version>]
  */
@@ -11,6 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import ts from 'typescript'
+import { ALLOWLIST_FILE, parseAllowlist } from './lib/allowlist.js'
 import { apiBreaks, type EntryBreak, judgeBreaks } from './lib/api-compat.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,6 +25,7 @@ const DECLARATIONS = [
 
 const at = process.argv.indexOf('--against')
 const against = at >= 0 ? process.argv[at + 1] : execFileSync('npm', ['view', 'meocord', 'dist-tags.latest'], { encoding: 'utf8' }).trim()
+console.log(`Comparing the built declarations with meocord@${against} (${at >= 0 ? '--against' : "npm's latest"}).`)
 
 // Unpacked inside the repository, so the published declarations resolve discord.js from its node_modules
 const published = path.join(repoRoot, 'node_modules', '.cache', 'api-compat', against)
@@ -55,7 +58,7 @@ const program = ts.createProgram(
 )
 const checker = program.getTypeChecker()
 
-const allowlist: Record<string, string> = JSON.parse(readFileSync(path.join(repoRoot, 'scripts', 'api-compat-allowlist.json'), 'utf8'))
+const allowlist = parseAllowlist(JSON.parse(readFileSync(path.join(repoRoot, ALLOWLIST_FILE), 'utf8')))
 // Only a major release may break the API: one a pending `major` changeset makes, or, on the release pull request once
 // changesets has consumed it, a version whose major is above the published one's
 const majorOf = (version: string) => Number(version.split('.')[0])
@@ -75,7 +78,14 @@ for (const { file, before, after } of pairs) {
   for (const line of compared.review) review.add(`${entry} ${line}`)
   for (const found of compared.breaks) breaks.push({ ...found, id: `${entry} ${found.path}`, file })
 }
-const { unlisted, allowed, stale, majorOnly } = judgeBreaks(breaks, allowlist, major)
+const { unlisted, allowed, stale, majorOnly, retired } = judgeBreaks(breaks, allowlist, major, against)
+if (retired.length > 0) {
+  const one = retired.length === 1
+  console.log(
+    `${retired.length} allowlist ${one ? 'entry' : 'entries'} retired by meocord@${against}, which has ${one ? 'its change' : 'their changes'}; ` +
+      `the next release removes ${one ? 'it' : 'them'}.`,
+  )
+}
 const problems = unlisted.map(({ file, path: where, problem }) => `${file}: ${where} ${problem}`)
 
 // Listed for a reviewer to read, not failed: the checker cannot relate a generic's parameters and return across versions
@@ -90,18 +100,18 @@ if (problems.length > 0) {
   console.error(
     `The built declarations break ${problems.length} thing(s) code written against meocord@${against} relies on:\n` +
       problems.map(problem => `  - ${problem}`).join('\n') +
-      '\nRestore them, or, for a deliberate break, name each in scripts/api-compat-allowlist.json with its reason ' +
+      '\nRestore them, or, for a deliberate break, name each in scripts/api-compat-allowlist.json as { "reason": "…" } ' +
         '(outside a major release, only a narrowed member type).',
   )
   process.exit(1)
 }
 if (stale.length > 0) {
-  console.error(`scripts/api-compat-allowlist.json names what no longer breaks; remove: ${stale.join(', ')}`)
+  console.error(`scripts/api-compat-allowlist.json names what no longer breaks against meocord@${against}; remove: ${stale.join(', ')}`)
   process.exit(1)
 }
 if (majorOnly.length > 0) {
   console.error(
-    `scripts/api-compat-allowlist.json allows breaks only a major release may make, but no pending changeset or version makes this one major: ${majorOnly.join(', ')}. ` +
+    `scripts/api-compat-allowlist.json allows breaks of meocord@${against} only a major release may make, but no pending changeset or version makes this one major: ${majorOnly.join(', ')}. ` +
       'Outside a major, an entry may allow only a narrowed member type.',
   )
   process.exit(1)
