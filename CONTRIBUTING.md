@@ -33,7 +33,7 @@ bun run test
 | `bun run test`             | Runs the suite, including the `*.test-d.ts` type-level assertions                                       |
 | `bun run test:watch`       | Same, in watch mode                                                                                     |
 | `bun run test:coverage`    | Runs the suite with istanbul coverage and enforces the thresholds                                       |
-| `bun run test:mutation`    | Mutation-tests the core modules with Stryker, by hand and not in CI; name modules to run a few          |
+| `bun run test:mutation`    | Mutation-tests core modules by hand, not in CI; name modules to run a few, `--force` to retest all      |
 | `bun run lint`             | Formats, fixes lint, then typechecks the source, test, and eslint projects                              |
 | `bun run build`            | Clears `dist/`, builds ESM, CJS, and type declarations through rollup, and writes `dist/cli.json`       |
 | `bun run verify:generated` | Generates an app from the packed build and runs its own checks — see below                              |

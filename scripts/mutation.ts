@@ -1,6 +1,7 @@
 /**
  * Runs mutation testing module by module, as stryker.config.mjs defines them, and prints each
- * module's score. `bun run test:mutation` runs every module; name modules to run only those.
+ * module's score. `bun run test:mutation` runs every module; name modules to run only those, and add
+ * `--force` to retest every mutant instead of reusing the incremental results.
  */
 
 import { spawnSync } from 'child_process'
@@ -10,7 +11,12 @@ import { fileURLToPath } from 'url'
 import { modules } from '../stryker.config.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const requested = process.argv.slice(2)
+/** The flag that makes Stryker ignore a module's incremental results and test every mutant again. */
+const FORCE_FLAG = '--force'
+
+const args = process.argv.slice(2).filter(arg => arg !== '--')
+const force = args.includes(FORCE_FLAG)
+const requested = args.filter(arg => arg !== FORCE_FLAG)
 const unknown = requested.filter(name => !(name in modules))
 if (unknown.length > 0) {
   console.error(`Unknown module(s): ${unknown.join(', ')}. Choose from: ${Object.keys(modules).join(', ')}.`)
@@ -37,7 +43,7 @@ function summarise(name: string) {
 const results: ReturnType<typeof summarise>[] = []
 for (const name of requested.length > 0 ? requested : Object.keys(modules)) {
   console.log(`\n== ${name}`)
-  const run = spawnSync('bunx', ['stryker', 'run'], {
+  const run = spawnSync('bunx', ['stryker', 'run', ...(force ? [FORCE_FLAG] : [])], {
     cwd: repoRoot,
     stdio: 'inherit',
     env: { ...process.env, MUTATION_MODULE: name },
