@@ -9,11 +9,13 @@ interface Job {
   needs?: string | string[]
   if?: string
   'timeout-minutes'?: number
-  steps?: { name?: string; if?: string; run?: string }[]
+  outputs?: Record<string, string>
+  steps?: { id?: string; name?: string; if?: string; run?: string }[]
 }
 
 interface Workflow {
   on: Record<string, { types?: string[] } | null>
+  concurrency?: unknown
   jobs: Record<string, Job>
 }
 
@@ -31,6 +33,12 @@ const WAIT_FOR_NPM = 'Wait for npm to serve the version'
 
 /** The job that versions, which `pack` and `publish` follow */
 const RELEASE = 'release'
+
+/** The jobs that release the committed version, which run only when npm doesn't have it yet */
+const PUBLISHERS = ['pack', 'publish']
+
+/** The condition, among those every publisher requires, that npm doesn't have the committed version */
+const UNPUBLISHED = `needs.${RELEASE}.outputs.unpublished == 'true'`
 
 /** The pull request events a label change sends */
 const LABEL_EVENTS = ['labeled', 'unlabeled']
@@ -54,6 +62,12 @@ const needsOf = (job: Job) => [job.needs ?? []].flat()
 // A need's result named in the job's condition, as the workflow does to keep a skipped job upstream from skipping it
 const requiresSuccess = (job: Job, need: string) =>
   needsOf(job).includes(need) && (job.if ?? '').replace(/\s+/g, ' ').includes(`needs.${need}.result == 'success'`)
+
+// A job's condition as the conditions it requires all of; `undefined` when an `||` makes any of them optional
+const conjunctsOf = (job: Job) => {
+  const condition = (job.if ?? '').replace(/\s+/g, ' ')
+  return condition.includes('||') ? undefined : condition.split('&&').map(part => part.trim())
+}
 
 const reporterOf = (check: string) => Object.keys(jobs).find(id => jobs[id]!.name === check)
 
@@ -101,6 +115,25 @@ describe('the Release workflow', () => {
     const reporters = REQUIRED_CHECKS.map(check => reporterOf(check)!)
 
     expect(reporters.filter(id => !requiresSuccess(jobs[gate]!, id))).toEqual([])
+  })
+
+  it('packs and publishes only a version npm does not have yet', () => {
+    const published = jobs[RELEASE]!.steps!.find(step => step.id === 'published')
+
+    expect(published).toMatchObject({
+      if: "steps.changesets.outputs.has-changesets == 'false'",
+      run: 'bun scripts/published-state.ts',
+    })
+    expect(jobs[RELEASE]!.outputs?.unpublished).toBe('${{ steps.published.outputs.unpublished }}')
+    expect(PUBLISHERS.filter(id => !conjunctsOf(jobs[id]!)?.includes(UNPUBLISHED))).toEqual([])
+  })
+
+  // Run by run, so a run never sees an earlier one's publish halfway, its version on npm before its tag is pushed
+  it('runs one push or manual run of a ref at a time, cancelling only pull requests', () => {
+    expect(release.concurrency).toEqual({
+      group: 'ci-${{ github.workflow }}-${{ github.ref }}',
+      'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
+    })
   })
 
   it('runs every job that follows the release only once it succeeded', () => {
