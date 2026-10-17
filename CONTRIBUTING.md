@@ -414,7 +414,8 @@ with packing in place; the required `Build` check reports it, so a failure block
 
 If a version reaches npm but its tag or GitHub release is missing, re-running the Release workflow
 does not repair it: the version is already on npm, so nothing is packed or published, and no tag or
-release is made. Create them by hand on the release commit, the merge of the `chore: release` pull
+release is made. Until both exist, every later run with no changeset pending fails and names what is
+missing. Create them by hand on the release commit, the merge of the `chore: release` pull
 request: push the tag `v<version>`, then create the GitHub release on it with that version's
 CHANGELOG section as its notes, marked as a prerelease for a beta:
 

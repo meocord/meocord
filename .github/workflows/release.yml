@@ -644,6 +644,7 @@ jobs:
     environment: Production
     outputs:
       pending: ${{ steps.changesets.outputs.has-changesets }}
+      unpublished: ${{ steps.published.outputs.unpublished }}
     concurrency:
       group: release-${{ github.ref }}
     permissions:
@@ -673,7 +674,8 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
 
       # With pending changesets this opens or updates the release pull request; with none, as right after it merges, it
-      # does nothing, and `pack` and `publish` release the committed version, so nothing reaches npm without that merge.
+      # does nothing, and `pack` and `publish` release the committed version if npm doesn't have it yet, so nothing
+      # reaches npm without that merge.
       # RELEASE_TOKEN, when set, opens the pull request so its checks start; GitHub holds the checks of one opened with
       # the workflow's own token until someone approves them.
       - name: Open or update the release pull request
@@ -685,12 +687,25 @@ jobs:
           pr-title: 'chore: release'
           commit-message: 'chore: release'
 
-  # Builds and packs the version committed, once nothing is pending, for `publish` to publish. The build runs code from
-  # dependencies, so it happens here, with no publishing identity and no environment: the tarball and the publish plan
-  # changesets writes beside it, the version's dist-tag among them, are uploaded as an artifact.
+      # Whether npm has the committed version, as changesets decides it; `pack` and `publish` run only when it doesn't.
+      # A version npm serves without its tag or GitHub release fails here, as no re-run can make them.
+      - name: Find whether the committed version is published
+        id: published
+        if: steps.changesets.outputs.has-changesets == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/published-state.ts
+
+  # Builds and packs the version committed, once nothing is pending and npm doesn't have it, for `publish` to publish.
+  # The build runs code from dependencies, so it happens here, with no publishing identity and no environment: the
+  # tarball and the publish plan changesets writes beside it, the version's dist-tag among them, are uploaded as an
+  # artifact.
   pack:
     name: Pack
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.pending == 'false' }}
+    if: >-
+      !cancelled() &&
+      needs.release.result == 'success' && needs.release.outputs.pending == 'false' &&
+      needs.release.outputs.unpublished == 'true'
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -732,7 +747,7 @@ jobs:
     if: >-
       !cancelled() &&
       needs.release.result == 'success' && needs.release.outputs.pending == 'false' &&
-      needs.pack.result == 'success'
+      needs.release.outputs.unpublished == 'true' && needs.pack.result == 'success'
     needs: [release, pack]
     runs-on: ubuntu-latest
     # Longer than the rule: a cut after npm accepts the tarball leaves the version untagged (CONTRIBUTING.md)
