@@ -68,6 +68,10 @@ jobs:
       - name: Check the release notes cover every changeset
         run: bun run notes:check
 
+      # Outside pre-release mode main is the current major's line: a major changeset waits for the next one.
+      - name: Check no changeset makes the next release a major
+        run: bun run major:check
+
   test:
     name: Test (node ${{ matrix.node }})
     runs-on: ubuntu-latest

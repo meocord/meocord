@@ -62,6 +62,10 @@ const ONCE_PER_PUSH = [
   'Run the slow CLI scenarios',
 ]
 
+/** The required check whose job refuses a major changeset, and the command it runs */
+const LINT_CHECK = 'Lint'
+const MAJOR_CHECK = 'bun run major:check'
+
 /** The jobs that run code from outside the lockfile, which keep no token in their checkout */
 const OUTSIDE_LOCKFILE = ['build', 'slow-scenarios', 'release-checks']
 
@@ -328,6 +332,14 @@ describe('the Release workflow', () => {
 
     expect(followers).toEqual(expect.arrayContaining(['pack', 'publish']))
     expect(followers.filter(id => !requiresSuccess(jobs[id]!, RELEASE))).toEqual([])
+  })
+
+  // Outside pre-release mode a major changeset would turn the next release into a major
+  it('refuses a major changeset in the Lint check, which every merge needs', () => {
+    const lint = jobs[reporterOf(LINT_CHECK)!]!
+
+    expect(lint.if).toBeUndefined()
+    expect((lint.steps ?? []).filter(step => step.if === undefined).map(step => step.run)).toContain(MAJOR_CHECK)
   })
 })
 
