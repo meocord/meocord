@@ -397,6 +397,25 @@ the shipped `.d.ts` and is what a user reads in their editor, so correcting a wr
 Getting it wrong is recoverable. A changeset is a file, so a forgotten or mis-sized one is fixed by
 committing another — nothing depends on a commit message being right the first time.
 
+### Release lines and the next major
+
+`main` is the line being built next. While `main` is the current major's line, a `major` changeset can't merge: `bun run major:check`, run in CI's Lint job, refuses one unless the repository is in pre-release mode. Work for the next major can still start early:
+
+| The change                                                                                     | Where it lands                                                                   |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Breaks nobody: a deprecated alias, an opt-in the major makes the default, an internal refactor | `main`, in the current minor's milestone, with a `minor` or `patch` changeset    |
+| Breaks a working bot: a removal, a changed default, a new refusal                              | A draft pull request against `main`, in the major's milestone, until the cutover |
+
+The cutover happens once the last minor of the line ships:
+
+1. `release/<major>.x` is cut from that minor's tag, with the same branch protection, required checks and merge queue as `main`, and added to the Release workflow's branches.
+2. `main` enters pre-release mode for the major (`bunx changeset pre enter next`). Its releases publish as `<major>.0.0-next.N` under the `next` dist-tag, and `npm install meocord` keeps resolving the previous line.
+3. The held draft pull requests are rebased onto `main` and merged.
+4. Fixes land on `main` first. A fix the previous line needs too gets the `backport` label and is cherry-picked to `release/<major>.x` with its changeset, to ship as a patch there.
+5. The major ships as stable with `bunx changeset pre exit` and its curated notes, and becomes `latest`. From then on the previous line's patches publish under a dist-tag of their own, such as `v4`, set through `publishConfig.tag` on its branch, so they never move `latest` back.
+
+The docs site serves each line from its own folder, so a new major opens a docs line beside the current one.
+
 ### How a release happens
 
 Merging to `main` does not publish. A bot collects every pending changeset into a release pull

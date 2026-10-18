@@ -21,6 +21,8 @@
       "devDependencies": {
         "@changesets/changelog-github": "^1.0.1",
         "@changesets/cli": "^3.0.3",
+        "@changesets/pre": "^3.0.0",
+        "@changesets/read": "^1.0.1",
         "@eslint/js": "^10.0.1",
         "@rollup/plugin-alias": "^6.0.0",
         "@rollup/plugin-json": "^6.1.0",
