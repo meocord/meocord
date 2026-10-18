@@ -1,7 +1,7 @@
 {
   "name": "meocord",
   "description": "Decorator-based framework for Discord bots on discord.js, with dependency injection, guards, a CLI and a testing toolkit.",
-  "version": "4.2.3",
+  "version": "4.2.4",
   "type": "module",
   "engines": {
     "node": ">=22.13"

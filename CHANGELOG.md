@@ -1,5 +1,11 @@
 # meocord
 
+## 4.2.4
+
+### Patch Changes
+
+- [#947](https://github.com/meocord/meocord/pull/947) [`5dd191e`](https://github.com/meocord/meocord/commit/5dd191eeec6f52b67bd0fe46036782b43e21dca5) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A new app from `meocord create` starts on vitest and @vitest/coverage-istanbul 5.0.5, the latest stable release, up from 5.0.4. An existing app is unchanged.
+
 ## 4.2.3
 
 ### Highlights
