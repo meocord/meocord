@@ -7,6 +7,6 @@
     "discord.js": "^14.27.0",
     "dotenv": "^18.0.7",
     "reflect-metadata": "^0.2.2",
-    "@types/bun": "^1.4.2"
+    "@types/bun": "^1.4.3"
   }
 }
