@@ -65,7 +65,7 @@ The pre-commit hook runs `bun run lint`. Do not bypass it for code changes.
 | `src/bin/`                    | The CLI, generators, `app-template/` and `builder-template/`                               |
 | `src/util/`                   | Internal helpers: config loading, routing keys, runtime detection, ...                     |
 | `scripts/`                    | `verify-generated.ts`, `third-party-notices.ts`                                            |
-| `README.md`                   | Landing page on GitHub and npm: intro, install, one example, links to meocord.dev          |
+| `README.md`                   | Landing page on GitHub and npm: intro, features, install, examples, links to meocord.dev   |
 | `docs/MIGRATING.md`           | Pointer to the upgrade guide on meocord.dev; its headings keep old changelog links landing |
 | `.changeset/`                 | Pending release notes and changesets config                                                |
 
@@ -227,8 +227,8 @@ Coordination happens between sessions and stays there.
 - The guides, the upgrade guide and the API reference live on meocord.dev, in the meocord/docs
   repository. A user-facing change updates them there, in a meocord/docs pull request, and the JSDoc
   here, which the API reference is generated from.
-- The README is the landing page. It holds no guide content, and its example compiles
-  (`check:jsdoc-examples` checks it).
+- The README is the landing page: an overview that links to meocord.dev for the guides. Every
+  TypeScript block in it compiles (`check:jsdoc-examples` checks them).
 - `docs/MIGRATING.md` and the README's "Moved sections" keep headings that published changelogs link
   to. Never rename or remove one; each points at the same section on meocord.dev.
 - Code examples in JSDoc must compile against the current API.
