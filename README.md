@@ -19,63 +19,78 @@ If you know NestJS, the shape will feel familiar.
 
 ## Why MeoCord?
 
-Discord bots often start with a handful of event listeners and command handlers. As they grow, interaction routing, permission checks, validation, error handling, shared services, and testing can become responsibilities scattered throughout the application.
-
-MeoCord brings those responsibilities into one consistent architecture.
-
-Instead of building your own infrastructure around discord.js, you get an application framework designed to handle the entire lifecycle of your bot.
-
-### One architecture for every Discord interaction
-
-Build slash commands, autocomplete, buttons, select menus, modals, context menus, message commands, reactions, and gateway events with structured handlers.
-
-### A unified execution pipeline
-
-Every handler can participate in the same execution lifecycle: guards, interceptors, validation, pipes, cooldowns, and exception filters.
+Discord bots often start with a handful of event listeners and command handlers. As they grow, routing, permission checks, input parsing, error handling, shared services and tests end up scattered across the code. MeoCord gives them one structure, so a bot that grows stays readable.
 
 ### Answers that fit the interaction
 
-Answering Discord means knowing where an interaction stands. An unanswered command takes a reply, an unanswered component an update of its own message, and a deferred or answered interaction an edit. `respond(interaction).send()` reads that state on every call and picks the right one, so handlers, guards and exception filters say what to send, not how. It also sees answers made directly with discord.js, and its answers work wherever the interaction happened, including user-installed apps in servers and direct messages the bot is not in.
+Answering Discord means knowing where an interaction stands, and getting it wrong fails at runtime. `respond(interaction)` reads that state on every call, so a handler, a guard or an exception filter says what to send and MeoCord picks the Discord call. It also sees answers made directly with discord.js, and its answers work wherever the interaction happened, including user-installed apps in servers and direct messages the bot is not in.
 
-### Dependency injection built in
+### One structure for interactions, messages and events
 
-Organize business logic into reusable services and providers. Inject dependencies instead of manually instantiating and passing them around.
+Slash commands, components, modals, context menus, message commands, reactions and gateway events are all methods on controllers, routed by MeoCord, with services injected where they are needed.
 
-### Test without Discord
+### One pipeline around every handler
 
-Execute handlers through the framework's testing module, including their guards, interceptors, validation, pipes, cooldowns, and exception filters. No live Discord connection required.
+Guards, interceptors, validation, pipes, cooldowns and exception filters run in a fixed order around every handler, so a permission check or an error reply is written once and applies everywhere.
 
-### Production tooling included
+### Tested the way it runs
 
-Scaffold applications and components, build with Rsbuild, register commands, run development workflows, and configure sharding through the MeoCord CLI.
+`meocord/testing` runs a handler through that same pipeline, with mocks that behave like discord.js, and no connection to Discord.
 
 ---
 
 ## Features
 
-| Capability                  | What you get                                                              |
-| --------------------------- | ------------------------------------------------------------------------- |
-| **Interaction controllers** | Decorator-based handlers for Discord interaction types                    |
-| **Message commands**        | Typed command patterns, parameters, flags, and built-in help              |
-| **Execution pipeline**      | Guards, interceptors, validation, pipes, cooldowns, and exception filters |
-| **Dependency injection**    | Services, providers, injection tokens, and lifecycle hooks                |
-| **Interaction responses**   | State-aware replies, edits, follow-ups, and presenters                    |
-| **Gateway events**          | Typed event handlers with the same execution pipeline                     |
-| **Testing utilities**       | Isolated handler execution and interaction mocks                          |
-| **Command management**      | Registration for global, guild, and development commands                  |
-| **CLI**                     | Project scaffolding, component generation, building, and execution        |
-| **Production builds**       | Rsbuild, self-contained builds, and sharding                              |
+| Capability                         | What you get                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| **Responses**                      | `respond()`: replies, updates, edits, follow-ups and errors, picked by state  |
+| **Interactions, messages, events** | Decorated controller methods for every interaction, message command and event |
+| **Message commands**               | Typed patterns, parameters, flags, lists and built-in help                    |
+| **Execution pipeline**             | Guards, interceptors, validation, pipes, cooldowns and exception filters      |
+| **Dependency injection**           | Services, providers, injection tokens and lifecycle hooks                     |
+| **Testing**                        | The real pipeline without Discord, and mocks for every interaction            |
+| **Command registration**           | Global, per guild, and to a development guild while you work                  |
+| **CLI**                            | Scaffolding, generators, development and production builds, starting the bot  |
+| **Deployment**                     | Rsbuild bundles, self-contained builds and sharding                           |
 
-### 1. Complete Discord interaction coverage
+### Responses
 
-A Discord bot isn't just slash commands.
+`respond(interaction)` answers whatever the interaction's state is:
 
-MeoCord provides a consistent controller-based approach to handling the interactions your application receives.
+| The interaction is                         | `send()` does                |
+| ------------------------------------------ | ---------------------------- |
+| A command, not yet answered                | Replies                      |
+| A component, not yet answered              | Updates the message it is on |
+| Deferred with `acknowledge()`, or answered | Edits the answer             |
 
-- Slash commands and subcommands
-- Autocomplete
-- Buttons
-- String, user, role, mentionable, and channel select menus
+`followUp()` sends another message after the answer, `modal()` shows a modal, and `error()` presents an error through the application's presenter, in the form that fits the state, never throwing.
+
+```typescript
+@Controller()
+export class ProfileController {
+  constructor(private readonly profiles: ProfileService) {}
+
+  @Command('profile', CommandType.SLASH)
+  async profile(interaction: ChatInputCommandInteraction) {
+    // A deferred reply: the profile may take longer than Discord's three seconds
+    await respond(interaction).acknowledge()
+
+    const embed = await this.profiles.render(interaction.user.id)
+
+    // Deferred, so this edits the reply
+    await respond(interaction).send({ embeds: [embed] })
+  }
+}
+```
+
+[Responses](https://meocord.dev/docs/latest/responses) · [Presenters](https://meocord.dev/docs/latest/presenters)
+
+### Interactions, messages and events
+
+Each of these is a method on a controller:
+
+- Slash commands and subcommands, with autocomplete
+- Buttons, and string, user, role, mentionable and channel select menus
 - Modal submissions
 - User and message context menus
 - Activity entry points
@@ -83,24 +98,18 @@ MeoCord provides a consistent controller-based approach to handling the interact
 - Message reactions
 - Gateway events
 
-Define handlers as methods and let MeoCord take care of dispatching the appropriate interaction.
+[Slash commands](https://meocord.dev/docs/latest/slash-commands) · [Components](https://meocord.dev/docs/latest/components) · [Message commands](https://meocord.dev/docs/latest/message-commands) · [Gateway events](https://meocord.dev/docs/latest/gateway-events)
 
-[Explore Controllers](https://meocord.dev/docs/latest/slash-commands) · [Components](https://meocord.dev/docs/latest/components) · [Message Commands](https://meocord.dev/docs/latest/message-commands)
+### The execution pipeline
 
-### 2. A unified execution pipeline
-
-Handlers shouldn't have to implement their own permission checks, validation, rate limiting, and error handling.
-
-MeoCord provides a consistent pipeline around handler execution.
-
-| Stage             | Responsibility                                    |
-| ----------------- | ------------------------------------------------- |
-| Guards            | Decide whether a handler is allowed to execute    |
-| Interceptors      | Wrap execution and modify or observe its result   |
-| Validation        | Check incoming handler input                      |
-| Pipes             | Transform validated input                         |
-| Cooldowns         | Control how frequently a handler can execute      |
-| Exception filters | Handle errors and determine how they are reported |
+| Stage             | Responsibility                                         |
+| ----------------- | ------------------------------------------------------ |
+| Guards            | Decide whether a handler runs                          |
+| Interceptors      | Wrap the handler, and can change or replace its result |
+| Validation        | Check the handler's input                              |
+| Pipes             | Turn valid input into what the handler takes           |
+| Cooldowns         | Limit how often a handler runs                         |
+| Exception filters | Answer errors the handler throws                       |
 
 Guards, interceptors and exception filters apply to a method, a controller or the whole app. Validation and pipes check a handler's input, and cooldowns go on a method or a controller.
 
@@ -108,101 +117,61 @@ Guards, interceptors and exception filters apply to a method, a controller or th
 @Controller()
 @UseGuard(StaffGuard)
 @UseInterceptor(TimingInterceptor)
-export class ProfileController {
-  @Command('profile', CommandType.SLASH)
+export class ModerationController {
+  @Command('warn', CommandType.SLASH)
   @Cooldown({ uses: 3, seconds: 10 })
-  async profile(interaction: ChatInputCommandInteraction) {
-    // Your application logic
+  async warn(interaction: ChatInputCommandInteraction) {
+    await respond(interaction).send('Warned.')
   }
 }
 ```
 
-Each stage has a defined place in the execution lifecycle, making behavior predictable and reusable across your application.
-
 [How a call runs](https://meocord.dev/docs/latest/how-a-call-runs) · [Guards](https://meocord.dev/docs/latest/guards) · [Interceptors](https://meocord.dev/docs/latest/interceptors) · [Validation and pipes](https://meocord.dev/docs/latest/validation) · [Cooldowns](https://meocord.dev/docs/latest/cooldowns)
 
-### 3. Dependency injection and application services
+### Services and dependency injection
 
-Separate application logic from Discord interaction handlers.
-
-MeoCord provides dependency injection for controllers, services, and providers, so your application can share reusable logic without manual instantiation.
+A service is a class with `@Service()`. A controller, or another service, asks for it in its constructor, and MeoCord builds it once and passes it in:
 
 ```typescript
-import { Service } from 'meocord/decorator'
-
 @Service()
 export class GreetingService {
   greet(name: string) {
     return `Hello, ${name}!`
   }
 }
-```
-
-Inject services into controllers and other services to keep your application modular.
-
-Providers also support values, classes, and asynchronous factories under injection tokens.
-
-[Services and providers](https://meocord.dev/docs/latest/services)
-
-### 4. Interaction-aware responses
-
-Discord interactions have different response rules depending on their type and current state.
-
-A command may need a reply. A component may need to update its original message. A deferred interaction needs an edit. A completed interaction may need a follow-up.
-
-MeoCord's `respond()` abstraction handles these states for you.
-
-```typescript
-import { respond } from 'meocord/common'
 
 @Controller()
-export class ProfileController {
-  constructor(private readonly profiles: ProfileService) {}
+export class GreetController {
+  constructor(private readonly greetings: GreetingService) {}
 
-  @Command('profile', CommandType.SLASH)
-  async profile(interaction: ChatInputCommandInteraction) {
-    await respond(interaction).acknowledge()
-
-    const embed = await this.profiles.render(interaction.user.id)
-
-    await respond(interaction).send({ embeds: [embed] })
+  @Command('greet', CommandType.SLASH)
+  async greet(interaction: ChatInputCommandInteraction, { name }: { name: string }) {
+    await respond(interaction).send(this.greetings.greet(name))
   }
 }
 ```
 
-You describe the response you want to send. MeoCord determines the appropriate Discord operation based on the interaction's current state.
+Providers add values, classes and asynchronous factories under injection tokens.
 
-The response abstraction also supports editing, follow-ups, deletion, modals, and presenter-based error responses.
+[Services and providers](https://meocord.dev/docs/latest/services)
 
-[Responses](https://meocord.dev/docs/latest/responses) · [Presenters](https://meocord.dev/docs/latest/presenters)
+### Message commands
 
-### 5. Message commands with typed parameters
-
-Not everything needs to be a slash command.
-
-MeoCord supports message commands with parameter patterns, typed arguments, optional values, flags, and lists.
+A pattern declares a message command's words, and the handler receives them typed:
 
 ```typescript
 @MessageHandler('ban {target:member} {reason...?}')
-async ban(
-  message: Message,
-  { target, reason }: { target: GuildMember; reason?: string },
-) {
+async ban(message: Message, { target, reason }: { target: GuildMember; reason?: string }) {
   await target.ban({ reason })
-
   await message.reply(`Banned ${target.user.tag}.`)
 }
 ```
 
-The framework handles parsing and parameter extraction, so your handler receives structured values instead of manually parsing message content.
+[Message commands](https://meocord.dev/docs/latest/message-commands) · [Typed params, flags and lists](https://meocord.dev/docs/latest/message-params)
 
-[Message Commands](https://meocord.dev/docs/latest/message-commands)
+### Testing
 
-### 6. Test handlers without Discord
-
-Testing Discord bot logic shouldn't require a running bot or a real Discord connection.
-
-MeoCord includes a dedicated `meocord/testing` entry point for isolated application testing.
+`module.invoke()` runs a handler as the bot does, guards and all, and the mock records what the bot answered:
 
 ```typescript
 import { ChatInputCommandInteraction } from 'discord.js'
@@ -223,64 +192,32 @@ class GreetController {
 const module = MeoCordTestingModule.create({ controllers: [GreetController] }).compile()
 const interaction = createMockInteraction(ChatInputCommandInteraction)
 
-const { ran } = await module.invoke(GreetController, 'greet', interaction, { name: 'Romeo' })
-expect(ran).toBe(true)
+await module.invoke(GreetController, 'greet', interaction, { name: 'Romeo' })
+expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ content: 'Hello, Romeo!' }))
 ```
 
-The testing module can execute handlers through their framework pipeline and provides mocks for Discord interaction types.
-
-You can test:
-
-- Handler execution
-- Guards and interceptors
-- Validation and pipes
-- Cooldowns
-- Exception filters
-- Dependency injection
-- Gateway event handlers
-
-The mocks work under Vitest, Jest, Node's test runner and bun test.
+`module.dispatch()` routes an interaction or a message as the bot would, and `module.emit()` sends a gateway event. The mocks work under Vitest, Jest, Node's test runner and bun test.
 
 [Testing](https://meocord.dev/docs/latest/testing) · [Mocks](https://meocord.dev/docs/latest/mocks)
 
-### 7. CLI and production tooling
-
-MeoCord includes a CLI for the entire development workflow.
+### The CLI
 
 ```bash
-# Create a new application
-npx meocord create my-bot
-
-# Generate a controller
-npx meocord g co slash Greeting
-
-# Build the application
-npx meocord build
-
-# Start the application
-npx meocord start
-
-# Register Discord commands
-npx meocord register
+npx meocord create my-bot          # a new project
+npx meocord g co slash Greeting    # a slash command controller
+npx meocord start --dev            # development, restarting on every change
+npx meocord build                  # a production build
+npx meocord start                  # the production build
+npx meocord register               # register the commands without starting
 ```
 
-The CLI provides:
+A self-contained build packs the bot's runtime dependencies into its output, so the server needs no `node_modules`.
 
-- Project scaffolding
-- Controller and component generation
-- Development and production builds
-- Command registration
-- Rsbuild-powered bundling
-- Self-contained builds
-- Gateway sharding
-
-Self-contained builds can package the bot's runtime dependencies into the build output, allowing deployment without installing `node_modules` on the target environment.
-
-[CLI Reference](https://meocord.dev/docs/latest/cli) · [Self-contained Builds](https://meocord.dev/docs/latest/self-contained-builds) · [Sharding](https://meocord.dev/docs/latest/sharding)
+[CLI](https://meocord.dev/docs/latest/cli) · [Self-contained builds](https://meocord.dev/docs/latest/self-contained-builds) · [Sharding](https://meocord.dev/docs/latest/sharding)
 
 ---
 
-## Getting Started
+## Getting started
 
 ### Requirements
 
@@ -291,55 +228,37 @@ Self-contained builds can package the bot's runtime dependencies into the build 
 | discord.js  | 14.27 or a later 14.x  |
 | dotenv      | 18.0.5 or a later 18.x |
 
-MeoCord supports ESM and CommonJS builds. Newly generated applications are configured for ESM.
+MeoCord ships ESM and CommonJS builds. A new project is ESM.
 
-### Create a project
+### 1. Create a project
 
 ```bash
 npx meocord create my-bot
 cd my-bot
 ```
 
-The CLI detects your package manager and helps you configure the generated project.
+The CLI asks which installed package manager to use, or takes `--use-npm`, `--use-yarn`, `--use-pnpm` or `--use-bun`.
 
-You can also choose one explicitly:
+### 2. Run the sample
 
-```bash
-npx meocord create my-bot --use-npm
-npx meocord create my-bot --use-yarn
-npx meocord create my-bot --use-pnpm
-npx meocord create my-bot --use-bun
-```
-
-### Configure your bot
-
-Copy the example environment file:
+Put your bot token in `.env`, and the ID of a test server in `DEV_GUILD_ID`, so commands show there at once:
 
 ```bash
 cp .env.example .env
-```
-
-Set your Discord bot token:
-
-```env
-DISCORD_TOKEN=your_discord_bot_token
-```
-
-### Start development
-
-```bash
 npx meocord start --dev
 ```
 
-Your generated project includes example controllers, a guard, a presenter, a service, and tests to help you understand how the framework fits together.
+The project comes with a sample of each controller type, a guard, a presenter, a service and a spec for each. Run `/sample-slash` in your test server to see one answer.
 
-Follow the [Getting Started guide](https://meocord.dev/docs/latest/getting-started) to configure your application and build your first command.
+### 3. Write your first command
+
+[Your first command](https://meocord.dev/docs/latest/first-command) builds one step by step. The complete example below is a whole bot in one file.
 
 ---
 
 ## Example
 
-Here's a complete example of a slash command using a command builder, controller, cooldown, and interaction-aware response.
+A slash command that greets whoever it names, at most three times in ten seconds per user:
 
 ```typescript
 import { type ChatInputCommandInteraction, GatewayIntentBits, SlashCommandBuilder } from 'discord.js'
@@ -348,7 +267,7 @@ import { respond } from 'meocord/common'
 import { Command, CommandBuilder, Controller, Cooldown, MeoCord } from 'meocord/decorator'
 import { CommandType } from 'meocord/enum'
 
-// Define the command registered with Discord.
+// What Discord registers: the name comes from @Command, so the two cannot drift apart
 @CommandBuilder(CommandType.SLASH)
 export class GreetCommandBuilder {
   build(commandName: string) {
@@ -359,75 +278,61 @@ export class GreetCommandBuilder {
   }
 }
 
-// Handle the interaction.
 @Controller()
 export class GreetController {
   @Command('greet', GreetCommandBuilder)
   @Cooldown({ uses: 3, seconds: 10 })
   async greet(interaction: ChatInputCommandInteraction, { name }: { name: string }) {
-    await respond(interaction).send({
-      content: `Hello, ${name}!`,
-    })
+    await respond(interaction).send({ content: `Hello, ${name}!` })
   }
 }
 
-// Bootstrap the application.
 @MeoCord({
   controllers: [GreetController],
-  clientOptions: {
-    intents: [GatewayIntentBits.Guilds],
-  },
+  clientOptions: { intents: [GatewayIntentBits.Guilds] },
 })
 export default class App {}
 ```
 
-Start the bot and it registers `/greet` with Discord. `npx meocord register` registers commands without starting it.
-
-For more examples, see the [documentation](https://meocord.dev/docs/latest).
+Starting the bot registers `/greet` with Discord. `npx meocord register` registers it without starting the bot.
 
 ---
 
 ## Documentation
 
-The full documentation is available at **[meocord.dev](https://meocord.dev)**.
+Everything else is on [meocord.dev](https://meocord.dev/docs/latest), for each version:
 
-| Resource                                                            | Description                                 |
-| ------------------------------------------------------------------- | ------------------------------------------- |
-| [Getting Started](https://meocord.dev/docs/latest/getting-started)  | Create and configure your first application |
-| [Your First Command](https://meocord.dev/docs/latest/first-command) | Build your first Discord command            |
-| [API Reference](https://meocord.dev/docs/latest/api)                | Look up decorators, types, and helpers      |
-| [Migration Guide](https://meocord.dev/docs/latest/migrating)        | Upgrade between framework versions          |
-| [Changelog](https://meocord.dev/docs/latest/changelog)              | Explore changes and improvements            |
+| To                                  | Read                                                                |
+| ----------------------------------- | ------------------------------------------------------------------- |
+| Learn MeoCord from the start        | [Getting started](https://meocord.dev/docs/latest/getting-started)  |
+| Build a command step by step        | [Your first command](https://meocord.dev/docs/latest/first-command) |
+| Look up a decorator, type or helper | [API reference](https://meocord.dev/docs/latest/api)                |
+| Upgrade from 4.0, or from 3.x       | [Upgrading](https://meocord.dev/docs/latest/migrating)              |
+| See what changed in each release    | [Changelog](https://meocord.dev/docs/latest/changelog)              |
 
-Documentation is versioned alongside MeoCord releases.
-
----
-
-## Community and Support
-
-Have a question, found a bug, or want to suggest an improvement?
+## Support
 
 - **Questions and ideas:** [GitHub Discussions](https://github.com/meocord/meocord/discussions)
-- **Bug reports and feature requests:** [GitHub Issues](https://github.com/meocord/meocord/issues)
-- **Security vulnerabilities:** Follow [SECURITY.md](./SECURITY.md)
-
----
+- **Bugs and feature requests:** [GitHub Issues](https://github.com/meocord/meocord/issues)
+- **Security vulnerabilities:** [SECURITY.md](./SECURITY.md)
 
 ## Contributing
 
-Contributions are welcome!
-
-Before submitting a pull request, read [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, project checks, and release procedures.
-
-Please also follow the project's [Code of Conduct](./CODE_OF_CONDUCT.md).
-
----
+Issues and pull requests are welcome. [CONTRIBUTING.md](./CONTRIBUTING.md) covers getting set up, what each check catches, and how releases work. Participation follows the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## License
 
-MeoCord is released under the [MIT License](./LICENSE).
+MeoCord is released under the [MIT License](./LICENSE). It builds on open-source packages under their own licenses, listed in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 
-MeoCord builds on open-source packages distributed under their respective licenses. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for details.
+<p align="center">
+  <strong>MeoCord</strong>: a decorator-based framework for Discord bots, built on discord.js.
+  <br>
+  <a href="https://meocord.dev/docs/latest/getting-started">Get started</a>
+  ·
+  <a href="https://meocord.dev/docs/latest/api">API reference</a>
+  ·
+  <a href="https://www.npmjs.com/package/meocord">npm</a>
+</p>
 
 ## Moved sections
 
@@ -460,15 +365,3 @@ These sections moved to meocord.dev. Their headings stay here so that links from
 ### Running tests
 
 [Running tests](https://meocord.dev/docs/latest/testing#running-tests) on meocord.dev.
-
----
-
-<p align="center">
-  <strong>Build better Discord bots with MeoCord.</strong>
-  <br>
-  <a href="https://meocord.dev/docs/latest/getting-started">Get Started</a>
-  ·
-  <a href="https://github.com/meocord/meocord">GitHub</a>
-  ·
-  <a href="https://www.npmjs.com/package/meocord">npm</a>
-</p>
