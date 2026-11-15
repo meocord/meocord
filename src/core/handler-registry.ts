@@ -22,7 +22,7 @@ import {
 } from '@src/core/message-routes.js'
 import { computeMessageHelp, helpInvocation } from '@src/core/message-help.js'
 import { effectiveScope } from '@src/core/message-params.js'
-import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
+import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-identity.js'
 import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
 import { type Translator } from '@src/common/translator.js'

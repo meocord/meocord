@@ -8,7 +8,8 @@ import { vi } from 'vitest'
 import { Command, CommandBuilder, Controller } from '@src/decorator/index.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
-import { type CollectedCommand, collectCommands, planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
+import { type CollectedCommand } from '@src/core/command-identity.js'
+import { collectCommands, planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
 
 const createLogger = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })
 
