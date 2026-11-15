@@ -4,7 +4,7 @@
   "type": "commonjs",
   "dependencies": {
     "@types/node": "^26.6.6",
-    "discord.js": "^14.27.0",
+    "discord.js": "^14.28.1",
     "dotenv": "^18.0.8",
     "reflect-metadata": "^0.2.2",
     "@jest/globals": "^30.5.2",
