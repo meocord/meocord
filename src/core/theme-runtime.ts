@@ -8,6 +8,7 @@ import {
   lookupLayers,
   resolverCaches,
   ThemeCache,
+  themeTargets,
   type ThemeResolverCaches,
   type ThemeResolverOptions,
 } from '@src/core/theme-resolvers.js'
@@ -17,8 +18,10 @@ import {
   defaultTheme,
   mergeTheme,
   ownsAmbientTheme,
+  type RebuildTheme,
   releaseAmbientTheme,
   type ResolvedTheme,
+  setRebuildOutsideCalls,
   setThemeOutsideCalls,
   themeLayersVersion,
   type ThemeScope,
@@ -143,6 +146,37 @@ function handlerTheme(themes: AppThemes, prototype: object, methodName: string):
   return theme
 }
 
+type Layers = ReturnType<typeof lookupLayers>
+
+/**
+ * A scope of `base` with a call's server's and user's `layers` over it. Layers still being looked up replace its theme
+ * once found, and `ready` settles then.
+ */
+function layeredScope(base: ResolvedTheme, layers: Layers, rebuild: RebuildTheme | undefined): { scope: ThemeScope; ready?: Promise<void> } {
+  if (!(layers instanceof Promise)) return { scope: { theme: mergeTheme(mergeTheme(base, layers?.[0]), layers?.[1]), rebuild } }
+  const scope: ThemeScope = { theme: base, rebuild }
+  const ready = layers.then(([guild, user]) => {
+    scope.theme = mergeTheme(mergeTheme(base, guild), user)
+  })
+  return { scope, ready }
+}
+
+/**
+ * How a function bound in a call of `base`, a handler's theme, builds the scope of a later call: `base` with the
+ * server's and user's themes of that call's interaction, message or reaction over it.
+ */
+function rebuildOver(resolvers: ThemeResolverCaches, base: ResolvedTheme): RebuildTheme {
+  const rebuild: RebuildTheme = args => {
+    const { guildId, userId } = themeTargets(args)
+    if (guildId === undefined && userId === undefined) return undefined
+    const { scope, ready } = layeredScope(base, lookupLayers(resolvers, args), rebuild)
+    // No pipeline waits for the layers here, so an answer does
+    scope.ready = ready
+    return scope
+  }
+  return rebuild
+}
+
 /**
  * The theme scope a call runs in, or `undefined` when it needs none: its handlers share the theme read outside any
  * call, and no resolver applies. The scope holds the handler's theme, or the app's without a handler, with the call's
@@ -159,17 +193,11 @@ export function beginCallTheme(
   const layers = themes.resolvers && lookupLayers(themes.resolvers, args)
   if (!layers && !themes.scoped) return undefined
   const base = themes.varies && prototype && methodName ? handlerTheme(themes, prototype, methodName) : themes.app
-  if (!layers) return { scope: { theme: base } }
-  if (!(layers instanceof Promise)) {
-    const theme = mergeTheme(mergeTheme(base, layers[0]), layers[1])
-    return theme === base && !themes.scoped ? undefined : { scope: { theme } }
-  }
+  const rebuild = themes.resolvers && rebuildOver(themes.resolvers, base)
   // Until the server's and user's themes are found, the call has the handler's; the pipeline waits for them
-  const scope: ThemeScope = { theme: base }
-  const ready = layers.then(([guild, user]) => {
-    scope.theme = mergeTheme(mergeTheme(base, guild), user)
-  })
-  return { scope, ready }
+  const { scope, ready } = layeredScope(base, layers, rebuild)
+  // With the theme the app owns outside calls, a function it binds rebuilds from the app's theme without this scope
+  return scope.theme === base && !ready && !themes.scoped ? undefined : { scope, ready }
 }
 
 const clientApps = shared('clientThemes', () => new WeakMap<object, Container>())
@@ -189,6 +217,15 @@ setThemeOutsideCalls(interaction => {
   if (!layers) return themes.app
   if (layers instanceof Promise) return layers.then(([guild, user]) => mergeTheme(mergeTheme(themes.app, guild), user))
   return mergeTheme(mergeTheme(themes.app, layers[0]), layers[1])
+})
+
+// A function bound outside any call's scope rebuilds each call's theme from the app of its first argument's client
+setRebuildOutsideCalls(args => {
+  const [first] = args as [{ client?: object } | undefined]
+  if (!first || typeof first !== 'object') return undefined
+  const container = clientApps.get(first.client ?? first)
+  const themes = container && current(container)
+  return themes?.resolvers && rebuildOver(themes.resolvers, themes.app)(args)
 })
 
 /** Makes the app's theme the one read outside a call, unless another app in the process already has. */

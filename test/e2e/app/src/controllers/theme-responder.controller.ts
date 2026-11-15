@@ -89,7 +89,7 @@ export class ThemeResponderController {
       content: 'Click Collected within a minute.',
       components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button('e2e-theme-collected', 'Collected'))],
     })
-    // The collector's callback runs in the client's event; bindTheme keeps the handler's theme for it
+    // The collector's callback runs in the client's event; bindTheme gives it the handler's theme, rebuilt for each clicker
     message?.createMessageComponentCollector({ time: 60_000 }).on(
       'collect',
       bindTheme(async (click: ButtonInteraction) => {
