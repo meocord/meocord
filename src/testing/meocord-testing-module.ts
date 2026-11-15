@@ -12,11 +12,13 @@ import {
   BaseInteraction,
   Client,
   type ClientEvents,
+  Events,
   type Interaction,
   Message,
   type MessageReaction,
   type PartialMessageReaction,
   type PartialUser,
+  ReactionType,
   type User,
 } from 'discord.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
@@ -78,9 +80,9 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
-import { createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
+import { applyDispatchedReaction, createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
 
-// Taken as the module loads, before a test fakes the timers, so the wait after an unrouted component's listeners holds
+// Taken as the module loads, before a test fakes the timers, so the wait after a client's listeners holds
 const realSetImmediate = globalThis.setImmediate
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createEventFallback, createFallback, type Fallback, type FallbackOptions, isUserOutcome } from '@src/core/fallback.js'
@@ -111,6 +113,47 @@ import { strictMocks } from '@src/testing/strict-mocks.js'
 import { notAClass } from '@src/testing/routing.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { META } from '@src/util/metadata-keys.js'
+
+type Listener = (...args: unknown[]) => unknown
+
+/** A client's `event` listeners, read past its mock functions, so a test's record of them holds only its own calls. */
+const listenersOf = (client: Client, event: string): Listener[] => Client.prototype.rawListeners.call(client, event) as Listener[]
+
+/**
+ * Calls `listeners` with `args` as an emitter's `emit` calls them: in order, a `once` listener only once, and none
+ * after one that throws. Waits for what each returns, then one turn of the event loop, so a collector's `collect`
+ * callback has started; resolves to what they threw or rejected with.
+ */
+async function deliverToListeners(client: Client, listeners: readonly Listener[], args: readonly unknown[]): Promise<unknown[]> {
+  const failures: unknown[] = []
+  const settling: Promise<void>[] = []
+  for (const listener of listeners) {
+    try {
+      const result = listener.call(client, ...args)
+      if (result instanceof Promise) settling.push(result.then(() => undefined, (error: unknown) => void failures.push(error)))
+    } catch (error) {
+      failures.push(error)
+      break
+    }
+  }
+  await Promise.all(settling)
+  await new Promise(resolve => realSetImmediate(resolve))
+  return failures
+}
+
+/**
+ * Under strict mocks, for a client `createMockClient` made, the delivery of a dispatched message or reaction to the
+ * client's `event` listeners, as the gateway emits it after MeoCord's own listener: to those attached before routing
+ * starts, so a collector a handler starts misses the message that started it. Undefined otherwise.
+ */
+function gatewayDelivery(clientOf: () => Client, event: string): ((args: readonly unknown[]) => Promise<unknown[]>) | undefined {
+  // Read only under strict mocks, where a mock's client is no placeholder
+  if (!strictMocks()) return undefined
+  const client = clientOf()
+  if (!isMockClient(client)) return undefined
+  const listeners = listenersOf(client, event)
+  return args => deliverToListeners(client, listeners, args)
+}
 
 /**
  * What a testing module is built from: the classes a test needs, and the app whose global stages apply.
@@ -913,34 +956,15 @@ export class TestingModule {
 
   /**
    * Under strict mocks, for a client `createMockClient` made, delivers a component or modal no route takes to the
-   * client's `interactionCreate` listeners, as the gateway delivers it to each after MeoCord's: in the order they were
-   * attached, a `once` listener only once, and none after one that throws, as an emitter's `emit` stops. It waits for
-   * what each returns, then one turn of the event loop, so a collector's `collect` callback has started its answer; an
-   * answer that waits on a timer of its own is not waited for. Otherwise the bot's wait applies.
+   * client's `interactionCreate` listeners, as the gateway delivers it after MeoCord's, by {@link deliverToListeners};
+   * an answer that waits on a timer of its own is not waited for. Otherwise the bot's wait applies.
    */
   private unroutedGrace(interaction: Interaction): Promise<void> | undefined {
     const { client } = interaction
     if (!strictMocks() || !isMockClient(client)) return undefined
-    return this.deliverToListeners(interaction, client)
-  }
-
-  private async deliverToListeners(interaction: Interaction, client: Client): Promise<void> {
-    const failures: unknown[] = []
-    const settling: Promise<void>[] = []
-    // Read and called past the client's mock functions, so a test's record of them holds only its own calls
-    const listeners = Client.prototype.rawListeners.call(client, 'interactionCreate') as ((...args: unknown[]) => unknown)[]
-    for (const listener of listeners) {
-      try {
-        const result = listener.call(client, interaction)
-        if (result instanceof Promise) settling.push(result.then(() => undefined, (error: unknown) => void failures.push(error)))
-      } catch (error) {
-        failures.push(error)
-        break
-      }
-    }
-    await Promise.all(settling)
-    await new Promise(resolve => realSetImmediate(resolve))
-    if (failures.length > 0) this.listenerFailures.set(interaction, failures)
+    return deliverToListeners(client, listenersOf(client, 'interactionCreate'), [interaction]).then(failures => {
+      if (failures.length > 0) this.listenerFailures.set(interaction, failures)
+    })
   }
 
   /**
@@ -961,14 +985,36 @@ export class TestingModule {
    * is not delivered to them, unlike on a bot. Dispatch alone delivers it: calling `client.emit('interactionCreate')`
    * as well delivers it twice. What a listener throws or rejects with rejects `dispatch` once MeoCord has answered.
    *
+   * Under `useStrictMocks()`, on a client from `createMockClient`, a message or a reaction reaches its client's
+   * `messageCreate`, `messageReactionAdd` or `messageReactionRemove` listeners too, routed or not, with discord.js's
+   * arguments, as the gateway delivers it: those attached before routing starts, once the route has run to its first
+   * `await`, so a collector a handler starts takes the next message, not the one that started it. Dispatch alone
+   * delivers it: calling `client.emit` with the same event as well delivers it twice, and `emit` applies nothing to a
+   * reaction. A dispatched reaction is a normal one, never a burst: its listeners get
+   * `{ type: ReactionType.Normal, burst: false }`.
+   *
+   * A reaction is applied to its message first, as the gateway applies it, by discord.js's own code. An add caches it
+   * on `message.reactions` and counts the user into its `users`, `count` and `countDetails`. Where its message doesn't
+   * cache it, the add starts it from none, `users` and `me` too, unless its state is the test's: a `count`,
+   * `countDetails`, `me` or users the test gave before its first dispatch, or a `count` or `countDetails` set after
+   * one. The add then counts on from what is there, `count` and `countDetails` apart, as discord.js keeps them. A
+   * remove takes the user out of `users`, and out of the count unless the user is the bot and `me` is set, as
+   * discord.js leaves that to the bot's own REST call; once neither users nor count are left the reaction leaves
+   * `message.reactions`. A remove of a reaction its message doesn't cache is delivered and changes nothing: a real
+   * client without `Partials.Reaction` emits nothing for it, and `dispatch` delivers it all the same, so a test doesn't
+   * show that a bot needs the partial. A partial reaction, its `count` null, is delivered as it is. A reaction on a
+   * real `Client`, its own or its message's, is routed as any other, the bot's own told apart by `user.bot` since the
+   * client has no user before login, and nothing is applied or delivered. Dispatch waits for the listeners as for a
+   * component, and what one throws or rejects with rejects it.
+   *
    * @param input - An interaction or a message; or a reaction, with the user who reacted and whether they
    *   added it, `ReactionHandlerAction.ADD` unless given.
    * @returns Every handler reached, in the order it ran, whether any ran, and the first error a call ended
    *   with. An error the fallback answers as the user's own outcome resolves: a usage reply, an unknown
    *   command, or a guard's, a cooldown's, a validation's or a `UserError`'s refusal, as the fallback
-   *   answers each for an interaction or a message. Any other error no filter handles, and what a listener an
-   *   unrouted component was delivered to threw, rejects the call once the fallback has answered and every
-   *   handler has run: with that error, or an `AggregateError` when there are several.
+   *   answers each for an interaction or a message. Any other error no filter handles, and what a client's listener
+   *   the input was delivered to threw, rejects the call once the fallback has answered and every handler has run:
+   *   with that error, or an `AggregateError` when there are several.
    *
    * @example
    * ```ts
@@ -1012,13 +1058,27 @@ export class TestingModule {
       unanswered: (error, failure) => unanswered.set(error, failure),
     }
 
+    // What the client's listeners threw, as a bot's client would raise it
+    let thrownByListeners: unknown[] = []
     if (options) {
       noteReactionDispatch(input)
-      await this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action: options.action ?? ReactionHandlerAction.ADD }, record))
+      const reaction = input as MessageReaction | PartialMessageReaction
+      const action = options.action ?? ReactionHandlerAction.ADD
+      const added = action === ReactionHandlerAction.ADD
+      const delivery = gatewayDelivery(() => reaction.client, added ? Events.MessageReactionAdd : Events.MessageReactionRemove)
+      if (delivery) applyDispatchedReaction(reaction, options.user, added)
+      const routing = this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action }, record))
+      if (delivery) thrownByListeners = await delivery([reaction, options.user, { type: ReactionType.Normal, burst: false }])
+      await routing
     } else if (input instanceof BaseInteraction) {
       await this.track(dispatcher.interaction(input as Interaction, record))
+      thrownByListeners = this.listenerFailures.get(input) ?? []
+      this.listenerFailures.delete(input)
     } else if (input instanceof Message) {
-      await this.track(dispatcher.message(input, record))
+      const delivery = gatewayDelivery(() => input.client, Events.MessageCreate)
+      const routing = this.track(dispatcher.message(input, record))
+      if (delivery) thrownByListeners = await delivery([input])
+      await routing
     } else {
       throw new TypeError('dispatch takes an interaction, a message, or a reaction with { user }.')
     }
@@ -1028,9 +1088,6 @@ export class TestingModule {
     const failures = unhandled.flatMap(error =>
       unanswered.has(error) ? [unanswered.get(error)] : isUserOutcome(error, options ? undefined : input) ? [] : [error],
     )
-    // What the client's other listeners threw, given an unrouted component, as a bot's client would raise it
-    const thrownByListeners = this.listenerFailures.get(input) ?? []
-    this.listenerFailures.delete(input)
     failures.push(...thrownByListeners)
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) {

@@ -79,6 +79,8 @@ import {
   MessageFlagsBitField,
   MessageMentions,
   MessageReaction,
+  type PartialMessageReaction,
+  type PartialUser,
   Presence,
   PresenceManager,
   ReactionManager,
@@ -435,6 +437,61 @@ export function noteReactionDispatch(reaction: object): void {
   if (message) dispatchedReactions.add(message)
 }
 
+/** The counts a dispatch last left on a reaction: a count that differs from them since is the test's. */
+interface AppliedCounts {
+  count: number
+  burst: number
+  normal: number
+}
+const appliedCounts = new WeakMap<object, AppliedCounts>()
+
+/** What a test gives a reaction to say how many have reacted, beside the users it puts in its users cache. */
+const GIVEN_REACTION_STATE = ['count', 'countDetails', 'me'] as const
+
+/**
+ * Whether `reaction`'s state is the test's: its count, countDetails or `me` given, or a user in its users cache, before
+ * its first dispatch; or its counts changed since the last.
+ */
+function testsState(reaction: MessageReaction | PartialMessageReaction, own: object): boolean {
+  const applied = appliedCounts.get(reaction)
+  if (applied === undefined) return GIVEN_REACTION_STATE.some(key => Object.hasOwn(own, key)) || reaction.users.cache.size > 0
+  const { burst, normal } = reaction.countDetails
+  return reaction.count !== applied.count || burst !== applied.burst || normal !== applied.normal
+}
+
+/**
+ * Applies a dispatched reaction to its mock as the gateway does before it emits the event, under strict mocks, by
+ * discord.js's own `_add` and `_remove`. An add caches the reaction on its message and counts the user in, starting it
+ * from none, its users and `me` too, where its message doesn't cache it, unless its state is the test's, which the add
+ * counts on from; a remove counts them out of a reaction its message caches, uncaching it at none left, and leaves any other as it is. A partial
+ * one, its `count` null, is left as it is, as discord.js leaves it.
+ */
+export function applyDispatchedReaction(reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser, added: boolean): void {
+  if (reaction.count === null) return
+  const own = mockTargets.get(reaction) ?? reaction
+  // discord.js's own, past the mock's stubs of them
+  const { _add, _remove } = MessageReaction.prototype as unknown as Record<'_add' | '_remove', (user: unknown, burst: boolean) => void>
+  const { cache } = reaction.message.reactions
+  const key = reaction.emoji.id ?? reaction.emoji.name
+  const cached = key !== null && cache.has(key)
+  if (!added && !cached) return
+  const applied = appliedCounts.has(reaction)
+  if (added && !testsState(reaction, own) && (!cached || !applied)) {
+    reaction.count = 0
+    reaction.countDetails = { burst: 0, normal: 0 }
+    reaction.users.cache.clear()
+    reaction.me = false
+  }
+  // Counted from the count as it is before discord.js changes it, which a default read later would not be
+  if (!Object.hasOwn(own, 'countDetails')) reaction.countDetails = { burst: 0, normal: reaction.count }
+  if (added) {
+    if (key !== null && !cached) cache.set(key, reaction as MessageReaction)
+    _add.call(reaction, user, false)
+  } else _remove.call(reaction, user, false)
+  const { burst, normal } = reaction.countDetails
+  appliedCounts.set(reaction, { count: reaction.count, burst, normal })
+}
+
 function warnPlaceholderRead(target: object, key: string, strictValue: string): void {
   if (quiet > 0) return
   const name = (Object.getPrototypeOf(target) as { constructor: { name: string } }).constructor.name
@@ -480,6 +537,13 @@ export function heldClient(structure: unknown): Client | undefined {
   const guild = Object.getOwnPropertyDescriptor(target, 'guild')?.value as unknown
   const held = own ? (own.get ? ownClients.get(target) : own.value) : guild instanceof Guild ? heldClient(guild) : ownClients.get(target)
   return isMockClient(held) ? (held as Client) : undefined
+}
+
+/** The discord.js `Client` a structure holds as its own, mock or real. */
+function ownClientOf(structure: unknown): Client | undefined {
+  if (typeof structure !== 'object' || structure === null) return undefined
+  const client = Object.getOwnPropertyDescriptor(mockTargets.get(structure) ?? structure, 'client')?.value as unknown
+  return client instanceof Client ? client : undefined
 }
 
 /**
@@ -599,12 +663,13 @@ const MESSAGE_METHODS = new Set([
 // Methods of a structure that resolve to the structure itself, as discord.js patches and returns it
 const SELF_METHODS = new Set(['ban', 'delete', 'disableCommunicationUntil', 'edit', 'fetch', 'kick', 'pin', 'timeout', 'unpin'])
 
-// Collectors that resolve to what they collected: nothing, for a mock no one answers
-const COLLECTING_METHODS = new Set(['awaitMessages', 'awaitReactions'])
-
 // The component collectors of a message, a response and a text-based channel, the discord.js classes that have them,
 // which run discord.js's own on a strict mock client
 const COMPONENT_COLLECTORS = new Set(['createMessageComponentCollector', 'awaitMessageComponent'])
+
+// The message collectors of a text-based channel and the reaction collectors of a message, which run discord.js's own
+// on a strict mock client, where dispatch delivers a message or a reaction to them
+const MESSAGE_COLLECTORS = new Set(['createMessageCollector', 'awaitMessages', 'createReactionCollector', 'awaitReactions'])
 
 /** What default mode warns, once, where an app's or a test's call reaches a mock's component collector. */
 const INERT_COLLECTOR_WARNING =
@@ -612,21 +677,32 @@ const INERT_COLLECTOR_WARNING =
   "nothing here and return undefined; under useStrictMocks() they run discord.js's own collector on the mock client. " +
   'In the next major version (5.0) they do so without the call (https://github.com/meocord/meocord/issues/441).'
 
+/** What default mode warns, once, where an app's or a test's call reaches a mock's message or reaction collector. */
+const INERT_MESSAGE_COLLECTOR_WARNING =
+  "A mock channel's createMessageCollector() and awaitMessages(), and a mock message's createReactionCollector() and " +
+  'awaitReactions(), collect nothing here: the create methods return undefined and the await methods an empty ' +
+  "collection at once. Under useStrictMocks() they run discord.js's own collector on the mock client, which collects " +
+  'the messages and reactions a test dispatches. In the next major version (5.0) they do so without the call ' +
+  '(https://github.com/meocord/meocord/issues/441).'
+
 /**
- * A mock message's, response's or channel's `createMessageComponentCollector` or `awaitMessageComponent`: on a mock
- * client, a mock function that calls through to discord.js's own under strict mocks, where the client's emitter works,
- * so a real `InteractionCollector` collects what reaches it; in default mode it does nothing and returns `undefined`,
- * with a warning once.
+ * A mock message's, response's or channel's component collector, or a channel's message collector or a message's
+ * reaction collector: on a mock client, a mock function that calls through to discord.js's own under strict mocks,
+ * where the client's emitter works, so a real collector collects what reaches it; in default mode it collects nothing,
+ * with a warning once. The create methods return `undefined`, `awaitMessageComponent` resolves to `undefined`, and
+ * `awaitMessages` and `awaitReactions` resolve at once to an empty collection.
  * A mock on a real `Client` stays inert, with no warning, as strict mocks keep it.
  */
-function componentCollectorStub(key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
+function collectorStub(key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
   return createMockFn((...args: unknown[]) => {
     const self = receiver()
     if (isMockClient(readPlaceQuietly(() => (self as { client?: unknown }).client))) {
       if (strictMocks()) return method.apply(self, args)
-      warnOnce(mockLogger, INERT_COLLECTOR_WARNING)
+      warnOnce(mockLogger, MESSAGE_COLLECTORS.has(key) ? INERT_MESSAGE_COLLECTOR_WARNING : INERT_COLLECTOR_WARNING)
     }
-    return key === 'awaitMessageComponent' ? Promise.resolve(undefined) : undefined
+    if (key === 'awaitMessageComponent') return Promise.resolve(undefined)
+    if (key === 'awaitMessages' || key === 'awaitReactions') return Promise.resolve(new Collection())
+    return undefined
   })
 }
 
@@ -874,15 +950,15 @@ function recentMessages(manager: object, options: unknown): Collection<string, M
 }
 
 /**
- * The mock function for a method found on a discord.js prototype. One that returns a promise in discord.js resolves:
- * `createDM` to the user's DM channel, `send` and its kin to a message, `awaitMessages` and `awaitReactions` to an
- * empty collection, a manager's `fetch`, `create` and `edit` to its item (a collection of each for a fetch of several,
- * an empty one for a list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `kick`, `pin`, `unpin`, `timeout`,
+ * The mock function for a method found on a discord.js prototype. A collector is {@link collectorStub}'s. One that
+ * returns a promise in discord.js resolves: `createDM` to the user's DM channel, `send` and its kin to a message, a
+ * manager's `fetch`, `create` and `edit` to its item (a collection of each for a fetch of several, an empty one for a
+ * list fetch), a structure's own `edit`, `fetch`, `delete`, `ban`, `kick`, `pin`, `unpin`, `timeout`,
  * `disableCommunicationUntil` and setters to the structure, and the rest to `undefined`. Any other method returns
  * `undefined`.
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
-  if (COMPONENT_COLLECTORS.has(key)) return componentCollectorStub(key, method, receiver)
+  if (COMPONENT_COLLECTORS.has(key) || MESSAGE_COLLECTORS.has(key)) return collectorStub(key, method, receiver)
   if (!returnsPromise(target, key, method)) return createMockFn()
   // A member's DMs go through its user, and a user's through its one DM channel, as discord.js sends them
   if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
@@ -911,7 +987,6 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
     return createMockFn(async (options?: unknown) => sentMessage(sent(options, false), receiver()))
   }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
-  if (COLLECTING_METHODS.has(key)) return createMockFn(async () => new Collection())
   if (target instanceof BaseManager) {
     const item = MANAGER_ITEMS.find(([Manager]) => Manager.prototype.isPrototypeOf(target))?.[1]
     // A fetch of one item finds it in the cache first, as discord.js does, and caches one it makes; a fetch of
@@ -1456,6 +1531,13 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * `createMockChannel()`, `createMockGuild()` or `createMockMessage()` for that. In default mode each keeps a client of
  * its own, and code that reads one strict mocks would give otherwise warns once.
  *
+ * A `MessageReaction` made here under `useStrictMocks()` is on its message's client by the same rule: the `client`
+ * given, else its `message`'s, a real `Client` included, else a new one, on which its message is made when none is
+ * given. A reaction given its `message` and no `client` is on the message's client, so `dispatch` delivers it to the
+ * message's collectors; give `client` for a reaction meant for listeners on another client, where a collector on its
+ * message's client sees nothing of it. A real `Client` given is the reaction's own only. On a real `Client`, its own or
+ * its message's, `dispatch` routes it and applies and delivers nothing. In default mode its `client` is a placeholder.
+ *
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
  * `update()` sent; after `deleteReply()`, or before any answer, fetching, editing or deleting the original response
@@ -1479,6 +1561,12 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * `collector.stop()`. To answer `awaitMessageComponent()`, start the handler without awaiting it, dispatch the click
  * once the handler has replied, then await the handler. Without strict mocks both collector methods return
  * `undefined`, with a warning once. On a real `Client` both stay inert, with strict mocks or without.
+ *
+ * A text-based channel's `createMessageCollector()` and `awaitMessages()`, and a message's `createReactionCollector()`
+ * and `awaitReactions()`, do the same with the messages and reactions `dispatch` delivers, routed or not, or that a
+ * test emits on the client. A collector a handler starts takes the next message, never the one that started it, as on a
+ * bot. Without strict mocks they collect nothing, with a warning once: the create methods return `undefined` and the
+ * await methods resolve at once to an empty collection.
  *
  * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
  * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
@@ -2212,6 +2300,21 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       Object.defineProperty(instance, key, { value, writable: true, enumerable: true, configurable: true })
     }
     ownOptions(instance, (props as { options?: unknown }).options)
+  }
+
+  // A reaction is reached through its message's reactions, so under strict mocks it is on its message's client, as a
+  // mock interaction is on its message's: the client given, else its message's, a real Client included, else a new one,
+  // on which a message is made for it when none is given. A real Client given is the reaction's own only. Default mode
+  // leaves it a placeholder
+  if (strictMocks() && MessageReaction.prototype.isPrototypeOf(instance)) {
+    const message = own('message')
+    if (!Object.hasOwn(instance, 'client')) {
+      const client = heldClient(message) ?? ownClientOf(message) ?? createMockClient()
+      Object.defineProperty(instance, 'client', { value: client, writable: true, configurable: true })
+    }
+    if (message === undefined && isMockClient(instance.client)) {
+      Object.defineProperty(instance, 'message', { value: createMockMessage({ client: instance.client as Client }), writable: true, enumerable: true, configurable: true })
+    }
   }
 
   // Ids and a user, as Discord always sends; no server unless the test names one, as in a direct message
@@ -2962,8 +3065,9 @@ type ChannelOf<T> = T extends ThreadChannel ? AnyThreadChannel : T
  * Type guards such as `isTextBased()`, `isDMBased()` and `isThread()` run discord.js's own logic, so each answers what
  * the channel is. A thread is typed as discord.js types every thread it gives, a public or a private one, so it fits
  * an interaction's `channel`, a guild's channels and the `threadCreate` event. Under `useStrictMocks()` a text-based
- * channel's `createMessageComponentCollector()` and `awaitMessageComponent()` run discord.js's own collector on its
- * mock client, as {@link createMockInteraction} describes; without them they return `undefined`, with a warning once.
+ * channel's `createMessageComponentCollector()`, `awaitMessageComponent()`, `createMessageCollector()` and
+ * `awaitMessages()` run discord.js's own collector on its mock client, as {@link createMockInteraction} describes;
+ * without them they collect nothing, with a warning once.
  *
  * @param Class - The discord.js channel class to mock.
  * @param props - Values for the channel's properties, such as its `id`, `name` or `topic`; see {@link MockProps}.
@@ -3879,13 +3983,13 @@ function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JS
  * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted. `edit()` changes
  * this message and resolves to it, and `reply()` resolves to the reply, sent in this message's channel and holding what
  * was sent, as a channel's `send()` does. Under `useStrictMocks()` a message the bot sends is its `client.user`'s, and
- * one sent in a DM is in that DM, and `createMessageComponentCollector()` and `awaitMessageComponent()` run
- * discord.js's own collector on the message's client, as {@link createMockInteraction} describes; without them they
- * return `undefined`, with a warning once. Without overrides the message is empty, in a server, from a new person who
- * is its `member`; with `guild: null` it is a direct message. Give `author` to send several messages as one user, such
- * as to reach a per-user cooldown. An author given, and the users, roles and channels the content mentions, are cached
- * as the gateway delivers them. It is typed as discord.js emits a message, never in a group DM, so it fits
- * `messageCreate` and the other message events.
+ * one sent in a DM is in that DM, and `createMessageComponentCollector()`, `awaitMessageComponent()`,
+ * `createReactionCollector()` and `awaitReactions()` run discord.js's own collector on the message's client, as
+ * {@link createMockInteraction} describes; without them they collect nothing, with a warning once. Without overrides
+ * the message is empty, in a server, from a new person who is its `member`; with `guild: null` it is a direct message.
+ * Give `author` to send several messages as one user, such as to reach a per-user cooldown. An author given, and the
+ * users, roles and channels the content mentions, are cached as the gateway delivers them. It is typed as discord.js
+ * emits a message, never in a group DM, so it fits `messageCreate` and the other message events.
  *
  * Under `useStrictMocks()` the message shares one client with its author, member, channel and server and the users it
  * mentions, as in discord.js: the `client` given, else the mock client its `channel` or `guild` already holds, else a
