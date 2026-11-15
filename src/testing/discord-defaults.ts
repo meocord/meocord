@@ -534,8 +534,13 @@ export function discordDefaults(makers: MockMakers): (target: object, key: strin
     defaultsOf(GuildChannel, { guild: guildFromOwnId, parent: REAL_GETTER }),
     // Full once its members reach a user limit, which a voice channel has none of unless given one
     defaultsOf(BaseGuildVoiceChannel, { userLimit: () => 0, full: REAL_GETTER }),
-    // A reaction's message, as discord.js always has one, is a whole one
-    defaultsOf(MessageReaction, { count: () => 1, me: () => false, message: () => createMockMessage() }),
+    // A reaction's message, as discord.js always has one, is a whole one; its count is of normal reactions
+    defaultsOf(MessageReaction, {
+      count: () => 1,
+      countDetails: reaction => ({ burst: 0, normal: reaction.count ?? 0 }),
+      me: () => false,
+      message: () => createMockMessage(),
+    }),
   ])
 
   return (target, key) => {
