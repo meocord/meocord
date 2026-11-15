@@ -1352,11 +1352,15 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
  * `update()` sent; after `deleteReply()`, or before any answer, fetching, editing or deleting the original response
- * rejects with 10008 (Unknown Message), while follow-ups stay reachable by their id. Flags are read as discord.js
- * reads them, and its errors carry its codes, such as `InteractionAlreadyReplied`. `reply()`, `deferReply()`,
- * `update()` and `deferUpdate()` resolve to `undefined`; under `useStrictMocks()` they resolve as discord.js's do, to
- * a mock `InteractionResponse`, or with `withResponse` to an `InteractionCallbackResponse` whose `resource.message` is
- * the message sent, as `fetchReply()` reads it then, and `null` for a deferral.
+ * rejects with 10008 (Unknown Message), while follow-ups stay reachable by their id. Each `fetchReply()`, `editReply()`
+ * and `followUp()` resolves to a new message object, the message as it stands then, never one an earlier call gave.
+ * discord.js does the same: `fetchReply()` and `followUp()` give a copy or a new object, never its cached message, and
+ * `editReply()` a copy of a message it has cached. So a message held from before an edit keeps what it said: compare
+ * two by `id`, and tell two edits apart by `editedTimestamp`. Flags are read as discord.js reads them, and its errors
+ * carry its codes, such as `InteractionAlreadyReplied`. `reply()`, `deferReply()`, `update()` and `deferUpdate()`
+ * resolve to `undefined`; under `useStrictMocks()` they resolve as discord.js's do, to a mock `InteractionResponse`, or
+ * with `withResponse` to an `InteractionCallbackResponse` whose `resource.message` is the message sent, as
+ * `fetchReply()` reads it then, and `null` for a deferral.
  *
  * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
  * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
@@ -1373,6 +1377,20 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * await interaction.reply({ content: 'Closed.' })
  * expect(interaction.replied).toBe(true)
  * await expect(interaction.reply({ content: 'Again.' })).rejects.toThrow()
+ * ```
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'status' })
+ * await command.reply({ content: 'Starting.' })
+ * const before = await command.fetchReply()
+ * const after = await command.editReply({ content: 'Done.' })
+ * // A new message object, as discord.js gives: the same message by id, and the one held before still says what it said
+ * expect(after).not.toBe(before)
+ * expect(after.id).toBe(before.id)
+ * expect(before.content).toBe('Starting.')
  * ```
  *
  * @group Testing
