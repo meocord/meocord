@@ -1,3 +1,4 @@
+import { queryObjects } from 'node:v8'
 import { vi } from 'vitest'
 import { clearAllMocks, createMockFn, isMockFunction, type MockedFunction, resetAllMocks } from '@src/testing/mock-fn.js'
 import { createMockClient, createMockInteraction } from '@src/testing/mock-interaction.js'
@@ -333,4 +334,187 @@ describe('clearAllMocks and resetAllMocks', () => {
 
     expect(native()).toBe('kept')
   })
+
+  it('reaches a mock at its next use, whichever use it is, as if it had been cleared or reset at once', () => {
+    for (const all of [clearAllMocks, resetAllMocks]) {
+      for (const [name, use] of USES) {
+        const fn = prepared()
+        all()
+        const now = observe(fn, use(fn))
+        const reference = prepared()
+        if (all === clearAllMocks) reference.mockClear()
+        else reference.mockReset()
+        expect(now, `${all.name}, then ${name}`).toEqual(observe(reference, use(reference)))
+      }
+    }
+  })
+
+  it('lets a matcher read a mock as cleared, without the mock being used first', () => {
+    const fn = prepared()
+
+    clearAllMocks()
+
+    expect(fn).not.toHaveBeenCalled()
+    expect(fn).toHaveBeenCalledTimes(0)
+  })
+
+  it('empties an array a test holds once the mock is next used, in place, as a mock clear does', () => {
+    const fn = prepared()
+    const calls = fn.mock.calls
+
+    clearAllMocks()
+    fn(7)
+
+    expect(calls).toEqual([[7]])
+    expect(calls).toBe(fn.mock.calls)
+  })
+
+  it('gives every mock the state a clear or reset at once would, over seeded runs of clears, resets, calls and settings', () => {
+    let seed = 1009
+    const next = (n: number) => {
+      // mulberry32: the same runs on every machine
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return (((t ^ (t >>> 14)) >>> 0) % n)
+    }
+    for (let run = 0; run < 200; run++) {
+      const own: MockedFunction<(x: number) => unknown>[] = []
+      const reference: ReturnType<typeof vi.fn<(x: number) => unknown>>[] = []
+      for (let step = 0; step < 16; step++) {
+        const action = next(7)
+        const target = next(Math.max(own.length, 1))
+        if (action === 0 || own.length === 0) {
+          own.push(createMockFn((x: number) => x + 1))
+          reference.push(vi.fn((x: number) => x + 1))
+        } else if (action === 1) {
+          clearAllMocks()
+          for (const fn of reference) fn.mockClear()
+        } else if (action === 2) {
+          resetAllMocks()
+          for (const fn of reference) fn.mockReset()
+        } else if (action === 3) {
+          own[target]!.mockReturnValue(step)
+          reference[target]!.mockReturnValue(step)
+        } else if (action === 4) {
+          own[target]!.mockReturnValueOnce(-step)
+          reference[target]!.mockReturnValueOnce(-step)
+        } else {
+          expect(own[target]!(step)).toBe(reference[target]!(step))
+        }
+      }
+      expect(own.map(fn => [fn.mock.calls, fn.mock.results, fn(0)])).toEqual(reference.map(fn => [fn.mock.calls, fn.mock.results, fn(0)]))
+    }
+  })
+
+  it('reaches a mock made between two clears with the second only', () => {
+    const early = prepared()
+    clearAllMocks()
+    const late = createMockFn((x: number) => x + 1)
+    late(1)
+    early(1)
+    clearAllMocks()
+    late(2)
+
+    expect(early.mock.calls).toEqual([])
+    expect(late.mock.calls).toEqual([[2]])
+  })
+
+  it('applies a reset between two clears, and a clear after a reset keeps the reset', () => {
+    const fn = prepared()
+
+    clearAllMocks()
+    resetAllMocks()
+    clearAllMocks()
+
+    expect(fn.mock.calls).toEqual([])
+    expect([fn(1), fn(1)]).toEqual([2, 2])
+  })
+
+  it('keeps no mock alive once a test lets go of it, before the test yields to the event loop', () => {
+    const before = liveHeld()
+    for (let i = 0; i < 100; i++) useAndDrop()
+
+    // queryObjects collects garbage first; a mock tracked through a WeakRef would stay until the job ends
+    expect(liveHeld() - before).toBe(0)
+  })
+
+  it('keeps no answered mock interaction alive while a test awaits only promises', async () => {
+    const before = liveInteractions()
+    for (let i = 0; i < 20; i++) await answerAndDrop(i)
+
+    expect(liveInteractions() - before).toBe(0)
+  })
 })
+
+// Every way a test can use a mock next: a call, a read of what it recorded, a setter, and the rest of its API
+const USES: [string, (fn: MockedFunction<(x: number) => unknown>) => unknown][] = [
+  ['a call', fn => fn(2)],
+  ['mock.calls', fn => fn.mock.calls],
+  ['mock.results', fn => fn.mock.results],
+  ['mock.instances', fn => fn.mock.instances],
+  ['mock.lastCall', fn => fn.mock.lastCall],
+  ['mock.settledResults', fn => fn.mock.settledResults],
+  ['mock.invocationCallOrder', fn => fn.mock.invocationCallOrder.length],
+  ['mock.contexts', fn => fn.mock.contexts],
+  ['mockReturnValue', fn => fn.mockReturnValue('value') === fn],
+  ['mockReturnValueOnce', fn => fn.mockReturnValueOnce('once') === fn],
+  ['mockResolvedValue', fn => fn.mockResolvedValue('resolved') === fn],
+  ['mockResolvedValueOnce', fn => fn.mockResolvedValueOnce('resolved once') === fn],
+  ['mockRejectedValue', fn => fn.mockRejectedValue('rejected') === fn],
+  ['mockRejectedValueOnce', fn => fn.mockRejectedValueOnce('rejected once') === fn],
+  ['mockImplementation', fn => fn.mockImplementation(x => x * 10) === fn],
+  ['mockImplementationOnce', fn => fn.mockImplementationOnce(x => x * 100) === fn],
+  ['mockClear', fn => fn.mockClear() === fn],
+  ['mockReset', fn => fn.mockReset() === fn],
+  ['mockRestore', fn => fn.mockRestore() === fn],
+  ['getMockName', fn => fn.getMockName()],
+  ['mockName', fn => fn.mockName('named') === fn],
+]
+
+/** A mock with a call recorded, a persistent and a once value set, and a name, for clearAllMocks and resetAllMocks to undo. */
+function prepared(): MockedFunction<(x: number) => unknown> {
+  const fn = createMockFn((x: number) => x + 1)
+  fn(1)
+  return fn.mockReturnValue('set').mockReturnValueOnce('set once').mockName('prepared')
+}
+
+/** What a test sees of a mock after a use: what the use gave, the records, the name, and the next two calls. */
+function observe(fn: MockedFunction<(x: number) => unknown>, given: unknown) {
+  // Copied before any other read, which would catch the mock up and change an array the use returned
+  const state = { given: structuredClone(given) }
+  const records = structuredClone([fn.mock.calls, fn.mock.results, fn.mock.instances, fn.mock.lastCall, fn.mock.contexts])
+  Object.assign(state, { records, settled: fn.mock.settledResults.length, name: fn.getMockName() })
+  const answers = [0, 1].map(() => {
+    try {
+      const value = fn(3)
+      if (value instanceof Promise) value.catch(() => undefined)
+      return value instanceof Promise ? 'a promise' : value
+    } catch (error) {
+      return error
+    }
+  })
+  return { ...state, answers }
+}
+
+class Held {}
+
+// Counted by v8 after a full garbage collection, so the test reads which objects anything still holds
+const liveHeld = () => queryObjects(Held, { format: 'count' })
+const liveInteractions = () => queryObjects(ButtonInteraction, { format: 'count' })
+
+/** Makes a mock holding a value, then calls, configures and reads it, in a frame of its own that ends after. */
+function useAndDrop(): void {
+  const held = new Held()
+  const fn = createMockFn(() => held)
+  fn()
+  fn.mockReturnValueOnce(held)
+  void fn.mock.calls
+}
+
+/** Makes a mock interaction and answers it, in a frame of its own that ends after. */
+async function answerAndDrop(i: number): Promise<void> {
+  const interaction = createMockInteraction(ButtonInteraction, { customId: `b/${i}` })
+  await interaction.reply({ content: 'Done.' })
+}
+

@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { types } from 'node:util'
+import { queryObjects } from 'node:v8'
 import { vi, type Mock as VitestMock } from 'vitest'
 import { ButtonInteraction } from 'discord.js'
 import { clearAllMocks, createMockFn, forgetMockFn, resetAllMocks, useMockFn } from '@src/testing/mock-fn.js'
@@ -100,6 +101,54 @@ describe('useMockFn', () => {
     expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made.*setup file/)
   })
 
+  it("refuses a function while a mock made before it lives, others made with it collected", async () => {
+    makeAndDrop()
+    const kept = createMockFn()
+    await collectGarbage()
+
+    expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made/)
+    void kept
+  })
+
+  it('allows a function once the mocks made before it are collected', async () => {
+    makeAndDrop()
+    await collectGarbage()
+
+    expect(() => useMockFn(vi.fn)).not.toThrow()
+  })
+
+  it('counts a mock made before forgetMockFn, collected after it, out of the mocks that refuse', async () => {
+    makeAndDrop()
+    forgetMockFn()
+    const kept = createMockFn()
+    await collectGarbage()
+
+    expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made/)
+    void kept
+  })
+
+  it('keeps every clear and reset made before forgetMockFn on a mock made before it', () => {
+    const cleared = createMockFn((x: number) => x)
+    cleared(1)
+    clearAllMocks()
+    const reset = createMockFn((x: number) => x).mockReturnValue(5)
+    resetAllMocks()
+    forgetMockFn()
+
+    expect([cleared.mock.calls, reset(2)]).toEqual([[], 2])
+  })
+
+  it('leaves a mock made before forgetMockFn out of clearAllMocks and resetAllMocks, as a spec starting afresh expects', () => {
+    const earlier = createMockFn((x: number) => x + 1).mockReturnValue(9)
+    earlier(1)
+    forgetMockFn()
+
+    resetAllMocks()
+
+    expect(earlier.mock.calls).toEqual([[1]])
+    expect(earlier(1)).toBe(9)
+  })
+
   it("refuses a function whose mocks lack jest's and Vitest's API, such as node:test's mock.fn", () => {
     expect(() => useMockFn((() => () => undefined) as never)).toThrow(/node:test.*meocord's own/)
   })
@@ -137,3 +186,16 @@ describe('useMockFn', () => {
     expect(store._save('k')).toBe(1)
   })
 })
+
+/** Makes mocks of meocord's own in a frame of its own, so nothing holds them once it returns. */
+function makeAndDrop(): void {
+  for (let i = 0; i < 10; i++) createMockFn(() => i)()
+}
+
+/** Lets the job end, collects garbage (queryObjects does first), then lets finalization callbacks run. */
+async function collectGarbage(): Promise<void> {
+  const turn = () => new Promise(resolve => setTimeout(resolve, 0))
+  await turn()
+  queryObjects(Object, { format: 'count' })
+  for (let i = 0; i < 3; i++) await turn()
+}
