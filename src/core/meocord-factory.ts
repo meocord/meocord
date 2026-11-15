@@ -3,7 +3,7 @@ import { COOLDOWN_POLICY, cooldownPolicyFrom } from '@src/core/cooldown-runner.j
 import { Container, type ServiceIdentifier } from 'inversify'
 import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
-import { MeoCordApp, type StartAttempt } from '@src/core/meocord.app.js'
+import { MeoCordApp, registerOnlyClient, type StartAttempt } from '@src/core/meocord.app.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
@@ -255,7 +255,7 @@ export class MeoCordFactory {
     // `meocord register` reads the commands from the controllers' prototypes and sends them over REST,
     // so nothing is bound or constructed, and nothing that needs the platform's native addons runs.
     if (isRegisterOnly()) {
-      return new MeoCordApp(options.controllers, new Container(), new Client(options.clientOptions), meocordConfig.discordToken)
+      return new MeoCordApp(options.controllers, new Container(), registerOnlyClient(options.clientOptions), meocordConfig.discordToken)
     }
 
     // A process-sharding manager only spawns shards, so it binds, constructs and connects nothing itself.
@@ -264,6 +264,7 @@ export class MeoCordFactory {
         controllerClasses: options.controllers,
         token: meocordConfig.discordToken,
         config: meocordConfig,
+        rest: options.clientOptions?.rest,
       })
     }
 

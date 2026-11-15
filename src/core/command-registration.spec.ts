@@ -10,6 +10,7 @@ import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
 import { type CollectedCommand } from '@src/core/command-identity.js'
 import { collectCommands, planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
+import { keepRestLocal } from '@src/spec-local-rest.js'
 
 const createLogger = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })
 
@@ -1049,6 +1050,9 @@ describe('registration, message by message', () => {
 
 describe('the token', () => {
   const token = 'MTIzNDU2Nzg5MDEyMzQ1Njc4.secret-part.do-not-log'
+
+  beforeEach(() => keepRestLocal())
+  afterEach(() => vi.restoreAllMocks())
 
   /** A real REST client whose requests Discord answers with a status, as a revoked token would get. */
   const restAnswering = (status: number) =>

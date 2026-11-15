@@ -1,10 +1,10 @@
-import { fetchRecommendedShardCount, REST, Routes, type Shard, ShardingManager, type ShardingManagerOptions } from 'discord.js'
+import { fetchRecommendedShardCount, type RESTOptions, Routes, type Shard, ShardingManager, type ShardingManagerOptions } from 'discord.js'
 import { type ChildProcess } from 'node:child_process'
 import { Logger } from '@src/common/index.js'
 import { hideInLogs } from '@src/common/logger.js'
 import { MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { answerCooldown } from '@src/common/sharded-cooldown-store.js'
-import { registerCommands, type RegistrationRest } from '@src/core/command-registration.js'
+import { registerCommands, type RegistrationRest, registrationRest } from '@src/core/command-registration.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { SHUTDOWN_MARGIN_MS, shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
@@ -34,6 +34,8 @@ export interface ShardManagerOptions {
   config: MeoCordConfig
   createManager?: (file: string, options: ShardingManagerOptions) => ShardingManager
   createRest?: (token: string) => RegistrationRest
+  /** The app's `clientOptions.rest`, which the shards' clients send with, and so the registration too. */
+  rest?: Partial<RESTOptions>
   recommendedShardCount?: (token: string) => Promise<number>
   exit?: (code: number) => void
   sleep?: (ms: number) => Promise<void>
@@ -169,7 +171,7 @@ export class ShardManager implements MeoCordApplication {
     }
 
     try {
-      const rest = this.options.createRest?.(token) ?? new REST().setToken(token)
+      const rest = this.options.createRest?.(token) ?? registrationRest(token, this.options.rest)
       const applicationId = ((await rest.get(Routes.currentApplication())) as { id: string }).id
       // Stopped while it asked: the commands are left as they are
       if (this.stopping) return true

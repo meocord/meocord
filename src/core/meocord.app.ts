@@ -1,9 +1,10 @@
 import {
   type ActivityOptions,
   Client,
+  type ClientOptions,
   type Interaction,
   Message,
-  REST,
+  type RESTOptions,
   Routes,
 } from 'discord.js'
 import { type Container, type ServiceIdentifier } from 'inversify'
@@ -51,7 +52,7 @@ import { managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
 import { claimAmbientAppTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
-import { registerCommands } from '@src/core/command-registration.js'
+import { registerCommands, registrationRest } from '@src/core/command-registration.js'
 import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { deliverUncachedDmReactions } from '@src/core/dm-reactions.js'
@@ -65,6 +66,19 @@ export const SLOW_READY_HOOK_MS = 10_000
 
 
 const { runningApps } = processState
+
+/**
+ * The `rest` option each client made for `meocord register` was given, before discord.js merged in its defaults, which
+ * add discord.js to the User-Agent: registration sends with the option as the app gave it, as the shard manager's does.
+ */
+const givenRestOptions = new WeakMap<Client, Partial<RESTOptions> | undefined>()
+
+/** A client for `meocord register`, made from the app's options, which keeps their `rest` option as given. */
+export function registerOnlyClient(options: ClientOptions): Client {
+  const client = new Client(options)
+  givenRestOptions.set(client, options.rest)
+  return client
+}
 
 /**
  * Shuts every started app down and exits, with the code set when the shutdown began or 0, and 1 if an app failed to
@@ -564,7 +578,10 @@ export class MeoCordApp implements MeoCordApplication {
       this.logger.error(tokenMessage(this.discordToken))
       process.exit(1)
     }
-    const rest = new REST().setToken(this.discordToken)
+    // The client's REST options as the app gave them: the bot sends its requests where they say, so its registration goes
+    // there too. A client made some other way, as in a spec, gives the options discord.js merged
+    const given = givenRestOptions.has(this.bot) ? givenRestOptions.get(this.bot) : this.bot.options?.rest
+    const rest = registrationRest(this.discordToken, given)
     let applicationId: string
 
     try {

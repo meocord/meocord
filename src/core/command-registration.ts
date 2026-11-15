@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
-import { ApplicationCommandType, Routes } from 'discord.js'
+import { ApplicationCommandType, REST, type RESTOptions, Routes } from 'discord.js'
 import Table from 'cli-table3'
 import { getCommandMap } from '@src/decorator/controller.decorator.js'
 import { localizationProblems } from '@src/core/command-localizations.js'
@@ -102,6 +102,14 @@ export function collectCommands(
   }
 
   return [...byKey.values()].map(({ command }) => command)
+}
+
+/**
+ * The REST client a registration outside the bot sends with, made from the bot's `clientOptions.rest`, so a REST proxy,
+ * another `api` or a `timeout` applies to it as to the bot's own requests. Without one, it sends to Discord.
+ */
+export function registrationRest(token: string, options?: Partial<RESTOptions>): REST {
+  return new REST(options).setToken(token)
 }
 
 /** What decides where each command goes. */
