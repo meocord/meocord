@@ -222,17 +222,31 @@ export function isMockFunction(fn: unknown): fn is MockInstance {
  * What `useMockFn` set and the mocks made, kept for both builds of this meocord version, so a setup file in one module
  * format sets them for specs in the other:
  * - `invocationOrder`: when each call of meocord's own mocks came, across all of them, as Vitest numbers its own;
- * - `created`: every mock createMockFn made, held weakly so the mocks of a finished test can still be collected;
+ * - `created`: every runner mock createMockFn made, held weakly so the mocks of a finished test can still be collected;
  * - `runnerFactory` and `restoreImpl`: the runner's factory useMockFn registered, and for each of its mocks how to
- *   give back the implementation it was created with, through the runner's own setter, which a mock's behaviour may wrap.
+ *   give back the implementation it was created with, through the runner's own setter, which a mock's behaviour may wrap;
+ * - `clears` and `resets`: how many times clearAllMocks and resetAllMocks ran; each of meocord's own mocks compares
+ *   them with what it last saw, and catches up the next time it is used;
+ * - `live` and `generation`: how many of meocord's own mocks are alive, counted without holding them, and which
+ *   forgetMockFn they were made after;
+ * - `ended`: for each generation forgetMockFn ended, the clears and resets it ended at, which its mocks still catch up to.
  */
 const mocks = shared('mocks', () => ({
   invocationOrder: 0,
   created: new Set<WeakRef<MockInstance>>(),
   runnerFactory: undefined as MockFnFactory | undefined,
   restoreImpl: new WeakMap<object, () => void>(),
+  clears: 0,
+  resets: 0,
+  live: 0,
+  generation: 0,
+  ended: [] as { clears: number; resets: number }[],
 }))
 const collected = new FinalizationRegistry<WeakRef<MockInstance>>(ref => mocks.created.delete(ref))
+// A WeakRef would keep each mock, and what it holds, alive until the job that made it ends, so own mocks are only counted
+const ownCollected = new FinalizationRegistry<number>(generation => {
+  if (generation === mocks.generation) mocks.live--
+})
 
 /**
  * A mock function a test runner makes, as {@link useMockFn} takes it.
@@ -280,6 +294,11 @@ export type MockFnFactory = (impl?: (...args: any[]) => any) => RunnerMock
  * {@link resetAllMocks}. node:test's `mock.fn` records calls in a shape of its own, so under node:test leave meocord's
  * own function in place. Calling it again with the same factory does nothing; another, once a mock exists, throws.
  *
+ * The runner's mocks stay in memory until the test yields to the event loop: Vitest holds every `vi.fn(impl)` from its
+ * creation, and {@link clearAllMocks} reaches them through a weak reference, which holds until then too. A test that
+ * makes thousands of mocks in one loop, such as mock interactions, yields between batches,
+ * `await new Promise(resolve => setTimeout(resolve, 0))`, or keeps them all until it does.
+ *
  * @param factory - The runner's mock function factory: `vi.fn`, `jest.fn` or bun's `mock`.
  * @throws Error when a mock already exists from another factory, or when `factory` doesn't make a mock with jest's and
  *   Vitest's API.
@@ -298,7 +317,7 @@ export type MockFnFactory = (impl?: (...args: any[]) => any) => RunnerMock
  */
 export function useMockFn(factory: MockFnFactory): void {
   if (factory === mocks.runnerFactory) return
-  if ([...mocks.created].some(ref => ref.deref() !== undefined)) {
+  if (mocks.live > 0 || [...mocks.created].some(ref => ref.deref() !== undefined)) {
     throw new Error(
       "useMockFn() goes before any mock is made: a mock made before it keeps meocord's own function, and the two kinds " +
         "would mix. Call it once, in the test runner's setup file.",
@@ -332,9 +351,12 @@ export const usesRunnerMockFn = (): boolean => mocks.runnerFactory !== undefined
 export function forgetMockFn(): void {
   mocks.runnerFactory = undefined
   mocks.created.clear()
+  mocks.live = 0
+  mocks.ended[mocks.generation] = { clears: mocks.clears, resets: mocks.resets }
+  mocks.generation++
 }
 
-/** Tracks a mock for clearAllMocks and resetAllMocks. */
+/** Tracks a runner's mock for clearAllMocks and resetAllMocks. */
 function track<M extends MockInstance>(mockFn: M): M {
   const ref = new WeakRef<MockInstance>(mockFn)
   mocks.created.add(ref)
@@ -350,6 +372,11 @@ function track<M extends MockInstance>(mockFn: M): M {
  * everything built on it, such as `createMockInteraction` and `createMockClient`, either way. To also undo what a test
  * set, use {@link resetAllMocks}.
  *
+ * @remarks
+ * Each of meocord's own mocks is cleared the next time it is used: called, read through `fn.mock` or a matcher, or
+ * set. So clearing holds no mock alive, and a mock never used again costs nothing. An array a test read before, as in
+ * `const calls = fn.mock.calls`, keeps its entries until then, and empties in place.
+ *
  * @example
  * ```ts
  * import { afterEach } from 'vitest'
@@ -362,6 +389,7 @@ function track<M extends MockInstance>(mockFn: M): M {
  * @see {@link resetAllMocks}
  */
 export function clearAllMocks(): void {
+  mocks.clears++
   for (const ref of mocks.created) ref.deref()?.mockClear()
 }
 
@@ -373,6 +401,10 @@ export function clearAllMocks(): void {
  *
  * @remarks
  * State a mock keeps outside its methods, such as whether an interaction was replied to, stays.
+ *
+ * Each of meocord's own mocks is reset the next time it is used: called, read through `fn.mock` or a matcher, or set.
+ * So resetting holds no mock alive. An array a test read before, as in `const calls = fn.mock.calls`, keeps its
+ * entries until then, and empties in place.
  *
  * @example
  * ```ts
@@ -387,6 +419,7 @@ export function clearAllMocks(): void {
  * @see {@link clearAllMocks}
  */
 export function resetAllMocks(): void {
+  mocks.resets++
   for (const ref of mocks.created) {
     const mockFn = ref.deref()
     if (!mockFn) continue
@@ -456,7 +489,24 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
   const invocationCallOrder: number[] = []
   const contexts: unknown[] = []
 
+  const { generation } = mocks
+  let { clears, resets } = mocks
+  // Does what clearAllMocks or resetAllMocks asked of every mock since this one was last used; a mock made before
+  // forgetMockFn sees those up to it and none after, as it is out of a runner's reach
+  const catchUp = () => {
+    const seen = generation === mocks.generation ? mocks : mocks.ended[generation]!
+    if (resets !== seen.resets) {
+      clears = seen.clears
+      resets = seen.resets
+      reset()
+    } else if (clears !== seen.clears) {
+      clears = seen.clears
+      forgetCalls()
+    }
+  }
+
   const mockFn = function (this: unknown, ...args: any[]): any {
+    catchUp()
     calls.push(args)
     instances.push(this)
     contexts.push(this)
@@ -510,69 +560,85 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
 
   const mock = {
     get calls() {
+      catchUp()
       return calls
     },
     get results() {
+      catchUp()
       return results
     },
     get instances() {
+      catchUp()
       return instances
     },
     get lastCall() {
+      catchUp()
       return calls.length > 0 ? calls[calls.length - 1] : undefined
     },
   } as MockState<T>
   // Out of the mock's keys, so a test comparing `mock` as a whole sees the shape it always had
   Object.defineProperties(mock, {
-    settledResults: { get: () => settledResults },
-    invocationCallOrder: { get: () => invocationCallOrder },
-    contexts: { get: () => contexts },
+    settledResults: { get: () => (catchUp(), settledResults) },
+    invocationCallOrder: { get: () => (catchUp(), invocationCallOrder) },
+    contexts: { get: () => (catchUp(), contexts) },
   })
   Object.defineProperty(mockFn, 'mock', { value: mock, enumerable: false })
 
   mockFn.mockReturnValue = ((v: any) => {
+    catchUp()
     currentImpl = () => v
     return mockFn
   }) as MockInstance<T>['mockReturnValue']
   mockFn.mockReturnValueOnce = ((v: any) => {
+    catchUp()
     onceQueue.push(() => v)
     return mockFn
   }) as MockInstance<T>['mockReturnValueOnce']
   mockFn.mockResolvedValue = ((v: any) => {
+    catchUp()
     currentImpl = () => Promise.resolve(v)
     return mockFn
   }) as MockInstance<T>['mockResolvedValue']
   mockFn.mockResolvedValueOnce = ((v: any) => {
+    catchUp()
     onceQueue.push(() => Promise.resolve(v))
     return mockFn
   }) as MockInstance<T>['mockResolvedValueOnce']
   mockFn.mockRejectedValue = ((v: any) => {
+    catchUp()
     currentImpl = () => Promise.reject(v)
     return mockFn
   }) as MockInstance<T>['mockRejectedValue']
   mockFn.mockRejectedValueOnce = ((v: any) => {
+    catchUp()
     onceQueue.push(() => Promise.reject(v))
     return mockFn
   }) as MockInstance<T>['mockRejectedValueOnce']
   mockFn.mockImplementation = ((fn: any) => {
+    catchUp()
     currentImpl = fn
     return mockFn
   }) as MockInstance<T>['mockImplementation']
   mockFn.mockImplementationOnce = ((fn: any) => {
+    catchUp()
     onceQueue.push(fn)
     return mockFn
   }) as MockInstance<T>['mockImplementationOnce']
   const forgetCalls = () => {
     for (const record of [calls, results, instances, settledResults, invocationCallOrder, contexts]) record.length = 0
   }
+  const reset = () => {
+    forgetCalls()
+    onceQueue = []
+    currentImpl = impl as ((...args: any[]) => any) | undefined
+  }
+  // mockClear, mockReset and the name need no catch-up: the next use does it, and neither a clear nor a reset renames
   mockFn.mockClear = (() => {
     forgetCalls()
     return mockFn
   }) as MockInstance<T>['mockClear']
   mockFn.mockReset = (() => {
-    forgetCalls()
-    onceQueue = []
-    currentImpl = impl as ((...args: any[]) => any) | undefined
+    reset()
     return mockFn
   }) as MockInstance<T>['mockReset']
   mockFn.mockRestore = (() => {
@@ -585,5 +651,7 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
     return mockFn
   }) as MockInstance<T>['mockName']
 
-  return track(mockFn)
+  mocks.live++
+  ownCollected.register(mockFn, generation)
+  return mockFn
 }
