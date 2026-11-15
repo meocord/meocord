@@ -189,8 +189,50 @@
     "qs": "^6.16.0"
   },
   "peerDependencies": {
+    "@typescript-eslint/parser": "*",
     "discord.js": "^14.27.0",
-    "dotenv": "^18.0.5"
+    "dotenv": "^18.0.5",
+    "eslint": "*",
+    "eslint-config-prettier": "*",
+    "eslint-import-resolver-typescript": "*",
+    "eslint-plugin-import-x": "*",
+    "eslint-plugin-prettier": "*",
+    "globals": "*",
+    "prettier": "*",
+    "typescript": "*",
+    "typescript-eslint": "*"
+  },
+  "peerDependenciesMeta": {
+    "@typescript-eslint/parser": {
+      "optional": true
+    },
+    "eslint": {
+      "optional": true
+    },
+    "eslint-config-prettier": {
+      "optional": true
+    },
+    "eslint-import-resolver-typescript": {
+      "optional": true
+    },
+    "eslint-plugin-import-x": {
+      "optional": true
+    },
+    "eslint-plugin-prettier": {
+      "optional": true
+    },
+    "globals": {
+      "optional": true
+    },
+    "prettier": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    },
+    "typescript-eslint": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "provenance": true
