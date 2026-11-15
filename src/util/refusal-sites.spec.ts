@@ -158,6 +158,7 @@ const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   'common/response/response-state.ts': { count: 6, why: 'a handler answering its interaction' },
   'common/route.ts': { count: 7, why: 'route().build(), called as a handler builds a customId' },
   'common/sharded-cooldown-store.ts': { count: 1, why: "a cooldown call on a shard whose manager's channel has closed" },
+  'common/split-message.ts': { count: 3, why: 'splitMessage and truncate, called by a handler with a max too small for its text' },
   'core/command-ids.ts': { count: 10, why: 'commandMention(), called as a handler mentions a command' },
   'core/dispatcher.ts': { count: 1, why: 'an interaction no handler takes' },
   'core/filter-runner.ts': { count: 1, why: 'a filter, resolved as it handles an error' },

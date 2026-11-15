@@ -17,9 +17,6 @@ import { userWords } from '@src/util/user-text.util.js'
 /** The word the built-in help answers to when `messages.help` names no other. */
 const HELP_WORD = 'help'
 
-/** The longest reply Discord takes, in characters. */
-const MAX_REPLY_LENGTH = 2000
-
 /** The words that ask for help, from `messages.help`: its command, then its aliases; none when help is off. */
 export function helpWords(help: boolean | MessageHelpOptions | undefined): string[] {
   if (!help) return []
@@ -215,51 +212,4 @@ function commandBlock(entry: MessageHelpEntry, render: Render): string {
   ]
     .filter((line): line is string => line !== undefined)
     .join('\n')
-}
-
-// Built on first use, for a line longer than a message
-let graphemes: Intl.Segmenter | undefined
-
-/**
- * Where a line longer than one message is cut: after the last character a reader sees as one, such as an emoji, a flag
- * or a letter with its accent, that still fits. A single such character longer than a message is cut between code points.
- */
-function fittingCut(piece: string): number {
-  let cut = 0
-  graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-  for (const { index, segment } of graphemes.segment(piece)) {
-    if (index + segment.length > MAX_REPLY_LENGTH) break
-    cut = index + segment.length
-  }
-  if (cut > 0) return cut
-  const high = piece.charCodeAt(MAX_REPLY_LENGTH - 1)
-  return high >= 0xd800 && high <= 0xdbff ? MAX_REPLY_LENGTH - 1 : MAX_REPLY_LENGTH
-}
-
-/**
- * Splits a reply into Discord-sized messages at line breaks, a line longer than one message cut where it must be. A
- * message of only whitespace, which Discord refuses as empty, is left out.
- */
-export function splitReply(text: string): string[] {
-  const chunks: string[] = []
-  const push = (chunk: string) => {
-    if (chunk.trim() !== '') chunks.push(chunk)
-  }
-  let current = ''
-  for (const line of text.split('\n')) {
-    for (let piece = line; ; ) {
-      const cut = piece.length <= MAX_REPLY_LENGTH ? piece.length : fittingCut(piece)
-      const part = piece.slice(0, cut)
-      const joined = current ? `${current}\n${part}` : part
-      if (joined.length <= MAX_REPLY_LENGTH) current = joined
-      else {
-        push(current)
-        current = part
-      }
-      if (cut === piece.length) break
-      piece = piece.slice(cut)
-    }
-  }
-  push(current)
-  return chunks
 }
