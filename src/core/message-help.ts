@@ -16,6 +16,9 @@ import { userWords } from '@src/util/user-text.util.js'
 
 /** The word the built-in help answers to when `messages.help` names no other. */
 const HELP_WORD = 'help'
+/** The texts that join a command's aliases and its params, read in the reply's locale. */
+const LIST_JOINER_KEY = 'meocord.help.listJoiner'
+const PARAM_JOINER_KEY = 'meocord.help.paramJoiner'
 
 /** The words that ask for help, from `messages.help`: its command, then its aliases; none when help is off. */
 export function helpWords(help: boolean | MessageHelpOptions | undefined): string[] {
@@ -206,8 +209,8 @@ function commandBlock(entry: MessageHelpEntry, render: Render): string {
   return [
     render(usageHeading(entry.usage)),
     entry.description,
-    params.length > 0 ? text('params', { params: { list: params, style: 'unit', joiner: ' · ' } }) : undefined,
-    entry.aliases.length > 0 ? text('aliases', { aliases: { list: entry.aliases, style: 'unit' } }) : undefined,
+    params.length > 0 ? text('params', { params: { list: params, style: 'unit', joinerKey: PARAM_JOINER_KEY } }) : undefined,
+    entry.aliases.length > 0 ? text('aliases', { aliases: { list: entry.aliases, style: 'unit', joinerKey: LIST_JOINER_KEY } }) : undefined,
     scope,
   ]
     .filter((line): line is string => line !== undefined)

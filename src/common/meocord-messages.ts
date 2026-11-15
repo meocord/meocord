@@ -135,6 +135,9 @@ export const MEOCORD_MESSAGES = {
       optionalParam: '{name} (optional): {label}',
       params: '{params}',
       aliases: 'Also: {aliases}',
+      // What joins the alias list and the params list, as a catalog's language writes a list
+      listJoiner: ', ',
+      paramJoiner: ' · ',
       serverOnly: 'Works in servers only.',
       dmOnly: 'Works in direct messages only.',
       unknown: 'No command is called "{query}". Type {invocation} to list them.',
