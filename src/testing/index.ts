@@ -35,7 +35,7 @@ export type {
 export { clearAllMocks, createMockFn, isMockFunction, resetAllMocks, useMockFn } from '@src/testing/mock-fn.js'
 export { useStrictMocks } from '@src/testing/strict-mocks.js'
 export { reportAllStartupErrors } from '@src/testing/startup-errors.js'
-export type { Mock, MockedFunction, MockFnFactory, MockInstance, MockResult, MockSettledResult, MockState, RunnerMock } from '@src/testing/mock-fn.js'
+export type { Mock, MockedFunction, MockFnFactory, MockInstance, MockResult, MockSettledResult, MockState, MockTypeOptions, RunnerMock } from '@src/testing/mock-fn.js'
 
 export { resolveRoute, findRouteConflicts } from '@src/testing/routing.js'
 export type { ComponentCommandType, MessageToResolve, ResolvedRoute, RouteConflict } from '@src/testing/routing.js'

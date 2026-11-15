@@ -1,9 +1,10 @@
 /**
  * Checks the shipped declarations as a consumer's compiler reads them, after `bun run build`: each `meocord/<entry>`
  * resolves through `exports` to its `.d.ts` (import) and `.d.cts` (require), they and their chunks compile with no
- * error, and they export exactly the names, values and types the source entry declares.
+ * error, and they export exactly the names, values and types the source entry declares. The opted-in typed mock values
+ * fixture compiles against them too, as ESM and as CommonJS.
  */
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import ts from 'typescript'
@@ -15,6 +16,8 @@ const CONDITIONS = [
   { name: 'require', from: '__consumer__.cts', mode: ts.ModuleKind.CommonJS, built: (entry: string) => `dist/types/${entry}/index.d.cts` },
 ] as const
 const ESLINT = { import: 'meocord.eslint.d.ts', require: 'meocord.eslint.d.cts' }
+// A project with typed mock values, written against src; a consumer names the module `meocord/testing`
+const TYPED_VALUES = { fixture: 'src/testing/typed-values/typed-values.augmented.ts', source: "'@src/testing/index.js'", consumer: "'meocord/testing'" }
 
 // As a consumer compiles against the package: NodeNext, its own libraries type-checked too
 const consumerOptions: ts.CompilerOptions = {
@@ -61,6 +64,14 @@ function exportsOf(checker: ts.TypeChecker, file: ts.SourceFile): Map<string, Ki
 
 const problems: string[] = []
 const relative = (file: string) => path.relative(repoRoot, file)
+const isOwn = (program: ts.Program, file: ts.SourceFile) =>
+  !relative(file.fileName).split(path.sep).includes('node_modules') && !program.isSourceFileDefaultLibrary(file)
+const report = (program: ts.Program, file: ts.SourceFile) => {
+  for (const diagnostic of [...program.getSyntacticDiagnostics(file), ...program.getSemanticDiagnostics(file)]) {
+    const { line } = diagnostic.start === undefined ? { line: 0 } : file.getLineAndCharacterOfPosition(diagnostic.start)
+    problems.push(`${relative(file.fileName)}:${line + 1}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`)
+  }
+}
 
 // Resolved by the package's own name, as an app importing or requiring it does: only the exports map decides it
 const host = ts.createCompilerHost(consumerOptions)
@@ -84,12 +95,22 @@ const program = ts.createProgram(
   host,
 )
 // The package's own files: the entries, the chunks they import and the eslint declarations
-const own = program.getSourceFiles().filter(file => !relative(file.fileName).split(path.sep).includes('node_modules') && !program.isSourceFileDefaultLibrary(file))
-for (const file of own) {
-  for (const diagnostic of [...program.getSyntacticDiagnostics(file), ...program.getSemanticDiagnostics(file)]) {
-    const { line } = diagnostic.start === undefined ? { line: 0 } : file.getLineAndCharacterOfPosition(diagnostic.start)
-    problems.push(`${relative(file.fileName)}:${line + 1}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')}`)
+for (const file of program.getSourceFiles().filter(file => isOwn(program, file))) report(program, file)
+
+// The fixture in each module format, as a file beside the consumer: its augmentation reaches the declarations that
+// format resolves to, and its `@ts-expect-error` lines fail if it doesn't
+const typedValues = readFileSync(path.join(repoRoot, TYPED_VALUES.fixture), 'utf8').replaceAll(TYPED_VALUES.source, TYPED_VALUES.consumer)
+for (const { from } of CONDITIONS) {
+  const fixture = path.join(repoRoot, from.replace('__consumer__', '__typed_values__'))
+  const fixtureHost: ts.CompilerHost = {
+    ...host,
+    fileExists: file => file === fixture || host.fileExists(file),
+    readFile: file => (file === fixture ? typedValues : host.readFile(file)),
+    getSourceFile: (file, version, ...rest) =>
+      file === fixture ? ts.createSourceFile(file, typedValues, version) : host.getSourceFile(file, version, ...rest),
   }
+  const fixtureProgram = ts.createProgram([fixture], consumerOptions, fixtureHost)
+  for (const file of fixtureProgram.getSourceFiles().filter(file => isOwn(fixtureProgram, file))) report(fixtureProgram, file)
 }
 
 // What each source entry declares, read with the repository's own options
@@ -126,5 +147,5 @@ if (problems.length > 0) {
 }
 console.log(
   `Each entry resolves for import and require to its own declarations, which compile and export the ${names} names ` +
-    'the source entry points declare, values as values and types as types.',
+    'the source entry points declare, values as values and types as types. Typed mock values hold for import and require.',
 )

@@ -5,7 +5,7 @@ import { shared } from '@src/util/shared-state.util.js'
 
 // Each call signature of `T`, up to four, as a union: `Parameters` and `ReturnType` read only an overloaded function's
 // last signature, such as the list form of a manager's `fetch`
-type Overloads<T> = T extends {
+type Overloads<T extends (...args: any[]) => any> = T extends {
   (...args: infer A1): infer R1
   (...args: infer A2): infer R2
   (...args: infer A3): infer R3
@@ -13,11 +13,54 @@ type Overloads<T> = T extends {
 }
   ? ((...args: A1) => R1) | ((...args: A2) => R2) | ((...args: A3) => R3) | ((...args: A4) => R4)
   : T
-// With the catch-all last, which `Parameters` and `ReturnType` read, every mock API value is `any`, as MockedFunction says
-type CallArgs<T> = Parameters<Overloads<T> & ((...args: any[]) => any)>
-type CallResult<T> = ReturnType<Overloads<T> & ((...args: any[]) => any)>
+
+/**
+ * Switches on checks of the values a test gives a mock and reads back from it, for the whole project, by declaration
+ * merging.
+ *
+ * Declared empty. With `typedValues: true` merged in, the mock API of every {@link MockedFunction} is typed from the
+ * function it mocks: `mock.calls`, `mock.lastCall`, `mock.results` and `mock.settledResults` hold its arguments and
+ * results, `mockReturnValue` and `mockImplementation` take only values and functions it could return or be, and
+ * `mockResolvedValue` takes what it resolves to, or `undefined`, which a mock's answers resolve to by default. An
+ * overloaded function's values are a union over its signatures, up to four of them; a fifth is left out. Without it,
+ * those values are `any`. It checks types only: `useStrictMocks()` is what changes how a mock behaves. The next major
+ * version (5.0) types the values by default, and `typedValues: false` opts out
+ * ({@link https://github.com/meocord/meocord/issues/561 | meocord#561}).
+ *
+ * @remarks
+ * An augmentation applies to the module format its own file compiles as: a project whose tests compile as both ESM
+ * and CommonJS declares it in a `.d.ts` and a `.d.cts`.
+ *
+ * @example
+ * ```ts
+ * // src/types/meocord-testing.d.ts
+ * import 'meocord/testing'
+ *
+ * declare module 'meocord/testing' {
+ *   interface MockTypeOptions {
+ *     typedValues: true
+ *   }
+ * }
+ * ```
+ *
+ * @group Testing
+ * @category Mocks
+ * @see {@link MockedFunction}
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- merged into by a project's declaration
+export interface MockTypeOptions {}
+
+// Whether a project merged `typedValues: true` into MockTypeOptions
+type TypedValues = MockTypeOptions extends { typedValues: true } ? true : false
+
+// With the catch-all last, which `Parameters` and `ReturnType` read, every mock API value is `any`, as MockedFunction
+// says; with typed values, a union over the function's own signatures
+type CallArgs<T extends (...args: any[]) => any> = TypedValues extends true ? Parameters<Overloads<T>> : Parameters<Overloads<T> & ((...args: any[]) => any)>
+type CallResult<T extends (...args: any[]) => any> = TypedValues extends true ? ReturnType<Overloads<T>> : ReturnType<Overloads<T> & ((...args: any[]) => any)>
+// What a resolved-value setter takes: with typed values, `undefined` too, which a mock's answers resolve to by default
+type ResolvedValue<T extends (...args: any[]) => any> = TypedValues extends true ? Awaited<CallResult<T>> | undefined : Awaited<CallResult<T>>
 // A function for any of `T`'s signatures; declared as a method so a narrower parameter, one overload's, is accepted
-type Implementation<T> = { fn(...args: CallArgs<T>): CallResult<T> }['fn']
+type Implementation<T extends (...args: any[]) => any> = { fn(...args: CallArgs<T>): CallResult<T> }['fn']
 
 /**
  * One call's outcome, as a mock function records it: the value it returned, or the error it threw.
@@ -80,8 +123,8 @@ export interface MockState<T extends (...args: any[]) => any = (...args: any[]) 
  * The mock API of a mock function: what it has recorded, and the methods that change what it does.
  *
  * Every mock from `meocord/testing` has it, with the names jest and Vitest use, so a test written for either runner
- * reads the same. The values it takes and records aren't checked against the function it mocks; see
- * {@link MockedFunction}.
+ * reads the same. The values it takes and records aren't checked against the function it mocks unless the project
+ * turns that on with {@link MockTypeOptions}; see {@link MockedFunction}.
  *
  * @group Testing
  * @category Mocks
@@ -98,9 +141,9 @@ export interface MockInstance<T extends (...args: any[]) => any = (...args: any[
   /** Returns `value` from the next call only. */
   mockReturnValueOnce(value: CallResult<T>): MockedFunction<T>
   /** Resolves every call to `value`. */
-  mockResolvedValue(value: Awaited<CallResult<T>>): MockedFunction<T>
+  mockResolvedValue(value: ResolvedValue<T>): MockedFunction<T>
   /** Resolves the next call only to `value`. */
-  mockResolvedValueOnce(value: Awaited<CallResult<T>>): MockedFunction<T>
+  mockResolvedValueOnce(value: ResolvedValue<T>): MockedFunction<T>
   /** Rejects every call with `value`. */
   mockRejectedValue(value: unknown): MockedFunction<T>
   /** Rejects the next call only with `value`. */
@@ -129,7 +172,7 @@ export interface MockInstance<T extends (...args: any[]) => any = (...args: any[
  * not, for a plain function as for an overloaded one: `mockReturnValue` and `mockResolvedValue` take any value,
  * `mockImplementation` takes any function, and each of `mock.calls`' arguments and each of `mock.results`' values reads
  * as `any`. So a partial fake, such as `guild.members.fetch.mockResolvedValue({ id })`, type-checks, and so does a
- * value of the wrong type.
+ * value of the wrong type. A project that merges `typedValues: true` into {@link MockTypeOptions} has them checked.
  *
  * @group Testing
  * @category Mocks

@@ -22,5 +22,5 @@
     "types": ["node", "reflect-metadata"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "src/**/*.spec.ts", "src/interface/theme-augmented"]
+  "exclude": ["node_modules", "src/**/*.spec.ts", "src/interface/theme-augmented", "src/testing/typed-values"]
 }
