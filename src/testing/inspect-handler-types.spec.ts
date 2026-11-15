@@ -68,7 +68,7 @@ class Moderation {
 @MeoCord({ controllers: [Moderation], guards: [MessageOnly, Everywhere], observers: [MessageAudit, Audit], clientOptions: { intents: [] } })
 class App {}
 
-const W_EVERY_TYPE = /^inspectHandler\(\) here lists the guards, interceptors and observers of every context type for Moderation\.ban, where dispatch runs only those of its own; under useStrictMocks\(\)/
+const W_EVERY_TYPE = /^inspectHandler\(\) here lists every guard, interceptor and observer declared for Moderation\.ban, where dispatch runs only those of its own context type and, for an event handler under globalStagesOnEvents: false, none of the app's untyped guards and interceptors; under useStrictMocks\(\)/
 
 describe('inspectHandler() under useStrictMocks()', () => {
   beforeEach(() => useStrictMocks())

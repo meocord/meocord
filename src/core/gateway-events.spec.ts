@@ -16,6 +16,7 @@ import {
 } from 'discord.js'
 import { ExecutionContext } from '@src/common/execution-context.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
+import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import {
   Catch,
   Controller,
@@ -71,6 +72,7 @@ async function startApp(
     guards?: any[]
     interceptors?: any[]
     messages?: MessageCommandOptions
+    globalStagesOnEvents?: boolean
   },
   clientOptions: ClientOptions = { intents: [] },
 ): Promise<Client> {
@@ -87,6 +89,7 @@ async function startApp(
     guards: options.guards,
     interceptors: options.interceptors,
     messages: options.messages,
+    ...(options.globalStagesOnEvents !== undefined && { globalStagesOnEvents: options.globalStagesOnEvents }),
     clientOptions,
   })
   class App {}
@@ -469,7 +472,7 @@ describe('gateway event handlers', () => {
       ])
     })
 
-    it('notes once per global guard or interceptor without types that it also runs on events', async () => {
+    describe('a global guard or interceptor without types', () => {
       @Guard()
       class RolesGuard implements GuardInterface {
         canActivate() {
@@ -499,25 +502,37 @@ describe('gateway event handlers', () => {
         farewell() {}
       }
 
-      await startApp({ services: [Welcome], guards: [RolesGuard, ScopedGuard], interceptors: [Timing] })
+      const onEvents = (logged: unknown[][]) => logged.map(args => String(args[0])).filter(text => text.includes('before @On and @Once handlers'))
 
-      expect(logged.info.map(args => args[0])).toEqual([
-        'Global guard RolesGuard also runs on gateway events; declare @Guard({ types: [...] }) to limit it.',
-        'Global interceptor Timing also runs on gateway events; declare @Interceptor({ types: [...] }) to limit it.',
-      ])
-    })
+      beforeEach(() => forgetDeprecationWarnings())
 
-    it('notes nothing when the app has no event handlers', async () => {
-      @Guard()
-      class RolesGuard implements GuardInterface {
-        canActivate() {
-          return true
-        }
-      }
+      it('warns once per stage that it runs before event handlers, and that 5.0 changes that', async () => {
+        await startApp({ services: [Welcome], guards: [RolesGuard, ScopedGuard], interceptors: [Timing] })
+        await startApp({ services: [Welcome], guards: [RolesGuard, ScopedGuard], interceptors: [Timing] })
 
-      await startApp({ services: [], guards: [RolesGuard] })
+        expect(onEvents(logged.warn)).toEqual([
+          'Global guard RolesGuard also runs before @On and @Once handlers; in the next major version (5.0) it no ' +
+            'longer does unless it declares types (https://github.com/meocord/meocord/issues/502). Declare ' +
+            '@Guard({ types: [...] }), or set @MeoCord({ globalStagesOnEvents }) to true or false.',
+          'Global interceptor Timing also runs before @On and @Once handlers; in the next major version (5.0) it no ' +
+            'longer does unless it declares types (https://github.com/meocord/meocord/issues/502). Declare ' +
+            '@Interceptor({ types: [...] }), or set @MeoCord({ globalStagesOnEvents }) to true or false.',
+        ])
+        expect(logged.info).toEqual([])
+      })
 
-      expect(logged.info).toEqual([])
+      it.each([true, false])('warns of nothing with globalStagesOnEvents set to %s', async globalStagesOnEvents => {
+        await startApp({ services: [Welcome], guards: [RolesGuard], interceptors: [Timing], globalStagesOnEvents })
+
+        expect(onEvents(logged.warn)).toEqual([])
+      })
+
+      it('warns of nothing when the app has no event handlers', async () => {
+        await startApp({ services: [], guards: [RolesGuard], interceptors: [Timing] })
+
+        expect(onEvents(logged.warn)).toEqual([])
+        expect(logged.info).toEqual([])
+      })
     })
   })
 

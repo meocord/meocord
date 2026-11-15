@@ -167,6 +167,19 @@ export interface MeoCordOptions<
   answerDenied?: boolean
 
   /**
+   * Whether the global guards and interceptors that declare no `types` also run before `@On` and `@Once` handlers.
+   * With `false`, they skip gateway events and still run for every other call: commands, components, modals, message
+   * commands, reactions and autocomplete. A stage that declares `types` keeps exactly what it declares, `'event'`
+   * included. The guards and interceptors a controller or a handler names are unaffected, and so are the global
+   * exception filters, which keep handling an event handler's errors. Left unset, the bot warns at startup, once for
+   * each such stage, when the app has event handlers; setting it either way silences that.
+   *
+   * @defaultValue `true`; `false` in the next major version (5.0), as
+   * {@link https://github.com/meocord/meocord/issues/502 | meocord#502} plans
+   */
+  globalStagesOnEvents?: boolean
+
+  /**
    * The app's theme: the roles it changes from MeoCord's defaults, and every role the app adds. It applies to every
    * handler, beneath each `@UseTheme`; code reads it with `useTheme()`. Each token is checked as the decorator
    * applies, so a bad one stops the bot before it logs in.

@@ -58,7 +58,7 @@ import {
   getMessageHandlers,
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
-import { appliesTo, stageClass } from '@src/core/stage-scope.js'
+import { applicable, type GlobalHead, stageClass } from '@src/core/stage-scope.js'
 import { OWNER_PARAM } from '@src/common/owner.guard.js'
 import { GuardDeniedError } from '@src/common/errors.js'
 import { textFor } from '@src/common/meocord-text.js'
@@ -71,6 +71,8 @@ export interface HandlerStages {
   readonly interceptors: readonly InterceptorEntry[]
   /** Filters by level, the level closest to the handler first: method, class, global. */
   readonly filters: readonly (readonly FilterEntry[])[]
+  /** The app's global guards and interceptors at the head of `guards` and `interceptors`. */
+  readonly global: { readonly guards: GlobalHead; readonly interceptors: GlobalHead }
 }
 
 /**
@@ -87,6 +89,8 @@ export interface GlobalStages {
   themeFor?: ThemeResolverOptions
   /** The app's `@MeoCord({ answerDenied })`: whether a guard's `false` on an interaction is answered. */
   answerDenied?: boolean
+  /** The app's `@MeoCord({ globalStagesOnEvents })`, when it sets one. */
+  globalStagesOnEvents?: boolean
 }
 
 const NO_GLOBAL_STAGES: GlobalStages = { guards: [], interceptors: [], filters: [] }
@@ -106,6 +110,7 @@ export function appStages(app: object): GlobalStages {
         themeCache?: ThemeResolverOptions['cache']
         themeForTimeoutMs?: number
         answerDenied?: boolean
+        globalStagesOnEvents?: boolean
       }
     | undefined
   if (!options) {
@@ -120,6 +125,7 @@ export function appStages(app: object): GlobalStages {
       themeFor: { resolvers: options.themeFor, cache: options.themeCache, timeoutMs: options.themeForTimeoutMs },
     }),
     ...(options.answerDenied !== undefined && { answerDenied: options.answerDenied }),
+    ...(options.globalStagesOnEvents !== undefined && { globalStagesOnEvents: options.globalStagesOnEvents }),
   }
 }
 
@@ -194,11 +200,17 @@ export function handlerStages(
 ): HandlerStages {
   let resolve = stagesByGlobals.get(globals)
   if (!resolve) {
+    const onEvents = globals.globalStagesOnEvents ?? true
+    const global = Object.freeze({
+      guards: Object.freeze({ count: globals.guards.length, onEvents }),
+      interceptors: Object.freeze({ count: globals.interceptors.length, onEvents }),
+    })
     resolve = perHandler((handlerPrototype, handler): HandlerStages =>
       Object.freeze({
         guards: Object.freeze([...globals.guards, ...handlerGuards(handlerPrototype, handler)]),
         interceptors: Object.freeze([...globals.interceptors, ...handlerInterceptors(handlerPrototype, handler)]),
         filters: Object.freeze(handlerFilterLevels(handlerPrototype, handler, globals.filters).map(level => Object.freeze(level))),
+        global,
       }),
     )
     stagesByGlobals.set(globals, resolve)
@@ -596,7 +608,7 @@ async function runPipeline(
 ): Promise<HandlerOutcome> {
   const controller = instance.constructor as new (...args: any[]) => unknown
   const globals = globalStagesOf(container)
-  const { guards, interceptors, filters } = handlerStages(Object.getPrototypeOf(instance), methodName, globals)
+  const { guards, interceptors, filters, global } = handlerStages(Object.getPrototypeOf(instance), methodName, globals)
   const type = options.type ?? inferContextType(args[0])
   // One cell for the whole call, so every stage's context reads the arguments as they stand now
   const currentArgs: CurrentArgs = { current: args }
@@ -631,7 +643,7 @@ async function runPipeline(
       args = await options.parseArgs(args)
       currentArgs.current = args
     }
-    if (!(await runGuards(guards, { container, controller, methodName, args, type, currentArgs, denial }))) {
+    if (!(await runGuards(guards, { container, controller, methodName, args, type, currentArgs, denial, global: global.guards }))) {
       outcome = 'denied'
       // Answered as a thrown denial is, through the filters and the fallback, in the user's language
       if (type === 'interaction' && globals.answerDenied) throw new GuardDeniedError(textFor(first as object, { key: 'meocord.guard.denied' }))
@@ -662,9 +674,9 @@ async function runPipeline(
       }
     }
     // Autocomplete answers within three seconds and has no reply to shape, so it skips interceptors.
-    const applicable = type === 'autocomplete' ? [] : interceptors.filter(entry => appliesTo(entry, type))
-    if (applicable.length === 0) await handler()
-    else await runInterceptors(applicable, container, contextOf(), handler, cls => (returnedEarly = cls))
+    const running = type === 'autocomplete' ? [] : applicable(interceptors, type, global.interceptors)
+    if (running.length === 0) await handler()
+    else await runInterceptors(running, container, contextOf(), handler, cls => (returnedEarly = cls))
     return { ran }
   } catch (error) {
     outcome = outcomeOf(error)
