@@ -1083,6 +1083,8 @@ export type ParamRefsOf<P extends string> = {
  * param a type its value does not fit, fails to compile, with the param named. Params such as
  * `Record<string, string>`, which take anything, are not checked.
  *
+ * @deprecated Since 4.3, and removed in the next major version (5.0). Internal: nothing replaces it.
+ *
  * @group Types
  * @see {@link ParamsOf}
  */

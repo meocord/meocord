@@ -64,6 +64,8 @@ export type InferSchemaOutput<S extends StandardSchemaV1> = NonNullable<S['~stan
 /**
  * Brands a {@link Piped} value's type; never present at runtime.
  *
+ * @deprecated Since 4.3, and removed in the next major version (5.0). Internal: nothing replaces it.
+ *
  * @internal
  */
 export declare const PIPED_BRAND: unique symbol

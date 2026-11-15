@@ -368,6 +368,7 @@ const TYPE_NAMES: Record<string, string[]> = {
 // behaviour deprecated without a name, such as retrying start() after a failed login, warns at runtime instead.
 const DEPRECATED = [
   'AutocompleteMetadata',
+  'CheckedParams',
   'CommandMeta.specificity',
   'CommandMetadata',
   'ExecutionContext.get',
@@ -375,6 +376,7 @@ const DEPRECATED = [
   'HandlerEntryBase.get',
   'HandlerEntryBase.getAll',
   'MetadataKey',
+  'PIPED_BRAND',
   'ReactionHandlerOptions',
   'ResponsePayload.ephemeral',
   'SetMetadata',
@@ -388,7 +390,7 @@ const DEPRECATED = [
 
 // A tag names its replacement and why, or says the name is internal
 const DEPRECATION_TAG =
-  /^Since 4\.[12], and removed in the next major version \(5\.0\)\. (Use `[^`]+` instead\. \S.*|Internal: nothing replaces it\.( \S.*)?)$/
+  /^Since 4\.[1-3], and removed in the next major version \(5\.0\)\. (Use `[^`]+` instead\. \S.*|Internal: nothing replaces it\.( \S.*)?)$/
 
 const ENTRY_FILES: Record<string, string> = {
   'meocord/core': 'src/core/index.ts',
