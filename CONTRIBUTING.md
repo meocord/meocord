@@ -16,7 +16,7 @@ Thanks for taking the time. Issues, questions, and pull requests are all welcome
 
 ## Getting set up
 
-MeoCord builds and tests with [Bun](https://bun.sh), and ships to consumers running Node `>=22.13`.
+MeoCord builds and tests with [Bun](https://bun.sh) 1.4.4 or newer, and ships to consumers running Node `>=22.13`.
 Bun is the repository's tooling only: the code MeoCord ships — `src/`, and the application templates —
 runs on whichever runtime the application chooses, so it uses Node APIs and no Bun-only ones such as
 `Bun.serve`, `Bun.file` or `bun:*` modules. `bun run lint` rejects them in `src/`.
@@ -34,7 +34,8 @@ bun run test
 | `bun run test:watch`       | Same, in watch mode                                                                                     |
 | `bun run test:coverage`    | Runs the suite with istanbul coverage and enforces the thresholds                                       |
 | `bun run test:mutation`    | Mutation-tests core modules by hand, not in CI; name modules to run a few, `--force` to retest all      |
-| `bun run lint`             | Formats, fixes lint, then typechecks the source, test, and eslint projects                              |
+| `bun run lint`             | Formats, fixes lint, then runs `bun run typecheck`                                                      |
+| `bun run typecheck`        | Type-checks the source, test, eslint and type-augmentation projects with `bun check`                    |
 | `bun run build`            | Clears `dist/`, builds ESM, CJS, and type declarations through rollup, and writes `dist/cli.json`       |
 | `bun run verify:generated` | Generates an app from the packed build and runs its own checks — see below                              |
 | `bun run verify:runners`   | Installs the packed build into a jest, vitest, node:test and bun test project, and runs each one's test |
@@ -91,6 +92,15 @@ and it needs network access for the install. Asserting on the text a template re
 whether that text lints, compiles, tests or builds; shipped bugs have hidden in each of those gaps.
 
 **`cli:scenarios`** installs an application from the packed build and runs the real CLI through scenarios that must succeed and scenarios that must fail: each asserts the exit code, what the output says, and which files were written or left alone. It also fails a scenario that leaves a process running. Run it after `bun run build`; `--only <text>` picks scenarios by name, `--windows` runs the subset that also runs on Windows. `--tier slow` runs the slower scenarios: an application installed with npm, the bun runtime, bundled builds run without `node_modules`, process sharding, and stop signals in each start mode, sent to the process group as Ctrl+C is and to the CLI alone as Docker sends them. They reach Discord with a token it refuses, so they need the network; they run on every pull request and queued merge, in a job of their own reported under the `Test` check, before every release, and nightly, with `--tier all` running both tiers. An unknown tier, or a selection that matches no scenario, fails before anything is installed. Add a scenario whenever a command gains a flag or a failure gains a message.
+
+**Two type checkers and two formatters.** `bun run typecheck` and the Markdown half of `bun run format` use
+Bun's own tools, `bun check` and `bun fmt`, which is why the repository needs Bun 1.4.4. `bun check` is on the
+TypeScript 7 line, while the `typescript` package installed here is on the line a consumer compiles with.
+Everything a consumer's compiler meets is checked by that compiler: the `*.test-d.ts` assertions,
+`check:dist-types`, `check:api-compat`, `check:jsdoc-examples` and `verify:runners` with the package installed
+here, and `verify:generated` with the one the generated application installs.
+`bun fmt` formats Markdown from the prettier config. Prettier itself formats the application template,
+whose `.template` files `bun fmt` does not read as TypeScript.
 
 **The Windows job** installs the packed tarball globally and drives the CLI through the `.cmd` shim npm
 writes from the interpreter line. Nothing on a POSIX runner exercises that path, and generation is what

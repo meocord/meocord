@@ -51,8 +51,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Before `lint`, which runs prettier in --write mode: it would reformat the
-      # working tree and exit 0, so nothing unformatted could ever fail CI.
+      # Before `lint`, which formats in write mode (`bun fmt` for Markdown, prettier for the
+      # application template): it would reformat the working tree and exit 0, so nothing
+      # unformatted could ever fail CI.
       - name: Check formatting
         run: bun run format:check
 
