@@ -153,6 +153,7 @@ describe('an application MeoCord refuses as it loads', () => {
  */
 const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   'common/command-mention.ts': { count: 1, why: 'commandMention(), called as a handler mentions a command' },
+  'common/format-duration.ts': { count: 7, why: 'formatDuration, called by a handler or cooldownMessage with a duration or option it cannot write' },
   'common/owner.guard.ts': { count: 1, why: 'OwnerGuard denying a user, as it runs' },
   'common/redis-cooldown-store.ts': { count: 1, why: "a Redis script's reply, read as a cooldown is taken" },
   'common/response/response-state.ts': { count: 6, why: 'a handler answering its interaction' },

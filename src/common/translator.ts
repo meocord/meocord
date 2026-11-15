@@ -158,8 +158,8 @@ type LocaleMessages<C> = {
 
 /**
  * What is wrong with a catalog's `meocord` group, one message per mistake: a key MeoCord has no text for, a group where
- * MeoCord has a text or a text where it has a group, or a `{param}` MeoCord's English text lacks, shown beside that
- * English.
+ * MeoCord has a text or a text where it has a group or a plural, a plural's key that is no plural category, or a
+ * `{param}` MeoCord's English text lacks, shown beside that English. A plural takes every category its language needs.
  */
 type MeoCordIssues<T, M, Path extends string = 'meocord.'> = {
   [K in keyof T & string]: K extends keyof M
@@ -167,11 +167,27 @@ type MeoCordIssues<T, M, Path extends string = 'meocord.'> = {
       ? T[K] extends string
         ? `${Path}${K} takes no {${Exclude<Placeholders<T[K]>, Placeholders<M[K]>> & string}}: MeoCord's English is "${M[K]}"`
         : `${Path}${K} is a text, not a group`
-      : T[K] extends string
-        ? `${Path}${K} is a group, not a text`
-        : MeoCordIssues<T[K], M[K], `${Path}${K}.`>
+      : IsPlural<M[K]> extends true
+        ? T[K] extends string
+          ? `${Path}${K} is a plural, not a text`
+          : MeoCordPluralIssues<T[K], M[K], `${Path}${K}`>
+        : T[K] extends string
+          ? `${Path}${K} is a group, not a text`
+          : MeoCordIssues<T[K], M[K], `${Path}${K}.`>
     : `${Path}${K} is not one of MeoCord's texts`
 }[keyof T & string]
+
+/**
+ * What is wrong with a translation of one of MeoCord's plural texts: no `other` form, which every language has, a form
+ * that is no text, a key that is no plural category, or a stray param.
+ */
+type MeoCordPluralIssues<T, M, Where extends string> =
+  | ('other' extends keyof T ? never : `${Where} lacks other, the form every language has`)
+  | { [K in keyof T & PluralCategory]: Exclude<T[K], undefined> extends string ? never : `${Where}.${K} is a text, not a group` }[keyof T & PluralCategory]
+  | (Exclude<keyof T & string, PluralCategory> extends infer Stray extends string ? ([Stray] extends [never] ? never : `${Where}.${Stray} is not a plural category`) : never)
+  | ([Exclude<UsedParams<T>, DefaultParams<M>>] extends [never]
+      ? never
+      : `${Where} takes no {${Exclude<UsedParams<T>, DefaultParams<M>> & string}}: MeoCord's English is "${ShownText<M>}"`)
 
 /** The issues of a catalog's `meocord` group, each a message naming the text and what is wrong. */
 export type CatalogIssues<C> = C extends { readonly meocord: infer G } ? MeoCordIssues<G, MeoCordMessages> : never
@@ -444,12 +460,12 @@ function valueAt(catalog: CatalogShape | undefined, key: string): unknown {
  * default catalog for a translation, decides where it has a group that an object is that group, so a translation that
  * keeps only a group's `other` message isn't read as a plural. Where it has a message, or lacks the key, the object's
  * own keys decide, so a translation may give a plural for a message its language needs one for. A plural without an
- * `other` form reads as missing, so a translation that left it out falls back to the next catalog.
+ * `other` form, or with a form that is no text, reads as missing, so the next catalog serves it.
  */
 export function lookup(catalog: CatalogShape | undefined, key: string, reference: CatalogShape | undefined = catalog): string | PluralMessage | undefined {
   const current = valueAt(catalog, key)
   if (typeof current === 'string') return current
-  if (!isPluralShape(current) || typeof current.other !== 'string') return undefined
+  if (!isPluralShape(current) || typeof current.other !== 'string' || Object.values(current).some(form => typeof form !== 'string')) return undefined
   const shape = reference === catalog ? current : valueAt(reference, key)
   const group = typeof shape === 'object' && shape !== null && !isPluralShape(shape)
   return group ? undefined : (current as PluralMessage)

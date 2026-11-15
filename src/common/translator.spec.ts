@@ -232,6 +232,16 @@ describe('an empty translation', () => {
   })
 })
 
+describe('a plural with a form that is no text', () => {
+  it('reads as missing, so the next catalog answers', () => {
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { items: { one: '{count} item', other: '{count} items' } }, id: { items: { one: { deep: 'x' }, other: '{count} barang' } } as never },
+    })
+    expect([t.locale('id')('items', { count: 1 }), t.locale('id')('items', { count: 2 })]).toEqual(['1 item', '2 items'])
+  })
+})
+
 describe('a key with no message, in development', () => {
   let warned: string[]
   beforeEach(() => {

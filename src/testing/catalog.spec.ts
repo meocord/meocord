@@ -187,6 +187,27 @@ describe('expectCompleteCatalog', () => {
     )
   })
 
+  it("names the plural forms a language needs that a translation of MeoCord's own plural texts lacks", () => {
+    const ru = {
+      ban: { description: 'Забанить', done: '{user} забанен.' },
+      warnings: { one: '{count} предупреждение', few: '{count} предупреждения', many: '{count} предупреждений', other: '{count} предупреждения' },
+    }
+    const hours = { one: '{count} час', many: '{count} часов', other: '{count} часа' }
+    const t = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': enUS, ru: { ...ru, meocord: { duration: { hourLong: hours, dayLong: '{count} дн.', weekLong: {} } } } as never },
+    })
+
+    expect(() => expectCompleteCatalog(t)).toThrow(
+      "  ru: meocord.duration.hourLong lacks few; meocord.duration.dayLong should be a plural, as MeoCord's English is; meocord.duration.weekLong should be a plural, as MeoCord's English is",
+    )
+    const complete = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': enUS, ru: { ...ru, meocord: { duration: { hourLong: { ...hours, few: '{count} часа' } } } } },
+    })
+    expect(() => expectCompleteCatalog(complete)).not.toThrow()
+  })
+
   it.each(PLACEHOLDER_CASES)('reads the params of $text as translating and the compiler do', ({ text, params }) => {
     expect(placeholderNames(text)).toEqual(params)
     // A translation that keeps the text's braces takes the same params, so nothing is reported
