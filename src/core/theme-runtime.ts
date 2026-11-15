@@ -179,6 +179,11 @@ export function registerClientTheme(client: object, container: Container): void 
   clientApps.set(client, container)
 }
 
+/** The container of the app a client belongs to: the bot's own, or a testing module's that ran a call on it. */
+export function appOfClient(client: object): Container | undefined {
+  return clientApps.get(client)
+}
+
 // An answer outside any call, as in a collector's callback, takes the theme of the app its interaction came to,
 // with the server's and user's themes over it, from the same caches calls use
 setThemeOutsideCalls(interaction => {

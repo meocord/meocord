@@ -1,7 +1,8 @@
 /** The longest delay a timer keeps: 2^31 - 1 ms, about 24.8 days. Node fires a longer one at once. */
 export const MAX_TIMER_MS = 2_147_483_647
 
-const MS_PER_SECOND = 1_000
+/** Milliseconds in a second. */
+export const MS_PER_SECOND = 1_000
 
 /** The most whole seconds a timer keeps, as a message about an option given in seconds names the limit. */
 export const MAX_TIMER_SECONDS = Math.floor(MAX_TIMER_MS / MS_PER_SECOND)

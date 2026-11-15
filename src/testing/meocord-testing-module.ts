@@ -8,6 +8,7 @@ import {
   type CooldownStoreFailure,
 } from '@src/core/cooldown-runner.js'
 import {
+  ApplicationCommandType,
   BaseInteraction,
   Client,
   type ClientEvents,
@@ -53,6 +54,8 @@ import {
 import { ThemeCache, type ThemeResolverClass, themeResolverClass } from '@src/core/theme-resolvers.js'
 import { appTheme, claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
+import { provideCommandIds } from '@src/core/command-ids.js'
+import { SNOWFLAKE, testingCommandIds } from '@src/testing/testing-command-ids.js'
 import { copyLayer, defaultTheme, mergeTheme, type ResolvedTheme } from '@src/core/theme-scope.js'
 import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js'
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
@@ -1008,6 +1011,8 @@ export class TestingModuleBuilder {
   private themeOverride?: ThemeOverride
   /** The resolvers `overrideThemeFor` gives, in place of the app's `@MeoCord({ themeFor })`. */
   private themeForOverride?: { resolvers: ThemeResolvers | ThemeResolverClass | undefined }
+  /** The IDs `overrideCommandId` gives, by command name. */
+  private readonly commandIds = new Map<string, string>()
 
   constructor(
     private readonly options: TestingModuleOptions,
@@ -1153,6 +1158,34 @@ export class TestingModuleBuilder {
     return this
   }
 
+  /**
+   * Sets the ID `commandMention` gives a slash command of this module's controllers, so a test can assert a mention's
+   * exact text. Without it, a command's ID is fixed and snowflake-shaped, the same for its name in every run.
+   *
+   * @param name - The slash command's name, as its builder registers it; its subcommands share its ID.
+   * @param id - The ID, shaped as a Discord snowflake: 17 to 20 digits.
+   * @returns The builder, for chaining.
+   * @throws TypeError when the ID is not snowflake-shaped.
+   * @throws RangeError when no controller of this module declares a slash command of that name.
+   * @example
+   * ```ts
+   * const module = MeoCordTestingModule.create({ controllers: [SettingsController] })
+   *   .overrideCommandId('settings', '123456789012345678')
+   *   .compile()
+   * ```
+   */
+  overrideCommandId(name: string, id: string): TestingModuleBuilder {
+    if (typeof id !== 'string' || !SNOWFLAKE.test(id)) {
+      throw new TypeError(`overrideCommandId('${name}') takes an ID of 17 to 20 digits, as Discord gives a command; got ${JSON.stringify(id)}.`)
+    }
+    const declared = testingCommandIds(this.options.controllers ?? [], this.commandIds).declared()
+    if (!declared.some(command => command.name === name && (command.body.type ?? ApplicationCommandType.ChatInput) === ApplicationCommandType.ChatInput)) {
+      throw new RangeError(`overrideCommandId('${name}'): no controller of this module declares a slash command of that name.`)
+    }
+    this.commandIds.set(name, id)
+    return this
+  }
+
   /** The app's global stages, with the theme overrides over them; `undefined` for a module with neither. */
   private globalStages(): GlobalStages | undefined {
     const stages = this.options.app && appStages(this.options.app)
@@ -1199,6 +1232,8 @@ export class TestingModuleBuilder {
       return collectStartupErrors(() => {
         declared.forEach(startupError)
         const container = new Container()
+        // A command mention in a call the module runs answers from these controllers, with no request
+        provideCommandIds(container, testingCommandIds(this.options.controllers ?? [], new Map(this.commandIds)))
         const stages = this.globalStages()
         if (stages) bindGlobalStages(container, stages)
 

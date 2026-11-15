@@ -31,6 +31,7 @@ export { ShardedCooldownStore } from '@src/common/sharded-cooldown-store.js'
 export type { RedisCooldownStoreOptions, RedisEval, RedisEvalSha } from '@src/common/redis-cooldown-store.js'
 export { createTranslator, defineCatalog, Translator } from '@src/common/translator.js'
 export { translateError } from '@src/common/translate-error.js'
+export { commandMention } from '@src/common/command-mention.js'
 export type {
   CatalogDefinition,
   CatalogShape,

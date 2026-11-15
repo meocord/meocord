@@ -1,13 +1,17 @@
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
-import { ApplicationCommandType, REST, type RESTOptions, Routes } from 'discord.js'
+import { ApplicationCommandType, REST, type RESTOptions } from 'discord.js'
 import Table from 'cli-table3'
-import { getCommandMap } from '@src/decorator/controller.decorator.js'
-import { localizationProblems } from '@src/core/command-localizations.js'
-import { CommandType } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
-import { type CollectedCommand, registrationKey, serialise } from '@src/core/command-identity.js'
+import {
+  type CollectedCommand,
+  collectCommands,
+  type RegistrationLogger,
+  type RegistrationScope,
+  routeFor,
+  scopeKey,
+} from '@src/core/command-identity.js'
 
 /** The part of discord.js's `REST` registration uses, so a client's own and a standalone one both fit. */
 export interface RegistrationRest {
@@ -15,93 +19,9 @@ export interface RegistrationRest {
   put(route: `/${string}`, options: { body: unknown }): Promise<unknown>
 }
 
-/** What registration logs through. */
-export interface RegistrationLogger {
-  log(...args: unknown[]): void
-  warn(...args: unknown[]): void
-  error(...args: unknown[]): void
-  debug(...args: unknown[]): void
-}
-
-/** `global`, or the id of a guild. */
-export type RegistrationScope = 'global' | { guild: string }
-
 export interface RegistrationTarget {
   scope: RegistrationScope
   commands: CollectedCommand[]
-}
-
-/**
- * Every command the controllers declare, read from their prototypes: nothing is constructed.
- *
- * @returns The commands, or `undefined` when a builder cannot be serialised or a localization would be rejected.
- *   Registration then sends nothing, since a bulk update without that command would delete it from Discord.
- */
-export function collectCommands(
-  controllerClasses: (new (...args: any[]) => any)[],
-  logger: RegistrationLogger,
-): CollectedCommand[] | undefined {
-  // Keyed by type and name: Discord treats that pair as one command, so a user and a message context
-  // menu may share a name, and a command split across methods sends its builder once.
-  const byKey = new Map<string, { builderClass: unknown; command: CollectedCommand }>()
-  const broken: string[] = []
-  const unlocalizable: string[] = []
-
-  for (const controllerClass of controllerClasses) {
-    const commandMap = getCommandMap(controllerClass.prototype) ?? {}
-
-    for (const commandName in commandMap) {
-      for (const { builder, builderClass, type, guilds } of commandMap[commandName]) {
-        if (!(type in CommandType) || !builder) continue
-
-        let body: CollectedCommand['body']
-        try {
-          body = serialise(builder)
-        } catch (error) {
-          broken.push(`"${commandName}" (${error instanceof Error ? error.message : String(error)})`)
-          continue
-        }
-
-        const key = registrationKey(body, commandName)
-        const existing = byKey.get(key)
-
-        if (existing === undefined) {
-          const name = typeof body.name === 'string' ? body.name : commandName
-          unlocalizable.push(...localizationProblems(name, body))
-          const builderName = (builderClass as { name?: unknown } | undefined)?.name
-          byKey.set(key, {
-            builderClass: builderClass ?? builder,
-            command: { name, body, ...(guilds && { guilds }), ...(typeof builderName === 'string' && builderName && { builder: builderName }) },
-          })
-        } else if (existing.builderClass !== (builderClass ?? builder)) {
-          // Refused when the app is created; kept for a caller that collects commands on its own, never thrown
-          logger.warn(
-            `Command "${existing.command.name}" is built more than once for the same application command type; ` +
-              `only the first builder is registered. Two builders of one type cannot both own a name, so declare ` +
-              `the builder on a single @Command and give the others the plain CommandType.`,
-          )
-        }
-      }
-    }
-  }
-
-  if (broken.length > 0) {
-    logger.error(
-      `No commands were registered: ${broken.length} builder(s) could not be serialised: ${broken.join(', ')}. ` +
-        `Registering the rest would remove these from Discord.`,
-    )
-    return undefined
-  }
-
-  if (unlocalizable.length > 0) {
-    logger.error(
-      `No commands were registered: Discord would reject ${unlocalizable.length} localization(s):\n` +
-        unlocalizable.map(problem => `  ${problem}`).join('\n'),
-    )
-    return undefined
-  }
-
-  return [...byKey.values()].map(({ command }) => command)
 }
 
 /**
@@ -124,8 +44,6 @@ export interface TargetOptions {
 const ids = (list: (string | undefined)[] | undefined): string[] => [
   ...new Set((list ?? []).map(id => id?.trim()).filter((id): id is string => !!id)),
 ]
-
-const scopeKey = (scope: RegistrationScope): string => (scope === 'global' ? 'global' : `guild-${scope.guild}`)
 
 /** Where every command goes regardless of `guilds`: `--guild`, or `developmentGuild` in development. */
 const everythingTarget = ({ config, development, onlyGuild }: TargetOptions): string | undefined =>
@@ -247,9 +165,6 @@ export function otherScopes(commands: CollectedCommand[], targets: RegistrationT
   return named.filter(scope => !sent.has(scopeKey(scope)))
 }
 
-const routeFor = (applicationId: string, scope: RegistrationScope) =>
-  scope === 'global' ? Routes.applicationCommands(applicationId) : Routes.applicationGuildCommands(applicationId, scope.guild)
-
 const describeScope = (scope: RegistrationScope) => (scope === 'global' ? 'globally' : `to guild ${scope.guild}`)
 
 /** The development cache of what was last sent, per application and scope. Undefined without node_modules. */
@@ -316,7 +231,13 @@ function versionsOf(commands: unknown): string[] | undefined {
 }
 
 /** Whether Discord still holds a scope as development last sent it, by each command's version; a failed listing doesn't. */
-async function stillAsSent(rest: RegistrationRest, route: `/${string}`, record: SentRecord, scope: RegistrationScope, logger: RegistrationLogger): Promise<boolean> {
+async function stillAsSent(
+  rest: RegistrationRest,
+  route: `/${string}`,
+  record: SentRecord,
+  scope: RegistrationScope,
+  { logger, listed }: Pick<RegisterCommandsOptions, 'logger' | 'listed'>,
+): Promise<boolean> {
   if (!record.versions) return false
   let registered: unknown
   try {
@@ -325,7 +246,9 @@ async function stillAsSent(rest: RegistrationRest, route: `/${string}`, record: 
     logger.debug(`Could not list the commands registered ${describeScope(scope)}, so they are sent again: ${String(error)}`)
     return false
   }
-  return versionsOf(registered)?.join('\n') === record.versions.join('\n')
+  const unchanged = versionsOf(registered)?.join('\n') === record.versions.join('\n')
+  if (unchanged) listed?.(scope, registered)
+  return unchanged
 }
 
 function logRegistered(target: RegistrationTarget, logger: RegistrationLogger): void {
@@ -350,6 +273,8 @@ export interface RegisterCommandsOptions extends TargetOptions {
   logger: RegistrationLogger
   /** Send every scope even when development's cache says it is unchanged. */
   force?: boolean
+  /** Hears what Discord answered a scope's bulk update with, or listed there for a scope left as it was. */
+  listed?: (scope: RegistrationScope, commands: unknown) => void
 }
 
 /**
@@ -383,7 +308,7 @@ export async function registerCommands(options: RegisterCommandsOptions): Promis
 
     // Unchanged since development last sent it, and still what Discord holds there
     const record = development && !force ? readRecord(file, logger) : undefined
-    if (record?.hash === hash && (await stillAsSent(rest, route, record, target.scope, logger))) {
+    if (record?.hash === hash && (await stillAsSent(rest, route, record, target.scope, options))) {
       logger.log(`Commands ${describeScope(target.scope)} are unchanged; not registering them again.`)
       continue
     }
@@ -391,6 +316,7 @@ export async function registerCommands(options: RegisterCommandsOptions): Promis
     try {
       const answered = await rest.put(route, { body: target.commands.map(({ body }) => body) })
       sent = true
+      options.listed?.(target.scope, answered)
       // Outside development the record would be stale, so the next development start sends again
       if (development) writeRecord(file, { hash, versions: versionsOf(answered) }, logger)
       else forgetRecord(file, logger)

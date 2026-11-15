@@ -52,7 +52,9 @@ import { managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
 import { claimAmbientAppTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
-import { registerCommands, registrationRest } from '@src/core/command-registration.js'
+import { planTargets, registerCommands, registrationRest } from '@src/core/command-registration.js'
+import { collectCommands, SILENT_LOGGER } from '@src/core/command-identity.js'
+import { discordCommandIds, provideCommandIds, startRegistration, storeCommandIds } from '@src/core/command-ids.js'
 import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { deliverUncachedDmReactions } from '@src/core/dm-reactions.js'
@@ -210,12 +212,29 @@ export class MeoCordApp implements MeoCordApplication {
       warnUnanswered,
     })
     this.dispatcher.getComponentRoutes()
+    provideCommandIds(container, discordCommandIds(() => this.declaredCommands(), name => this.onlyGuildsOf(name)))
     // Read through the config's own check: a bot started without the CLI loads its config unchecked
     this.shutdownTimeout = shutdownTimeoutOf(shutdownTimeout, message => this.logger.warn(message))
   }
 
   /** Everything whose lifecycle hooks run, classes and provided values, in dependency order. */
   private readonly lifecycleUnits: LifecycleUnit[]
+
+  /** The commands the controllers declare, read on the first mention. */
+  private declared?: ReturnType<typeof collectCommands>
+
+  private declaredCommands() {
+    // Creating the app refuses a builder registration can't send, so nothing is logged here
+    return (this.declared ??= collectCommands(this.controllerClasses, SILENT_LOGGER)) ?? []
+  }
+
+  /** The guilds the configuration registers a command to, when it registers it to no other scope. */
+  private onlyGuildsOf(name: string): string[] | undefined {
+    const targets = planTargets([...this.declaredCommands()], { config: loadMeoCordConfig()?.commands, development: registersAsDevelopment() }, SILENT_LOGGER)
+    const scopes = targets.filter(({ commands }) => commands.some(command => command.name === name)).map(({ scope }) => scope)
+    if (scopes.length === 0 || scopes.includes('global')) return undefined
+    return scopes.map(scope => (scope as { guild: string }).guild)
+  }
 
   /** Routes interactions, messages and reactions to their handlers. */
   private readonly dispatcher: Dispatcher
@@ -443,10 +462,18 @@ export class MeoCordApp implements MeoCordApplication {
           this.updateActivity()
           this.activityInterval ??= setInterval(() => this.updateActivity(), 10000)
         }
+        // With process sharding, the manager registers once for every shard. Recorded before the ready hooks start, so a
+        // command mention in one waits for the IDs registration answers with
+        const registered = this.shard ? undefined : startRegistration(this.bot)
         // Started before registration and not waited on by it, so a slow or failed registration never holds them up
         const readyHooks = this.runReadyHooks((readyClient ?? this.bot) as Client<true>)
-        // With process sharding, the manager registers once for every shard
-        if (!this.shard) await this.registerCommands()
+        if (registered) {
+          try {
+            await this.registerCommands()
+          } finally {
+            registered()
+          }
+        }
         await readyHooks
       }),
     )
@@ -558,15 +585,21 @@ export class MeoCordApp implements MeoCordApplication {
       return
     }
 
-    await registerCommands({
-      rest: this.bot.rest,
-      applicationId,
-      controllerClasses: this.controllerClasses,
-      logger: this.logger,
-      config,
-      development: registersAsDevelopment(),
-      force: process.env[FORCE_REGISTER_ENV] === '1',
-    })
+    const registered = startRegistration(this.bot)
+    try {
+      await registerCommands({
+        rest: this.bot.rest,
+        applicationId,
+        controllerClasses: this.controllerClasses,
+        logger: this.logger,
+        config,
+        development: registersAsDevelopment(),
+        force: process.env[FORCE_REGISTER_ENV] === '1',
+        listed: (scope, commands) => storeCommandIds(this.bot, scope, commands),
+      })
+    } finally {
+      registered()
+    }
   }
 
   /**

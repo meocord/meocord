@@ -58,6 +58,7 @@ const PUBLIC_API: Record<string, string[]> = {
     'ValidationError',
     'applyDecorators',
     'bindTheme',
+    'commandMention',
     'cooldownMessage',
     'cooldownStoreMessage',
     'createMetadata',
@@ -412,6 +413,19 @@ const modules: Record<string, object> = {
 describe('public API', () => {
   it.each(Object.keys(PUBLIC_API))('%s exports exactly its public names', entry => {
     expect(Object.keys(modules[entry]).sort()).toEqual([...PUBLIC_API[entry]].sort())
+  })
+
+  it("meocord/testing's builder has exactly these override methods", () => {
+    const methods = Object.getOwnPropertyNames(testing.TestingModuleBuilder.prototype).filter(name => name.startsWith('override'))
+    expect(methods.sort()).toEqual([
+      'overrideCommandId',
+      'overrideFilter',
+      'overrideGuard',
+      'overrideInterceptor',
+      'overrideProvider',
+      'overrideTheme',
+      'overrideThemeFor',
+    ])
   })
 
   describe('declarations', () => {
