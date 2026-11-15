@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
-import { ButtonInteraction, type Message, MessageReaction, TextChannel } from 'discord.js'
+import { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, type Message, MessageReaction, TextChannel } from 'discord.js'
 import {
+  Autocomplete,
   Catch,
   Command,
   Controller,
@@ -244,6 +245,28 @@ describe('the layers themeFor adds', () => {
 
     expect(acknowledgedFirst).toBe(1)
     expect(seen).toEqual([['deferred', '#000019']])
+  })
+  // A command or an autocomplete in a direct message has no server, and no message to take one from
+  it('looks no server up for a command or an autocomplete in a direct message, reading no message of theirs', async () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    @Controller()
+    class Slash {
+      @Command('ping', CommandType.SLASH)
+      ping() {}
+
+      @Autocomplete('ping')
+      suggest() {}
+    }
+    const guild = vi.fn(() => colour('#00001A'))
+    const module = moduleWith({ guild }, { controllers: [Slash] })
+    const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping', guildId: null } as never)
+    const typing = createMockInteraction(AutocompleteInteraction, { commandName: 'ping', guildId: null } as never)
+
+    await module.dispatch(command)
+    await module.dispatch(typing)
+
+    expect(guild).not.toHaveBeenCalled()
+    expect(warned.mock.calls.map(([text]) => String(text)).filter(text => text.includes('.message'))).toEqual([])
   })
 })
 

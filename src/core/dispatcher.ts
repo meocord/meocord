@@ -72,6 +72,7 @@ import { messageCommandHooks, subcommandUsageError } from '@src/core/message-par
 import { type GivenWords } from '@src/core/message-words.js'
 import { CommandNotFoundError } from '@src/common/errors.js'
 import { existingResponse } from '@src/common/response/response-state.js'
+import { startOwnCall } from '@src/common/response/call-order.js'
 
 /**
  * How long a component or modal submission no route takes is left to the client's other listeners, such as a
@@ -93,7 +94,8 @@ export function ownInteractionListener<F extends (...args: never[]) => unknown>(
 function othersListening(client: unknown): boolean {
   const { listeners } = (client ?? {}) as { listeners?: unknown }
   if (typeof listeners !== 'function') return false
-  const taken: unknown = listeners.call(client, 'interactionCreate')
+  // MeoCord's own read, which a mock client's emitter doesn't warn about
+  const taken: unknown = startOwnCall(() => listeners.call(client, 'interactionCreate'))
   return Array.isArray(taken) && taken.some(listener => !ownListeners.has(listener as object))
 }
 
@@ -132,6 +134,11 @@ export interface DispatcherOptions {
   warnSlowMessageHandlers?: boolean
   /** Waits for the observers before a call settles, as the testing module does. */
   awaitObservers?: boolean
+  /**
+   * Leaves a component or modal no route takes to the client's other listeners, in place of waiting
+   * {@link UNROUTED_COMPONENT_GRACE_MS}, when it returns a promise: the testing module's, for a mock client.
+   */
+  unroutedGrace?: (interaction: Interaction) => Promise<void> | undefined
 }
 
 /** A handler of a message, by name, and how to run it in a call. */
@@ -331,7 +338,7 @@ export class Dispatcher {
     // A component or modal no route takes may be a collector's: with another listener on the client, it has the
     // grace to answer, and MeoCord says no handler matched only if nothing did
     if (hasCustomId(interaction) && othersListening(interaction.client)) {
-      await new Promise(resolve => setTimeout(resolve, UNROUTED_COMPONENT_GRACE_MS))
+      await (this.options.unroutedGrace?.(interaction) ?? new Promise(resolve => setTimeout(resolve, UNROUTED_COMPONENT_GRACE_MS)))
       // Another listener's to report: MeoCord neither answered nor failed it, so the observers are not told
       if (answered(interaction)) {
         this.logger.debug(`No handler matched ${describeInteraction(interaction)}; another listener answered it.`)

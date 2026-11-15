@@ -40,9 +40,12 @@ export function noteMockMade(): void {
  * `deferReply()`, `update()` and `deferUpdate()` resolve to a mock `InteractionResponse`, or with `withResponse` to an
  * `InteractionCallbackResponse` holding what Discord answers, where without it they resolve to `undefined`, a deferred
  * reply is flagged `Loading` until it is edited, and `respond()`'s `send()` resolves to the message a reply or an
- * update sent. An answer marks the interaction `replied`, `deferred` or `responded` once it resolves, as discord.js
- * does, so code that doesn't await one fails as it would on a bot, within one run of the test's code. The next major
- * version (5.0) computes these values, and refuses those answers, without the call.
+ * update sent. A client from `createMockClient()` has a working emitter, and `dispatch` leaves a component or modal no
+ * route takes to its `interactionCreate` listeners, such as a collector's. A message an interaction sends names it in
+ * `interactionMetadata`, and a command's `message` and a message's raw `channel_id` and `guild_id` read `undefined`, as
+ * discord.js's `InteractionCollector` expects. An answer marks the interaction `replied`, `deferred` or `responded`
+ * once it resolves, as discord.js does, so code that doesn't await one fails as it would on a bot, within one run of
+ * the test's code. The next major version (5.0) computes these values, and refuses those answers, without the call.
  *
  * `invoke` also refuses a call that gives a handler fewer arguments than it declares where it builds none, such as a
  * reaction handler given its reaction without its `ReactionEvent`; without strict mocks, it warns once and calls it.
