@@ -79,7 +79,8 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
 import { createMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
-import { createFallback, type Fallback, type FallbackOptions, isUserOutcome } from '@src/core/fallback.js'
+import { createEventFallback, createFallback, type Fallback, type FallbackOptions, isUserOutcome } from '@src/core/fallback.js'
+import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import { Logger } from '@src/common/logger.js'
 import { isExplainedError, markExplained } from '@src/common/explained-error.js'
 import { collectStartupErrors, declaredErrorsOf, isRefusal, logStartupErrors, startupError, stopOnStartupErrors } from '@src/util/refusal.util.js'
@@ -140,6 +141,17 @@ export interface TestingModuleOptions {
    * and 10000 unless set. A test whose fake store never answers, or whose `onShutdown` never settles, sets it short.
    */
   shutdownTimeout?: number
+
+  /**
+   * Has `emit` answer an error no filter handles as the bot's event fallback does: a guard's `GuardDeniedError` skips
+   * the event, and a `UserError` is answered as a reply to the newest message among the event's arguments, drawn with
+   * the `app`'s presenter and `replyEmoji`. Neither rejects `emit`; any other error still does. Unset, `emit` rejects
+   * with both, and warns once that the next major version (5.0) answers them as the bot does; `false` keeps the
+   * rejection without the warning. It applies to `emit` alone: `invoke` of an `@On` or `@Once` handler doesn't take it.
+   *
+   * @see {@link https://github.com/meocord/meocord/issues/964 | meocord#964}
+   */
+  eventFallback?: boolean
 }
 
 /**
@@ -158,6 +170,8 @@ export interface FromAppOptions {
   observers?: (new (...args: any[]) => DispatchObserver)[]
   /** How long `close()` waits for the `onShutdown` hooks; see {@link TestingModuleOptions.shutdownTimeout}. */
   shutdownTimeout?: number
+  /** Has `emit` answer a denial and a `UserError` as the bot does; see {@link TestingModuleOptions.eventFallback}. */
+  eventFallback?: boolean
 }
 
 /** What `fromApp` takes from the app beyond what `app` gives: its providers and services. */
@@ -264,9 +278,9 @@ export interface DispatchedCall extends InvocationResult {
  */
 export interface EmitResult {
   /**
-   * How many `@On` and `@Once` handlers ran; a handler a guard denied by returning `false` is not counted. A guard
-   * that throws `GuardDeniedError` rejects `emit` instead, as the bot's event fallback, which skips the event, doesn't
-   * run in a testing module.
+   * How many `@On` and `@Once` handlers ran; a handler a guard denied is not counted. A guard that throws
+   * `GuardDeniedError` rejects `emit` instead, unless the module has `eventFallback: true`, which skips the event as
+   * the bot does.
    */
   ran: number
 }
@@ -322,6 +336,8 @@ export class TestingModule {
     private readonly shutdownTimeout: number = DEFAULT_SHUTDOWN_TIMEOUT_MS,
     /** The `app`, whose presenter `init()` makes after the providers, as the bot does. */
     private readonly app?: object,
+    /** Whether `emit` answers a denial and a `UserError` with the bot's event fallback; unset, it rejects and warns. */
+    private readonly eventFallback?: boolean,
   ) {}
 
   private resolving?: Promise<void>
@@ -668,8 +684,13 @@ export class TestingModule {
   }
 
   /** Runs an `@On` or `@Once` handler as the bot and `emit` do: as an event, with its arguments as given. */
-  private runEventHandler(instance: Record<string, (...args: unknown[]) => unknown>, method: string, args: unknown[]): Promise<HandlerOutcome> {
-    return runHandler(this.container, instance, method, args, { type: 'event', awaitObservers: true })
+  private runEventHandler(
+    instance: Record<string, (...args: unknown[]) => unknown>,
+    method: string,
+    args: unknown[],
+    fallback?: Fallback,
+  ): Promise<HandlerOutcome> {
+    return runHandler(this.container, instance, method, args, { type: 'event', awaitObservers: true, fallback })
   }
 
   /** The autocomplete mismatches already warned about without strict mocks, so each handler and route warns once. */
@@ -741,13 +762,15 @@ export class TestingModule {
   }
 
   /**
-   * Makes this module the app of each event argument's client, as the bot is of its own, under strict mocks; default
-   * mode leaves the clients as they are and warns once where this module would draw answers otherwise.
+   * Makes this module the app of each event argument's client, as the bot is of its own, under strict mocks or with
+   * `eventFallback: true`; default mode leaves the clients as they are and warns once where this module would draw
+   * answers otherwise.
    */
   private registerEventClients(args: readonly unknown[]): void {
     const withClient = args.filter(arg => typeof (arg as { client?: unknown } | null)?.client === 'object')
     if (withClient.length === 0) return
-    if (strictMocks()) {
+    // The event fallback answers with the app's presenter, as the bot's does
+    if (strictMocks() || this.eventFallback === true) {
       for (const arg of withClient) this.registerClient(arg)
       return
     }
@@ -891,20 +914,21 @@ export class TestingModule {
 
   /**
    * Emits a client event to the module's `@On` and `@Once` handlers, through the pipeline the app runs
-   * them in up to its event fallback: the global guards of the module's `app`, then each handler's own.
+   * them in: the global guards of the module's `app`, then each handler's own.
    * As on the bot, every instance the module runs lifecycle hooks on, the cooldown store aside, receives
    * it: the controllers and services, what they and the stages inject, and each provided class or value.
    * A `@Once` handler handles only the first event, as it would on a client.
    *
-   * The bot's event fallback doesn't run here. On a bot, a guard's `GuardDeniedError` is logged and the
-   * event skipped, and a handler's `UserError` is logged and, when the event carries a message, answered
-   * as a reply to it; here both reject `emit` as any error does, so a test checks them with `rejects`.
+   * On a bot, a guard's `GuardDeniedError` is logged and the event skipped, and a handler's `UserError` is
+   * logged and, when the event carries a message, answered as a reply to it. With `eventFallback: true` the
+   * module does the same, with the bot's own event fallback. Without it both reject `emit` as any error
+   * does, so a test checks them with `rejects`, and a warning says once that 5.0 answers them as the bot does.
    *
    * @param event - The client event, such as `'guildMemberAdd'`.
    * @param args - The event's arguments, typed from discord.js's `ClientEvents`.
    * @returns How many handlers ran. Rejects once every handler has settled if any threw, a guard's
-   *   `GuardDeniedError` and a handler's `UserError` included: with that error when one handler failed,
-   *   or an `AggregateError` of them when several did.
+   *   `GuardDeniedError` and a handler's `UserError` included unless the module has `eventFallback: true`:
+   *   with that error when one handler failed, or an `AggregateError` of them when several did.
    *
    * @example
    * ```ts
@@ -929,11 +953,12 @@ export class TestingModule {
           if (this.firedOnce.has(key)) continue
           this.firedOnce.add(key)
         }
+        const fallback = this.eventFallback === true ? this.eventFallbackOf(source, handler.method, event) : undefined
         // Resolved inside the call, so a class that cannot be resolved fails as its handler would
         const run = async () => {
           const instance = source.resolve()
           if (!instance) return false
-          const { ran } = await this.runEventHandler(instance, handler.method, args)
+          const { ran } = await this.runEventHandler(instance, handler.method, args, fallback)
           return ran
         }
         calls.push(this.track(run()))
@@ -942,9 +967,31 @@ export class TestingModule {
 
     const results = await Promise.allSettled(calls)
     const errors = results.flatMap(result => (result.status === 'rejected' ? [result.reason as unknown] : []))
+    if (this.eventFallback === undefined && errors.some(error => error instanceof GuardDeniedError || error instanceof UserError)) {
+      warnOnce(
+        new Logger('TestingModule'),
+        "emit() rejects here with a GuardDeniedError or a UserError, which the bot's event fallback answers: it skips " +
+          'a denied event, and replies to the message of an event a UserError refused. In the next major version (5.0) ' +
+          'emit answers them as the bot does (https://github.com/meocord/meocord/issues/964). Set eventFallback: true to ' +
+          'have it do so now, or eventFallback: false to keep the rejection.',
+      )
+    }
     if (errors.length === 1) throw errors[0]
     if (errors.length > 1) throw new AggregateError(errors, `${errors.length} handlers of "${event}" threw.`)
     return { ran: results.filter(result => result.status === 'fulfilled' && result.value).length }
+  }
+
+  /**
+   * The bot's event fallback for one handler, answering with the app's `replyEmoji`. Any other error rejects `emit`,
+   * and so does a reply MeoCord fails to draw, as the bot ends that call in the fault.
+   */
+  private eventFallbackOf(source: EventSource, method: string, event: string): Fallback {
+    const rethrow = (error: unknown) => {
+      throw error
+    }
+    return createEventFallback(new Logger('TestingModule'), `event "${event}" in ${source.cls.name}.${method}`, this.messageOptions.replyEmoji, rethrow, {
+      strict: true,
+    })
   }
 }
 
@@ -1468,6 +1515,7 @@ export class TestingModuleBuilder {
           services,
           this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
           this.options.app,
+          this.options.eventFallback,
         )
       })
     } catch (error) {
@@ -1597,7 +1645,14 @@ export class MeoCordTestingModule {
     }
     const controllers = [...new Set([...appOptions.controllers, ...(options.controllers ?? [])])]
     return new TestingModuleBuilder(
-      { app, controllers, providers: options.providers, observers: options.observers, shutdownTimeout: options.shutdownTimeout },
+      {
+        app,
+        controllers,
+        providers: options.providers,
+        observers: options.observers,
+        shutdownTimeout: options.shutdownTimeout,
+        eventFallback: options.eventFallback,
+      },
       { providers: appOptions.providers ?? [], services: appOptions.services ?? [] },
     )
   }

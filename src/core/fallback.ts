@@ -231,6 +231,31 @@ async function replyToMessage(message: Message, error: UserError, logger: Logger
   if (reply.failure !== undefined) answering.fail('the reply', call, reply.failure)
 }
 
+/**
+ * The fallback of an `@On` or `@Once` handler's call, `where` naming it. A guard denying an event only filters which
+ * events the handler takes, so its `GuardDeniedError` is logged at debug level and the event skipped. A `UserError` is
+ * meant for the sender of the event's message: it is answered as a reply to the newest message among the event's
+ * arguments, as a refusal of a message is. Any other error goes to `unhandled`. Resolves as {@link Fallback} does.
+ */
+export function createEventFallback(
+  logger: Logger,
+  where: string,
+  replyEmoji: boolean | undefined,
+  unhandled: (error: unknown) => void,
+  options: Pick<FallbackOptions, 'strict'> = {},
+): Fallback {
+  return async (error, context) => {
+    if (error instanceof GuardDeniedError) logger.debug(`Denied ${where}: ${escapeForLog(error.message)}`)
+    else if (error instanceof UserError) {
+      logger.debug(`Refused ${where}: ${escapeForLog(error.message)}`)
+      // The newest message the event carries: an edit's new message, not its old one
+      const message = [...context.getArgs()].reverse().find((arg): arg is Message => arg instanceof Message)
+      if (message) return replyWithUserError(message, error, logger, replyEmoji, options)
+    } else unhandled(error)
+    return undefined
+  }
+}
+
 /** Whether the call is a message command: a `@MessageHandler` with a pattern, not a listener for every message. */
 function isCommand(context: ExecutionContext): boolean {
   const controller = context.getController()
