@@ -9,34 +9,11 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import ts from 'typescript'
+import { documentationProblems, exportedSymbols, importSources, publicSymbols } from './lib/public-symbols.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const fixturesFile = path.join(repoRoot, 'scripts/jsdoc-examples/fixtures.ts')
 const examplesDir = path.join(repoRoot, '.jsdoc-examples')
-
-/** The groups the docs site files symbols under; see CONTRIBUTING.md. */
-const GROUPS = ['Controllers', 'Decorators', 'Responses', 'Utilities', 'Testing', 'Configuration', 'CLI', 'Types']
-/**
- * The pipeline stages `@pipeline` names, in the order a call runs: the stages of the docs' pipeline figure, whose sync
- * refuses a tag naming any other. No symbol is the fallback, so none names it.
- */
-const STAGES = [
-  'observers-start',
-  'filters',
-  'defer',
-  'parse',
-  'guards',
-  'cooldown-check',
-  'fetch',
-  'interceptors',
-  'validation',
-  'pipes',
-  'cooldowns',
-  'defer-lock',
-  'handler',
-  'fallback',
-  'observers-settled',
-]
 
 const compilerOptions: ts.CompilerOptions = {
   module: ts.ModuleKind.NodeNext,
@@ -51,18 +28,6 @@ const compilerOptions: ts.CompilerOptions = {
   types: ['node'],
 }
 
-interface PublicSymbol {
-  name: string
-  entries: string[]
-  symbol: ts.Symbol
-  isType: boolean
-  summary: string
-  group?: string
-  category?: string
-  stages: string[]
-  examples: string[]
-}
-
 /** The package's entry points that ship types, as `meocord/<entry>` to the `.d.ts` file. */
 function entryPoints(): Map<string, string> {
   const manifest = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
@@ -74,125 +39,6 @@ function entryPoints(): Map<string, string> {
     if (key.startsWith('./') && types) entries.set(`meocord/${key.slice(2)}`, path.join(repoRoot, types))
   }
   return entries
-}
-
-interface ParsedDoc {
-  summary: string
-  tags: { name: string; text: string }[]
-}
-
-/**
- * A symbol's JSDoc, read from its declaration's comment as TypeDoc reads it: a line starting with `@` inside a code
- * fence is code, where TypeScript's own parser takes an example's decorators for tags.
- */
-function parsedDoc(symbol: ts.Symbol): ParsedDoc {
-  for (const declaration of symbol.declarations ?? []) {
-    const comment = ts.getJSDocCommentsAndTags(declaration).find(ts.isJSDoc)
-    if (!comment) continue
-    const lines = comment
-      .getSourceFile()
-      .text.slice(comment.pos, comment.end)
-      .replace(/^\/\*\*|\*\/$/g, '')
-      .split('\n')
-      .map(line => line.replace(/^\s*\* ?/, ''))
-    const description: string[] = []
-    const tags: { name: string; text: string[] }[] = []
-    let fenced = false
-    for (const line of lines) {
-      const tag = !fenced && /^@(\w+)\s?(.*)$/.exec(line)
-      if (tag) tags.push({ name: tag[1], text: [tag[2]] })
-      else (tags.at(-1)?.text ?? description).push(line)
-      if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
-    }
-    return {
-      summary: description.join('\n').trim().split(/\n\s*\n/)[0] ?? '',
-      tags: tags.map(({ name, text }) => ({ name, text: text.join('\n').trim() })),
-    }
-  }
-  return { summary: '', tags: [] }
-}
-
-/** Every public symbol, once however many entry points export it, with the parts of its JSDoc the standard asks for. */
-function publicSymbols(program: ts.Program, entries: Map<string, string>): Map<ts.Symbol, PublicSymbol> {
-  const checker = program.getTypeChecker()
-  const symbols = new Map<ts.Symbol, PublicSymbol>()
-  for (const [entry, file] of entries) {
-    const source = program.getSourceFile(file)
-    const moduleSymbol = source && checker.getSymbolAtLocation(source)
-    if (!moduleSymbol) throw new Error(`${entry}: ${path.relative(repoRoot, file)} was not built. Run bun run build first.`)
-    for (const exported of checker.getExportsOfModule(moduleSymbol)) {
-      const symbol = exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported
-      const known = symbols.get(symbol)
-      if (known) {
-        known.entries.push(entry)
-        continue
-      }
-      const { summary, tags } = parsedDoc(symbol)
-      // Exported for the types' sake, but not public API: the reference leaves it out
-      if (tags.some(tag => tag.name === 'internal')) continue
-      symbols.set(symbol, {
-        name: exported.name,
-        entries: [entry],
-        symbol,
-        isType: !(symbol.flags & ts.SymbolFlags.Value),
-        summary,
-        group: tags.find(tag => tag.name === 'group')?.text,
-        category: tags.find(tag => tag.name === 'category')?.text,
-        stages: tags.filter(tag => tag.name === 'pipeline').map(tag => tag.text.split(/\s/)[0]),
-        examples: tags.filter(tag => tag.name === 'example').map(tag => fencedCode(tag.text)),
-      })
-    }
-  }
-  return symbols
-}
-
-/** An example's code, without its fence. */
-function fencedCode(text: string): string {
-  const match = /```[a-z]*\n([\s\S]*?)\n?```/.exec(text)
-  return (match ? match[1] : text).trimEnd()
-}
-
-/**
- * How many sentences a summary holds. Code spans and links read as capitalised words, since either can start a
- * sentence, and abbreviations such as "e.g." as plain ones; a sentence may end inside a closing quote or bracket.
- */
-function sentenceCount(text: string): number {
-  const plain = text
-    .replace(/`[^`]*`/g, 'Code')
-    .replace(/\{@link [^}]*\}/g, 'Link')
-    .replace(/\b(e\.g|i\.e|etc|vs)\./g, 'abbreviation')
-  return plain.split(/(?<=[.!?]["'”’)]?)\s+(?=[A-Z`@'"“(])/).filter(sentence => sentence.trim() !== '').length
-}
-
-/** Whether a declaration has a comment of its own with text, not only tags. */
-const commented = (declaration: ts.Node) =>
-  ts.getJSDocCommentsAndTags(declaration).some(doc => ts.isJSDoc(doc) && (ts.getTextOfJSDocComment(doc.comment) ?? '').trim() !== '')
-
-/**
- * The signatures of an overloaded function or method with no comment of their own, numbered from 1: the reference
- * shows each signature apart, with its own comment.
- */
-function uncommentedOverloads(declarations: readonly ts.Declaration[] | undefined): number[] {
-  const signatures = (declarations ?? []).filter(declaration => ts.isFunctionDeclaration(declaration) || ts.isMethodSignature(declaration) || ts.isMethodDeclaration(declaration))
-  if (signatures.length < 2) return []
-  return signatures.flatMap((signature, index) => (commented(signature) ? [] : [index + 1]))
-}
-
-/**
- * An interface's own properties and methods with no comment of their own, which the reference would show blank, and
- * each overload of a method that has none.
- */
-function undocumentedMembers(checker: ts.TypeChecker, symbol: ts.Symbol): string[] {
-  if (!(symbol.flags & ts.SymbolFlags.Interface)) return []
-  const own = new Set<ts.Node>(symbol.declarations)
-  return checker
-    .getPropertiesOfType(checker.getDeclaredTypeOfSymbol(symbol))
-    .filter(member => member.declarations?.some(declaration => own.has(declaration.parent)))
-    .filter(member => !member.getJsDocTags(checker).some(tag => tag.name === 'internal'))
-    .flatMap(member => {
-      if (ts.displayPartsToString(member.getDocumentationComment(checker)).trim() === '') return [member.name]
-      return uncommentedOverloads(member.declarations).map(number => `${member.name} (signature ${number})`)
-    })
 }
 
 /** The documentation line the package's links name: its major and minor version, such as `4.1` for 4.1.0-beta.6. */
@@ -238,14 +84,6 @@ function staleDocsLinks(line: string, fix: boolean): string[] {
     })
   }
   return stale
-}
-
-/** The names a module exports, from a file in the program. */
-function exportedNames(program: ts.Program, file: string): Set<string> {
-  const checker = program.getTypeChecker()
-  const source = program.getSourceFile(file)
-  const moduleSymbol = source && checker.getSymbolAtLocation(source)
-  return new Set(moduleSymbol ? checker.getExportsOfModule(moduleSymbol).map(symbol => symbol.name) : [])
 }
 
 /**
@@ -329,24 +167,21 @@ function readmeBlocks(): { code: string; firstLine: number }[] {
 function main(): void {
   const line = docsLine()
   const entries = entryPoints()
-  // The declarations an example's `import … from 'discord.js'` resolves to
-  const discordTypes = ts.resolveModuleName('discord.js', path.join(examplesDir, 'x.ts'), compilerOptions, ts.sys).resolvedModule
+  // The declarations an example's `import … from 'discord.js'` resolves to, as an ES module, as the package's own
+  // re-exports of it resolve: its CommonJS typings would declare every name a second time
+  const discordTypes = ts.resolveModuleName('discord.js', path.join(examplesDir, 'x.ts'), compilerOptions, ts.sys, undefined, undefined, ts.ModuleKind.ESNext).resolvedModule
     ?.resolvedFileName
   if (!discordTypes) throw new Error('discord.js could not be resolved. Run bun install first.')
   const base = ts.createProgram([...entries.values(), discordTypes, fixturesFile], compilerOptions)
-  const symbols = publicSymbols(base, entries)
+  const symbols = publicSymbols(base, entries, path.join(repoRoot, 'dist/types'))
   const checker = base.getTypeChecker()
   const problems: string[] = [...staleDocsLinks(line, false)]
 
   // Where each importable name comes from; a name with two sources is refused rather than guessed
-  const sources = new Map<string, Set<string>>()
-  const add = (name: string, from: string) => sources.set(name, (sources.get(name) ?? new Set()).add(from))
-  for (const { name, entries: from } of symbols.values()) add(name, from[0])
-  for (const name of exportedNames(base, discordTypes)) add(name, 'discord.js')
-  const fixtures = exportedNames(base, fixturesFile)
-  for (const name of fixtures) {
+  const sources = importSources(symbols, { 'discord.js': exportedSymbols(base, discordTypes) })
+  for (const name of exportedSymbols(base, fixturesFile).keys()) {
     if (sources.has(name)) problems.push(`scripts/jsdoc-examples/fixtures.ts: ${name} shadows an export of ${[...sources.get(name)!].join(', ')}.`)
-    add(name, './fixtures')
+    sources.set(name, (sources.get(name) ?? new Set()).add('./fixtures'))
   }
 
   const files = new Map<string, { label: string; code: string; lineOf: (number | undefined)[] }>()
@@ -400,36 +235,8 @@ function main(): void {
   }
 
   for (const item of symbols.values()) {
-    // The API reference files every public symbol under its @group, from the JSDoc of its own declaration; a re-export
-    // has its target's
-    if (!item.group) {
-      problems.push(`${item.entries.join(', ')}'s ${item.name} has no @group tag; give its declaration a JSDoc comment of its own with one.`)
-      continue
-    }
-    if (!GROUPS.includes(item.group)) problems.push(`${item.name}: @group ${item.group} is not one of ${GROUPS.join(', ')}.`)
-    // A symbol with a @group follows the whole standard: the reference renders it from these
-    const sentences = sentenceCount(item.summary)
-    if (sentences === 0) problems.push(`${item.name}: it has no summary; the comment's first paragraph is its summary.`)
-    if (sentences > 1) {
-      problems.push(`${item.name}: its summary is ${sentences} sentences; start a new paragraph after the first.`)
-    }
-    if (!item.isType && item.examples.length === 0) problems.push(`${item.name}: it has no @example; only a type may skip one.`)
-    const overloads = uncommentedOverloads(item.symbol.declarations)
-    if (overloads.length > 0) {
-      problems.push(`${item.name}: its signature ${overloads.join(' and ')} ${overloads.length > 1 ? 'have' : 'has'} no comment of ${overloads.length > 1 ? 'their' : 'its'} own.`)
-    }
-    const blank = undocumentedMembers(checker, item.symbol)
-    if (blank.length > 0) {
-      const [verb, own] = blank.length > 1 ? ['have no comments', 'their'] : ['has no comment', 'its']
-      problems.push(`${item.name}: ${blank.join(', ')} ${verb} of ${own} own.`)
-    }
-    for (const stage of item.stages) {
-      if (!STAGES.includes(stage)) problems.push(`${item.name}: @pipeline ${stage} is not one of ${STAGES.join(', ')}.`)
-    }
-    // The reference says where each stage runs, from these tags
-    if (item.category === 'Pipeline stages' && item.stages.length === 0) {
-      problems.push(`${item.name}: it is a pipeline stage with no @pipeline; say where it runs.`)
-    }
+    problems.push(...documentationProblems(checker, item))
+    if (item.external || !item.group) continue
     item.examples.forEach((snippet, index) =>
       addExample(item.name, `${item.name}: its example${item.examples.length > 1 ? ` ${index + 1}` : ''}`, snippet),
     )
@@ -476,11 +283,12 @@ function main(): void {
     }
   }
 
-  const following = [...symbols.values()].filter(item => item.group)
-  console.log(`${files.size} examples of ${following.length} of ${symbols.size} public symbols checked.`)
+  const own = [...symbols.values()].filter(item => !item.external)
+  const following = own.filter(item => item.group)
+  console.log(`${files.size} examples of ${following.length} of ${own.length} public symbols checked.`)
 
   if (process.argv.includes('--coverage')) {
-    const missing = [...symbols.values()]
+    const missing = own
       .map(item => {
         const lacks = [!item.group && '@group', !item.summary && 'summary', !item.isType && item.examples.length === 0 && '@example'].filter(Boolean)
         return { item, lacks }

@@ -25,7 +25,7 @@ export enum ControllerType {
  * ```ts
  * @Command('profile/{uid}', CommandType.BUTTON)
  * async profile(interaction: ButtonInteraction, { uid }: { uid: string }) {
- *   await respond(interaction).send(`Profile of <@${uid}>`)
+ *   await respond(interaction).send(`Profile of ${userMention(uid)}`)
  * }
  * ```
  *
