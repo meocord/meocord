@@ -52,3 +52,17 @@ describe('a unit list that names the text joining it', () => {
     ]).toEqual(['合计：a + b + c', '合计：a, b, c'])
   })
 })
+
+describe('an and list', () => {
+  it("reads in the words of the text's locale, English included, and never names a joiner", () => {
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': { need: 'You need {perms}.', lack: 'Lacking {perms}.' }, fr: { need: 'Il vous faut {perms}.' } } })
+    const perms = { list: ['A', 'B', 'C'], style: 'and' as const, joiner: ' / ' }
+
+    expect([
+      renderText(t, 'en-US', { key: 'need', params: { perms } }),
+      renderText(t, 'fr', { key: 'need', params: { perms } }),
+      // A text French lacks reads in English, its list too
+      renderText(t, 'fr', { key: 'lack', params: { perms } }),
+    ]).toEqual(['You need A, B, and C.', `Il vous faut ${new Intl.ListFormat('fr', { type: 'conjunction' }).format(['A', 'B', 'C'])}.`, 'Lacking A, B, and C.'])
+  })
+})
