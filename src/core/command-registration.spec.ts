@@ -576,6 +576,42 @@ describe('registerCommands', () => {
   })
 
   describe('in development', () => {
+    describe('a record of a guild the configuration no longer names', () => {
+      const records = () => path.join(cwd, 'node_modules', '.cache', 'meocord')
+      const leave = (name: string) => {
+        mkdirSync(records(), { recursive: true })
+        writeFileSync(path.join(records(), name), '{}')
+      }
+      const hint = (guild: string) =>
+        `Commands may be left in server ${guild}, which this configuration no longer registers to; run \`meocord register --prune\` to find and remove them.`
+
+      it('warns once per such guild, and keeps the record', async () => {
+        leave('commands-app-guild-111.json')
+        leave('commands-app-guild-222.json')
+        const { logger, run } = register({ development: true })
+        await run
+
+        expect(logger.warn.mock.calls.filter(([text]) => String(text).startsWith('Commands may be left'))).toEqual([[hint('111')], [hint('222')]])
+        expect(existsSync(path.join(records(), 'commands-app-guild-111.json'))).toBe(true)
+      })
+
+      it("is quiet about a guild it sends to or names, another application's records, and outside development", async () => {
+        leave('commands-app-guild-333.json')
+        leave('commands-app-guild-444.json')
+        leave('commands-other-guild-555.json')
+        const config = { guilds: ['333'], developmentGuild: '444' }
+        const development = register({ development: true, config })
+        await development.run
+        leave('commands-app-guild-666.json')
+        const production = register({ development: false })
+        await production.run
+
+        for (const { logger } of [development, production]) {
+          expect(logger.warn.mock.calls.filter(([text]) => String(text).startsWith('Commands may be left'))).toEqual([])
+        }
+      })
+    })
+
     it('skips a scope whose payload is unchanged since it was last sent, and still registered', async () => {
       const rest = createRest()
       await register({ development: true, rest }).run

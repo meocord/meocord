@@ -47,7 +47,14 @@ import { PLATFORM_MANIFEST, writePlatformManifest } from '@src/util/platform.uti
 import { loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
-import { FORCE_REGISTER_ENV, REGISTER_GUILD_ENV, REGISTER_MODE_ENV, REGISTER_ONLY_ENV } from '@src/util/registration-mode.util.js'
+import {
+  CLI_REGISTRATION_ENV,
+  FORCE_REGISTER_ENV,
+  REGISTER_GUILD_ENV,
+  REGISTER_MODE_ENV,
+  REGISTER_ONLY_ENV,
+} from '@src/util/registration-mode.util.js'
+import { pruneEnvOf, withPruneOptions } from '@src/bin/prune-options.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -132,6 +139,9 @@ export const RELOAD_DEBOUNCE_MS = 300
 
 /** The name watch mode taps the compiler's hooks under. */
 const WATCH_HOOK_NAME = 'MeoCordWatch'
+
+/** Each variable the CLI tells a bot how to register with, blank: a run's flags then set the ones they ask for. */
+const BLANK_REGISTRATION_ENV = Object.fromEntries(CLI_REGISTRATION_ENV.map(key => [key, '']))
 
 /** What a shell adds to a signal's number for the exit code of a process that signal ended. */
 const SIGNAL_EXIT_BASE = 128
@@ -271,13 +281,22 @@ copies or substantial portions of the Software.
         options.prod ? await this.startProd() : await this.startDev()
       })
 
-    program
+    const registerCommand = program
       .command('register')
       .description('Register the application commands with Discord, without starting the bot')
       .option('-b, --build', 'Build before registering')
       .option('-d, --dev', 'Register as development does, to commands.developmentGuild')
       .option('-g, --guild <id>', 'Register every command to this guild only')
-      .action(async options => {
+
+    withPruneOptions(registerCommand).action(async options => {
+        // Checked before anything else, so a mistyped flag costs no build and sends nothing
+        const prune = pruneEnvOf(options)
+        if ('problem' in prune) {
+          this.logger.error(prune.problem)
+          await wait(100)
+          process.exit(1)
+          return
+        }
         await ensureReady()
 
         const mode = options.dev ? 'development' : 'production'
@@ -292,7 +311,7 @@ copies or substantial portions of the Software.
           await this.compileConfig({ mode })
         }
 
-        await this.register(options.guild)
+        await this.register(options.guild, prune.env)
       })
 
     program = this.generatorCLI.register(program)
@@ -635,8 +654,10 @@ copies or substantial portions of the Software.
   /**
    * Runs the built application in register-only mode: it collects the commands from the bundle, sends
    * them over REST and exits, without logging in. Exits with the application's code.
+   * @param guild - The guild `--guild` registers every command to.
+   * @param prune - What `--prune` and the options that shape it give the application, from `pruneEnvOf`.
    */
-  async register(guild?: string) {
+  async register(guild?: string, prune: Record<string, string> = {}) {
     // An unset variable passed as the guild: registering where commands.* says instead could publish everywhere
     if (guild !== undefined && !guild.trim()) {
       this.logger.error('--guild was given no guild id, so nothing is registered. Pass a guild id, or leave --guild out to register where commands.* says.')
@@ -654,6 +675,7 @@ copies or substantial portions of the Software.
     this.appEnv[REGISTER_ONLY_ENV] = '1'
     this.appEnv[FORCE_REGISTER_ENV] = '1'
     if (guild) this.appEnv[REGISTER_GUILD_ENV] = guild
+    Object.assign(this.appEnv, prune)
 
     const child = this.spawnApp().on('exit', (code, signal) => process.exit(this.exitCodeOf(code, signal, 1)))
     this.relayStopSignals(() => child)
@@ -806,6 +828,8 @@ copies or substantial portions of the Software.
       cwd: this.projectRoot,
       env: {
         ...this.inheritedEnv,
+        // Blank unless this run's flags set them below: set, so neither an inherited value nor a .env file steers the run
+        ...BLANK_REGISTRATION_ENV,
         // The mode the command set, development for --dev, so the bot's config and Bun read the same .env files as the CLI
         ...(process.env.NODE_ENV !== undefined && { NODE_ENV: process.env.NODE_ENV }),
         // And where it registers, which a bundle can't read from NODE_ENV: bundleDependencies writes in the build's mode

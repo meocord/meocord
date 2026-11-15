@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import path from 'path'
 import { ApplicationCommandType, REST, type RESTOptions } from 'discord.js'
 import Table from 'cli-table3'
@@ -168,7 +168,7 @@ export function otherScopes(commands: CollectedCommand[], targets: RegistrationT
 const describeScope = (scope: RegistrationScope) => (scope === 'global' ? 'globally' : `to guild ${scope.guild}`)
 
 /** The development cache of what was last sent, per application and scope. Undefined without node_modules. */
-function cacheFile(applicationId: string, scope: RegistrationScope): string | undefined {
+export function cacheFile(applicationId: string, scope: RegistrationScope): string | undefined {
   const nodeModules = path.resolve(process.cwd(), 'node_modules')
   if (!existsSync(nodeModules)) return undefined
   return path.join(nodeModules, '.cache', 'meocord', `commands-${applicationId}-${scopeKey(scope)}.json`)
@@ -207,7 +207,7 @@ function writeRecord(file: string | undefined, record: SentRecord, logger: Regis
 }
 
 /** Forgets what development last sent to a scope, once that scope is written some other way. */
-function forgetRecord(file: string | undefined, logger: RegistrationLogger): void {
+export function forgetRecord(file: string | undefined, logger: RegistrationLogger): void {
   if (!file || !existsSync(file)) return
   try {
     rmSync(file)
@@ -265,6 +265,35 @@ function logRegistered(target: RegistrationTarget, logger: RegistrationLogger): 
   logger.log(`Registered ${target.commands.length} bot commands ${describeScope(target.scope)}:\n${table.toString()}`)
 }
 
+/**
+ * Warns, once per guild, about each guild this checkout's development runs registered to, by the records they left,
+ * that the configuration neither sends to nor names: commands may be left there. It only warns, and keeps the record,
+ * which proves a past send from here and not what Discord holds now.
+ */
+function warnAboutUnnamedGuilds(
+  applicationId: string,
+  commands: CollectedCommand[],
+  targets: RegistrationTarget[],
+  config: CommandRegistrationConfig | undefined,
+  logger: RegistrationLogger,
+): void {
+  const anyRecord = cacheFile(applicationId, 'global')
+  const directory = anyRecord && path.dirname(anyRecord)
+  if (!directory || !existsSync(directory)) return
+  const owned = new Set(
+    [...targets.map(({ scope }) => scope), ...otherScopes(commands, targets, config)].map(scope => scopeKey(scope)),
+  )
+  const prefix = `commands-${applicationId}-guild-`
+  for (const file of readdirSync(directory)) {
+    if (!file.startsWith(prefix) || !file.endsWith('.json')) continue
+    const guild = file.slice(prefix.length, -'.json'.length)
+    if (owned.has(scopeKey({ guild }))) continue
+    logger.warn(
+      `Commands may be left in server ${guild}, which this configuration no longer registers to; run \`meocord register --prune\` to find and remove them.`,
+    )
+  }
+}
+
 /** Everything one registration needs. */
 export interface RegisterCommandsOptions extends TargetOptions {
   rest: RegistrationRest
@@ -296,6 +325,7 @@ export async function registerCommands(options: RegisterCommandsOptions): Promis
   if (!commands) return false
 
   const targets = planTargets(commands, { config, development, onlyGuild }, logger)
+  if (development) warnAboutUnnamedGuilds(applicationId, commands, targets, config, logger)
   // Commands the configuration meant for guilds went nowhere, and what it would clear cannot be trusted
   const guildsEmpty = defaultGuildsEmpty({ config, development, onlyGuild })
   let succeeded = !guildsEmpty

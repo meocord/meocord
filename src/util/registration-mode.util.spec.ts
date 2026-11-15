@@ -1,4 +1,29 @@
-import { REGISTER_MODE_ENV, registersAsDevelopment } from '@src/util/registration-mode.util.js'
+import {
+  FORCE_REGISTER_ENV,
+  isRegisterOnly,
+  PRUNE_ENV,
+  pruneRequestOf,
+  REGISTER_GUILD_ENV,
+  REGISTER_MODE_ENV,
+  REGISTER_ONLY_ENV,
+  registerGuildOf,
+  registersAsDevelopment,
+} from '@src/util/registration-mode.util.js'
+
+// The CLI blanks each variable a run's flags do not set, so a blank one reads as not given
+describe('a blank variable from the CLI', () => {
+  it('asks for no register-only run, guild, forced send or prune', () => {
+    const env = { [REGISTER_ONLY_ENV]: '', [REGISTER_GUILD_ENV]: '', [FORCE_REGISTER_ENV]: '', [PRUNE_ENV]: '' }
+
+    expect(isRegisterOnly(env)).toBe(false)
+    expect(registerGuildOf(env)).toBeUndefined()
+    expect(pruneRequestOf(env)).toBeUndefined()
+  })
+
+  it('reads a guild the CLI gives', () => {
+    expect(registerGuildOf({ [REGISTER_GUILD_ENV]: '111111111111111111' })).toBe('111111111111111111')
+  })
+})
 
 describe('registersAsDevelopment', () => {
   afterEach(() => {
