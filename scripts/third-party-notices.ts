@@ -1,13 +1,15 @@
 /**
- * Writes THIRD_PARTY_NOTICES.md from the installed dependencies, formatted by prettier.
+ * Writes THIRD_PARTY_NOTICES.md from the installed dependencies, with the license texts of those the CommonJS build
+ * bundles, formatted by prettier.
  * `--check` fails when the file differs from what would be written, so CI catches a missing notice.
  * Versions are left out: they change on every update, while license and source do not.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { format, resolveConfig } from 'prettier'
+import { bundledPackages } from './es-module-only.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outputPath = path.join(repoRoot, 'THIRD_PARTY_NOTICES.md')
@@ -73,18 +75,38 @@ function interfaceTable(): string {
   return ['| Specification | License | Source | Declared as |', '| --- | --- | --- | --- |', ...rows].join('\n')
 }
 
+/** A package's license file as it ships, which a bundled copy carries with it. */
+function licenseTextOf(name: string): string {
+  const dir = path.join(repoRoot, 'node_modules', name)
+  const file = readdirSync(dir).find(each => /^licen[cs]e(\.md|\.txt)?$/i.test(each))
+  if (!file) throw new Error(`${name} has no license file to carry with its bundled copy.`)
+  return readFileSync(path.join(dir, file), 'utf8').trim()
+}
+
+/** The license texts of the bundled packages, one section per distinct text, naming each package it covers. */
+function bundledLicenses(names: string[]): string {
+  const byText = new Map<string, string[]>()
+  for (const name of names) {
+    const text = licenseTextOf(name)
+    byText.set(text, [...(byText.get(text) ?? []), name])
+  }
+  return [...byText].map(([text, covered]) => `### ${covered.join(', ')}\n\n\`\`\`text\n${text}\n\`\`\``).join('\n\n')
+}
+
 function generate(): string {
   const own = readManifest(repoRoot)
   const dependencies = Object.keys(own.dependencies ?? {}).sort()
   const peers = Object.keys(own.peerDependencies ?? {}).sort()
+  const bundled = bundledPackages(repoRoot)
 
   return `# Third-Party Notices
 
 MeoCord is licensed under the [MIT License](./LICENSE). It depends on the open-source packages
 below, each under its own license.
 
-None of their code is copied into MeoCord's published package: npm installs each one alongside
-MeoCord, with its own license file. This list is a record of what MeoCord relies on, and of the
+npm installs each dependency alongside MeoCord, with its own license file. MeoCord's CommonJS build
+also carries a copy of its ES-module-only dependencies, so that \`require()\` loads it; those copies
+are listed with their license texts. This list is a record of what MeoCord relies on, and of the
 terms those packages are offered under. One published interface is declared in MeoCord's own types
 instead of installed; it is listed last.
 
@@ -99,6 +121,15 @@ ${table(dependencies)}
 Installed by the application using MeoCord.
 
 ${table(peers)}
+
+## Bundled into the CommonJS build
+
+Copied into \`dist/cjs\`, because they ship only as ES modules. The ES module build imports the
+installed packages instead.
+
+${table(bundled)}
+
+${bundledLicenses(bundled)}
 
 ## Interfaces
 

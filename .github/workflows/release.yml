@@ -369,6 +369,11 @@ jobs:
       - name: Check the CommonJS build
         run: bun run check:dist-cjs
 
+      # Both builds in one Node process, as a project that mixes import and require() of meocord runs them, each with
+      # its own copies of the ES-module-only dependencies the CommonJS build bundles
+      - name: Check both builds in one process
+        run: bun run check:dual-build
+
       # Every JSDoc example that follows the standard in CONTRIBUTING.md, compiled against the build
       - name: Compile the JSDoc examples
         run: bun run check:jsdoc-examples
