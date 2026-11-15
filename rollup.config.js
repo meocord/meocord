@@ -6,6 +6,7 @@ import dts from 'rollup-plugin-dts'
 import { cpSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { bundledPackages, packageNameOf } from './scripts/es-module-only.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -104,12 +105,26 @@ const onwarn = (warning, warn) => {
   warn(warning)
 }
 
+const bundledInCjs = new Set(bundledPackages(__dirname))
+
+/**
+ * What the CommonJS build leaves to `require()`: every ES-module-only dependency, and what it depends on, is bundled
+ * instead (`scripts/es-module-only.js`). A `#` specifier is a bundled package's own subpath import.
+ */
+const externalToCjs = id => !id.startsWith('#') && !bundledInCjs.has(packageNameOf(id)) && external(id)
+
+/**
+ * Resolves what the CommonJS build bundles as Node resolves it: the bundle runs on Node, so a bundled package's `node`
+ * branch is the one to take, such as chalk's colour detection, whose `default` branch is the browser's.
+ */
+const cjsResolvePlugin = resolve({ extensions: ['.ts', '.js'], exportConditions: ['node'] })
+
 /** CJS build: library entries only (no CLI) */
 const cjsBuild = {
   input: libraryEntries,
-  external,
+  external: externalToCjs,
   onwarn,
-  plugins: [aliasPlugin, swcPlugin, json(), resolvePlugin],
+  plugins: [aliasPlugin, swcPlugin, json(), cjsResolvePlugin],
   output: {
     dir: 'dist/cjs',
     format: 'cjs',

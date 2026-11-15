@@ -105,6 +105,12 @@ here, and `verify:generated` with the one the generated application installs.
 `bun fmt` formats Markdown from the prettier config. Prettier itself formats the application template,
 whose `.template` files `bun fmt` does not read as TypeScript.
 
+**ES-module-only dependencies.** The CommonJS build bundles every dependency that ships only as an ES
+module, so jest loads `meocord/testing` without Node's VM modules. They are listed once, in
+`scripts/es-module-only.js`, which the rollup config and `bun run notices` read. After `bun run build`,
+`check:dist-cjs` fails when `dist/cjs` requires a package that is ES module only, so a new one goes in that list,
+and `check:dual-build` loads both builds in one Node process and fails when they disagree.
+
 **The Windows job** installs the packed tarball globally and drives the CLI through the `.cmd` shim npm
 writes from the interpreter line. Nothing on a POSIX runner exercises that path, and generation is what
 walks and writes file paths, so it is also run where the separator and case rules differ.

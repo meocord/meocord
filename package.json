@@ -34,6 +34,7 @@
     "check:dist-types": "bun scripts/check-dist-types.ts",
     "check:api-compat": "bun scripts/check-api-compat.ts",
     "check:dist-cjs": "bun scripts/check-dist-cjs.ts",
+    "check:dual-build": "bun scripts/check-dual-build.ts",
     "brand": "bun tools/brand/brand.ts"
   },
   "bin": "./dist/esm/bin/meocord.js",

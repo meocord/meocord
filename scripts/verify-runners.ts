@@ -66,11 +66,16 @@ function consumer(name: string, tarball: string): string {
 const node = (dir: string, bin: string) => path.join(dir, 'node_modules', bin)
 
 const runners: Record<string, (dir: string) => void> = {
-  // meocord's CommonJS build requires ES-module-only packages, which jest loads only with Node's VM modules enabled
+  // meocord's CommonJS build requires nothing that is ES module only, so jest runs without Node's VM modules, and with
+  // them as a project set up for an older meocord does
   jest: dir => {
-    const env = cleanEnv({ NODE_OPTIONS: '--experimental-vm-modules' })
-    const output = run('jest: test', 'node', [node(dir, 'jest/bin/jest.js')], dir, env)
-    expectCounts('jest', output, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 2)
+    for (const [label, env] of [
+      ['jest', cleanEnv()],
+      ['jest with VM modules', cleanEnv({ NODE_OPTIONS: '--experimental-vm-modules' })],
+    ] as const) {
+      const output = run(`${label}: test`, 'node', [node(dir, 'jest/bin/jest.js')], dir, env)
+      expectCounts(label, output, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 2)
+    }
   },
   vitest: dir => {
     const output = run('vitest: test', 'node', [node(dir, 'vitest/vitest.mjs'), 'run'], dir)
