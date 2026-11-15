@@ -189,8 +189,9 @@ export interface MeoCordOptions<
    * private as that answer. A hook that throws counts as settled. The hooks still run one at a time, so a call also
    * waits for a slower hook ordered before its own.
    *
-   * A `MeoCordTestingModule` takes it from here too: its calls wait only for the hooks `init({ ready: true })` runs. A
-   * mock interaction was created when it was made, or at its id's time when the test gives one, so a bound counts from
+   * A `MeoCordTestingModule` takes it from here too: its calls wait only for the hooks `init({ ready: true })` runs,
+   * and under strict mocks, which run them in the bot's order, for the same hooks as the bot's calls. A mock
+   * interaction was created when it was made, or at its id's time when the test gives one, so a bound counts from
    * there.
    *
    * @defaultValue `false`: calls are handled while the hooks run
