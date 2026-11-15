@@ -283,6 +283,56 @@ describe("MeoCord's own texts", () => {
     expectTypeOf<Issues<{ usage: { heading: 'Cara pakai: {usage}' }; types: { int: string } }>>().toEqualTypeOf<never>()
   })
 
+  it("takes every plural category a language needs in a translation of MeoCord's plural texts", () => {
+    type Issues<T> = CatalogIssues<{ meocord: T }>
+    expectTypeOf<Issues<{ duration: { hourLong: { one: '{count} час'; few: '{count} часа'; many: '{count} часов'; other: '{count} часа' } } }>>().toEqualTypeOf<never>()
+    expectTypeOf<Issues<{ duration: { hourLong: '{count} ч' } }>>().toEqualTypeOf<`meocord.duration.hourLong is a plural, not a text`>()
+    expectTypeOf<Issues<{ duration: { hourLong: { other: '{count} {unit}'; plural: 'x' } } }>>().toEqualTypeOf<
+      `meocord.duration.hourLong.plural is not a plural category` | `meocord.duration.hourLong takes no {unit}: MeoCord's English is "{count} hours"`
+    >()
+    expectTypeOf<Issues<{ duration: { hourLong: { one: '{count} jam' } } }>>().toEqualTypeOf<`meocord.duration.hourLong lacks other, the form every language has`>()
+    expectTypeOf<Issues<{ duration: { hourLong: Record<never, never> } }>>().toEqualTypeOf<`meocord.duration.hourLong lacks other, the form every language has`>()
+    expectTypeOf<Issues<{ duration: { hourLong: { one: { deep: 'x' }; other: '{count} jam' } } }>>().toEqualTypeOf<`meocord.duration.hourLong.one is a text, not a group`>()
+    // A catalog read from JSON types its forms string, and may leave a form optional
+    expectTypeOf<Issues<{ duration: { hourLong: { one?: string; other: string } } }>>().toEqualTypeOf<never>()
+  })
+
+  it("refuses each mistake in a translation of MeoCord's plural texts, and takes each right one", () => {
+    // @ts-expect-error a plural without `other`
+    defineCatalog({ meocord: { duration: { weekLong: { one: '{count} semana' } } } })
+    // @ts-expect-error a plural with no form
+    defineCatalog({ meocord: { duration: { weekLong: {} } } })
+    // @ts-expect-error a stray param in a plural
+    defineCatalog({ meocord: { duration: { weekLong: { one: '{count} semana {x}', other: '{count} semanas' } } } })
+    // @ts-expect-error a text where MeoCord has a plural
+    defineCatalog({ meocord: { duration: { weekLong: '{count} semanas' } } })
+    // @ts-expect-error a key that is no plural category
+    defineCatalog({ meocord: { duration: { weekLong: { other: '{count} semanas', plenty: 'x' } } } })
+    // @ts-expect-error a plural where MeoCord has a text
+    defineCatalog({ meocord: { usage: { missing: { one: '{param} falta', other: '{param} faltan' } } } })
+    // @ts-expect-error a stray param in a text
+    defineCatalog({ meocord: { usage: { missing: '{param} falta {y}' } } })
+    // @ts-expect-error a group as a plural's form
+    defineCatalog({ meocord: { duration: { weekLong: { one: { deep: 'x' }, other: '{count} semanas' } } } })
+    // @ts-expect-error a locale's plural with a stray param
+    createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': defineCatalog({ hi: 'hi' }), 'es-ES': { hi: 'hola', meocord: { duration: { weekLong: { one: '{count} semana {x}', other: '{count} semanas' } } } } },
+    })
+    // @ts-expect-error a locale's text where MeoCord has a plural
+    createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': defineCatalog({ hi: 'hi' }), 'es-ES': { hi: 'hola', meocord: { duration: { weekLong: '{count} semanas' } } } },
+    })
+
+    defineCatalog({ meocord: { duration: { weekLong: { one: '{count} semana', other: '{count} semanas' } } } })
+    defineCatalog({ meocord: { usage: { missing: '{param} falta' } } })
+    // A form without {count}, as a language may write one
+    defineCatalog({ meocord: { duration: { weekLong: { one: 'una semana', other: '{count} semanas' } } } })
+    const loose = { one: 'x', other: 'y' } as { one: string; other: string }
+    defineCatalog({ meocord: { duration: { weekLong: loose } } })
+  })
+
   it('gives the translator their keys when the default catalog has them', () => {
     const own = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ meocord: { presenter: { loading: 'Hang on…' } } }) } })
     expectTypeOf(own.default('meocord.presenter.loading')).toEqualTypeOf<string>()

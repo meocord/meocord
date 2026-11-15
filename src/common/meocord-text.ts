@@ -18,13 +18,15 @@ import { shared } from '@src/util/shared-state.util.js'
 export type TextParam = string | number | TextList | MeoCordText
 
 /**
- * Words to join as a list. A `unit` list is joined with `joiner`, a comma unless given, in every language; an `or` list
- * in an app's catalog reads in its locale's words, and in MeoCord's English with `joiner`.
+ * Words to join as a list. A `unit` list is joined by the text `joinerKey` names, read in the locale the list renders
+ * in, or else with `joiner`, a comma unless given, in every language; an `or` list in an app's catalog reads in its
+ * locale's words, and in MeoCord's English with `joiner`.
  */
 export interface TextList {
   readonly list: readonly string[]
   readonly style: 'or' | 'unit'
   readonly joiner?: string
+  readonly joinerKey?: string
 }
 
 /** One of MeoCord's texts, by its key under `meocord.` or an app's own, and what it is told if nothing has the key. */
@@ -80,9 +82,19 @@ function orListIn(locale: string, items: readonly string[]): string {
 }
 
 /**
+ * A list's words joined in `locale`: a `unit` list that names its joiner's text by that text, which falls back to
+ * MeoCord's English and then to `joiner`; any other by its `joiner`, a comma unless given, as Intl's `unit` lists join
+ * with nothing in zh-CN and with a space in ja.
+ */
+export function joinList(translator: Translator<any> | undefined, locale: TextLocale, list: TextList): string {
+  const joiner = list.joiner ?? ', '
+  if (list.style !== 'unit' || list.joinerKey === undefined) return list.list.join(joiner)
+  return list.list.join(renderText(translator, locale, { key: list.joinerKey, fallback: joiner }))
+}
+
+/**
  * A text in `locale`, as {@link findText} finds it. An `or` list in an app's catalog reads in the words of the locale
- * that has it; any other list is joined with its `joiner`, a comma unless given, as Intl's `unit` lists join with
- * nothing in zh-CN and with a space in ja.
+ * that has it; any other list is joined as {@link joinList} joins it.
  */
 export function renderText(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): string {
   const params = text.params ?? {}
@@ -92,14 +104,14 @@ export function renderText(translator: Translator<any> | undefined, locale: Text
     if (!Object.hasOwn(params, name)) return whole
     const value = params[name]
     if (typeof value !== 'object') return String(value)
-    if ('list' in value) return found.own && value.style === 'or' ? orListIn(found.locale, value.list) : value.list.join(value.joiner ?? ', ')
+    if ('list' in value) return found.own && value.style === 'or' ? orListIn(found.locale, value.list) : joinList(translator, locale, value)
     return renderText(translator, locale, value)
   })
 }
 
 /** Renders texts in one locale through one translator: a word or number as it is, a text in the locale's words. */
 export function textRenderer(translator: Translator<any> | undefined, locale: TextLocale): (text: TextParam) => string {
-  return text => (typeof text !== 'object' ? String(text) : 'list' in text ? text.list.join(text.joiner ?? ', ') : renderText(translator, locale, text))
+  return text => (typeof text !== 'object' ? String(text) : 'list' in text ? joinList(translator, locale, text) : renderText(translator, locale, text))
 }
 
 // Shared by both builds of this version, so either answers in the app's language

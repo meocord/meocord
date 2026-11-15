@@ -1,5 +1,6 @@
 import { type StandardSchemaV1Issue } from '@src/interface/standard-schema.interface.js'
 import { type MeoCordText, renderText } from '@src/common/meocord-text.js'
+import { formatDuration } from '@src/common/format-duration.js'
 import { type CooldownLimit } from '@src/common/cooldown-store.js'
 import { sharedKey } from '@src/util/shared-state.util.js'
 
@@ -275,6 +276,10 @@ export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
  * The wait before a cooldown allows another call, in plain English, such as "Slow down: try again in 12s.": the
  * message of a {@link CooldownError}, for logs and tests.
  *
+ * The wait is {@link formatDuration}'s, rounded up so it never says less than the wait, and `1s` at the least. A wait
+ * that is no finite number, as a custom store may answer for a call it refuses for good, reads "Slow down: try again
+ * later.", `meocord.cooldown.later`.
+ *
  * The answer a caller sees is `meocord.cooldown.until` instead, with the time the wait ends as a Discord timestamp,
  * which the reader's client words in their language and counts down; {@link translateError} gives it.
  *
@@ -291,28 +296,22 @@ export type CooldownScope = 'user' | 'guild' | 'channel' | 'global'
  * @group Utilities
  */
 export function cooldownMessage(retryAfterMs: number): string {
-  return `Slow down: try again in ${waitText(retryAfterMs)}.`
+  if (!Number.isFinite(retryAfterMs)) return renderText(undefined, undefined, LATER)
+  // At least 1 ms, so the wait reads 1s at the least, rounded up so it never says less than the wait
+  return `Slow down: try again in ${formatDuration(Math.max(retryAfterMs, 1), undefined, { round: 'up' })}.`
 }
+
+/** What a caller is told of a wait with no end to give, such as one a store answers as no finite number. */
+const LATER: MeoCordText = { key: 'meocord.cooldown.later' }
 
 /**
- * A wait in its two biggest units: seconds, then minutes and seconds, from an hour hours and minutes, and from a day
- * days and hours. The smaller unit is rounded up, so the text never says less than the wait.
+ * The text a caller sees for a cooldown's wait: when it ends, as a Discord timestamp, rounded up to the second; to try
+ * again later when the wait has no end to show.
  */
-function waitText(retryAfterMs: number): string {
-  const both = (big: number, bigUnit: string, small: number, smallUnit: string) =>
-    small === 0 ? `${big}${bigUnit}` : `${big}${bigUnit} ${small}${smallUnit}`
-  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000))
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3_600) return both(Math.floor(seconds / 60), 'm', seconds % 60, 's')
-  const minutes = Math.ceil(seconds / 60)
-  if (minutes < 1_440) return both(Math.floor(minutes / 60), 'h', minutes % 60, 'm')
-  const hours = Math.ceil(minutes / 60)
-  return both(Math.floor(hours / 24), 'd', hours % 24, 'h')
-}
-
-/** The text a caller sees for a cooldown's wait: when it ends, as a Discord timestamp, rounded up to the second. */
 export function cooldownText(retryAt: Date): MeoCordText {
-  return { key: 'meocord.cooldown.until', params: { when: `<t:${Math.ceil(retryAt.getTime() / 1000)}:R>` } }
+  const at = retryAt.getTime()
+  if (!Number.isFinite(at)) return LATER
+  return { key: 'meocord.cooldown.until', params: { when: `<t:${Math.ceil(at / 1000)}:R>` } }
 }
 
 /**
@@ -339,7 +338,10 @@ export function cooldownText(retryAt: Date): MeoCordText {
  * @category Errors
  */
 export class CooldownError extends Error {
-  /** When the next call is allowed: when the error was made, plus {@link CooldownError.retryAfterMs}. */
+  /**
+   * When the next call is allowed: when the error was made, plus {@link CooldownError.retryAfterMs}; an invalid date
+   * when the wait is no finite number.
+   */
   readonly retryAt: Date
 
   /**

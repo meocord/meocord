@@ -10,7 +10,8 @@ export function lookupTable<T extends object>(entries: T): Readonly<T> {
 
 const BOOLEANS: Readonly<Record<string, boolean | undefined>> = lookupTable({ yes: true, true: true, on: true, no: false, false: false, off: false })
 
-const UNIT_MS: Readonly<Record<string, number | undefined>> = lookupTable({ ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 })
+/** The milliseconds in each unit a duration is written in. */
+export const UNIT_MS: Readonly<Record<string, number | undefined>> = lookupTable({ ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 })
 
 /** A number written in full, `whole` for an integer: `undefined` for anything else. */
 export function number(word: string, whole: boolean): number | undefined {

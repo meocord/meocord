@@ -1,9 +1,10 @@
-import { ChatInputCommandInteraction, User } from 'discord.js'
+import { ChatInputCommandInteraction, MessageFlags, User } from 'discord.js'
 import { vi } from 'vitest'
 import {
   type CooldownBatchVerdict,
   type CooldownEntry,
   type CooldownLimit,
+  CooldownError,
   CooldownStore,
   CooldownStoreError,
   type CooldownVerdict,
@@ -263,5 +264,74 @@ describe('@MeoCord({ cooldownStoreFailure, cooldownStoreTimeoutMs })', () => {
     }
 
     expect(declare).toThrow(message)
+  })
+})
+
+/** A store refusing with `wait`: its batch answer, or with `refusing`, the entry at that place, the others allowed. */
+class WaitStore extends CooldownStore {
+  private asked = 0
+
+  constructor(
+    private readonly wait: number,
+    private readonly refusing?: number,
+  ) {
+    super()
+  }
+
+  consume(_key: string, _limit: CooldownLimit): Promise<CooldownVerdict> {
+    return Promise.resolve(this.asked++ === this.refusing ? { allowed: false, retryAfterMs: this.wait } : { allowed: true, retryAfterMs: 0 })
+  }
+
+  consumeMany(entries: readonly CooldownEntry[]): Promise<CooldownBatchVerdict> {
+    return this.refusing === undefined ? Promise.resolve({ allowed: false, retryAfterMs: this.wait }) : super.consumeMany(entries)
+  }
+}
+
+/** What dispatch sent the caller, privately or not, and what it settled with. */
+async function dispatched(store: CooldownStore, policy: { cooldownStoreFailure?: 'deny' | 'allow' }) {
+  const module = moduleWith(store, policy)
+  const interaction = call()
+  const result = await module.dispatch(interaction)
+  const sent = vi.mocked(interaction.reply).mock.calls.map(([options]) => {
+    const { embeds, flags } = options as { embeds?: { description?: string }[]; flags?: number }
+    return { text: embeds?.[0]?.description, ephemeral: ((flags ?? 0) & MessageFlags.Ephemeral) !== 0 }
+  })
+  return { result, sent, runs: module.get(DailyController).runs }
+}
+
+describe('a refusal whose wait is not a finite number', () => {
+  const later = [{ text: 'Slow down: try again later.', ephemeral: true }]
+
+  it.each([
+    [Number.NaN, 'deny'],
+    [Number.NaN, 'allow'],
+    [Infinity, 'deny'],
+    [Infinity, 'allow'],
+  ] as const)('stays a refusal, told privately to try again later: %s under %s', async (wait, cooldownStoreFailure) => {
+    const { result, sent, runs } = await dispatched(new WaitStore(wait), { cooldownStoreFailure })
+
+    expect(result.error).toBeInstanceOf(CooldownError)
+    expect((result.error as CooldownError).message).toBe('Slow down: try again later.')
+    expect(sent).toEqual(later)
+    expect(runs).toBe(0)
+    expect(logs.error).not.toHaveBeenCalled()
+    expect(logs.warn).not.toHaveBeenCalled()
+  })
+
+  it.each([Number.NaN, Infinity])('stays a refusal when one cooldown of a batch refuses with it (%s)', async wait => {
+    // The second cooldown refuses; the first allows
+    const { result, sent, runs } = await dispatched(new WaitStore(wait, 1), {})
+
+    expect(result.error).toBeInstanceOf(CooldownError)
+    expect(sent).toEqual(later)
+    expect(runs).toBe(0)
+    expect(logs.error).not.toHaveBeenCalled()
+  })
+
+  it('keeps a finite negative wait a refusal, told as 1s at the least', async () => {
+    const { result, sent } = await dispatched(new WaitStore(-500), {})
+
+    expect((result.error as CooldownError).message).toBe('Slow down: try again in 1s.')
+    expect(sent).toHaveLength(1)
   })
 })

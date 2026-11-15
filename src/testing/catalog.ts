@@ -69,9 +69,10 @@ function strayParams(translation: unknown, original: unknown): string[] {
  * lacks the group's other messages.
  *
  * @remarks
- * MeoCord's own texts, a catalog's `meocord` group, fall back to English by design, so only a key MeoCord lacks, and
- * a `{param}` MeoCord's English doesn't take, is reported. With `meocord: true`, every locale other than an English
- * one must translate each of them as well.
+ * MeoCord's own texts, a catalog's `meocord` group, fall back to English by design, so only a key MeoCord lacks, a
+ * translation of another shape than MeoCord's English, a plural form the language needs that a translation lacks,
+ * and a `{param}` MeoCord's English doesn't take, are reported. With `meocord: true`, every locale other than an
+ * English one must translate each of them as well.
  *
  * A translation may leave a param out, as a language can say it without the name, so a missing param isn't
  * reported.
@@ -107,6 +108,8 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
 
   const defaultCatalog = catalogs[translator.defaultLocale] ?? {}
   const reference = leaves(defaultCatalog).filter(({ key }) => !isMeoCordKey(key))
+  // A translation is read by the default catalog's shapes, and its MeoCord texts by MeoCord's English, so `{}` for a plural is one
+  const shapes = { ...defaultCatalog, meocord: MEOCORD_MESSAGES.meocord }
   const referenceKeys = new Set(reference.map(({ key }) => key))
   const gaps: string[] = []
 
@@ -137,14 +140,23 @@ export function expectCompleteCatalog(translator: Translator<any>, options: { me
     if (options.meocord && !locale.startsWith('en-')) {
       for (const key of MEOCORD_KEYS) if (isMissing(at(catalog, key))) problems.push(`missing ${key}`)
     }
-    for (const { key } of leaves(catalog, '', defaultCatalog)) {
+    for (const { key } of leaves(catalog, '', shapes)) {
       // A message left out, as a null one is, that the default has is reported missing above, and is nothing extra
       if (isMissing(at(catalog, key)) && at(defaultCatalog, key) !== undefined) continue
       if (isMeoCordKey(key)) {
         if (!MEOCORD_KEYS.has(key)) problems.push(`${key} is not one of MeoCord's texts`)
         else {
           const english = at(MEOCORD_MESSAGES, key)
-          const stray = strayParams(at(catalog, key), english)
+          const message = at(catalog, key)
+          const plural = isPluralShape(english)
+          // Read by MeoCord's English shapes, as an app's own texts are read by the default catalog's
+          if (plural !== isPluralShape(message) || (!plural && typeof message !== 'string')) {
+            problems.push(`${key} should be a ${plural ? 'plural' : 'text'}, as MeoCord's English is`)
+            continue
+          }
+          const missing = plural ? categories.filter(category => !isText((message as Record<string, unknown>)[category])) : []
+          if (missing.length > 0) problems.push(`${key} lacks ${missing.join(', ')}`)
+          const stray = strayParams(message, english)
           for (const name of stray) problems.push(`${key} takes no {${name}}: MeoCord's English is "${shown(english)}"`)
         }
       } else if (!referenceKeys.has(key)) {
