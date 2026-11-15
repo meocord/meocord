@@ -2,9 +2,11 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { type Container, type ServiceIdentifier } from 'inversify'
 import { type Client } from 'discord.js'
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
+import { providedHooksOf } from '@src/core/providers.js'
 import { storeOperationsSettled } from '@src/core/cooldown-runner.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { RunningCalls } from '@src/core/running-calls.js'
+import { seconds } from '@src/core/autocomplete-timing.js'
 
 /** A unit a shutdown closes, with the instance whose `onShutdown` runs. */
 export interface LifecycleEntry {
@@ -36,8 +38,14 @@ export interface ReadyHooksReport {
   hookFailed(unit: LifecycleUnit, error: unknown): void
   /** The unit's `onReady` is about to run although units it depends on failed. */
   dependsOnFailed?(unit: LifecycleUnit, failed: readonly LifecycleUnit[]): void
-  /** The unit's `onReady` has run for `slowAfterMs`. */
-  slow?(unit: LifecycleUnit): void
+  /** The unit's `onReady` has run for `slowAfterMs`, with `waiting` hooks of the units after it yet to run. */
+  slow?(unit: LifecycleUnit, waiting: HooksAfter): void
+}
+
+/** The hooks of the units after a slow one: how many are known, and whether a provider not made yet may add more. */
+export interface HooksAfter {
+  count: number
+  unknown: boolean
 }
 
 /** How the ready hooks run. */
@@ -50,6 +58,8 @@ export interface ReadyHooksOptions {
   settled?: (unit: LifecycleUnit) => void
   /** Runs a unit's `onReady`, `run`, in place of calling it directly. */
   runOnReady?: (unit: LifecycleUnit, run: () => unknown) => Promise<void>
+  /** A unit's instance once the container has made it, which counting the hooks after a slow one reads, never makes. */
+  made?: (unit: LifecycleUnit) => object | undefined
 }
 
 /**
@@ -99,6 +109,23 @@ export class ReadyPass {
   }
 }
 
+/** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
+export const SLOW_READY_HOOK_MS = 10_000
+
+/**
+ * The warning that `unit`'s `onReady` has run for `ranMs` while `waiting` hooks after it wait: it names the hook, the
+ * time and what to do. Calls are handled meanwhile, as they don't wait for the hooks.
+ */
+export function slowReadyWarning(unit: LifecycleUnit, ranMs: number, waiting: HooksAfter): string {
+  const { count, unknown } = waiting
+  const known = count === 1 ? '1 hook' : `${count} hooks`
+  const hooks = !unknown ? (count === 0 ? 'no hooks' : known) : count === 0 ? 'an unknown number of hooks' : `at least ${known}`
+  return (
+    `onReady in ${unit.name} has run for ${seconds(ranMs)}, holding back ${hooks} after it; calls are already being handled. ` +
+    'Start long work without awaiting it in onReady, and stop it in onShutdown.'
+  )
+}
+
 /**
  * Resolves each unit and runs its `onReady` one at a time, in the units' dependency order. A failure is
  * reported and the next unit still runs. `settled` hears of each unit as its `onReady` settles, or once it is found
@@ -110,7 +137,7 @@ export async function runReadyHooks(
   client: Client<true>,
   info: ReadyInfo,
   report: ReadyHooksReport,
-  { stopped = () => false, slowAfterMs, settled, runOnReady }: ReadyHooksOptions = {},
+  { stopped = () => false, slowAfterMs, settled, runOnReady, made }: ReadyHooksOptions = {},
 ): Promise<void> {
   const failed = new Set<unknown>()
   // For each unit, the failed units it depends on, directly or through another dependency
@@ -119,8 +146,30 @@ export async function runReadyHooks(
   // The token each instance was first reached by: one instance two tokens reach, an alias or one value provided twice,
   // runs its hooks once
   const firstToken = new Map<object, unknown>()
+  // The hooks the units after `index` have yet to run, each once, read without making anything: from an instance
+  // already made or a provided value, else from the class a unit is made of at its turn. A factory not run yet can't
+  // be read, so the count is then only a floor
+  const hooksAfter = (index: number): HooksAfter => {
+    const waiting = new Set<unknown>()
+    let unknown = false
+    for (const later of units.slice(index + 1)) {
+      const provided = providedHooksOf(container, later.token)
+      const instance = (made?.(later) ?? (typeof provided === 'object' && 'instance' in provided ? provided.instance : undefined)) as
+        | Partial<OnReady>
+        | undefined
+      if (!instance && provided === 'unmade') {
+        unknown = true
+        continue
+      }
+      if (instance && firstToken.has(instance)) continue
+      const prototype = typeof provided === 'object' && 'prototype' in provided ? provided.prototype : undefined
+      const hooks = (instance ?? prototype ?? (typeof later.token === 'function' ? later.token.prototype : undefined)) as Partial<OnReady> | undefined
+      if (typeof hooks?.onReady === 'function') waiting.add(instance ?? later.token)
+    }
+    return { count: waiting.size, unknown }
+  }
 
-  for (const unit of units) {
+  for (const [index, unit] of units.entries()) {
     if (stopped()) break
     const upstream = new Set<LifecycleUnit>()
     for (const dependency of unit.dependencies) {
@@ -154,7 +203,7 @@ export async function runReadyHooks(
 
     if (upstream.size > 0) report.dependsOnFailed?.(unit, [...upstream])
 
-    const slow = slowAfterMs !== undefined && report.slow ? setTimeout(() => report.slow!(unit), slowAfterMs) : undefined
+    const slow = slowAfterMs !== undefined && report.slow ? setTimeout(() => report.slow!(unit, hooksAfter(index)), slowAfterMs) : undefined
     try {
       const onReady = () => instance.onReady!(client, info)
       await (runOnReady ? runOnReady(unit, onReady) : onReady())

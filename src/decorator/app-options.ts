@@ -161,6 +161,18 @@ export interface MeoCordOptions<
   warnUnanswered?: boolean
 
   /**
+   * Warns about work slow enough to cost the member something: an `@Autocomplete` handler that takes 2 seconds or
+   * more to answer, once per handler, or misses Discord's 3 seconds, so the member sees no suggestions; and an
+   * `onReady` that has run for 10 seconds, naming the hooks it holds back. A slow message handler is warned about too,
+   * unless `messages.slowHandlerWarning` says otherwise. An autocomplete handler that returns without answering is told
+   * whatever this says, and its menu closed with no choices.
+   *
+   * @defaultValue `true` in a running bot, `false` in a `MeoCordTestingModule` unless set to `true`, since a test's
+   * fake clock can pass these times inside a handler
+   */
+  warnSlow?: boolean
+
+  /**
    * Answers a guard's `false` on an interaction as if the guard had thrown `GuardDeniedError`: a command, context menu,
    * component or modal is told privately "You can't use this.", `meocord.guard.denied` in the user's language. The
    * denial takes a thrown one's path, so a filter catching `GuardDeniedError` sees it, observers get its `deniedBy`, and

@@ -37,7 +37,15 @@ import {
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { type EventSource } from '@src/core/event-sources.js'
 import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
-import { type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import {
+  type LifecycleEntry,
+  lifecycleEntry,
+  ReadyPass,
+  runReadyHooks,
+  runShutdownSequence,
+  SLOW_READY_HOOK_MS,
+  slowReadyWarning,
+} from '@src/core/lifecycle-hooks.js'
 import { RunningCalls } from '@src/core/running-calls.js'
 import { type StartupControl } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
@@ -62,8 +70,7 @@ import { FORCE_REGISTER_ENV, isRegisterOnly, pruneRequestOf, registerGuildOf, re
 import { shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { escapeForLog } from '@src/util/user-text.util.js'
 
-/** How long an `onReady` hook runs before a warning says the hooks after it are waiting. */
-export const SLOW_READY_HOOK_MS = 10_000
+export { SLOW_READY_HOOK_MS } from '@src/core/lifecycle-hooks.js'
 
 
 const { runningApps } = processState
@@ -209,6 +216,7 @@ export class MeoCordApp implements MeoCordApplication {
       fallback: this.fallback,
       botUserId: () => this.bot.user?.id,
       warnUnanswered,
+      warnSlow: globalStagesOf(container).warnSlow ?? true,
     })
     this.dispatcher.getComponentRoutes()
     provideCommandIds(container, discordCommandIds(() => this.declaredCommands(), name => this.onlyGuildsOf(name)))
@@ -745,17 +753,18 @@ export class MeoCordApp implements MeoCordApplication {
         hookFailed: (unit, error) => this.logger.error(`onReady failed in ${unit.name}:`, error),
         dependsOnFailed: (unit, failed) =>
           this.logger.warn(`Running onReady in ${unit.name} although it depends on ${failed.map(({ name }) => name).join(', ')}, which failed.`),
-        slow: unit => this.logger.warn(`onReady in ${unit.name} has run for over ${SLOW_READY_HOOK_MS} ms; the hooks after it are waiting.`),
+        slow: (unit, waiting) => this.logger.warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting)),
       },
       // Shutdown has begun: the client is going away, so no further hook starts
       {
         stopped: () => this.closing,
-        slowAfterMs: SLOW_READY_HOOK_MS,
+        slowAfterMs: (globalStagesOf(this.container).warnSlow ?? true) ? SLOW_READY_HOOK_MS : undefined,
         settled: unit => {
           this.readySettled.add(unit.token)
           if (unit.cooldownStore) this.storeReady?.resolve()
         },
         runOnReady: this.readyPass.runOnReady,
+        made: unit => (this.attempt?.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
       },
     ))
     // Also when shutdown stopped the hooks before the store's, so no call waits on it

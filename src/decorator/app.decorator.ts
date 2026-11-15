@@ -152,7 +152,7 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     providerMap(options.providers ?? [], `${target.name}: @MeoCord({ providers })`)
     assertMessageOptions(target.name, options.messages, options.i18n)
     assertCooldownPolicy(target.name, options)
-    for (const name of ['warnUnanswered', 'answerDenied', 'globalStagesOnEvents'] as const) {
+    for (const name of ['warnUnanswered', 'warnSlow', 'answerDenied', 'globalStagesOnEvents'] as const) {
       if (options[name] !== undefined && typeof options[name] !== 'boolean') {
         throw refuse(new TypeError(`${target.name}: @MeoCord({ ${name} }) takes true or false.`))
       }

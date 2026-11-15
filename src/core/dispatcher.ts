@@ -51,6 +51,19 @@ import { logFailedSend } from '@src/common/response/send-failure.js'
 import { Translator } from '@src/common/translator.js'
 import { useTheme } from '@src/core/theme-scope.js'
 import { closeAutocomplete, type Fallback, noteInvocation } from '@src/core/fallback.js'
+import {
+  type AutocompleteCall,
+  AUTOCOMPLETE_WINDOW,
+  autocompleteElapsed,
+  autocompleteSubject,
+  isExpired,
+  noteAutocompleteCall,
+  reportExpiredAutocomplete,
+  seconds,
+  SLOW_AUTOCOMPLETE_MS,
+  watchRespond,
+  type WatchedRespond,
+} from '@src/core/autocomplete-timing.js'
 import { handlerInput } from '@src/core/handler-input.js'
 import { matchCommandRoute } from '@src/core/command-routes.js'
 import { runGuards } from '@src/core/guard-runner.js'
@@ -131,8 +144,16 @@ export interface DispatcherOptions {
   botUserId: (event: { client?: { user?: { id?: unknown } | null } }) => string | undefined
   /** Whether to warn, once per handler, about an interaction a handler left unanswered. */
   warnUnanswered?: boolean
-  /** Whether a slow message handler is named, unless `messages.slowHandlerWarning` says; on unless given. */
-  warnSlowMessageHandlers?: boolean
+  /**
+   * The app's `warnSlow`: whether an autocomplete handler near or past Discord's three seconds is named, and a slow
+   * message handler unless `messages.slowHandlerWarning` says; on unless given.
+   */
+  warnSlow?: boolean
+  /**
+   * Whether to leave open the menu of an autocomplete its handler returned from without answering, where the bot closes
+   * it: the testing module's, without strict mocks.
+   */
+  leaveUnansweredAutocompleteOpen?: () => boolean
   /** Waits for the observers before a call settles, as the testing module does. */
   awaitObservers?: boolean
   /**
@@ -367,8 +388,22 @@ export class Dispatcher {
       const { controllerClass, meta } = route
       this.logger.log('[AUTOCOMPLETE]', `[${meta.commandPath}]`, `[${meta.methodName}]`)
       const params = resolveOptionParams(interaction)
-      const ran = await this.invokeHandler(this.getInstance(controllerClass), meta.methodName, [interaction, params], call)
-      if (!ran) await closeAutocomplete(interaction, this.logger)
+      const instance = this.getInstance(controllerClass)
+      const timing = { handler: `${instance.constructor.name}.${meta.methodName}`, start: call.startedAt, warnSlow: this.options.warnSlow ?? true }
+      noteAutocompleteCall(interaction, timing)
+      const answers: WatchedRespond[] = []
+      try {
+        const watched = await watchRespond(interaction, () => this.invokeHandler(instance, meta.methodName, [interaction, params], call), answers)
+        const { result: outcome } = watched
+        const [sent] = answers
+        if (!outcome.ran) await closeAutocomplete(interaction, this.logger)
+        // The fallback has answered an error, closing the menu or reporting a late answer. A handler that put its own
+        // respond in place and answered nothing through MeoCord's may have answered through its own, which MeoCord can't tell
+        else if (outcome.error === undefined && !(watched.replaced && !sent)) await this.settleAutocomplete(interaction, timing, sent)
+      } finally {
+        // Whatever the call ended in, as each failure was the handler's to read
+        await this.reportUnreadAnswers(interaction, timing.handler, answers)
+      }
       return
     }
 
@@ -435,7 +470,7 @@ export class Dispatcher {
 
   /**
    * Runs a handler through its pipeline, with the fallback answering any error no filter handles, and
-   * says whether the handler ran. Its guard wrappers let this call through, so each guard runs once.
+   * gives how the call ended. Its guard wrappers let this call through, so each guard runs once.
    */
   private async invokeHandler(
     instance: Record<string, (...args: unknown[]) => unknown>,
@@ -443,12 +478,77 @@ export class Dispatcher {
     args: unknown[],
     call: Call,
     hooks: Pick<RunOptions, 'parseArgs' | 'fetchArgs'> = {},
-  ): Promise<boolean> {
+  ): Promise<HandlerOutcome> {
     const handler = `${instance.constructor.name}.${methodName}`
     const onUnanswered: RunOptions['onUnanswered'] = this.options.warnUnanswered ? unanswered => this.warnUnansweredOnce(handler, unanswered) : undefined
     const outcome = await runHandler(this.container, instance, methodName, args, { ...this.runOptions(call), onUnanswered, ...hooks })
     call.record?.settled(instance.constructor as ControllerClass, methodName, outcome)
-    return outcome.ran
+    return outcome
+  }
+
+  /** The autocomplete handlers already named, as slow or as leaving their menu open, so each is named once a run. */
+  private readonly warnedAutocomplete = { slow: new Set<string>(), open: new Set<string>() }
+
+  /**
+   * After an autocomplete handler that ran without an error: names one that answered near the end of Discord's three
+   * seconds, and closes the menu of one that returned without answering, which the member would otherwise see fail to
+   * load. The close is told even when slow calls aren't, since such a handler is broken whatever its speed. `sent` is
+   * the handler's first `respond()`, waited for here when the handler didn't wait for it; its failure is reported with
+   * the others' by {@link reportUnreadAnswers}.
+   */
+  private async settleAutocomplete(interaction: AutocompleteInteraction, call: AutocompleteCall, sent?: WatchedRespond): Promise<void> {
+    const { handler, start, warnSlow } = call
+    if (sent) {
+      try {
+        await sent.promise
+      } catch {
+        return
+      }
+    }
+    const elapsed = autocompleteElapsed(interaction, start)
+    if (sent || interaction.responded) {
+      if (!warnSlow || elapsed < SLOW_AUTOCOMPLETE_MS || this.warnedAutocomplete.slow.has(handler)) return
+      this.warnedAutocomplete.slow.add(handler)
+      this.logger.warn(
+        `${handler} took ${seconds(elapsed)} of Discord's ${AUTOCOMPLETE_WINDOW} to suggest choices for ` +
+          `${autocompleteSubject(interaction)}. Past ${AUTOCOMPLETE_WINDOW} the member sees no suggestions; ` +
+          'cache what it searches, or search less.',
+      )
+      return
+    }
+    const answer = `Answer it with interaction.respond(choices) within Discord's ${AUTOCOMPLETE_WINDOW}.`
+    const once = (text: string) => {
+      if (this.warnedAutocomplete.open.has(handler)) return
+      this.warnedAutocomplete.open.add(handler)
+      this.logger.warn(text)
+    }
+    if (this.options.leaveUnansweredAutocompleteOpen?.()) {
+      once(`${handler} returned without answering its autocomplete, so the member saw its options fail to load. ${answer}`)
+      return
+    }
+    let expired = false
+    await closeAutocomplete(interaction, this.logger, () => (expired = true))
+    once(
+      expired
+        ? `${handler} returned without answering its autocomplete, and Discord refused MeoCord's close of the menu as ` +
+            `expired, after ${seconds(elapsed)} by MeoCord's count, so the member saw its options fail to load. ${answer}`
+        : `${handler} returned without answering its autocomplete, so MeoCord closed the menu with no choices. ${answer}`,
+    )
+  }
+
+  /**
+   * Reports each of an autocomplete handler's `respond()` calls that failed without the handler reading the failure,
+   * once each, after waiting for those it didn't wait for. A failure the handler read is its own to handle.
+   */
+  private async reportUnreadAnswers(interaction: AutocompleteInteraction, handler: string, answers: readonly WatchedRespond[]): Promise<void> {
+    for (const answer of answers) {
+      try {
+        await answer.promise
+      } catch (error) {
+        if (answer.observed()) continue
+        if (!(isExpired(error) && reportExpiredAutocomplete(interaction, this.logger))) logFailedSend(this.logger, `send ${handler}'s choices`, error)
+      }
+    }
   }
 
   /** The handlers already warned about, so each is named once however often it runs. */
@@ -459,15 +559,12 @@ export class Dispatcher {
    * or that an interceptor returned before the handler ran or finished, and the call ended so.
    */
   private warnUnansweredOnce(handler: string, { type, phase, returnedBy }: Unanswered): void {
-    if (this.warnedUnanswered.has(handler)) return
+    // An autocomplete left unanswered is told once its menu is closed, which says more
+    if (type === 'autocomplete' || this.warnedUnanswered.has(handler)) return
     this.warnedUnanswered.add(handler)
     const interceptor = returnedBy && { name: returnedBy.interceptor.name, handlerStarted: returnedBy.handlerStarted }
     const returned = interceptor && `${handler}: its interceptor ${interceptor.name} returned before the handler ${interceptor.handlerStarted ? 'finished' : 'ran'}`
-    const what =
-      type === 'autocomplete'
-        ? `${handler} finished without answering its autocomplete, so the user saw its options fail to load. Answer it ` +
-          'with interaction.respond(choices) within 3 seconds.'
-        : interceptor
+    const what = interceptor
           ? phase === 'unanswered'
             ? `${returned}, without answering the interaction, so the user saw "The application did not respond". Answer it ` +
               `in ${interceptor.name}, or await next.handle().`
@@ -538,7 +635,7 @@ export class Dispatcher {
 
   /** Runs a message's handlers one after another, warning once about one that held the rest back for long. */
   private async runInTurn(runs: readonly MessageRun[], call: Call): Promise<void> {
-    const warn = this.messageOptions.slowHandlerWarning ?? this.options.warnSlowMessageHandlers ?? true
+    const warn = this.messageOptions.slowHandlerWarning ?? this.options.warnSlow ?? true
     for (const [index, { name, run }] of runs.entries()) {
       const started = performance.now()
       await run(call)

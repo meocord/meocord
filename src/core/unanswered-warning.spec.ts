@@ -211,16 +211,16 @@ describe('the warning for an interaction left unanswered', () => {
     ])
   })
 
-  it('names, once, an autocomplete handler that returned without answering, and not one that answered or threw', async () => {
+  it("gives way, for an autocomplete handler that returned without answering, to the warning that its menu was closed", async () => {
     process.env.NODE_ENV = 'development'
     const run = await startApp(await load())
 
     for (const command of ['forgetsChoices', 'forgetsChoices', 'answersChoices', 'failsChoices']) await run(command, 'autocomplete')
 
-    expect(unanswered()).toEqual([
-      'Shop.forgetsChoices finished without answering its autocomplete, so the user saw its options fail to load. Answer ' +
-        'it with interaction.respond(choices) within 3 seconds. Shown once per handler; @MeoCord({ warnUnanswered: ' +
-        'false }) turns it off.',
+    expect(unanswered()).toEqual([])
+    expect(warned.filter(message => message.startsWith('Shop.') && message.includes('autocomplete'))).toEqual([
+      'Shop.forgetsChoices returned without answering its autocomplete, so MeoCord closed the menu with no choices. ' +
+        "Answer it with interaction.respond(choices) within Discord's 3 s.",
     ])
   })
 

@@ -91,6 +91,8 @@ export interface GlobalStages {
   answerDenied?: boolean
   /** The app's `@MeoCord({ globalStagesOnEvents })`, when it sets one. */
   globalStagesOnEvents?: boolean
+  /** The app's `@MeoCord({ warnSlow })`, when it sets one. */
+  warnSlow?: boolean
 }
 
 const NO_GLOBAL_STAGES: GlobalStages = { guards: [], interceptors: [], filters: [] }
@@ -111,6 +113,7 @@ export function appStages(app: object): GlobalStages {
         themeForTimeoutMs?: number
         answerDenied?: boolean
         globalStagesOnEvents?: boolean
+        warnSlow?: boolean
       }
     | undefined
   if (!options) {
@@ -126,6 +129,7 @@ export function appStages(app: object): GlobalStages {
     }),
     ...(options.answerDenied !== undefined && { answerDenied: options.answerDenied }),
     ...(options.globalStagesOnEvents !== undefined && { globalStagesOnEvents: options.globalStagesOnEvents }),
+    ...(options.warnSlow !== undefined && { warnSlow: options.warnSlow }),
   }
 }
 

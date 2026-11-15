@@ -945,8 +945,10 @@ type AutocompleteDecorator = <P extends Record<string, any>, R>(
  * your own data. Enable it on the option with `setAutocomplete(true)` in the command's builder.
  *
  * @remarks
- * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. The handler runs its
- * guards, the global ones, its class's and its own, and its filters, but no interceptors; a guard must not answer,
+ * Answer with discord.js's `interaction.respond(choices)`, at most 25, within three seconds. A handler that takes 2
+ * seconds or more, or misses the three, is warned about unless `@MeoCord({ warnSlow: false })`; one that returns
+ * without answering has its menu closed with no choices, and is warned about whatever `warnSlow` says. The handler runs
+ * its guards, the global ones, its class's and its own, and its filters, but no interceptors; a guard must not answer,
  * and returning `false` closes the menu with an empty list. The bot warns as it starts about a handler Discord never
  * asks, such as one for an option registered without autocomplete, and about one that completes what an earlier
  * handler already does, since only the first runs; the next major version (5.0) refuses to start with either. A
