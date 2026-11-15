@@ -1,4 +1,5 @@
 import { markExplained } from '@src/common/explained-error.js'
+import { meocordListener } from '@src/util/process-listener.util.js'
 import { handOffRefusal, refuse, reportRefusals } from '@src/util/refusal.util.js'
 import { sharedKey } from '@src/util/shared-state.util.js'
 
@@ -196,11 +197,35 @@ describe('reportRefusals under Bun, which reports an unhandled rejection without
     expect(process.listeners('unhandledRejection')).toHaveLength(2)
   })
 
+  it('leaves a rejection to an application listener added before it that removes itself as it runs', () => {
+    const own = vi.fn()
+    process.once('unhandledRejection', own)
+    const { log, exit, reject, rejected } = watch(true)
+
+    rejected(refuse(new Error('Shop.buy: refused')))
+
+    expect(own).toHaveBeenCalledTimes(1)
+    expect(reject).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+    expect(exit).not.toHaveBeenCalled()
+  })
+
   it('reports a refusal again once the application stops listening', () => {
     const own = vi.fn()
     process.on('unhandledRejection', own)
     const { log, exit, rejected } = watch(true)
     process.off('unhandledRejection', own)
+
+    rejected(refuse(new Error('Shop.buy: refused')))
+
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^Shop\.buy: refused/))
+    expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  // Such as the listener that reports a rejection with its source-mapped stack under Bun
+  it("reports a refusal beside another listener of MeoCord's, which it does not take for the application's", () => {
+    process.on('unhandledRejection', meocordListener(() => {}))
+    const { log, exit, rejected } = watch(true)
 
     rejected(refuse(new Error('Shop.buy: refused')))
 

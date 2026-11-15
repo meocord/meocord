@@ -1246,12 +1246,15 @@ export interface MeoCordConfig {
    * flag, the bundle maps each stack through `Error.prepareStackTrace` itself. Either way every trace Node
    * prints is mapped.
    *
-   * Under Bun, the bundle maps `error.stack`, and so each trace MeoCord's `Logger` prints. What Bun prints
-   * itself, for an uncaught error, an unhandled rejection or `console.error(error)` before `error.stack` is
-   * read, keeps the bundle's positions.
+   * Under Bun, the bundle maps `error.stack`, and so each trace MeoCord's `Logger` prints, and what Bun
+   * prints itself: an inspection hook on `Error.prototype` maps `console.error(error)` and any other
+   * inspection of an error, and an `uncaughtException` and an `unhandledRejection` listener report an
+   * uncaught error or a rejection nothing handles, ending the process as Bun would. Either listener does
+   * nothing while the application listens for its event itself. Under `--unhandled-rejections=warn`, the
+   * warning Bun prints keeps the bundle's positions.
    *
-   * Set `false` for an error tracker that applies uploaded source maps to the bundle's positions, or a
-   * source mapper of your own.
+   * Set `false` for an error tracker that applies uploaded source maps to the bundle's positions, a
+   * source mapper of your own, or Bun's own layout for what it prints.
    *
    * @defaultValue `true`
    */

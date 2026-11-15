@@ -1,4 +1,4 @@
-import { execFileSync } from 'child_process'
+import { execFileSync, spawnSync } from 'child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { tmpdir } from 'os'
@@ -7,7 +7,8 @@ import { pathToFileURL } from 'url'
 import { createRsbuild, rspack } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
-import { installStackRemapper } from '@src/build/stack-remap.js'
+import { installStackRemapper, rejectionMode, reportRejection, reportUncaught } from '@src/build/stack-remap.js'
+import { meocordListener } from '@src/util/process-listener.util.js'
 
 describe('installStackRemapper', () => {
   // The long form: os.tmpdir() can be a Windows 8.3 short path, such as RUNNER~1, where Bun names the long one
@@ -404,5 +405,345 @@ describe('the stack hook alongside others', () => {
 
     expect(hooked).toBe(false)
     expect(frames(stack).thrower?.[0]).toBe(pathToFileURL(path.join(root, 'dist', 'main.js')).href)
+  })
+})
+
+describe('rejectionMode', () => {
+  it.each([
+    [[], undefined],
+    [['--unhandled-rejections=throw'], 'throw'],
+    [['--unhandled-rejections=warn'], 'warn'],
+    [['--unhandled-rejections', 'none'], 'none'],
+    [['--unhandled-rejections=strict', '--smol', '--unhandled-rejections', 'warn-with-error-code'], 'warn-with-error-code'],
+  ])('reads %j as %s', (execArgv, mode) => {
+    expect(rejectionMode(execArgv)).toBe(mode)
+  })
+})
+
+describe('reportRejection and reportUncaught', () => {
+  const execArgv = process.execArgv
+
+  beforeEach(() => {
+    process.execArgv = []
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+  })
+
+  afterEach(() => {
+    process.execArgv = execArgv
+    vi.restoreAllMocks()
+  })
+
+  const listening = (...listeners: ((...args: never[]) => void)[]) =>
+    vi.spyOn(process, 'listeners').mockImplementation(() => listeners as ReturnType<typeof process.listeners>)
+
+  it('reports a rejection and exits 1 when its own listener is the only one', () => {
+    listening(meocordListener(reportRejection))
+
+    reportRejection(new Error('boom'))
+
+    expect(console.error).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }))
+    expect(process.exit).toHaveBeenCalledWith(1)
+  })
+
+  it('still prints the name and message of an error that throws as it is printed', () => {
+    listening(meocordListener(reportUncaught))
+    vi.mocked(console.error).mockImplementation(() => {
+      throw new Error('unprintable')
+    })
+    const written = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    reportUncaught(new TypeError('boom'))
+    reportUncaught(
+      Object.defineProperties(new Error(), {
+        name: { get: () => 'Odd' },
+        message: {
+          get: () => {
+            throw new Error('no message')
+          },
+        },
+      }),
+    )
+
+    expect(written.mock.calls).toEqual([['TypeError: boom\n'], ['Odd (it could not be printed)\n']])
+    expect(process.exit).toHaveBeenCalledTimes(2)
+  })
+
+  // The refusal reporter reports a refused rejection itself, and rejects any other again once it stops listening
+  it("stands aside while another of MeoCord's listeners, the refusal reporter, listens", () => {
+    listening(
+      meocordListener(reportRejection),
+      meocordListener(() => undefined),
+    )
+
+    reportRejection(new Error('boom'))
+
+    expect(console.error).not.toHaveBeenCalled()
+    expect(process.exit).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * An application that inspects an error, throws one or leaves one rejected, as CRASH_CASE says, and first prints how
+ * many listeners each crash event has. With APP_LISTENER=after it listens for both itself, after MeoCord, with
+ * APP_LISTENER=uncaught for uncaught errors only, and with APP_LISTENER=removed it listens for both and stops again.
+ */
+const CRASH_MAIN = `import { explode } from './boom'
+
+const own = (event: string) => (error: unknown) => console.log(\`app saw \${event}: \${(error as Error).message}\`)
+if (process.env.APP_LISTENER === 'after' || process.env.APP_LISTENER === 'uncaught') {
+  process.on('uncaughtException', own('uncaughtException'))
+}
+if (process.env.APP_LISTENER === 'after') process.on('unhandledRejection', own('unhandledRejection'))
+if (process.env.APP_LISTENER === 'removed') {
+  const listener = own('a removed listener')
+  for (const event of ['uncaughtException', 'unhandledRejection'] as const) process.on(event, listener).off(event, listener)
+}
+console.log(
+  JSON.stringify({
+    uncaught: process.listenerCount('uncaughtException'),
+    rejection: process.listenerCount('unhandledRejection'),
+    inspectHook: Object.hasOwn(Error.prototype, Symbol.for('nodejs.util.inspect.custom')),
+  }),
+)
+
+const logged = () => Object.assign(new Error('logged', { cause: new TypeError('inner') }), { code: 50013 })
+
+// An error with no stack of its own, alone and as a cause, and an error inspecting itself its own way
+const unusual = () => {
+  console.error(new DOMException('aborted', 'AbortError'))
+  console.error(new Error('outer', { cause: new DOMException('inner') }))
+  const own = new Error('own')
+  Reflect.set(own, Symbol.for('nodejs.util.inspect.custom'), () => 'its own inspection')
+  console.error(own)
+}
+
+// Two errors made under the runtime's own stack hook, as before MeoCord installs its own, one of them read at once.
+// RUNTIME_HOOK saves the runtime's hook before the bundle loads
+const unmapped = () => {
+  const hook = Error.prepareStackTrace
+  Error.prepareStackTrace = Reflect.get(globalThis, 'runtimeStackHook')
+  const unread = new Error('first read later')
+  const read = new Error('read at once')
+  void read.stack
+  Error.prepareStackTrace = hook
+  console.error(unread)
+  console.error(read)
+}
+
+// An uncaught error whose stack throws as it is read, is no string, or is gone
+const oddStack = (shape: string) => {
+  const error = new Error(\`odd \${shape}\`)
+  if (shape === 'getter') Object.defineProperty(error, 'stack', { get: () => { throw new Error('unreadable') } })
+  else if (shape === 'number') Object.defineProperty(error, 'stack', { value: 42 })
+  else Reflect.deleteProperty(error, 'stack')
+  throw error
+}
+
+const scenario = process.env.CRASH_CASE
+if (scenario === 'logged') console.error(logged())
+else if (scenario === 'unmapped') unmapped()
+else if (scenario === 'unusual') unusual()
+else if (scenario === 'uncaught') setTimeout(explode, 0)
+else if (scenario === 'rejected') void Promise.resolve().then(explode)
+else if (scenario?.startsWith('odd-')) setTimeout(() => oddStack(scenario.slice('odd-'.length)), 0)
+`
+// Run before the bundle: the runtime's own stack hook, saved for an error made as if MeoCord had installed nothing
+const RUNTIME_HOOK = `globalThis.runtimeStackHook = Error.prepareStackTrace\n`
+// Run before the bundle, as a listener the application adds before MeoCord's
+const APP_LISTENER = `process.on('uncaughtException', error => console.log('app saw uncaughtException: ' + error.message))
+process.on('unhandledRejection', error => console.log('app saw unhandledRejection: ' + error.message))
+`
+// Run before the bundle, as listeners the application adds before MeoCord's, each removing itself as it runs
+const APP_LISTENER_ONCE = APP_LISTENER.replaceAll('process.on(', 'process.once(')
+
+interface Crash {
+  status: number | null
+  counts: { uncaught: number; rejection: number; inspectHook: boolean }
+  stdout: string
+  stderr: string
+}
+
+function crash(root: string, runtime: string, args: string[], env: NodeJS.ProcessEnv): Crash {
+  const { status, stdout, stderr } = spawnSync(runtime, [...args, path.join(root, 'dist', 'main.js')], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_OPTIONS: '', ...env },
+  })
+  return { status, counts: JSON.parse(stdout.split('\n')[0]), stdout, stderr }
+}
+
+describe('what Bun prints itself', () => {
+  const { root, write } = fixtureApp()
+  write('src/main.ts', CRASH_MAIN)
+  write('app-listener.mjs', APP_LISTENER)
+  write('app-listener-once.mjs', APP_LISTENER_ONCE)
+  write('runtime-hook.mjs', RUNTIME_HOOK)
+  const source = (file: string) => path.join(root, 'src', file)
+  const bundled = path.join(root, 'dist', 'main.js')
+  const loggedLine = String(CRASH_MAIN.split('\n').findIndex(line => line.includes("new Error('logged'")) + 1)
+  const onBun = (env: NodeJS.ProcessEnv, flags: string[] = []) => crash(root, bun, ['--no-install', ...flags], env)
+
+  beforeAll(async () => {
+    await build(root, 'production', false)
+  }, 120_000)
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('inspects an error with the mapped stack, keeping its own properties and cause, as console.error prints it', () => {
+    const { status, stderr } = onBun({ CRASH_CASE: 'logged' })
+    const [error, cause] = stderr.split('[cause]')
+
+    expect(status).toBe(0)
+    expect(error).toMatch(/^Error: logged\n/)
+    expect(error).toContain(`${source('main.ts')}:${loggedLine}:`)
+    expect(error).toContain('code: 50013')
+    expect(cause).toMatch(/^: TypeError: inner\n/)
+    expect(cause).toContain(`${source('main.ts')}:${loggedLine}:`)
+    expect(stderr).not.toContain(bundled)
+  })
+
+  it('inspects an error with no stack of its own as Bun would, and one inspecting itself its own way', () => {
+    const { status, stderr } = onBun({ CRASH_CASE: 'unusual' })
+    const outerLine = String(CRASH_MAIN.split('\n').findIndex(line => line.includes("new Error('outer'")) + 1)
+
+    expect(status).toBe(0)
+    expect(stderr).toContain('aborted')
+    expect(stderr).toContain('AbortError')
+    expect(stderr).toMatch(/Error: outer\n/)
+    expect(stderr).toContain(`${source('main.ts')}:${outerLine}:`)
+    expect(stderr).toContain('inner')
+    expect(stderr).toContain('its own inspection')
+    expect(stderr).not.toContain('can only be used on instances')
+  })
+
+  // Under the runtime's own hook, Bun writes an error's stack when it is first read, not when the error is made
+  it('maps an error made before the stack hook was in place unless its stack was read before', () => {
+    const { status, stderr } = onBun({ CRASH_CASE: 'unmapped' }, ['--preload', path.join(root, 'runtime-hook.mjs')])
+    const [unread, read] = stderr.split(/(?=^Error: read at once$)/m)
+    const unreadLine = String(CRASH_MAIN.split('\n').findIndex(line => line.includes("new Error('first read later')")) + 1)
+
+    expect(status).toBe(0)
+    expect(unread).toMatch(/^Error: first read later\n/)
+    expect(unread).toContain(`${source('main.ts')}:${unreadLine}:`)
+    expect(read).toMatch(/^Error: read at once\n/)
+    expect(read).toContain(bundled)
+    expect(read).not.toContain(source('main.ts'))
+  })
+
+  it.each([
+    ['an uncaught error', 'uncaught', [] as string[]],
+    ['a rejection', 'rejected', [] as string[]],
+    ['a rejection under --unhandled-rejections=strict', 'rejected', ['--unhandled-rejections=strict']],
+    ['a rejection under --unhandled-rejections=throw', 'rejected', ['--unhandled-rejections=throw']],
+  ])('reports %s with the mapped stack, and exits 1 as Bun does', (_name, scenario, flags) => {
+    const { status, counts, stderr } = onBun({ CRASH_CASE: scenario }, flags)
+
+    expect(counts).toEqual({ uncaught: 1, rejection: 1, inspectHook: true })
+    expect(status).toBe(1)
+    expect(stderr).toMatch(/^Error: boom\n/)
+    expect(stderr).toContain(`${source('boom.ts')}:2:`)
+    expect(stderr).not.toContain(bundled)
+  })
+
+  it('warns of a rejection with the mapped stack and exits 1 under --unhandled-rejections=warn-with-error-code', () => {
+    const { status, stderr } = onBun({ CRASH_CASE: 'rejected' }, ['--unhandled-rejections=warn-with-error-code'])
+
+    expect(status).toBe(1)
+    expect(stderr).toMatch(/UnhandledPromiseRejectionWarning: Error: boom\n/)
+    expect(stderr).toContain(`${source('boom.ts')}:2:`)
+    expect(stderr).not.toContain(bundled)
+  })
+
+  // Strict mode raises the rejection as an uncaught error first; Bun warns of it once that is handled
+  it("warns of a rejection the application's uncaughtException listener handled, under --unhandled-rejections=strict", () => {
+    const { status, stdout, stderr } = onBun({ APP_LISTENER: 'uncaught', CRASH_CASE: 'rejected' }, ['--unhandled-rejections=strict'])
+
+    expect(stdout).toContain('app saw uncaughtException: boom')
+    expect(status).toBe(0)
+    expect(stderr).toMatch(/UnhandledPromiseRejectionWarning: Error: boom\n/)
+    expect(stderr).toContain(`${source('boom.ts')}:2:`)
+  })
+
+  // Explicit throw raises the rejection as an uncaught error; Bun's default ends the process whatever listens for those
+  it("hands a rejection to the application's uncaughtException listener under --unhandled-rejections=throw only", () => {
+    const thrown = onBun({ APP_LISTENER: 'uncaught', CRASH_CASE: 'rejected' }, ['--unhandled-rejections=throw'])
+
+    expect(thrown.stdout).toContain('app saw uncaughtException: boom')
+    expect(thrown.status).toBe(0)
+    expect(thrown.stderr).toBe('')
+
+    const unflagged = onBun({ APP_LISTENER: 'uncaught', CRASH_CASE: 'rejected' })
+
+    expect(unflagged.stdout).not.toContain('app saw')
+    expect(unflagged.status).toBe(1)
+    expect(unflagged.stderr).toMatch(/^Error: boom\n/)
+    expect(unflagged.stderr).toContain(`${source('boom.ts')}:2:`)
+  })
+
+  // Bun keeps no frames of its own for an error made under a stack hook, and gives a listener no throw site
+  it.each(['getter', 'number', 'deleted'])('prints an uncaught error whose stack is %s as Bun does, and exits 1', shape => {
+    const { status, stderr } = onBun({ CRASH_CASE: `odd-${shape}` })
+
+    expect(status).toBe(1)
+    expect(stderr).toMatch(new RegExp(`^error: odd ${shape}$`, 'm'))
+  })
+
+  it('prints nothing for a rejection, and goes on, under --unhandled-rejections=none', () => {
+    const { status, stderr } = onBun({ CRASH_CASE: 'rejected' }, ['--unhandled-rejections=none'])
+
+    expect(status).toBe(0)
+    expect(stderr).toBe('')
+  })
+
+  it.each([
+    ['before', { APP_LISTENER: 'none' }, ['--preload', path.join(root, 'app-listener.mjs')]],
+    ['before, removing itself as it runs,', { APP_LISTENER: 'none' }, ['--preload', path.join(root, 'app-listener-once.mjs')]],
+    ['after', { APP_LISTENER: 'after' }, []],
+  ])("leaves the error and the exit to the application's own listener, added %s MeoCord's", (_when, env, flags) => {
+    for (const [scenario, event] of [
+      ['uncaught', 'uncaughtException'],
+      ['rejected', 'unhandledRejection'],
+    ]) {
+      const { status, counts, stdout, stderr } = onBun({ ...env, CRASH_CASE: scenario }, flags)
+
+      expect(counts).toEqual({ uncaught: 2, rejection: 2, inspectHook: true })
+      expect(stdout).toContain(`app saw ${event}: boom`)
+      expect(status).toBe(0)
+      expect(stderr).toBe('')
+    }
+  })
+
+  it("reports the crash once the application's own listener is removed", () => {
+    for (const scenario of ['uncaught', 'rejected']) {
+      const { status, counts, stderr } = onBun({ APP_LISTENER: 'removed', CRASH_CASE: scenario })
+
+      expect(counts).toEqual({ uncaught: 1, rejection: 1, inspectHook: true })
+      expect(status).toBe(1)
+      expect(stderr).toMatch(/^Error: boom\n/)
+    }
+  })
+
+  it('installs nothing under Node, which maps what it prints itself', () => {
+    const { status, counts, stderr } = crash(root, 'node', [], { CRASH_CASE: 'uncaught' })
+
+    expect(counts).toEqual({ uncaught: 0, rejection: 0, inspectHook: false })
+    expect(status).toBe(1)
+    expect(stderr).toContain(`${source('boom.ts')}:2:`)
+  })
+
+  it('installs nothing on Bun when the config sets sourceMappedStacks: false', () => {
+    write('dist/meocord.config.mjs', 'export default { sourceMappedStacks: false }\n')
+    try {
+      const { status, counts, stderr } = onBun({ CRASH_CASE: 'uncaught' })
+
+      expect(counts).toEqual({ uncaught: 0, rejection: 0, inspectHook: false })
+      expect(status).toBe(1)
+      expect(stderr).toContain(bundled)
+    } finally {
+      rmSync(path.join(root, 'dist', 'meocord.config.mjs'))
+    }
   })
 })

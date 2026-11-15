@@ -447,6 +447,28 @@ async function bootstrap() {
 void bootstrap()
 `
 
+/**
+ * An entry that loads both builds of meocord, has the CommonJS one refuse a pattern it catches, then leaves a refusal
+ * of the ES module build's, or an Error, rejected.
+ */
+const bothBuildsMain = (reason: 'error' | 'refusal') => `import { createRequire } from 'module'
+import { route } from 'meocord/common'
+
+const commonjs = createRequire(import.meta.url)('meocord/common') as typeof import('meocord/common')
+console.log(\`Both builds loaded: \${commonjs.route !== route}\`)
+try {
+  commonjs.route('item-{id}')
+} catch {
+  console.log('Refused a pattern and caught it')
+}
+
+async function bootstrap() {
+  ${reason === 'refusal' ? "route('a bug in bootstrap/{id}-x')" : "throw new Error('a bug in bootstrap')"}
+}
+
+void bootstrap()
+`
+
 /** A bun test file whose one test expects MeoCordFactory.create to refuse the app. */
 const refusedAppTest = `import { expect, test } from 'bun:test'
 import { Controller, MeoCord, MessageHandler } from 'meocord/decorator'
@@ -1787,17 +1809,33 @@ const scenarios: Scenario[] = [
         ['a string', 'string'],
       ] as const
     ).flatMap(([label, reason]): Scenario[] => [
-      {
-        name: `start --prod on ${runtime} leaves ${label} rejection after a refusal to the runtime's own report`,
-        tier: runtime === 'node' ? 'fast' : 'slow',
-        platforms: ['linux', 'darwin'],
-        runtime,
-        files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': rejectingMain(reason, false), dist: null },
-        argv: ['start', '--prod', '--build'],
-        timeoutMs: 60_000,
-        // The code and the report the runtime gives with no listener of MeoCord's
-        expect: { code: 1, says: ['a bug in bootstrap', runtime === 'node' ? 'Node.js v' : 'Bun v'], never: ['[ERROR]'] },
-      },
+      runtime === 'node'
+        ? {
+            name: `start --prod on node leaves ${label} rejection after a refusal to the runtime's own report`,
+            tier: 'fast',
+            platforms: ['linux', 'darwin'],
+            runtime,
+            files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': rejectingMain(reason, false), dist: null },
+            argv: ['start', '--prod', '--build'],
+            timeoutMs: 60_000,
+            // The code and the report the runtime gives with no listener of MeoCord's
+            expect: { code: 1, says: ['a bug in bootstrap', 'Node.js v'], never: ['[ERROR]'] },
+          }
+        : {
+            name: `start --prod on bun reports ${label} rejection after a refusal once, with its source, and exits 1 as Bun does`,
+            tier: 'slow',
+            platforms: ['linux', 'darwin'],
+            runtime,
+            files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': rejectingMain(reason, false), dist: null },
+            argv: ['start', '--prod', '--build'],
+            timeoutMs: 60_000,
+            expect: {
+              code: 1,
+              counts: { 'a bug in bootstrap': 1 },
+              says: reason === 'error' ? ['src/main.ts:'] : [],
+              never: ['[ERROR]', 'main.js:'],
+            },
+          },
       {
         name: `start --prod on ${runtime} leaves ${label} rejection after a refusal to the app's own listener`,
         tier: runtime === 'node' ? 'fast' : 'slow',
@@ -1819,6 +1857,40 @@ const scenarios: Scenario[] = [
       timeoutMs: 60_000,
       expect: { code: 0, counts: { 'The app heard: ': 1 }, says: ['Invalid pattern "a bug in bootstrap/{id}-x"'], never: ['[ERROR]'] },
     },
+    ...(runtime === 'bun'
+      ? [
+          {
+            name: 'start --prod on bun with both builds loaded reports a rejected refusal once, and exits 1',
+            tier: 'slow',
+            platforms: ['linux', 'darwin'],
+            runtime,
+            files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': bothBuildsMain('refusal'), dist: null },
+            argv: ['start', '--prod', '--build'],
+            timeoutMs: 60_000,
+            expect: {
+              code: 1,
+              says: ['Both builds loaded: true'],
+              counts: { 'Invalid pattern "a bug in bootstrap/{id}-x"': 1 },
+              never: [...RAW_REPORT, 'Bun v'],
+            },
+          },
+          {
+            name: 'start --prod on bun with both builds loaded reports a rejected Error once, with its source, and exits 1',
+            tier: 'slow',
+            platforms: ['linux', 'darwin'],
+            runtime,
+            files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': bothBuildsMain('error'), dist: null },
+            argv: ['start', '--prod', '--build'],
+            timeoutMs: 60_000,
+            expect: {
+              code: 1,
+              says: ['Both builds loaded: true', 'src/main.ts:'],
+              counts: { 'a bug in bootstrap': 1 },
+              never: ['[ERROR]', 'main.js:'],
+            },
+          },
+        ] satisfies Scenario[]
+      : []),
     {
       name: `start --dev on ${runtime} reports a decorator it refuses as one line, and keeps watching`,
       tier: runtime === 'node' ? 'fast' : 'slow',
