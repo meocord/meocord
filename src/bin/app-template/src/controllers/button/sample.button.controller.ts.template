@@ -1,5 +1,5 @@
 import { ButtonInteraction } from 'discord.js'
-import { OwnerGuard, respond } from 'meocord/common'
+import { OwnerGuard, respond, userMention } from 'meocord/common'
 import { Command, Controller, Cooldown, Defer, UseGuard } from 'meocord/decorator'
 import { CommandType } from 'meocord/enum'
 
@@ -20,6 +20,6 @@ export class SampleButtonController {
   @Cooldown({ uses: 5, seconds: 60 })
   @Defer()
   async handleButtonWithId(interaction: ButtonInteraction, { ownerId }: { ownerId: string }) {
-    await respond(interaction).send({ content: `Button of <@${ownerId}> clicked!` })
+    await respond(interaction).send({ content: `Button of ${userMention(ownerId)} clicked!` })
   }
 }
