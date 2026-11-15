@@ -2,7 +2,8 @@ import { ButtonInteraction, ChatInputCommandInteraction, type Message, MessageFl
 import { vi } from 'vitest'
 import packageJson from '../../package.json' with { type: 'json' }
 import * as errors from '@src/common/errors.js'
-import { Command, Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
+import { inject } from 'inversify'
+import { Command, Controller, MeoCord, MessageHandler, Service } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { CATALOGS, LOCALE_CHAIN, Translator } from '@src/common/translator.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
@@ -239,6 +240,69 @@ describe('state the two builds of one meocord version share', () => {
 
     expect(click.update.mock.calls[0]?.[0]).toMatchObject({ embeds: [{ color: 0x0000b2 }] })
   })
+
+  it("holds an answer outside a call from the other build until the hooks of the app's themeFor class settle", async () => {
+    const asked: string[] = []
+    let settle = () => undefined as void
+    @Service()
+    class Prefs {
+      onReady() {
+        return new Promise<void>(resolve => (settle = resolve))
+      }
+    }
+    @Service()
+    class PrefsThemes {
+      constructor(@inject(Prefs) readonly prefs: Prefs) {}
+      user() {
+        asked.push('themes asked')
+        return { colors: { primary: '#0000B4' as const } }
+      }
+    }
+    @Controller()
+    class Picker {
+      @Command('pick', CommandType.BUTTON)
+      pick() {}
+    }
+    @MeoCord({ controllers: [Picker], services: [Prefs], clientOptions: { intents: [] }, waitForReady: true, themeFor: PrefsThemes } as never)
+    class Bot {}
+    const module = MeoCordTestingModule.create({ app: Bot, controllers: [Picker] }).compile()
+    const pressed = createMockInteraction(ButtonInteraction, { customId: 'pick' })
+    // A call registers its client, which an answer outside any call finds the app by
+    await module.dispatch(pressed)
+    asked.length = 0
+    const ready = module.init({ ready: true })
+
+    const click = createMockInteraction(ButtonInteraction, { customId: 'picked', client: pressed.client })
+    const answered = other.response.respond(click).send({ embeds: [{ description: 'picked' }] })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(asked).toEqual([])
+
+    settle()
+    await Promise.all([ready, answered])
+    expect(asked).toEqual(['themes asked'])
+    expect(click.update.mock.calls[0]?.[0]).toMatchObject({ embeds: [{ color: 0x0000b4 }] })
+  })
+
+  it("refuses at once a call a @Command of the other build can't take, while the hook it waits for never settles", async () => {
+    @Service()
+    class Cache {
+      onReady() {
+        return new Promise<void>(() => undefined)
+      }
+    }
+    @Controller()
+    class Prices {
+      constructor(@inject(Cache) readonly cache: Cache) {}
+      @other.decorator.Command('price', CommandType.SLASH)
+      price() {}
+    }
+    @MeoCord({ controllers: [Prices], services: [Cache], clientOptions: { intents: [] }, waitForReady: true } as never)
+    class Bot {}
+    const module = MeoCordTestingModule.create({ app: Bot, controllers: [Prices] }).compile()
+    void module.init({ ready: true })
+
+    await expect(module.invoke(Prices, 'price', {} as never)).rejects.toThrow("Prices.price: @Command('price', CommandType.SLASH) takes a ChatInputCommandInteraction")
+  }, 1_000)
 
   it("runs a handler in the theme of a @UseTheme from the other build", async () => {
     let primary: unknown

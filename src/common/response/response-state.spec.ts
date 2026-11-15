@@ -978,6 +978,90 @@ describe("respond() under @Defer's timer and locks", () => {
       expect(opening.deferUpdate).not.toHaveBeenCalled()
     })
 
+    it('reads as under way until Discord has the acknowledgement or an answer, and as nothing once neither is coming', async () => {
+      vi.useFakeTimers()
+      vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      const held = <T>() => Promise.withResolvers<T>()
+      const told: Record<string, string[]> = {}
+      const watch = (name: string, interaction: ReturnType<typeof command>, scheduled = true) => {
+        const state = responseOf(interaction)
+        told[name] = [state.told]
+        // Each change wakes a wait, which reads what Discord has been told then
+        const follow = (): void => void state.toldChanged().then(() => (told[name].at(-1) !== state.told && told[name].push(state.told), follow()))
+        follow()
+        if (scheduled) state.scheduleAcknowledge(1000)
+      }
+      const acknowledging = held<never>()
+      const acknowledged = command()
+      acknowledged.deferReply.mockReturnValueOnce(acknowledging.promise)
+      const refused = command()
+      refused.deferReply.mockRejectedValueOnce(new Error('acknowledgement failed'))
+      // Doubles that leave the interaction unmarked, as discord.js leaves it until Discord answers, and as it stays when
+      // Discord refuses: only what the state knows of its own calls tells these apart
+      const bare = (deferReply: () => Promise<unknown>) => Object.assign(command(), { deferReply: vi.fn(deferReply) })
+      const through = bare(() => Promise.resolve(undefined))
+      const elsewhere = bare(() => Promise.reject(createDiscordError(40060)))
+      const answering = held<never>()
+      const answered = command()
+      answered.reply.mockReturnValueOnce(answering.promise)
+      const failing = command()
+      failing.reply.mockRejectedValueOnce(new Error('answer failed'))
+      const raw = command()
+      const released = command()
+      const queued = command()
+      const ahead = held<undefined>()
+      for (const [name, interaction] of Object.entries({ acknowledged, through, refused, elsewhere, answered, failing, raw, released, queued })) {
+        watch(name, interaction)
+      }
+      // As @Defer's eager mode acknowledges: no timer counts the acknowledgement while it is sent
+      const eagerThrough = bare(() => Promise.resolve(undefined))
+      const eagerElsewhere = bare(() => Promise.reject(createDiscordError(40060)))
+      watch('eager through', eagerThrough, false)
+      watch('eager elsewhere', eagerElsewhere, false)
+      void responseOf(eagerThrough).acknowledge()
+      void responseOf(eagerElsewhere).acknowledge()
+
+      // Answered before the timer: nothing while the answer is not sent, under way while it is, then as it ends
+      void respond(answered).send('through respond')
+      void respond(failing).send('through respond').catch(() => undefined)
+      await raw.reply('raw')
+      await responseOf(released).release()
+      // A step ahead of it holds the acknowledgement in the queue, still on its way
+      void (responseOf(queued) as unknown as { queued: (step: () => Promise<unknown>) => Promise<unknown> }).queued(() => ahead.promise)
+      await vi.advanceTimersByTimeAsync(1000)
+      answering.resolve(undefined as never)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(told.acknowledged.at(-1)).toBe('under way')
+      acknowledging.resolve(undefined as never)
+      // Fired, the acknowledgement is on its way though a step ahead of it holds the queue
+      expect(responseOf(queued).told).toBe('under way')
+      ahead.resolve(undefined)
+      await vi.advanceTimersByTimeAsync(0)
+
+      // Nothing before the timer is set
+      expect(told).toEqual({
+        acknowledged: ['nothing', 'under way', 'told'],
+        through: ['nothing', 'under way', 'told'],
+        refused: ['nothing', 'under way', 'nothing'],
+        elsewhere: ['nothing', 'under way', 'told'],
+        answered: ['nothing', 'under way', 'told'],
+        failing: ['nothing', 'under way', 'nothing'],
+        raw: ['nothing', 'under way', 'told'],
+        released: ['nothing', 'under way', 'nothing'],
+        queued: ['nothing', 'under way', 'told'],
+        'eager through': ['nothing', 'under way', 'told'],
+        'eager elsewhere': ['nothing', 'under way', 'told'],
+      })
+    })
+
+    it('reads a raw answer with nothing scheduled as told', async () => {
+      const interaction = command()
+      const before = responseOf(interaction).told
+      await interaction.reply('raw')
+
+      expect([before, responseOf(interaction).told]).toEqual(['nothing', 'told'])
+    })
+
     it('applies a lock asked for before it fired, with the controls asked for', async () => {
       vi.useFakeTimers()
       const interaction = button(messageWith({ components: [row('refresh', 'other')] }))

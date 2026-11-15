@@ -90,6 +90,7 @@ import {
   SLOW_READY_HOOK_MS,
   slowReadyWarning,
 } from '@src/core/lifecycle-hooks.js'
+import { closeReadyGate } from '@src/core/ready-gate.js'
 import { applyDispatchedReaction, createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
 
 // Taken as the module loads, before a test fakes the timers, so the wait after a client's listeners holds
@@ -412,7 +413,9 @@ export class TestingModule {
    *
    * With `{ ready: true }`, it then runs every `onReady` hook once, as the bot does once it is online:
    * one at a time, each class after the classes and providers it injects, the observers' last. Every
-   * hook runs even when one fails. Pair it with {@link close}, which runs the `onShutdown` hooks.
+   * hook runs even when one fails. Pair it with {@link close}, which runs the `onShutdown` hooks. With
+   * `@MeoCord({ waitForReady: true })`, a `dispatch`, `invoke` or `emit` made while they run waits for the hooks of
+   * the classes it uses, as the bot's calls do.
    *
    * Ready, the module's app theme is also the one `useTheme()` reads outside any call, as a bot's is once
    * it is online, unless another module or app in the process was ready first: that one keeps it, and
@@ -567,20 +570,29 @@ export class TestingModule {
     claimAmbientAppTheme(this.container)
     const failures: { name: string; error: unknown }[] = []
     const failed = (unit: LifecycleUnit, error: unknown) => failures.push({ name: unit.name, error })
-    // No warning for a hook whose dependency failed: the test sees the dependency's own error
-    await runReadyHooks(
-      this.container,
-      this.lifecycle,
-      client,
-      { primary },
-      { resolveFailed: failed, hookFailed: failed, slow: (unit, waiting) => new Logger('TestingModule').warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting)) },
-      // A test's fake clock can pass the time inside a hook, so the warning waits to be asked for
-      {
-        runOnReady: this.readyPass.runOnReady,
-        slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
-        made: unit => (this.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
-      },
-    )
+    const warn = (message: string) => new Logger('TestingModule').warn(message)
+    // With waitForReady, a call made while these hooks run waits for those of the classes it uses, as the bot's does
+    const stages = globalStagesOf(this.container)
+    const gate = stages.waitForReady === true ? closeReadyGate(this.container, this.lifecycle, warn, themeResolverClass(stages.themeFor?.resolvers)) : undefined
+    try {
+      // No warning for a hook whose dependency failed: the test sees the dependency's own error
+      await runReadyHooks(
+        this.container,
+        this.lifecycle,
+        client,
+        { primary },
+        { resolveFailed: failed, hookFailed: failed, slow: (unit, waiting) => warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting, gate !== undefined)) },
+        // A test's fake clock can pass the time inside a hook, so the warning waits to be asked for
+        {
+          runOnReady: this.readyPass.runOnReady,
+          slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
+          made: unit => (this.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
+          ...(gate && { settled: (unit: LifecycleUnit) => gate.settled(unit) }),
+        },
+      )
+    } finally {
+      gate?.finish()
+    }
     throwFailures('onReady', failures)
   }
 

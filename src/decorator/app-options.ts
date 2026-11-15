@@ -173,6 +173,31 @@ export interface MeoCordOptions<
   warnSlow?: boolean
 
   /**
+   * Holds each call until the `onReady` hooks of the classes it uses have settled: its handler's class, the guards,
+   * interceptors, filters and pipes that run for it, global ones included (an autocomplete waits for its interceptors
+   * too, though they don't run for it), the presenter, the `themeFor` class, and what each of them injects. The call
+   * waits after `@Defer` acknowledges it and before its guards run. No server's or user's theme is looked up before the
+   * `themeFor` class's own hooks have settled, in a call, in a function `bindTheme` wraps, or in an answer outside any
+   * call. A call or a lookup for an interaction follows what Discord has been told of it: once Discord has an
+   * acknowledgement or an answer, it waits as long as the hooks run; while one is on its way, it waits for the outcome
+   * without warning; told nothing, as without `@Defer`, it waits until 2 seconds after the interaction was created (or
+   * 2 seconds from the wait, with no creation time or one ahead of the clock), then goes ahead with a warning naming
+   * the hook, at once if those have passed. An autocomplete waits the same way for 1 second. A message, a reaction, an
+   * event and a bound function called with no interaction wait as long as the hooks run. `@Defer({ mode: 'auto' })`'s
+   * acknowledgement counts as on its way from the call's start until it is sent or an answer's Discord call replaces
+   * it; an answer still waiting for its theme doesn't hold it back, and is sent after it, the acknowledgement as
+   * private as that answer. A hook that throws counts as settled. The hooks still run one at a time, so a call also
+   * waits for a slower hook ordered before its own.
+   *
+   * A `MeoCordTestingModule` takes it from here too: its calls wait only for the hooks `init({ ready: true })` runs. A
+   * mock interaction was created when it was made, or at its id's time when the test gives one, so a bound counts from
+   * there.
+   *
+   * @defaultValue `false`: calls are handled while the hooks run
+   */
+  waitForReady?: boolean
+
+  /**
    * Answers a guard's `false` on an interaction as if the guard had thrown `GuardDeniedError`: a command, context menu,
    * component or modal is told privately "You can't use this.", `meocord.guard.denied` in the user's language. The
    * denial takes a thrown one's path, so a filter catching `GuardDeniedError` sees it, observers get its `deniedBy`, and

@@ -29,6 +29,7 @@ import {
 } from '@src/core/theme-scope.js'
 import { META } from '@src/util/metadata-keys.js'
 import { shared } from '@src/util/shared-state.util.js'
+import { type ReadyBound, readyBoundOf, readyGateOf } from '@src/core/ready-gate.js'
 
 /** Classes with a `@UseTheme`, on the class or one of its methods, from either build of this version. */
 export const THEMED_CLASSES = shared('themedClasses', () => new WeakSet<object>())
@@ -162,14 +163,20 @@ function layeredScope(base: ResolvedTheme, layers: Layers, rebuild: RebuildTheme
 }
 
 /**
+ * With `waitForReady`, what a theme lookup for `container`'s app waits for: its theme resolver's hooks, within `bound`;
+ * `undefined` without the option, or once there is nothing left to wait for.
+ */
+const lookupReady = (container: Container, bound: () => ReadyBound) => readyGateOf(container)?.lookupReady(bound)
+
+/**
  * How a function bound in a call of `base`, a handler's theme, builds the scope of a later call: `base` with the
  * server's and user's themes of that call's interaction, message or reaction over it.
  */
-function rebuildOver(resolvers: ThemeResolverCaches, base: ResolvedTheme): RebuildTheme {
+function rebuildOver(container: Container, resolvers: ThemeResolverCaches, base: ResolvedTheme): RebuildTheme {
   const rebuild: RebuildTheme = args => {
     const { guildId, userId } = themeTargets(args)
     if (guildId === undefined && userId === undefined) return undefined
-    const { scope, ready } = layeredScope(base, lookupLayers(resolvers, args), rebuild)
+    const { scope, ready } = layeredScope(base, lookupLayers(resolvers, args, lookupReady(container, () => readyBoundOf(args))), rebuild)
     // No pipeline waits for the layers here, so an answer does
     scope.ready = ready
     return scope
@@ -187,13 +194,14 @@ export function beginCallTheme(
   args: readonly unknown[],
   prototype?: object,
   methodName?: string,
+  bound: () => ReadyBound = () => readyBoundOf(args),
 ): { scope: ThemeScope; ready?: Promise<void> } | undefined {
   const themes = current(container)
   if (!themes) return undefined
-  const layers = themes.resolvers && lookupLayers(themes.resolvers, args)
+  const layers = themes.resolvers && lookupLayers(themes.resolvers, args, lookupReady(container, bound))
   if (!layers && !themes.scoped) return undefined
   const base = themes.varies && prototype && methodName ? handlerTheme(themes, prototype, methodName) : themes.app
-  const rebuild = themes.resolvers && rebuildOver(themes.resolvers, base)
+  const rebuild = themes.resolvers && rebuildOver(container, themes.resolvers, base)
   // Until the server's and user's themes are found, the call has the handler's; the pipeline waits for them
   const { scope, ready } = layeredScope(base, layers, rebuild)
   // With the theme the app owns outside calls, a function it binds rebuilds from the app's theme without this scope
@@ -218,7 +226,7 @@ setThemeOutsideCalls(interaction => {
   const container = clientApps.get((interaction as { client?: object }).client ?? interaction)
   const themes = container && current(container)
   if (!themes) return useTheme()
-  const layers = themes.resolvers && lookupLayers(themes.resolvers, [interaction])
+  const layers = themes.resolvers && lookupLayers(themes.resolvers, [interaction], lookupReady(container, () => readyBoundOf([interaction])))
   if (!layers) return themes.app
   if (layers instanceof Promise) return layers.then(([guild, user]) => mergeTheme(mergeTheme(themes.app, guild), user))
   return mergeTheme(mergeTheme(themes.app, layers[0]), layers[1])
@@ -230,7 +238,7 @@ setRebuildOutsideCalls(args => {
   if (!first || typeof first !== 'object') return undefined
   const container = clientApps.get(first.client ?? first)
   const themes = container && current(container)
-  return themes?.resolvers && rebuildOver(themes.resolvers, themes.app)(args)
+  return themes?.resolvers && rebuildOver(container!, themes.resolvers, themes.app)(args)
 })
 
 /** Makes the app's theme the one read outside a call, unless another app in the process already has. */

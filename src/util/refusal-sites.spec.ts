@@ -165,7 +165,10 @@ const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   'core/dispatcher.ts': { count: 1, why: 'an interaction no handler takes' },
   'core/filter-runner.ts': { count: 1, why: 'a filter, resolved as it handles an error' },
   'core/guard-runner.ts': { count: 3, why: 'a guard, resolved as it runs, or a guarded method called on an instance no app made' },
-  'core/handler-pipeline.ts': { count: 1, why: "a guard's false on an interaction, answered as a denial under answerDenied" },
+  'core/handler-pipeline.ts': {
+    count: 2,
+    why: "a guard's false on an interaction, answered as a denial under answerDenied; and an interaction of the wrong type, refused before the call waits",
+  },
   'core/input-runner.ts': { count: 1, why: 'a pipe, resolved as it runs' },
   'core/interceptor-runner.ts': { count: 1, why: 'an interceptor, resolved as it runs' },
   'core/meocord.app.ts': { count: 1, why: 'start() of an app that was stopped' },
