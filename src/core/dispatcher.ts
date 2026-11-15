@@ -33,6 +33,8 @@ import {
 } from '@src/core/component-routes.js'
 import {
   appPresenterOf,
+  type CallStart,
+  callStart,
   globalStagesOf,
   handleUnroutedError,
   type HandlerOutcome,
@@ -143,7 +145,7 @@ const SLOW_HANDLER_MS = 5000
 
 /** One dispatched call: when it arrived, the fallback that answers it, and who is told what it did. */
 interface Call {
-  startedAt: number
+  startedAt: CallStart
   fallback: Fallback
   record?: DispatchRecorder
 }
@@ -231,7 +233,7 @@ export class Dispatcher {
           return failure
         }
       : this.fallback
-    return { startedAt: performance.now(), fallback, record }
+    return { startedAt: callStart(), fallback, record }
   }
 
   private getInstance(controllerClass: ControllerClass): any {

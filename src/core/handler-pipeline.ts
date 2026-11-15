@@ -142,6 +142,19 @@ export function globalStagesOf(container: Container): GlobalStages {
   return container.isBound(GLOBAL_STAGES) ? container.get<GlobalStages>(GLOBAL_STAGES) : NO_GLOBAL_STAGES
 }
 
+/** When dispatch received a call, read from both clocks. */
+export interface CallStart {
+  /** From `Date.now()`, which observers are told: the monotonic clock drifts from the system clock as a process runs. */
+  readonly at: number
+  /** From `performance.now()`, which the call's duration is measured from. */
+  readonly mono: number
+}
+
+/** Reads the start of a call that arrives now. */
+export function callStart(): CallStart {
+  return { at: Date.now(), mono: performance.now() }
+}
+
 /** How a call through the pipeline ended. */
 export interface HandlerOutcome {
   /** Whether the handler itself ran. */
@@ -386,8 +399,8 @@ export interface RunOptions {
    * were told. At runtime they are never waited for.
    */
   awaitObservers?: boolean
-  /** When dispatch received the call, from `performance.now()`, when it started before the pipeline. */
-  startedAt?: number
+  /** When dispatch received the call, when it started before the pipeline. */
+  startedAt?: CallStart
   /** Told when a call ended without an error and left its interaction or autocomplete unanswered. */
   onUnanswered?: (unanswered: Unanswered) => void
 }
@@ -411,8 +424,7 @@ async function observe(
 /** How a call settled, as the pipeline saw it. */
 interface Settlement {
   outcome: DispatchOutcome
-  /** When the call started, from `performance.now()`. */
-  startedAt: number
+  startedAt: CallStart
   handled: boolean
   failure?: { error: unknown }
   deniedBy?: abstract new (...args: any[]) => unknown
@@ -425,8 +437,8 @@ interface Settlement {
 function settled(context: ExecutionContext, { outcome, startedAt, handled, failure, deniedBy }: Settlement): DispatchResult {
   const result: DispatchResult = {
     outcome,
-    startedAt: performance.timeOrigin + startedAt,
-    durationMs: performance.now() - startedAt,
+    startedAt: startedAt.at,
+    durationMs: performance.now() - startedAt.mono,
     handled,
   }
   if (failure) result.error = failure.error
@@ -512,7 +524,7 @@ async function runPipeline(
     defer && first?.isRepliable?.() ? responseOf(first as Parameters<typeof responseOf>[0]) : undefined
 
   // What the observers are told once the call has settled
-  const startedAt = options.startedAt ?? performance.now()
+  const startedAt = options.startedAt ?? callStart()
   let outcome: DispatchOutcome = 'ran'
   let failure: { error: unknown } | undefined
   let handled = false
@@ -614,7 +626,7 @@ export async function runInAppTheme<T>(container: Container, args: readonly unkn
 
 /** {@link handleUnroutedError}'s answer, in the app's theme. */
 async function answerUnrouted(container: Container, args: readonly unknown[], error: unknown, options: RunOptions): Promise<void> {
-  const startedAt = options.startedAt ?? performance.now()
+  const startedAt = options.startedAt ?? callStart()
   const context = new UnroutedExecutionContext(args)
   let handled = false
   let outcome = outcomeOf(error)
@@ -637,6 +649,6 @@ export async function observeUnclaimed(
   args: readonly unknown[],
   options: RunOptions = {},
 ): Promise<void> {
-  const startedAt = options.startedAt ?? performance.now()
+  const startedAt = options.startedAt ?? callStart()
   await observe(container, () => new UnroutedExecutionContext(args), { outcome: 'not-found', startedAt, handled: false }, options)
 }

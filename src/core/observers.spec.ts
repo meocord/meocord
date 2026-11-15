@@ -393,6 +393,33 @@ describe('what the result carries', () => {
     expect(startedAt).toBeGreaterThanOrEqual(before - 5)
     expect(startedAt + durationMs).toBeLessThanOrEqual(after + 5)
   })
+
+  // A process that has run for days, or slept, has its monotonic clock off the system clock by seconds
+  it.each([
+    ['invoked', () => module.invoke(ShopController, 'buy', slash())],
+    [
+      'dispatched',
+      () => module.dispatch(createMockInteraction(ChatInputCommandInteraction, { commandName: 'buy', options: createChatInputOptions({}) })),
+    ],
+  ])('reads the start of a call %s from the system clock, however far the monotonic clock has drifted from it', async (_, call) => {
+    const drift = 60_000
+    const now = performance.now.bind(performance)
+    const monotonic = vi.spyOn(performance, 'now').mockImplementation(() => now() - drift)
+    try {
+      const before = Date.now()
+      await call()
+      const after = Date.now()
+
+      const { startedAt, durationMs } = told.find(entry => entry.observer === 'metrics')!.result
+      expect(startedAt).toBeGreaterThanOrEqual(before)
+      expect(startedAt).toBeLessThanOrEqual(after)
+      expect(durationMs).toBeGreaterThanOrEqual(0)
+      // Date.now() drops the fraction of a millisecond
+      expect(durationMs).toBeLessThan(after - before + 1)
+    } finally {
+      monotonic.mockRestore()
+    }
+  })
 })
 
 describe('@Observer({ types })', () => {
