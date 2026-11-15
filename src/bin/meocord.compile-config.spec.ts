@@ -23,6 +23,7 @@ vi.mock('@src/util/meocord-source-config.util.js', () => ({ loadMeoCordSourceCon
 
 vi.mock('@rsbuild/core', () => ({
   createRsbuild: async ({ config }: { config: { output: { distPath: { root: string } } } }) => ({
+    onAfterBuild: () => {},
     build: async () => {
       const tag = `build ${builds.length + 1}`
       mkdirSync(config.output.distPath.root, { recursive: true })
@@ -62,7 +63,8 @@ describe('compileConfig', () => {
     await compile
 
     expect(readFileSync(path.join(dist(), 'meocord.config.mjs'), 'utf-8')).toBe('build 1')
-    expect(readdirSync(dist())).toEqual(['meocord.config.mjs'])
+    // Beside it, the record of what the build read
+    expect(readdirSync(dist()).sort()).toEqual(['meocord.build.json', 'meocord.config.mjs'])
     expect(exit).not.toHaveBeenCalled()
   })
 
@@ -80,7 +82,7 @@ describe('compileConfig', () => {
     builds[1].release()
     await second
     expect(readFileSync(path.join(dist(), 'meocord.config.mjs'), 'utf-8')).toBe('build 2')
-    expect(readdirSync(dist())).toEqual(['meocord.config.mjs'])
+    expect(readdirSync(dist()).sort()).toEqual(['meocord.build.json', 'meocord.config.mjs'])
     expect(exit).not.toHaveBeenCalled()
   })
 

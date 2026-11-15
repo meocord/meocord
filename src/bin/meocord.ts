@@ -44,6 +44,7 @@ import {
 } from '@src/build/native-addons.js'
 import { PLATFORM_MANIFEST, writePlatformManifest } from '@src/util/platform.util.js'
 import { loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
+import { type BuildMode, fileDependenciesOf, recordBuild, type StaleCommand, stalenessMessage, stalenessOf } from '@src/bin/build-record.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { type MeoCordConfig } from '@src/interface/index.js'
 import {
@@ -275,6 +276,8 @@ copies or substantial portions of the Software.
         if (options.build && options.prod) {
           await this.build(mode)
           await this.compileConfig({ mode })
+        } else if (options.prod) {
+          this.warnIfStale('start', mode)
         }
 
         options.prod ? await this.startProd() : await this.startDev()
@@ -308,6 +311,8 @@ copies or substantial portions of the Software.
         if (options.build) {
           await this.build(mode)
           await this.compileConfig({ mode })
+        } else {
+          this.warnIfStale('register', mode)
         }
 
         await this.register(options.guild, prune.env)
@@ -545,11 +550,11 @@ copies or substantial portions of the Software.
       const { rsbuild, meocordConfig, natives } = await this.createBundler(mode)
 
       const bundledFiles: string[] = []
-      if (meocordConfig?.bundleDependencies) {
-        rsbuild.onAfterBuild(({ stats }) => {
-          bundledFiles.push(...bundledModuleFiles(stats))
-        })
-      }
+      const dependencies: string[] = []
+      rsbuild.onAfterBuild(({ stats }) => {
+        dependencies.push(...fileDependenciesOf(stats))
+        if (meocordConfig?.bundleDependencies) bundledFiles.push(...bundledModuleFiles(stats))
+      })
       await rsbuild.build()
 
       if (meocordConfig?.bundleDependencies && natives) {
@@ -560,6 +565,7 @@ copies or substantial portions of the Software.
       } else if (!meocordConfig?.bundleDependencies) {
         this.removePackedOutputs()
       }
+      recordBuild(this.projectRoot, mode, 'app', dependencies, { bundleDependencies: meocordConfig?.bundleDependencies })
 
       this.logger.info(`${capitalize(mode)} build completed successfully.`)
     } catch (error: any) {
@@ -620,9 +626,14 @@ copies or substantial portions of the Software.
         },
       })
 
+      const dependencies: string[] = []
+      rsbuild.onAfterBuild(({ stats }) => {
+        dependencies.push(...fileDependenciesOf(stats))
+      })
       await rsbuild.build()
       fs.renameSync(path.join(staging, 'meocord.config.mjs'), path.join(dist, 'meocord.config.mjs'))
       fs.rmSync(staging, { recursive: true, force: true })
+      recordBuild(this.projectRoot, mode, 'config', dependencies)
       this.compiledConfig = meocordConfig
       this.logger.info('Config compiled to dist/meocord.config.mjs')
       return true
@@ -650,6 +661,15 @@ copies or substantial portions of the Software.
    */
   private runConfig(): MeoCordConfig | undefined {
     return this.compiledConfig ?? loadMeoCordConfig()
+  }
+
+  /**
+   * Warns when the build in dist is older than the source, or of development where the command runs production, before
+   * a command that runs it without building. Only ever warns: the command goes on with the build it has.
+   */
+  private warnIfStale(command: StaleCommand, mode: BuildMode): void {
+    const staleness = stalenessOf(this.projectRoot, mode)
+    if (staleness) this.logger.warn(stalenessMessage(staleness, command, mode))
   }
 
   /**
@@ -867,7 +887,7 @@ copies or substantial portions of the Software.
       // The new bundler is made, its plugins set up and its config resolved, before the running build is closed: a
       // config whose rsbuild hook or plugin throws leaves that build watching the sources, and the bot it started running
       const watch = async () => {
-        const { rsbuild } = await this.createBundler('development')
+        const { rsbuild, meocordConfig } = await this.createBundler('development')
         await rsbuild.initConfigs({ action: 'build' })
 
         // Runs after every rebuild, which is where the application is restarted. A rebuild that fails reports its own
@@ -879,6 +899,9 @@ copies or substantial portions of the Software.
           if (stats?.hasErrors()) return
           // A watch build packs nothing, so a previous build's packed copies would shadow the project's packages
           this.removePackedOutputs()
+          if (stats) {
+            recordBuild(this.projectRoot, 'development', 'app', fileDependenciesOf(stats), { bundleDependencies: meocordConfig?.bundleDependencies })
+          }
           this.latestBuild = stats ? emittedDigest(stats) : undefined
           this.restartApp(this.latestBuild)
         })

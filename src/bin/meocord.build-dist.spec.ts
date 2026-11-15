@@ -112,7 +112,7 @@ describe('a built application', () => {
 
     await build(dir, '{}')
 
-    expect(readdirSync(path.join(dir, 'dist')).sort()).toEqual(['main.js', 'main.js.map', 'meocord.config.mjs'])
+    expect(readdirSync(path.join(dir, 'dist')).sort()).toEqual(['main.js', 'main.js.map', 'meocord.build.json', 'meocord.config.mjs'])
   })
 
   it('packs the package of an external that names a file inside it', async () => {

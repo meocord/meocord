@@ -676,7 +676,7 @@ describe('spawning the application', () => {
       const statsOf = (output: string) => ({
         hash: `build ${++builds}`,
         hasErrors: () => false,
-        compilation: { getAssets: () => [{ name: 'main.js', source: { buffer: () => Buffer.from(output) } }] },
+        compilation: { fileDependencies: new Set<string>(), getAssets: () => [{ name: 'main.js', source: { buffer: () => Buffer.from(output) } }] },
       })
       const cli = new MeoCordCLI() as unknown as {
         startDev: () => Promise<void>
