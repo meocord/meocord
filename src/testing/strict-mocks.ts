@@ -41,11 +41,13 @@ export function noteMockMade(): void {
  * `InteractionCallbackResponse` holding what Discord answers, where without it they resolve to `undefined`, a deferred
  * reply is flagged `Loading` until it is edited, and `respond()`'s `send()` resolves to the message a reply or an
  * update sent. A client from `createMockClient()` has a working emitter, and `dispatch` leaves a component or modal no
- * route takes to its `interactionCreate` listeners, such as a collector's. A message an interaction sends names it in
- * `interactionMetadata`, and a command's `message` and a message's raw `channel_id` and `guild_id` read `undefined`, as
- * discord.js's `InteractionCollector` expects. An answer marks the interaction `replied`, `deferred` or `responded`
- * once it resolves, as discord.js does, so code that doesn't await one fails as it would on a bot, within one run of
- * the test's code. The next major version (5.0) computes these values, and refuses those answers, without the call.
+ * route takes to its `interactionCreate` listeners, such as a collector's. A mock interaction or message shares its
+ * client with what it holds, its user, member, channel and server, as discord.js reaches them through its caches. A
+ * message an interaction sends names it in `interactionMetadata`, and a command's `message` and a message's raw
+ * `channel_id` and `guild_id` read `undefined`, as discord.js's `InteractionCollector` expects. An answer marks the
+ * interaction `replied`, `deferred` or `responded` once it resolves, as discord.js does, so code that doesn't await one
+ * fails as it would on a bot, within one run of the test's code. The next major version (5.0) computes these values,
+ * and refuses those answers, without the call.
  * With strict mocks or without, each `fetchReply()`, `editReply()` and `followUp()` resolves to a new message object,
  * never one an earlier call gave, as in discord.js, so a test compares messages by `id`, and two edits by
  * `editedTimestamp`.
