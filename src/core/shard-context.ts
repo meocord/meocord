@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { type Client } from 'discord.js'
 import { type Container } from 'inversify'
 import { Logger } from '@src/common/index.js'
+import { sharedClass } from '@src/util/shared-state.util.js'
 
 /** Where each shard's client keeps the function that runs a `ShardContext.call` in that shard. */
 export const SHARD_CALL_KEY = Symbol.for('meocord.shardCall')
@@ -194,6 +195,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Pr
  * @see {@link ShardCallResult}
  * @see {@link https://meocord.dev/docs/4.2/sharding | Sharding}
  */
+@sharedClass('ShardContext')
 export class ShardContext {
   private readonly logger = new Logger(ShardContext.name)
   private warnedAboutBroadcastEval = false

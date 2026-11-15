@@ -260,7 +260,8 @@ describe("a store that extends the other build's CooldownStore", () => {
   it('passes the suite implementing consume alone, as one that extends this build does', async () => {
     vi.resetModules()
     const other = await import('@src/common/cooldown-store.js')
-    expect(other.CooldownStore).not.toBe(CooldownStore)
+    // Its classes are one for both builds; its functions are the second build's own
+    expect(other.withRelease).not.toBe(withRelease)
 
     class OnlyConsume extends other.CooldownStore {
       private readonly counts = new MemoryCooldownStore()

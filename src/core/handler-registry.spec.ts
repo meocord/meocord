@@ -25,7 +25,7 @@ import {
   Service,
 } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { HandlerRegistry } from '@src/core/handler-registry.js'
+import { HandlerRegistry, listEventSources } from '@src/core/handler-registry.js'
 import { MeoCordTestingModule } from '@src/testing/index.js'
 
 const Category = createMetadata<string>('category')
@@ -264,6 +264,16 @@ describe('HandlerRegistry, at its edges', () => {
     expect(new HandlerRegistry([DerivedController]).list()).toEqual([
       expect.objectContaining({ kind: 'message', name: 'base', controller: DerivedController, method: 'base' }),
     ])
+  })
+
+  it('lists the event sources the app gives it after a first list', () => {
+    class Made {}
+    const registry = new HandlerRegistry([EmptyController])
+    expect(registry.list({ kind: 'event' })).toEqual([])
+
+    listEventSources(registry, [{ cls: Made, handlers: [{ event: 'clientReady', method: 'ready', once: true }] }])
+
+    expect(registry.list({ kind: 'event' }).map(({ controller, name }) => [controller, name])).toEqual([[Made, 'clientReady']])
   })
 
   it('lists nothing for a controller without handlers, or a filter nothing matches', () => {

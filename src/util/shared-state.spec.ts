@@ -2,9 +2,9 @@ import { ButtonInteraction, ChatInputCommandInteraction, type Message, MessageFl
 import { vi } from 'vitest'
 import packageJson from '../../package.json' with { type: 'json' }
 import * as errors from '@src/common/errors.js'
-import { Command, Controller, MeoCord } from '@src/decorator/index.js'
+import { Command, Controller, MeoCord, MessageHandler } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
-import { CATALOGS, LOCALE_CHAIN } from '@src/common/translator.js'
+import { CATALOGS, LOCALE_CHAIN, Translator } from '@src/common/translator.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { defaultPresenter, setPresenter } from '@src/common/response/presenter.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
@@ -13,7 +13,12 @@ import { createMockFn, createMockInteraction, createMockMessage, getResponse, Me
 import { forgetMockFn, useMockFn } from '@src/testing/mock-fn.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import { nextSnowflake } from '@src/testing/snowflake.js'
-import { sharedKey } from '@src/util/shared-state.util.js'
+import { sharedClass, sharedKey } from '@src/util/shared-state.util.js'
+import { ExecutionContext } from '@src/common/execution-context.js'
+import { CooldownStore, MemoryCooldownStore, recordedOf } from '@src/common/cooldown-store.js'
+import { ThemeCache } from '@src/core/theme-resolvers.js'
+import { HandlerRegistry } from '@src/core/handler-registry.js'
+import { ShardContext } from '@src/core/shard-context.js'
 import { respond, responseOf } from '@src/common/response/response-state.js'
 import { callOrder, stampCall } from '@src/common/response/call-order.js'
 import { createTranslator, Theme, translateError, useTheme } from '@src/common/index.js'
@@ -42,6 +47,11 @@ async function otherBuild() {
     deprecation: await import('@src/common/deprecation.js'),
     logger: await import('@src/common/logger.js'),
     logLevel: await import('@src/common/log-level.js'),
+    executionContext: await import('@src/common/execution-context.js'),
+    cooldownStore: await import('@src/common/cooldown-store.js'),
+    themeResolvers: await import('@src/core/theme-resolvers.js'),
+    handlerRegistry: await import('@src/core/handler-registry.js'),
+    shardContext: await import('@src/core/shard-context.js'),
   }
 }
 
@@ -321,5 +331,94 @@ describe('state the two builds of one meocord version share', () => {
   it('keeps its keys to this version, apart from any other installed one', () => {
     expect(sharedKey('themeScope')).toBe(Symbol.for(`meocord@${packageJson.version}:themeScope`))
     expect(sharedKey('themeScope')).not.toBe(Symbol.for('meocord@0.0.0:themeScope'))
+  })
+
+  // inversify finds a binding by the class object: a file typed against the other build is given the app's instance
+  it('makes each class MeoCord binds in an app one object for both builds', () => {
+    expect(other.translator.Translator).toBe(Translator)
+    expect(other.executionContext.ExecutionContext).toBe(ExecutionContext)
+    expect(other.cooldownStore.CooldownStore).toBe(CooldownStore)
+    expect(other.cooldownStore.MemoryCooldownStore).toBe(MemoryCooldownStore)
+    expect(other.themeResolvers.ThemeCache).toBe(ThemeCache)
+    expect(other.handlerRegistry.HandlerRegistry).toBe(HandlerRegistry)
+    expect(other.shardContext.ShardContext).toBe(ShardContext)
+  })
+
+  it("makes a store of the other build an instance of this build's CooldownStore", () => {
+    expect(new other.cooldownStore.MemoryCooldownStore()).toBeInstanceOf(CooldownStore)
+    expect(new MemoryCooldownStore()).toBeInstanceOf(other.cooldownStore.CooldownStore)
+  })
+
+  // A shared class runs the first build's methods, which read module state the other build's functions write
+  it('reads the calls an allowed verdict recorded from either build', async () => {
+    const verdict = await new MemoryCooldownStore().consumeMany([{ key: 'daily:42', limit: { uses: 1, windowMs: 60_000 } }])
+
+    expect(other.cooldownStore.recordedOf(verdict)).toEqual([{ key: 'daily:42', at: expect.any(Number) }])
+  })
+
+  it("undoes a memory store's recorded calls through either build", async () => {
+    const store = new MemoryCooldownStore()
+    const limit = { uses: 1, windowMs: 60_000 }
+    const verdict = await store.consumeMany([{ key: 'daily:42', limit }])
+
+    other.cooldownStore.forgetRecorded(store, recordedOf(verdict) ?? [])
+
+    expect((await store.consume('daily:42', limit)).allowed).toBe(true)
+  })
+
+  it('lists the event handlers the other build found on a class the app makes', () => {
+    class Made {}
+    const registry = new HandlerRegistry([])
+
+    other.handlerRegistry.listEventSources(registry, [{ cls: Made, handlers: [{ event: 'clientReady', method: 'ready', once: true }] }])
+
+    expect(registry.list({ kind: 'event' }).map(({ controller, name }) => [controller, name])).toEqual([[Made, 'clientReady']])
+  })
+
+  it("works out message help from the routes the other build's dispatcher shares", async () => {
+    @Controller()
+    class Pings {
+      @MessageHandler('ping')
+      ping() {}
+    }
+    const registry = new HandlerRegistry([Pings])
+
+    // A shared table with no routes, so help lists nothing rather than the controller's own `ping`
+    other.handlerRegistry.shareMessageRoutes(registry, [])
+
+    expect(await registry.messageHelp(createMockMessage({ content: 'help' }) as never)).toMatchObject({ kind: 'empty', reason: 'none' })
+  })
+
+  it('clears the theme caches the other build attached', () => {
+    const cache = new ThemeCache()
+    const invalidate = vi.fn()
+
+    other.themeResolvers.attachThemeCache(cache, { guild: { invalidate } } as never)
+    cache.invalidateGuild('42')
+
+    expect(invalidate).toHaveBeenCalledWith('42')
+  })
+})
+
+describe('sharedClass', () => {
+  it('gives every later class under a name the first one', () => {
+    @sharedClass('shared-state-spec:first')
+    class First {}
+    @sharedClass('shared-state-spec:first')
+    class Second {}
+
+    expect(Second).toBe(First)
+  })
+
+  it('leaves the class no compiler metadata, as an undecorated one has', () => {
+    class Dependency {}
+    @sharedClass('shared-state-spec:metadata')
+    class WithParameters {
+      constructor(readonly dependency: Dependency) {}
+    }
+
+    expect(Reflect.getOwnMetadataKeys(WithParameters)).toEqual([])
+    expect(Reflect.getOwnMetadataKeys(HandlerRegistry)).toEqual([])
+    expect(Reflect.getOwnMetadataKeys(ShardContext)).toEqual([])
   })
 })
