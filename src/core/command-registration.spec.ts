@@ -8,8 +8,8 @@ import { vi } from 'vitest'
 import { Command, CommandBuilder, Controller } from '@src/decorator/index.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type CommandRegistrationConfig } from '@src/interface/index.js'
-import { type CollectedCommand } from '@src/core/command-identity.js'
-import { collectCommands, planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
+import { type CollectedCommand, collectCommands } from '@src/core/command-identity.js'
+import { planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
 import { keepRestLocal } from '@src/spec-local-rest.js'
 
 const createLogger = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })
@@ -585,6 +585,19 @@ describe('registerCommands', () => {
 
       expect(rest.put).not.toHaveBeenCalled()
       expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('unchanged'))
+    })
+
+    // A command mention takes its IDs from these, so a development run that sends nothing still has them
+    it('passes on the listing of a scope it skips, and the answer of one it sends', async () => {
+      const rest = createRest()
+      const sent = vi.fn()
+      await register({ development: true, rest, listed: sent }).run
+      const skipped = vi.fn()
+      await register({ development: true, rest, listed: skipped }).run
+
+      const registered = [expect.objectContaining({ name: 'ping', id: 'id-ping' })]
+      expect(sent.mock.calls).toEqual([['global', registered]])
+      expect(skipped.mock.calls).toEqual([['global', registered]])
     })
 
     // Production on another machine, or another tool, cleared or changed the scope since

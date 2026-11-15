@@ -152,11 +152,13 @@ describe('an application MeoCord refuses as it loads', () => {
  * src/bin, src/build and src/testing are left out: the CLI and a test get the error with its stack.
  */
 const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
+  'common/command-mention.ts': { count: 1, why: 'commandMention(), called as a handler mentions a command' },
   'common/owner.guard.ts': { count: 1, why: 'OwnerGuard denying a user, as it runs' },
   'common/redis-cooldown-store.ts': { count: 1, why: "a Redis script's reply, read as a cooldown is taken" },
   'common/response/response-state.ts': { count: 6, why: 'a handler answering its interaction' },
   'common/route.ts': { count: 7, why: 'route().build(), called as a handler builds a customId' },
   'common/sharded-cooldown-store.ts': { count: 1, why: "a cooldown call on a shard whose manager's channel has closed" },
+  'core/command-ids.ts': { count: 10, why: 'commandMention(), called as a handler mentions a command' },
   'core/dispatcher.ts': { count: 1, why: 'an interaction no handler takes' },
   'core/filter-runner.ts': { count: 1, why: 'a filter, resolved as it handles an error' },
   'core/guard-runner.ts': { count: 3, why: 'a guard, resolved as it runs, or a guarded method called on an instance no app made' },
