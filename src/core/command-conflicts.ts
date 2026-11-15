@@ -11,7 +11,7 @@ import {
   ownEventHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
-import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-registration.js'
+import { commandNameOf, registrationKey, SENT_AS, serialise } from '@src/core/command-identity.js'
 import { buildComponentRoutes, type ComponentRoute, findComponentRouteConflicts } from '@src/core/component-routes.js'
 import { CommandType } from '@src/enum/index.js'
 import { type AutocompleteMeta, type CommandMeta } from '@src/interface/command-decorator.interface.js'
