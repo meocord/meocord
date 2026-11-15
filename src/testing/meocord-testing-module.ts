@@ -77,7 +77,10 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
-import { createMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
+import { createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
+
+// Taken as the module loads, before a test fakes the timers, so the wait after an unrouted component's listeners holds
+const realSetImmediate = globalThis.setImmediate
 import { Dispatcher, type DispatchRecorder } from '@src/core/dispatcher.js'
 import { createEventFallback, createFallback, type Fallback, type FallbackOptions, isUserOutcome } from '@src/core/fallback.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
@@ -834,8 +837,44 @@ export class TestingModule {
       },
       warnUnanswered,
       awaitObservers: true,
+      unroutedGrace: interaction => this.unroutedGrace(interaction),
     })
     return this.dispatcher
+  }
+
+  /** What the listeners an unrouted component was delivered to threw or rejected with, by interaction. */
+  private readonly listenerFailures = new WeakMap<object, unknown[]>()
+
+  /**
+   * Under strict mocks, for a client `createMockClient` made, delivers a component or modal no route takes to the
+   * client's `interactionCreate` listeners, as the gateway delivers it to each after MeoCord's: in the order they were
+   * attached, a `once` listener only once, and none after one that throws, as an emitter's `emit` stops. It waits for
+   * what each returns, then one turn of the event loop, so a collector's `collect` callback has started its answer; an
+   * answer that waits on a timer of its own is not waited for. Otherwise the bot's wait applies.
+   */
+  private unroutedGrace(interaction: Interaction): Promise<void> | undefined {
+    const { client } = interaction
+    if (!strictMocks() || !isMockClient(client)) return undefined
+    return this.deliverToListeners(interaction, client)
+  }
+
+  private async deliverToListeners(interaction: Interaction, client: Client): Promise<void> {
+    const failures: unknown[] = []
+    const settling: Promise<void>[] = []
+    // Read and called past the client's mock functions, so a test's record of them holds only its own calls
+    const listeners = Client.prototype.rawListeners.call(client, 'interactionCreate') as ((...args: unknown[]) => unknown)[]
+    for (const listener of listeners) {
+      try {
+        const result = listener.call(client, interaction)
+        if (result instanceof Promise) settling.push(result.then(() => undefined, (error: unknown) => void failures.push(error)))
+      } catch (error) {
+        failures.push(error)
+        break
+      }
+    }
+    await Promise.all(settling)
+    await new Promise(resolve => realSetImmediate(resolve))
+    if (failures.length > 0) this.listenerFailures.set(interaction, failures)
   }
 
   /**
@@ -848,14 +887,22 @@ export class TestingModule {
    * `dispatch` tests what the bot does with an input: which handler it reaches, with what params, and what
    * the user sees. To test one handler you name, whatever would route to it, use {@link invoke}.
    *
+   * Under `useStrictMocks()`, a component or modal no route takes, on a client from `createMockClient` with
+   * `interactionCreate` listeners, such as a collector's, is delivered to those listeners after MeoCord's dispatch,
+   * in the order they were attached, as the gateway delivers it; MeoCord answers that no handler matched only if none
+   * of them answered. Dispatch waits for what each listener returns, then one turn of the event loop, never the bot's
+   * 1.5 seconds; an answer a listener sends only after a timer of its own isn't waited for. A component a route takes
+   * is not delivered to them, unlike on a bot. Dispatch alone delivers it: calling `client.emit('interactionCreate')`
+   * as well delivers it twice. What a listener throws or rejects with rejects `dispatch` once MeoCord has answered.
+   *
    * @param input - An interaction or a message; or a reaction, with the user who reacted and whether they
    *   added it, `ReactionHandlerAction.ADD` unless given.
    * @returns Every handler reached, in the order it ran, whether any ran, and the first error a call ended
    *   with. An error the fallback answers as the user's own outcome resolves: a usage reply, an unknown
    *   command, or a guard's, a cooldown's, a validation's or a `UserError`'s refusal, as the fallback
-   *   answers each for an interaction or a message. Any other error no filter handles rejects the call once
-   *   the fallback has answered and every handler has run: with that error, or an `AggregateError` when
-   *   several were left unhandled.
+   *   answers each for an interaction or a message. Any other error no filter handles, and what a listener an
+   *   unrouted component was delivered to threw, rejects the call once the fallback has answered and every
+   *   handler has run: with that error, or an `AggregateError` when there are several.
    *
    * @example
    * ```ts
@@ -906,8 +953,15 @@ export class TestingModule {
     const failures = unhandled.flatMap(error =>
       unanswered.has(error) ? [unanswered.get(error)] : isUserOutcome(error, options ? undefined : input) ? [] : [error],
     )
+    // What the client's other listeners threw, given an unrouted component, as a bot's client would raise it
+    const thrownByListeners = this.listenerFailures.get(input) ?? []
+    this.listenerFailures.delete(input)
+    failures.push(...thrownByListeners)
     if (failures.length === 1) throw failures[0]
-    if (failures.length > 1) throw new AggregateError(failures, `${failures.length} errors were left to the fallback.`)
+    if (failures.length > 1) {
+      const by = thrownByListeners.length > 0 ? "left to the fallback or thrown by the client's listeners" : 'left to the fallback'
+      throw new AggregateError(failures, `${failures.length} errors were ${by}.`)
+    }
     const error = handlers.find(handler => handler.error !== undefined)?.error ?? unhandled[0]
     return { ran: handlers.some(handler => handler.ran), handlers, ...(error !== undefined && { error }) }
   }

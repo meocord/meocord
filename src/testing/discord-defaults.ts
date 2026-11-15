@@ -1,4 +1,6 @@
 import {
+  ApplicationIntegrationType,
+  AuthorizingIntegrationOwners,
   AutocompleteInteraction,
   AutoModerationRule,
   BaseGuild,
@@ -129,13 +131,42 @@ const guildIdOf = (channel: GuildChannel | ThreadChannel): string => (typeof cha
 const PLACEHOLDER_VALUES = new Map<object, Readonly<Record<string, string>>>([
   [MessageReaction.prototype, { me: 'false', message: 'createMockMessage()' }],
   [MessageMentions.prototype, { repliedUser: 'null' }],
-  [Message.prototype, { editedAt: 'null' }],
+  [Message.prototype, { editedAt: 'null', channel_id: 'undefined', guild_id: 'undefined' }],
   [GuildMember.prototype, { presence: 'null' }],
   [BaseGuild.prototype, { verified: 'false' }],
   [Guild.prototype, { systemChannel: 'null' }],
   [GuildChannel.prototype, { parent: 'null' }],
   [ModalSubmitInteraction.prototype, { message: 'null' }],
+  // A command and an autocomplete come from no message: discord.js gives them no `message`
+  [CommandInteraction.prototype, { message: 'undefined' }],
+  [AutocompleteInteraction.prototype, { message: 'undefined' }],
 ])
+
+/**
+ * Properties a discord.js class never has, which code reaching for a raw field or another class's member reads as
+ * `undefined` there, as InteractionCollector reads a message's `channel_id` and `guild_id` and a command's `message`
+ * (discord.js 14.27.0, src/structures/InteractionCollector.js:65-77). Strict mocks read them so; otherwise they are
+ * placeholders, as {@link PLACEHOLDER_VALUES} lists.
+ */
+const NEVER_SET = new Map<object, ReadonlySet<string>>([
+  [Message.prototype, new Set(['channel_id', 'guild_id'])],
+  [CommandInteraction.prototype, new Set(['message'])],
+  [AutocompleteInteraction.prototype, new Set(['message'])],
+])
+
+/** What Discord keys a server install to for an interaction in a direct message with the app's bot user. */
+const BOT_DM_GUILD_INSTALL = '0'
+
+/** The `AuthorizingIntegrationOwners` discord.js builds from Discord's `authorizing_integration_owners` data. */
+export const ownersFrom = (client: unknown, data: unknown): AuthorizingIntegrationOwners =>
+  new (AuthorizingIntegrationOwners as unknown as new (client: unknown, data: unknown) => AuthorizingIntegrationOwners)(client, data)
+
+/** The integration owners of an app installed to `guildId`. */
+const integrationOwners = (client: unknown, guildId: string): AuthorizingIntegrationOwners =>
+  ownersFrom(client, { [ApplicationIntegrationType.GuildInstall]: guildId })
+
+/** What a strict mock reads for a property its class never has. */
+const absent = (): undefined => undefined
 
 /** The value a test sets for `key` on a mock of `target`'s class, when a mock reads it as a placeholder. */
 export function placeholderValue(target: object, key: string): string | undefined {
@@ -474,6 +505,9 @@ export function discordDefaults(makers: MockMakers): (target: object, key: strin
     defaultsOf(BaseGuild, { verified: REAL_GETTER }),
     defaultsOf(GuildMember, { presence: REAL_GETTER }),
     defaultsOf(ModalSubmitInteraction, { message: () => null }),
+    // The app installed to a server, as the bot is: keyed to the interaction's server, or "0" in a direct message with
+    // the bot, as Discord's Authorizing Integration Owners Object says
+    defaultsOf(BaseInteraction, { authorizingIntegrationOwners: interaction => integrationOwners(interaction.client, interaction.guildId ?? BOT_DM_GUILD_INSTALL) }),
     defaultsOf(ThreadChannel, {
       guild: guildFromOwnId,
       guildId: thread => thread.guild.id,
@@ -496,6 +530,11 @@ export function discordDefaults(makers: MockMakers): (target: object, key: strin
   ])
 
   return (target, key) => {
+    if (strictMocks()) {
+      for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
+        if (NEVER_SET.get(proto)?.has(key)) return absent as unknown as Default<unknown, never>
+      }
+    }
     for (const defaults of strictMocks() ? [STRICT_DEFAULTS, DEFAULTS] : [DEFAULTS]) {
       for (let proto = Object.getPrototypeOf(target) as object | null; proto !== null; proto = Object.getPrototypeOf(proto)) {
         const found = defaults.get(proto)?.[key as never]

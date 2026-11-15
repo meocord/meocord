@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { ButtonInteraction, resolveColor } from 'discord.js'
+import { ButtonInteraction, ChatInputCommandInteraction, resolveColor } from 'discord.js'
 import { Command, Controller, MeoCord, MessageHandler, UseTheme } from '@src/decorator/index.js'
 import { bindTheme, Logger, respond, useTheme } from '@src/common/index.js'
 import { CommandType } from '@src/enum/index.js'
@@ -26,7 +26,7 @@ function sent(content: string, userId: string) {
 }
 
 /** A button pressed by `userId` in `guildId`, on `client` when given, as clicks on one bot share its client. */
-function press(customId: string, { guildId = GUILD, userId = ADA, client }: { guildId?: string; userId?: string; client?: object } = {}) {
+function press(customId: string, { guildId = GUILD, userId = ADA, client }: { guildId?: string | null; userId?: string; client?: object } = {}) {
   const interaction = createMockInteraction(ButtonInteraction, { customId })
   Object.assign(interaction, { guildId })
   Object.assign(interaction.user, { id: userId })
@@ -90,6 +90,22 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe('a listener bindTheme wraps, with themeFor', () => {
+  // A call in a direct message has no server, and a command no message to take one from
+  it('looks no server up for a call in a direct message, reading no message of its own', async () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const guild = vi.fn(() => colour('#00000C'))
+    const module = moduleWith({ guild }, [Plain])
+    await module.invoke(Plain, 'plain', press('plain'))
+
+    collector.emit('collect', press('pick', { guildId: null }))
+    collector.emit('collect', createMockInteraction(ChatInputCommandInteraction, { commandName: 'poll', guildId: null } as never))
+    await pause()
+
+    // The bound call's server alone
+    expect(guild).toHaveBeenCalledTimes(1)
+    expect(warned.mock.calls.map(([text]) => String(text)).filter(text => text.includes('.message'))).toEqual([])
+  })
+
   it('answers each member who clicks in their own theme, over the handler\'s @UseTheme', async () => {
     const module = moduleWith(byUser)
     await module.invoke(Poll, 'poll', press('poll'))

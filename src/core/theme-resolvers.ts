@@ -302,7 +302,9 @@ const idOf = (value: unknown): string | undefined => (typeof value === 'string' 
 export function themeTargets(args: readonly unknown[]): { guildId?: string; userId?: string } {
   const [first, second] = args as [Record<string, any> | undefined, Record<string, any> | undefined]
   if (!first || typeof first !== 'object') return {}
-  const guildId = idOf(first.guildId) ?? idOf(first.guild?.id) ?? idOf(first.message?.guildId)
+  // A reaction has no guildId of its own, so its message's; a call whose guildId is null has no server at all
+  const own: unknown = first.guildId
+  const guildId = idOf(own) ?? idOf(first.guild?.id) ?? (own === null ? undefined : idOf(first.message?.guildId))
   // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
   const userId =
     idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)

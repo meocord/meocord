@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { EventEmitter } from 'node:events'
 import { createMockFn, type MockedFunction, type Mock, usesRunnerMockFn } from '@src/testing/mock-fn.js'
 import {
   type APIAuthorizingIntegrationOwnersMap,
@@ -124,7 +125,7 @@ import {
 import { createDiscordError } from '@src/testing/response.js'
 import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
-import { discordDefaults, placeholderValue, REAL_GETTER } from '@src/testing/discord-defaults.js'
+import { discordDefaults, ownersFrom, placeholderValue, REAL_GETTER } from '@src/testing/discord-defaults.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from '@src/testing/discord-shape.js'
@@ -1115,6 +1116,10 @@ function mockCallbackResponse(interaction: Record<string, any>, answer: Callback
   return response as InteractionCallbackResponse
 }
 
+/** Integration owners discord.js would build again from the same data; anything else as it is. */
+const copyOwners = (client: unknown, owners: unknown): unknown =>
+  owners instanceof AuthorizingIntegrationOwners ? ownersFrom(client, (owners as unknown as { data: unknown }).data) : owners
+
 /** The id of the interaction that sent `message`, when it names one, as discord.js names an update's response. */
 function interactionMetadataId(message: unknown): string | undefined {
   const metadata = (message as { interactionMetadata?: unknown } | null | undefined)?.interactionMetadata
@@ -1440,6 +1445,8 @@ export function createMockInteraction<T extends object>(
 export function createMockInteraction<T extends object>(Class: InteractionClass<T>, props?: MockProps<T>): DeepMocked<T> {
   const instance = Object.create(Class.prototype) as Record<string, unknown>
   const stubs = new Map<string, Mock>()
+  // The mock returned, which reads the defaults the instance lacks; set once it is made, before any answer runs
+  let mock: Record<string, unknown> = instance
 
   // Set type fields so all prototype type-guard methods compute the right value
   const fields = CLASS_TYPE_FIELDS[Class.name]
@@ -1750,6 +1757,28 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     // What each answer's message made for itself, by its id, so every read of it has the same author and place
     const madePlaces = new Map<string, MadePlace>()
     const madeFor = (id: string) => madePlaces.get(id) ?? madePlaces.set(id, {}).get(id)!
+    /**
+     * A held message as a mock message. Under strict mocks one the interaction sent names it in `interactionMetadata`,
+     * as discord.js builds it from Discord's `interaction_metadata` (discord.js 14.27.0,
+     * src/util/Transformers.js:52-66): a follow-up with the original response's id, and a component's reply with the id
+     * of the message it was on. The modal a submit came from is unknown to the mock, so `triggeringInteractionMetadata`
+     * is `null`.
+     */
+    const messageOf = (held: HeldMessage) => {
+      const message = messageFrom(held, madeFor(held.id), ...answeredIn())
+      if (!strict || !held.sentHere) return message
+      message.interactionMetadata = readPlaceQuietly(() => ({
+        id: instance.id as string,
+        type: instance.type as InteractionType,
+        user: instance.user as User,
+        // Built from the same data, as discord.js builds the message's from Discord's
+        authorizingIntegrationOwners: copyOwners(instance.client, mock.authorizingIntegrationOwners),
+        originalResponseMessageId: followUps.has(held.id) ? (original && typeof original !== 'function' && original.id !== '' ? original.id : null) : null,
+        interactedMessageId: isComponent ? ((instance.message as { id?: string } | null | undefined)?.id ?? null) : null,
+        triggeringInteractionMetadata: null,
+      })) as never
+      return message
+    }
     // Each call's message, read by its behaviour right after the gate made it
     let made: HeldMessage | undefined
     let followUpMade: string | undefined
@@ -1788,7 +1817,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         return mockCallbackResponse(interaction, {
           resourceType:
             method === 'deferUpdate' ? undefined : method === 'update' ? InteractionResponseType.UpdateMessage : InteractionResponseType.ChannelMessageWithSource,
-          message: held && method !== 'deferUpdate' ? messageFrom(held, madeFor(held.id), ...answeredIn()) : null,
+          message: held && method !== 'deferUpdate' ? messageOf(held) : null,
           messageId: held?.id || null,
           loading: method === 'deferReply',
           // An update leaves the message's flags; a reply and a deferral set them
@@ -1808,7 +1837,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     answer(
       'reply',
       resolvedAnswer('reply'),
-      resolvesUndefined(first('reply', 'replied', ([options]) => (original = answerMade = hold('reply', () => sent(options, false))))),
+      resolvesUndefined(first('reply', 'replied', ([options]) => (original = answerMade = hold('reply', () => ({ ...sent(options, false), sentHere: true }))))),
     )
     answer(
       'deferReply',
@@ -1817,7 +1846,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         first('deferReply', 'deferred', ([options]) => {
           // Strict mocks hold it loading, as Discord does until it is edited, and ephemeral when asked
           const flags = strict ? { flags: new MessageFlagsBitField(MessageFlags.Loading | (hasEphemeralFlag(options) ? MessageFlags.Ephemeral : 0)) } : {}
-          original = answerMade = { ...sent(undefined), ...flags }
+          original = answerMade = { ...sent(undefined), sentHere: true, ...flags }
         }),
       ),
     )
@@ -1827,14 +1856,14 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       async () => {
         const held = followUps.get(followUpMade!)!
         // One held to build when read resolves to its id alone, as building it now would refuse it
-        return typeof held === 'function' ? createMockMessage({ id: followUpMade }) : messageFrom(held, madeFor(held.id), ...answeredIn())
+        return typeof held === 'function' ? createMockMessage({ id: followUpMade }) : messageOf(held)
       },
       later(
         'followUp',
         ([options]) => {
           // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen; its id taken
         // once built, so one that fails to build under strict mocks takes none
-        const held = hold('followUp', () => sent(options, false))
+        const held = hold('followUp', () => ({ ...sent(options, false), sentHere: true }))
         const id = nextSnowflake()
         made = undefined
         followUps.set(id, typeof held === 'function' ? () => ({ ...held(), id }) : { ...held, id })
@@ -1848,7 +1877,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       async () => {
         if (!made) throw unknownMessage()
         // The response has the message as Discord answers the edit, before its uploaded files have loaded again
-        return messageFrom({ ...made, components: made.returned ?? made.components }, madeFor(made.id), ...answeredIn())
+        return messageOf({ ...made, components: made.returned ?? made.components })
       },
       later('editReply', ([options]) => {
         const id = targetId((options as { message?: unknown } | undefined)?.message)
@@ -1864,7 +1893,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       createMockFn(async (message?: unknown) => {
         const held = target(targetId(message))
         if (!held) throw unknownMessage()
-        return messageFrom(held, madeFor(held.id), ...answeredIn())
+        return messageOf(held)
       }),
     )
     answer(
@@ -2252,9 +2281,10 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
   }
 
   // Options assigned after creation, directly or through Object.assign, belong to it as those given do
-  return stubDeep(instance, stubs, (prop, value) => {
+  mock = stubDeep(instance, stubs, (prop, value) => {
     if (prop === 'options') ownOptions(instance, value)
-  }) as DeepMocked<T>
+  }) as Record<string, unknown>
+  return mock as DeepMocked<T>
 }
 
 // ---------------------------------------------------------------------------
@@ -2402,6 +2432,12 @@ export function createMockUser(props: MockProps<User> = {}): DeepMocked<User> {
  * `channels.cache` are real, empty collections. Every mock client is logged in as the same bot, so `user.id` is the id
  * a message mentions to address it.
  *
+ * Under `useStrictMocks()` its emitter works as discord.js's: `on()`, `once()`, `off()`, `emit()`, `listeners()`,
+ * `listenerCount()` and the rest stay mock functions that record each call, and call through to the real methods, so
+ * `client.on()` attaches the listener and returns the client, and a collector made on the client sees what is emitted.
+ * {@link TestingModule.dispatch} then leaves a component or modal no route takes to those listeners, as the bot does.
+ * Without strict mocks they attach nothing and return `undefined`, with a warning once.
+ *
  * @example
  * ```ts
  * import { expect } from 'vitest'
@@ -2417,7 +2453,11 @@ export function createMockUser(props: MockProps<User> = {}): DeepMocked<User> {
  * @see {@link createMockMessage}
  */
 export function createMockClient(): DeepMocked<Client<true>> {
-  const instance = Object.create(Client.prototype) as Record<string, unknown>
+  const strict = strictMocks()
+  // Under strict mocks, the emitter set up as discord.js's constructor sets it up, without the rest of the constructor
+  const instance = (
+    strict ? Reflect.construct(EventEmitter, [{ captureRejections: true }], Client) : Object.create(Client.prototype)
+  ) as Record<string, unknown>
 
   // Manager properties are constructor-assigned — pre-initialize as prototype-based
   // stubs so ALL manager methods (not just fetch) are auto-stubbed as a mock fn.
@@ -2436,10 +2476,63 @@ export function createMockClient(): DeepMocked<Client<true>> {
   // A client a test is given is a logged-in one
   instance.isReady = createMockFn(() => true)
 
-  const client = stubDeep(instance) as DeepMocked<Client<true>>
+  const client = stubDeep(instance, emitterStubs(strict)) as DeepMocked<Client<true>>
+  mockClients.add(client)
   for (const key of ['users', 'channels', 'guilds']) (instance[key] as Record<string, unknown>).client = client
   Object.defineProperty(instance.user, 'client', { value: client, writable: true, configurable: true })
   return client
+}
+
+// The clients createMockClient made, which dispatch delivers an unrouted component to the listeners of
+const mockClients = new WeakSet<object>()
+
+/** Whether `client` is one {@link createMockClient} made. */
+export const isMockClient = (client: unknown): boolean => typeof client === 'object' && client !== null && mockClients.has(client)
+
+/** The emitter methods of a client, discord.js's two included, which a mock client's emitter answers. */
+const EMITTER_METHODS = [
+  'addListener',
+  'on',
+  'prependListener',
+  'once',
+  'prependOnceListener',
+  'removeListener',
+  'off',
+  'removeAllListeners',
+  'emit',
+  'listeners',
+  'rawListeners',
+  'listenerCount',
+  'eventNames',
+  'setMaxListeners',
+  'getMaxListeners',
+  'incrementMaxListeners',
+  'decrementMaxListeners',
+] as const
+
+/** What default mode warns, once, where an app's or a test's call reaches a mock client's emitter. */
+const INERT_EMITTER_WARNING =
+  "A mock client's on(), once(), off(), emit(), listeners() and listenerCount() attach and reach no listener here, and " +
+  'return undefined; under useStrictMocks() they work as discord.js\'s emitter does. In the next major version (5.0) ' +
+  'they do so without the call (https://github.com/meocord/meocord/issues/441).'
+
+/**
+ * A mock client's emitter methods: mock functions that call through to `Client.prototype`'s under strict mocks, so each
+ * call is recorded and a test can still set its own behaviour; in default mode, ones that do nothing, as before, and
+ * warn once where an app's or a test's own call reaches them.
+ */
+function emitterStubs(strict: boolean): Map<string, StubValue> {
+  const prototype = Client.prototype as unknown as Record<string, (...args: unknown[]) => unknown>
+  return new Map(
+    EMITTER_METHODS.map(name => [
+      name,
+      createMockFn(function (this: unknown, ...args: unknown[]) {
+        if (strict) return prototype[name]!.apply(this, args)
+        if (!isOwnCall()) warnOnce(mockLogger, INERT_EMITTER_WARNING)
+        return undefined
+      }),
+    ]),
+  )
 }
 
 /**
@@ -3477,6 +3570,8 @@ interface HeldMessage {
   embeds: unknown[]
   flags?: MessageFlagsResolvable
   editedTimestamp: number | null
+  /** Whether the interaction holding it sent it, as a reply or a follow-up, so Discord names the interaction on it. */
+  sentHere?: boolean
 }
 
 /** A value as its API JSON: a builder or discord.js structure through `toJSON()`, anything else as it is. */
