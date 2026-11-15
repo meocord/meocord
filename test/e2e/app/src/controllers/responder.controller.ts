@@ -6,11 +6,10 @@ import {
   type ChatInputCommandInteraction,
   MessageFlags,
 } from 'discord.js'
-import { getInstallContext, respond } from 'meocord/common'
+import { getInstallContext, OwnerGuard, respond } from 'meocord/common'
 import { Command, Controller, Defer, UseGuard } from 'meocord/decorator'
 import { CommandType } from 'meocord/enum'
 import { PanelCommandBuilder, PrivateFailCommandBuilder } from '@src/controllers/builders/responder.builders'
-import { OwnerGuard } from '@src/guards/owner.guard'
 import { report, sleep } from '@src/report'
 
 const button = (customId: string, label: string, style = ButtonStyle.Secondary) =>

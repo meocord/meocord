@@ -307,7 +307,7 @@ it in each of the four contexts, and work through the steps in each:
    message, and the panel comes back as it was: its buttons usable, the loading view gone. The handler
    answers only with a follow-up, so nothing but `@Defer` puts the panel back.
 7. **A stranger's click**: from the second account, click **Owner only**. Only they see "Only the user
-   who opened this panel can use this button.", the panel does not change, not even briefly, and the
+   who opened this can use it.", the panel does not change, not even briefly, and the
    output flags the click as another user's. When you click it, the lock appears and the text says
    "Owner only: handled for its owner".
 8. **The error, public**: click **Fail**. You see a private "Oops!" message with "An error occurred

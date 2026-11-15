@@ -22,6 +22,7 @@ export {
 export type { MessageUsageIssue, UserErrorOptions } from '@src/common/errors.js'
 export type { CooldownScope } from '@src/common/errors.js'
 export { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.js'
+export { OwnerGuard } from '@src/common/owner.guard.js'
 export type { CooldownBatchVerdict, CooldownEntry, CooldownLimit, CooldownVerdict } from '@src/common/cooldown-store.js'
 export { RedisCooldownStore } from '@src/common/redis-cooldown-store.js'
 export { route } from '@src/common/route.js'

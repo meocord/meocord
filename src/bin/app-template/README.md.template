@@ -59,8 +59,9 @@ disables the message's controls with a loading view until the handler answers.
 `src/presenters/app.presenter.ts` decides how the loading and error views look.
 
 `@Cooldown({ uses: 5, seconds: 60 })` limits how often a user can run a handler, and
-`src/guards/owner.guard.ts` shows a guard that denies with a reason by throwing
-`GuardDeniedError`.
+`OwnerGuard` from `meocord/common` lets only the user a button was made for click it. The
+[Guards](https://meocord.dev/docs/4.2/guards) page shows how to write your own, such as one
+that denies with a reason by throwing `GuardDeniedError`.
 
 ## Generating components
 

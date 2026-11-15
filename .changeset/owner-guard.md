@@ -1,0 +1,7 @@
+---
+'meocord': minor
+---
+
+`OwnerGuard`, from `meocord/common`, lets only the user whose id a component's customId carries use it. Put the id in the route, `@Command('card/{ownerId:snowflake}', CommandType.BUTTON)`, and add `@UseGuard(OwnerGuard)`; anyone else who clicks is told privately, in their own language, "Only the user who opened this can use it." Name another route param or give your own words with `@UseGuard({ provide: OwnerGuard, params: { param: 'authorId', message: '…' } })`. The text is `meocord.guard.notOwner`, which an app's catalogs translate. Since the guard throws `GuardDeniedError`, a filter catching that error can answer otherwise, and observers name it in `deniedBy`.
+
+The bot refuses to start with `OwnerGuard` where it would deny every call: on a slash command, a context menu or an entry point, and on a component or modal handler whose routes lack the param. Written with `@UseGuard` on a message, reaction, autocomplete or event handler it is refused too; on a controller or in `@MeoCord({ guards })` it passes over those handlers, which it never runs for, as a controller's `@Cooldown` passes over the handlers it never counts. Apps made with `meocord create` no longer get their own `src/guards/owner.guard.ts`: the sample button uses `OwnerGuard`. An app that has that file can keep it, or delete it and import `OwnerGuard` from `meocord/common`. See https://meocord.dev/docs/4.3/guards.

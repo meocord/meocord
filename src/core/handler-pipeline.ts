@@ -5,7 +5,17 @@ import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from 
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
 import { deferMisuseError, handlerDefer, nonInteractionHandler, startDefer } from '@src/core/defer.js'
-import { callGuardedHandler, type GuardEntry, handlerGuards, isGuardWithParams, perHandler, runGuards } from '@src/core/guard-runner.js'
+import {
+  callGuardedHandler,
+  classLevelGuards,
+  type GuardEntry,
+  handlerGuards,
+  isGuardWithParams,
+  methodStages,
+  perHandler,
+  runGuards,
+  stageClasses,
+} from '@src/core/guard-runner.js'
 import {
   bindShared,
   handlerInterceptors,
@@ -48,7 +58,9 @@ import {
   getMessageHandlers,
   getReactionHandlers,
 } from '@src/decorator/controller.decorator.js'
-import { appliesTo } from '@src/core/stage-scope.js'
+import { appliesTo, stageClass } from '@src/core/stage-scope.js'
+import { OWNER_PARAM } from '@src/common/owner.guard.js'
+import { CommandType } from '@src/enum/index.js'
 import { META } from '@src/util/metadata-keys.js'
 
 /** The stages that run around one handler, in the order they run. */
@@ -275,8 +287,78 @@ export function prepareEventHandler(container: Container, cls: new (...args: any
   }
 }
 
-/** Binds what one handler's interceptors, filters and pipes need, refusing `@Defer` where it cannot apply. */
+/** The handlers whose calls carry customId params: components' and modals'. */
+const CUSTOM_ID_TYPES: ReadonlySet<CommandType> = new Set([
+  CommandType.BUTTON,
+  CommandType.SELECT_MENU,
+  CommandType.USER_SELECT_MENU,
+  CommandType.ROLE_SELECT_MENU,
+  CommandType.MENTIONABLE_SELECT_MENU,
+  CommandType.CHANNEL_SELECT_MENU,
+  CommandType.MODAL_SUBMIT,
+])
+
+/** A command handler of a type whose calls carry no customId, as an error names it. */
+const COMMAND_KINDS: Partial<Record<CommandType, string>> = {
+  [CommandType.SLASH]: 'a slash command handler',
+  [CommandType.CONTEXT_MENU]: 'a context menu handler',
+  [CommandType.PRIMARY_ENTRY_POINT]: 'an entry point command handler',
+}
+
+/** What one handler that is no command is, as an error names it. */
+function otherKind(prototype: object, method: string): string {
+  if (getMessageHandlers(prototype).some(handler => handler.method === method)) return 'a message handler'
+  if (getReactionHandlers(prototype).some(handler => handler.method === method)) return 'a reaction handler'
+  if (getAutocompleteHandlers(prototype).some(handler => handler.methodName === method)) return 'an autocomplete handler'
+  return 'an event handler'
+}
+
+/**
+ * Refuses `OwnerGuard` where it would deny every call it runs for: on a command that is no component or modal, and on a
+ * component's or modal's whose routes lack the param it reads. One written on the method is refused on any other
+ * handler too; a controller's or the app's passes over the handlers it never runs for, as their `@Cooldown` does.
+ */
+function assertOwnerGuards(container: Container, controller: new (...args: any[]) => unknown, method: string): void {
+  const prototype = controller.prototype as object
+  const commands = Object.entries(getCommandMap(prototype) ?? {}).flatMap(([pattern, metas]) =>
+    metas.filter(meta => meta.methodName === method).map(meta => ({ pattern, meta })),
+  )
+  // The method's own guards on any handler; the controller's and the app's on commands alone, as OwnerGuard skips every
+  // other call
+  const scoped = [
+    ...methodStages<GuardEntry>(prototype, method, META.methodGuards).map(entry => ({ entry, from: 'OwnerGuard' })),
+    ...(commands.length === 0
+      ? []
+      : [
+          ...stageClasses(prototype, method).flatMap(classLevelGuards).map(entry => ({ entry, from: 'OwnerGuard' })),
+          ...globalStagesOf(container).guards.map(entry => ({ entry, from: 'OwnerGuard, from @MeoCord({ guards }),' })),
+        ]),
+  ]
+  const where = `${controller.name}.${method}`
+  for (const { entry, from } of scoped.filter(({ entry }) => Reflect.getOwnMetadata(META.ownerGuard, stageClass(entry)) === true)) {
+    const command = commands.find(({ meta }) => !CUSTOM_ID_TYPES.has(meta.type))
+    const kind = commands.length === 0 ? otherKind(prototype, method) : command && (COMMAND_KINDS[command.meta.type] ?? 'a command handler')
+    if (kind) {
+      startupError(new Error(
+        `${where}: ${from} is for component and modal handlers, whose customId carries the owner's id, and this is ${kind}.`,
+      ))
+      continue
+    }
+    const param = isGuardWithParams(entry) && typeof entry.params?.param === 'string' ? entry.params.param : OWNER_PARAM
+    const route = commands.find(({ meta }) => !(meta.dynamicParams ?? []).includes(param))
+    if (route) {
+      startupError(new Error(
+        `${where}: ${from} compares the user with the customId param "${param}", and the route ` +
+          `"${route.pattern}" has none. Add {${param}:snowflake} to the pattern, or name the param ` +
+          `with { provide: OwnerGuard, params: { param } }.`,
+      ))
+    }
+  }
+}
+
+/** Binds what one handler's interceptors, filters and pipes need, refusing `@Defer` and `OwnerGuard` where they cannot apply. */
 function prepareHandler(container: Container, controller: new (...args: any[]) => unknown, method: string): void {
+  assertOwnerGuards(container, controller, method)
   const prototype = controller.prototype as object
   const kind = handlerDefer(prototype, method) ? nonInteractionHandler(prototype, method) : undefined
   if (kind) return startupError(deferMisuseError(controller.name, method, kind))

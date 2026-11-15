@@ -31,6 +31,8 @@ export const META = {
 
   /** Marks a class `@Guard` decorated. */
   guardClass: 'meocord:guard-class',
+  /** Marks `OwnerGuard` itself, which either build of this version recognises, and not a class extending it. */
+  ownerGuard: 'meocord:owner-guard',
   /** The guards a class-level `@UseGuard` declares, kept on the class. */
   classLevelGuards: 'meocord:class-level-guards',
   /** The guards a class-level `@UseGuard` applies to one method, in the order they run. */

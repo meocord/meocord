@@ -1,8 +1,8 @@
 /**
  * Checks that every public symbol has a `@group`, checks its JSDoc and compiles its `@example`, and the README's
  * blocks, against the built package, after `bun run build`. `--coverage` lists the symbols still missing parts; `--fix`
- * only moves every documentation link onto the package's own line, with no build: `release:version` runs it after
- * setting the version, so a new minor's release carries its links.
+ * only moves every documentation link, in the JSDoc and the app templates, onto the package's own line, with no build:
+ * `release:version` runs it after setting the version, so a new minor's release and the apps it creates carry its links.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs'
@@ -201,11 +201,12 @@ function docsLine(): string {
   return version.split('.').slice(0, 2).join('.')
 }
 
-/** The source files the package's JSDoc is written in. */
+/** The files whose documentation links a reader follows: the package's JSDoc, and the templates a new app is made from. */
 function sourceFiles(dir = path.join(repoRoot, 'src')): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const file = path.join(dir, entry.name)
     if (entry.isDirectory()) return sourceFiles(file)
+    if (entry.name.endsWith('.template')) return [file]
     return /\.ts$/.test(entry.name) && !/\.(spec|test-d)\.ts$/.test(entry.name) ? [file] : []
   })
 }
