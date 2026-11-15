@@ -29,8 +29,8 @@ import {
   buildComponentRoutes,
   type ComponentRoute,
   matchComponentRoute,
-  type RouteParamValue,
 } from '@src/core/component-routes.js'
+import { type RouteParamValue } from '@src/core/custom-id.js'
 import {
   appPresenterOf,
   type CallStart,

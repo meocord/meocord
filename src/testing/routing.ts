@@ -4,8 +4,8 @@ import {
   type ControllerClass,
   findComponentRouteConflicts,
   matchComponentRoute,
-  readCustomId,
 } from '@src/core/component-routes.js'
+import { readCustomId } from '@src/core/custom-id.js'
 import { isCustomIdRouted } from '@src/util/interaction.util.js'
 import { buildMessageRoutes, fitsScope, matchMessageRoute, type MessageRoute, staticMessageStarts } from '@src/core/message-routes.js'
 import { isGuildType, needsGuild, takesGuildParam } from '@src/core/message-params.js'
@@ -241,7 +241,7 @@ export function resolveRoute(
   const typed = Object.keys(route.types).length > 0
   // The routes ranked behind it that the customId matches too, which dispatch never reaches for it
   const behind = routes.slice(routes.indexOf(route) + 1)
-  const alsoMatches = behind.filter(other => other.meta.type === input.type && readCustomId(other.pattern, other.meta.regex!, input.customId)).map(other => other.pattern)
+  const alsoMatches = behind.filter(other => other.meta.type === input.type && readCustomId(other.types, other.meta.regex!, input.customId)).map(other => other.pattern)
   const resolved: ResolvedRoute = { controller: route.controllerClass, method, handler: route.controllerClass.prototype[method], params: text, ...(typed && { values: params }) }
   return alsoMatches.length > 0 ? readableOnly(resolved, { alsoMatches }) : resolved
 }

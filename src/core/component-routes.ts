@@ -1,14 +1,10 @@
 import { type CommandType } from '@src/enum/index.js'
 import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { createRegexFromPattern, getCommandMap, paramNarrowness, patternShape, sharedCustomId } from '@src/decorator/controller.decorator.js'
-import { decodeRouteParams } from '@src/common/route.js'
-import { parseSegment } from '@src/core/scalar-types.js'
+import { readCustomIdSegments, type RouteParamValue } from '@src/core/custom-id.js'
 import { refuse } from '@src/util/refusal.util.js'
 
 export type ControllerClass = new (...args: any[]) => any
-
-/** A customId param as its handler gets it: text, or the value of its type, such as a number for `{count:int}`. */
-export type RouteParamValue = string | number | boolean
 
 /** A `@Command` route matched by customId pattern. */
 export interface ComponentRoute {
@@ -70,7 +66,7 @@ export function buildComponentRoutes(controllerClasses: readonly ControllerClass
       if (!Array.isArray(metaArray)) continue
       for (const meta of metaArray) {
         if (!meta.regex) continue
-        const route = { controllerClass, meta, pattern, types: typesOf(pattern) }
+        const route = { controllerClass, meta, pattern, types: createRegexFromPattern(pattern).types }
         const key = `${meta.type}\0${patternShape(pattern)}`
         const earlier = seen.get(key)
         if (!earlier) {
@@ -107,45 +103,10 @@ export function matchComponentRoute(
 ): { route: ComponentRoute; params: Record<string, RouteParamValue>; text: Record<string, string> } | undefined {
   for (const route of routes) {
     if (!acceptsType(route.meta.type)) continue
-    const read = readCustomIdSegments(route.pattern, route.meta.regex!, customId)
+    const read = readCustomIdSegments(route.types, route.meta.regex!, customId)
     if (read) return { route, params: read.values, text: read.text }
   }
   return undefined
-}
-
-const typesByPattern = new Map<string, Record<string, string>>()
-
-/** The typed params of a customId pattern, read once per pattern. */
-function typesOf(pattern: string): Record<string, string> {
-  let types = typesByPattern.get(pattern)
-  if (!types) typesByPattern.set(pattern, (types = createRegexFromPattern(pattern).types))
-  return types
-}
-
-/**
- * The params `pattern`, compiled as `regex`, captures from a customId, each typed param as its value:
- * `undefined` when the customId does not match, or a segment is not a value of its param's type.
- */
-export function readCustomId(pattern: string, regex: RegExp, customId: string): Record<string, RouteParamValue> | undefined {
-  return readCustomIdSegments(pattern, regex, customId)?.values
-}
-
-/** {@link readCustomId}'s values, with each param's text as the customId gave it. */
-function readCustomIdSegments(
-  pattern: string,
-  regex: RegExp,
-  customId: string,
-): { values: Record<string, RouteParamValue>; text: Record<string, string> } | undefined {
-  const match = regex.exec(customId)
-  if (!match) return undefined
-  const text = decodeRouteParams(match.groups)
-  const values: Record<string, RouteParamValue> = { ...text }
-  for (const [name, type] of Object.entries(typesOf(pattern))) {
-    const value = parseSegment(type, text[name]) as RouteParamValue | undefined
-    if (value === undefined) return undefined
-    values[name] = value
-  }
-  return { values, text }
 }
 
 /**

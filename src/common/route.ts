@@ -1,6 +1,7 @@
 import { DiscordLimits } from '@src/common/discord-limits.js'
 import { createRegexFromPattern, literalBraces } from '@src/decorator/controller.decorator.js'
 import { parseSegment } from '@src/core/scalar-types.js'
+import { encodeSegment, readCustomId } from '@src/core/custom-id.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { type IsWord } from '@src/util/word-chars.util.js'
@@ -71,9 +72,39 @@ export type RouteValues<T extends string> = {
 
 
 /**
- * A component's customId pattern with a typed `build`, as {@link route} makes it.
+ * The params a customId route gives its handler, one for each of its params, as {@link Route.match} reads them.
  *
- * Pass it to `@Command` in place of the pattern's text, and `build` the customIds that reach its handler.
+ * An untyped param is its text, `int` and `number` are numbers, `bool` is a boolean, `snowflake` and `uuid` are
+ * text, and words to choose from, such as `{order:asc|desc}`, are the word. A pattern without params gives an empty
+ * object. It also types a handler's params, or a helper that receives them, as `ParamsOf` does for a message pattern.
+ *
+ * @example
+ * ```ts
+ * const closeTicket = route('ticket/{id:int}/close')
+ *
+ * // { id: number }
+ * type CloseParams = RouteMatch<typeof closeTicket.pattern>
+ *
+ * @Command(closeTicket, CommandType.BUTTON)
+ * async close(interaction: ButtonInteraction, { id }: CloseParams) {
+ *   await interaction.reply(`Closed ticket #${id}.`)
+ * }
+ * ```
+ *
+ * @group Types
+ * @see {@link Route}
+ * @see {@link RouteParams}
+ * @see {@link RouteValues}
+ */
+export type RouteMatch<T extends string> = {
+  [S in RouteParamSpecs<T> as S['name']]: S['type'] extends 'string' ? string : SegmentValue<S['type']>
+}
+
+/**
+ * A component's customId pattern with a typed `build` and `match`, as {@link route} makes it.
+ *
+ * Pass it to `@Command` in place of the pattern's text, `build` the customIds that reach its handler, and `match`
+ * one to read its params back.
  *
  * @group Types
  * @see {@link route}
@@ -89,26 +120,34 @@ export interface Route<T extends string = string> {
    *   that is empty or over 100 characters.
    */
   build(...values: [RouteParams<T>] extends [never] ? [] : [values: RouteValues<T>]): string
+  /**
+   * Reads a customId's params as this route's handler receives them, for a customId the bot did not get as a
+   * handler call, such as another button on the message. `/` and `%` that `build` encoded come back as they were
+   * given, and a typed param comes back as its value.
+   *
+   * @remarks
+   * It reads this route alone, as dispatch does. A customId it matches reaches its handler unless a more specific
+   * pattern in the app ranks first for it, as `ticket/new` does before `ticket/{id}`.
+   *
+   * @param customId - The customId to read.
+   * @returns The params, an empty object for a pattern without params, or `undefined` when the customId doesn't match
+   *   the pattern or a segment isn't a value of its param's type.
+   *
+   * @example
+   * ```ts
+   * const closeTicket = route('ticket/{id:int}/close')
+   *
+   * closeTicket.match('ticket/42/close') // { id: 42 }
+   * closeTicket.match('ticket/new/close') // undefined: 'new' isn't an int
+   * closeTicket.match('poll/1') // undefined
+   * ```
+   */
+  match(customId: string): RouteMatch<T> | undefined
   /** The pattern, so a route reads as its pattern in a template string. */
   toString(): T
 }
 
 const PLACEHOLDER = /\{(\w+)(?::([^}/]*))?}/g
-
-/** Encodes the characters that would end a param's segment, or read as an encoding, in a customId. */
-const encodeSegment = (value: string): string => value.replace(/%/g, '%25').replace(/\//g, '%2F')
-
-/**
- * A captured customId param as the handler receives it: `%2F` and `%25`, which `Route.build` writes for
- * `/` and `%`, read back as those characters.
- */
-const decodeSegment = (value: string): string =>
-  value.replace(/%(25|2F)/gi, (_, code: string) => (code === '25' ? '%' : '/'))
-
-/** Every captured param of a customId, decoded as `decodeSegment` decodes one. */
-export function decodeRouteParams(groups: Record<string, string> | undefined): Record<string, string> {
-  return Object.fromEntries(Object.entries(groups ?? {}).map(([name, value]) => [name, decodeSegment(value)]))
-}
 
 /** The segment types whose value is text, which `build` takes only as a string. */
 const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
@@ -127,7 +166,7 @@ const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
  * @param pattern - The customId pattern, where `{name}` captures one `/`-separated segment and `{name:int}` a
  *   typed one. A param's name is ASCII letters, digits and _: a brace pair such as `{café}` is literal text, and is
  *   warned about.
- * @returns A route whose `build` takes a value for each param.
+ * @returns A route whose `build` takes a value for each param, and whose `match` reads them back from a customId.
  * @throws Error when the pattern cannot be read, as `@Command` would throw for it.
  *
  * @example
@@ -151,7 +190,7 @@ const TEXT_TYPES: ReadonlySet<string> = new Set(['snowflake', 'uuid'])
  * @see {@link https://meocord.dev/docs/4.2/components | Buttons, selects and modals}
  */
 export function route<const T extends string>(pattern: T): Route<T> {
-  const { params, types } = createRegexFromPattern(pattern)
+  const { params, types, regex } = createRegexFromPattern(pattern)
   const braces = literalBraces(pattern)
   // Once per pattern, as a route made inside a handler is made on every call
   if (braces) warnOnce(logger, `Pattern "${pattern}": ${braces}`)
@@ -189,6 +228,7 @@ export function route<const T extends string>(pattern: T): Route<T> {
   return Object.freeze({
     pattern,
     build: build as Route<T>['build'],
+    match: (customId: string) => readCustomId(types, regex, customId) as RouteMatch<T> | undefined,
     toString: () => pattern,
   })
 }
