@@ -3,7 +3,6 @@ import {
   Client,
   type ClientOptions,
   type Interaction,
-  Message,
   type RESTOptions,
   Routes,
 } from 'discord.js'
@@ -23,7 +22,7 @@ import { type MessageCommandOptions } from '@src/interface/index.js'
 
 
 import { globalStagesOf, runHandler } from '@src/core/handler-pipeline.js'
-import { createFallback, type Fallback, replyWithUserError } from '@src/core/fallback.js'
+import { createEventFallback, createFallback, type Fallback } from '@src/core/fallback.js'
 import { claimCooldownNotice, claimStoreDownNotice } from '@src/core/cooldown-runner.js'
 
 
@@ -47,7 +46,6 @@ import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
 import { warnDeprecatedBehaviour, warnOnce } from '@src/common/deprecation.js'
-import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import { managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
@@ -656,19 +654,8 @@ export class MeoCordApp implements MeoCordApplication {
       const { name } = source.cls
       for (const { event, method, once } of source.handlers) {
         const logError = (error: unknown) => this.logger.error(`Error handling event "${event}" in ${name}.${method}:`, error)
-        // An error no filter handles is logged, with the handler. A guard denying an event only filters which
-        // events the handler takes, and a UserError is meant for the sender of the event's message, if it has one
-        const fallback: Fallback = async (error, context) => {
-          const where = `event "${event}" in ${name}.${method}`
-          if (error instanceof GuardDeniedError) this.logger.debug(`Denied ${where}: ${escapeForLog(error.message)}`)
-          else if (error instanceof UserError) {
-            this.logger.debug(`Refused ${where}: ${escapeForLog(error.message)}`)
-            // The newest message the event carries: an edit's new message, not its old one
-            const message = [...context.getArgs()].reverse().find((arg): arg is Message => arg instanceof Message)
-            if (message) return replyWithUserError(message, error, this.logger, this.messageOptions?.replyEmoji)
-          } else logError(error)
-          return undefined
-        }
+        // An error no filter handles is logged, with the handler
+        const fallback = createEventFallback(this.logger, `event "${event}" in ${name}.${method}`, this.messageOptions?.replyEmoji, logError)
         const label = `@${once ? 'Once' : 'On'}('${event}') in ${name}.${method}`
         // A call, as a dispatched one is, which shutdown waits for
         const listener = (...args: unknown[]) =>
