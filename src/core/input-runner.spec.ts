@@ -1,4 +1,5 @@
 import { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, ModalSubmitInteraction } from 'discord.js'
+import { z } from 'zod'
 import {
   Autocomplete,
   Command,
@@ -374,5 +375,32 @@ describe('ValidationError', () => {
 
     expect(error.message).toBe('note: Too long\noptions.0: Required\nInvalid input')
     expect(error.issues[1].path).toEqual(['options', 0])
+  })
+
+  it("keeps zod's own issue as raw, which toEqual and a serialised issue leave out", async () => {
+    @Controller()
+    class SnoozeController {
+      @Command('snooze', CommandType.SLASH)
+      @Validate(z.object({ minutes: z.number().min(5) }))
+      async snooze(_interaction: ChatInputCommandInteraction, _params: { minutes: number }) {}
+    }
+    const run = MeoCordTestingModule.create({ controllers: [SnoozeController] }).compile().invoke(SnoozeController, 'snooze', slash({ minutes: 2 }))
+    const error = (await run.then(() => undefined, (thrown: unknown) => thrown)) as ValidationError
+    const [issue] = error.issues
+    const raw = issue.raw as { code?: string; minimum?: number; inclusive?: boolean }
+
+    expect([raw.code, raw.minimum, raw.inclusive]).toEqual(['too_small', 5, true])
+    expect(issue).toEqual({ message: 'Too small: expected number to be >=5', path: ['minutes'] })
+    expect([Object.keys(issue), JSON.stringify(issue)]).toEqual([['message', 'path'], '{"message":"Too small: expected number to be >=5","path":["minutes"]}'])
+  })
+
+  it('keeps each issue exactly as the schema reported it, and gives an issue made by hand none', () => {
+    const reported = [{ message: 'Too long', path: [{ key: 'note' }], maximum: 10 }, { message: 'Invalid input' }]
+    const error = ValidationError.fromSchemaIssues(reported)
+    const own = new ValidationError([{ message: 'Pick one', path: [] }])
+
+    expect(error.issues.map(issue => issue.raw)).toEqual(reported)
+    expect(error.issues.every((issue, index) => issue.raw === reported[index])).toBe(true)
+    expect([own.issues[0].raw, Object.hasOwn(own.issues[0], 'raw')]).toEqual([undefined, false])
   })
 })
