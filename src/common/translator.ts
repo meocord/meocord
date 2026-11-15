@@ -86,6 +86,62 @@ export type LocalizationKey<C> = {
   [K in StringMessageKey<C>]: [Placeholders<MessageAt<C, K>>] extends [never] ? K : never
 }[StringMessageKey<C>]
 
+/**
+ * The keys {@link Translator.localizations} takes with params: a single string with `{params}`, filled in every
+ * locale.
+ *
+ * A translator typed `Translator<any>`, or by hand with messages typed `string`, has params the compiler can't read,
+ * so such a key is here too, beside {@link LocalizationKey}. For `Translator<any>` it is any `string`.
+ *
+ * @example
+ * ```ts
+ * const enUS = defineCatalog({ ping: 'Pong!', lookup: { user: 'Show {mode} for a linked user' } })
+ * const key: ParamLocalizationKey<typeof enUS> = 'lookup.user'
+ * ```
+ *
+ * @group Types
+ * @see {@link Translator.localizations}
+ * @see {@link LocalizationKey}
+ */
+export type ParamLocalizationKey<C> = Exclude<StringMessageKey<C>, LocalizationKey<C>> | WidenedMessageKey<C>
+
+/** The keys whose message is typed `string` rather than its text. */
+type WidenedMessageKey<C> = { [K in StringMessageKey<C>]: string extends MessageAt<C, K> ? K : never }[StringMessageKey<C>]
+
+/**
+ * A value {@link Translator.localizations} fills into a `{param}`: a word or a number, the same in every locale, or a
+ * function of the locale for a value that is itself translated.
+ *
+ * Either is used as written: a `{param}` in it stays as text, as `t()` leaves it.
+ *
+ * @group Types
+ * @see {@link Translator.localizations}
+ * @see {@link LocalizationParams}
+ */
+export type LocalizationParam = string | number | ((locale: Locale) => string | number)
+
+/**
+ * The params {@link Translator.localizations} fills into a message, one per `{name}` placeholder of the message `M`.
+ *
+ * A message typed `string`, as in a translator typed `Translator<any>` or typed by hand from a JSON file's shape, takes
+ * any params.
+ * Use it to type params a helper builds before passing them on.
+ *
+ * @example
+ * ```ts
+ * const enUS = defineCatalog({ lookup: { user: 'Show {mode} for a linked user' }, modes: { chaos: 'Chaos mode' } })
+ * const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS } })
+ *
+ * const params: LocalizationParams<typeof enUS.lookup.user> = { mode: locale => t.locale(locale)('modes.chaos') }
+ * t.localizations('lookup.user', params)
+ * ```
+ *
+ * @group Types
+ * @see {@link Translator.localizations}
+ * @see {@link LocalizationKey}
+ */
+export type LocalizationParams<M> = string extends M ? Record<string, LocalizationParam> : Record<Placeholders<M>, LocalizationParam>
+
 /** The message at a key. */
 export type MessageAt<C, K extends string> = K extends `${infer Head}.${infer Rest}`
   ? Head extends keyof C
@@ -368,6 +424,35 @@ export abstract class Translator<C = CatalogShape> {
   abstract default<K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>): string
 
   /**
+   * A message with `{params}` in every locale other than the default whose own catalog has it, each filled with its
+   * own placement of the params, for a builder's `setNameLocalizations` or `setDescriptionLocalizations`.
+   *
+   * A param's value is a word or a number, used as written in every locale, or a function of the locale for a value
+   * that is itself translated, such as a mode's name. The function is called once for each locale whose message uses
+   * it. A value, static or from a function, is used as written: a `{param}` in it stays as text, as `t()` leaves it.
+   * Otherwise the result follows the rules of `localizations(key)`: locales without the message and empty translations
+   * are left out, and the default's own message, filled, is added beside its fallback partner.
+   *
+   * @param key - A plain message key with `{params}`, typed from the default catalog; plurals are refused.
+   * @param params - A value for each of the default message's params.
+   * @returns The filled message keyed by locale.
+   * @throws When `params` give no value, or `undefined`, for a param the default message takes.
+   *
+   * @example
+   * ```ts
+   * const enUS = defineCatalog({ lookup: { user: 'Show {mode} for a linked user' }, modes: { chaos: 'Chaos mode' } })
+   * const ja = { lookup: { user: '連携済みユーザーの{mode}を表示' }, modes: { chaos: '混沌モード' } }
+   * const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, ja } })
+   *
+   * const mode = (locale: Locale) => t.locale(locale)('modes.chaos')
+   * new SlashCommandUserOption()
+   *   .setName('user')
+   *   .setDescription(t.default('lookup.user', { mode: t.default('modes.chaos') }))
+   *   .setDescriptionLocalizations(t.localizations('lookup.user', { mode }))
+   * ```
+   */
+  abstract localizations<K extends ParamLocalizationKey<C>>(key: K, params: LocalizationParams<MessageAt<C, K>>): Partial<Record<Locale, string>>
+  /**
    * A message in every locale other than the default whose own catalog has it, for a builder's
    * `setNameLocalizations` or `setDescriptionLocalizations`. Locales without it are left out, so
    * Discord falls back to the default name for them, and so are an empty translation and a translation
@@ -498,6 +583,29 @@ function interpolate(message: string, params: Record<string, unknown>): string {
   return fillPlaceholders(message, (name, whole) => (Object.hasOwn(params, name) ? String(params[name]) : whole))
 }
 
+/**
+ * A localization of `message` for `locale`, its params filled, a function's once; `undefined` where Discord would
+ * show it empty or show one of the message's own `{param}`s as written. A value is used as written.
+ */
+function localizedIn(message: string, locale: Locale, params: Readonly<Record<string, LocalizationParam>>): string | undefined {
+  const values = new Map<string, string>()
+  let unfilled = false
+  const filled = fillPlaceholders(message, (name, whole) => {
+    const param = params[name]
+    if (!Object.hasOwn(params, name) || param === undefined) {
+      unfilled = true
+      return whole
+    }
+    let value = values.get(name)
+    if (value === undefined) {
+      value = String(typeof param === 'function' ? param(locale) : param)
+      values.set(name, value)
+    }
+    return value
+  })
+  return unfilled || filled === '' ? undefined : filled
+}
+
 /** Whether a dotted key leads to an object in a catalog: a group of messages, which has no text of its own. */
 function isGroup(catalog: CatalogShape | undefined, key: string): boolean {
   let current: unknown = catalog
@@ -585,14 +693,28 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     return this.translate(this.defaultLocale, key, params[0] as Record<string, unknown> | undefined)
   }
 
-  localizations(key: LocalizationKey<C>): Partial<Record<Locale, string>> {
+  localizations<K extends ParamLocalizationKey<C>>(key: K, params: LocalizationParams<MessageAt<C, K>>): Partial<Record<Locale, string>>
+  localizations(key: LocalizationKey<C>): Partial<Record<Locale, string>>
+  localizations(key: string, params?: Readonly<Record<string, LocalizationParam>>): Partial<Record<Locale, string>> {
     const original = lookup(this.catalogs[this.defaultLocale], key)
     if (original === undefined) this.warnUnknown(key)
-    const params = typeof original === 'string' ? placeholderNames(original) : []
-    if (params.length > 0) {
-      const taken = [...new Set(params)].map(name => `{${name}}`).join(', ')
+    const names = typeof original === 'string' ? [...new Set(placeholderNames(original))] : []
+    const taken = names.map(name => `{${name}}`).join(', ')
+    if (params === undefined && names.length > 0) {
       throw refuse(
-        new Error(`localizations("${key}"): the message takes ${taken}, and a name or description is shown as written. Use a message without params.`),
+        new Error(
+          `localizations("${key}"): the message takes ${taken}, and a name or description is shown as written. ` +
+            `Give a value for each, as in localizations("${key}", { ${names.join(', ')} }), or use a message without params.`,
+        ),
+      )
+    }
+    const missing = names.filter(name => !Object.hasOwn(params ?? {}, name) || params?.[name] === undefined)
+    if (missing.length > 0) {
+      throw refuse(
+        new Error(
+          `localizations("${key}", params): the message takes ${taken}, and params give no value for ` +
+            `${missing.map(name => `{${name}}`).join(', ')}. A name or description is shown as written, so give a value for each.`,
+        ),
       )
     }
 
@@ -600,15 +722,14 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     for (const locale of this.locales) {
       if (locale === this.defaultLocale) continue
       const message = lookup(this.catalogs[locale], key, this.catalogs[this.defaultLocale])
-      // A translation with a {param} is left out, as Discord would show it as written, and so is an empty one
-      if (typeof message === 'string' && message !== '' && placeholderNames(message).length === 0) {
-        localized[locale] = fillPlaceholders(message, (_name, whole) => whole)
-      }
+      const filled = typeof message === 'string' ? localizedIn(message, locale, params ?? {}) : undefined
+      if (filled !== undefined) localized[locale] = filled
     }
     // Discord gives a locale it falls back from its partner's value, so the default keeps its own wording beside one
     const partner = FALLBACK_PARTNERS[this.defaultLocale]
-    if (partner && localized[partner] !== undefined && typeof original === 'string' && original !== '') {
-      localized[this.defaultLocale] = fillPlaceholders(original, (_name, whole) => whole)
+    if (partner && localized[partner] !== undefined && typeof original === 'string') {
+      const filled = localizedIn(original, this.defaultLocale, params ?? {})
+      if (filled !== undefined) localized[this.defaultLocale] = filled
     }
     return localized
   }

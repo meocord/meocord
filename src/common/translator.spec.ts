@@ -189,9 +189,9 @@ describe('localizations', () => {
     } as never,
   }) as unknown as { localizations: (key: string) => unknown }
 
-  it('refuses a key whose message takes params, which Discord would show as written', () => {
+  it('refuses a key whose message takes params without them, which Discord would show as written', () => {
     expect(() => loose.localizations('ban.done')).toThrow(
-      'localizations("ban.done"): the message takes {user}, and a name or description is shown as written. Use a message without params.',
+      'localizations("ban.done"): the message takes {user}, and a name or description is shown as written. Give a value for each, as in localizations("ban.done", { user }), or use a message without params.',
     )
   })
 
@@ -214,6 +214,153 @@ describe('localizations', () => {
     const empty = createTranslator({ default: 'en-US', locales: { 'en-US': { d: 'Ban a member' }, 'en-GB': { d: '' }, id: { d: '' }, ja: { d: 'BAN' } } })
 
     expect(empty.localizations('d')).toEqual({ ja: 'BAN' })
+  })
+})
+
+describe('localizations with params', () => {
+  const lookups = createTranslator({
+    default: 'en-US',
+    locales: {
+      'en-US': defineCatalog({ lookup: { user: 'Show {mode} for a linked user' }, modes: { chaos: 'Chaos mode' } }),
+      'en-GB': { lookup: { user: 'Show {mode} for a linked member' } },
+      ja: { lookup: { user: '連携済みユーザーの{mode}を表示' }, modes: { chaos: '混沌モード' } },
+      id: { lookup: { user: '' } },
+      'es-ES': { modes: { chaos: 'Modo caos' } },
+    },
+  })
+  const chaos = (locale: Locale) => lookups.locale(locale)('modes.chaos')
+
+  it('fills the params into each translation, calling a function once for each locale whose message uses it', () => {
+    const mode = vi.fn(chaos)
+
+    expect(lookups.localizations('lookup.user', { mode })).toEqual({
+      'en-US': 'Show Chaos mode for a linked user',
+      'en-GB': 'Show Chaos mode for a linked member',
+      ja: '連携済みユーザーの混沌モードを表示',
+    })
+    expect(mode.mock.calls.map(([locale]) => locale).sort()).toEqual(['en-GB', 'en-US', 'ja'])
+    expect(lookups.localizations('lookup.user', { mode: 7 })).toEqual({
+      'en-US': 'Show 7 for a linked user',
+      'en-GB': 'Show 7 for a linked member',
+      ja: '連携済みユーザーの7を表示',
+    })
+  })
+
+  it('uses a value as written, static or from a function, a `{param}` in it included', () => {
+    const mode = (locale: Locale) => (locale === Locale.Japanese ? '{n}' : '{n} modes')
+
+    expect(lookups.localizations('lookup.user', { mode })).toEqual({
+      'en-US': 'Show {n} modes for a linked user',
+      'en-GB': 'Show {n} modes for a linked member',
+      ja: '連携済みユーザーの{n}を表示',
+    })
+    expect(lookups.localizations('lookup.user', { mode: '{n}' })).toEqual({
+      'en-US': 'Show {n} for a linked user',
+      'en-GB': 'Show {n} for a linked member',
+      ja: '連携済みユーザーの{n}を表示',
+    })
+  })
+
+  it('keeps every locale for a value from a message that writes a brace as text', () => {
+    const routes = createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': defineCatalog({ d: 'Open {what}', route: 'ticket/{{id}}' }),
+        'en-GB': { d: 'Open up {what}' },
+        ja: { d: '{what}を開く', route: 'チケット/{{id}}' },
+      },
+    })
+
+    expect(routes.localizations('d', { what: locale => routes.locale(locale)('route') })).toEqual({
+      'en-US': 'Open ticket/{id}',
+      'en-GB': 'Open up ticket/{id}',
+      ja: 'チケット/{id}を開く',
+    })
+  })
+
+  it('adds the default only beside its partner, and calls no function for it otherwise', () => {
+    const plain = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ d: 'Ban {who}' }), ja: { d: '{who}をBAN（{who}）' } } })
+    const who = vi.fn((locale: Locale) => (locale === Locale.Japanese ? 'メンバー' : 'a member'))
+
+    expect(plain.localizations('d', { who })).toEqual({ ja: 'メンバーをBAN（メンバー）' })
+    expect(who.mock.calls).toEqual([[Locale.Japanese]])
+  })
+
+  // Discord shows en-US users the en-GB value, and es-419 users the es-ES one, when their own locale has none
+  it.each([
+    ['en-US', 'en-GB', 'Pick a {tone} color', 'Pick a {tone} colour'],
+    ['en-GB', 'en-US', 'Pick a {tone} colour', 'Pick a {tone} color'],
+    ['es-419', 'es-ES', 'Elige un color {tone}', 'Escoge un color {tone}'],
+  ] as const)('keeps a %s default’s own wording, filled, beside its %s partner', (locale, partner, wording, partnerWording) => {
+    const paint = createTranslator({ default: locale, locales: { [locale]: { d: wording }, [partner]: { d: partnerWording }, ja: { d: '{tone}色' } } } as never)
+    const tone = vi.fn((target: Locale) => (target === Locale.Japanese ? '暗い' : 'dark'))
+
+    expect(paint.localizations('d' as never, { tone } as never)).toEqual({
+      [locale]: wording.replace('{tone}', 'dark'),
+      [partner]: partnerWording.replace('{tone}', 'dark'),
+      ja: '暗い色',
+    })
+    expect(tone).toHaveBeenCalledTimes(3)
+  })
+
+  it('leaves out an empty translation and a locale without the message, and keeps braces written as text', () => {
+    const tickets = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': defineCatalog({ d: 'Open {kind} ticket/{{id}}' }), 'en-GB': { d: '' }, ja: { d: '{kind}チケット/{{id}}を開く' }, id: {} },
+    })
+
+    expect(tickets.localizations('d', { kind: 'bug' })).toEqual({ ja: 'bugチケット/{id}を開く' })
+    // Filled with nothing, a translation is as empty as an untranslated one
+    const bare = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ d: '{kind}' }), ja: { d: '{kind}' }, id: { d: '{kind}' } } })
+    expect(bare.localizations('d', { kind: locale => (locale === Locale.Japanese ? '' : 'bug') })).toEqual({ id: 'bug' })
+  })
+
+  it("leaves out a translation from a JSON catalog that uses a param it wasn't given", () => {
+    const loose = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { d: 'Ban {who}' }, id: { d: 'Blokir {siapa}' }, ja: { d: '{who}をBAN' } } as never,
+    }) as unknown as { localizations: (key: string, params?: Record<string, unknown>) => unknown }
+
+    expect(loose.localizations('d', { who: 'Ada' })).toEqual({ ja: 'AdaをBAN' })
+  })
+
+  it('calls a function for a locale it then leaves out, and leaves out a translation whose own param is given no value', () => {
+    const loose = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': { d: 'Ban {who}' }, fr: { d: 'Bannir {who} {extra}' }, ja: { d: '{who}をBAN' } } as never,
+    }) as unknown as { localizations: (key: string, params?: Record<string, unknown>) => unknown }
+    const who = vi.fn((locale: Locale) => (locale === Locale.Japanese ? 'エイダ' : 'Ada'))
+
+    expect(loose.localizations('d', { who, extra: undefined })).toEqual({ ja: 'エイダをBAN' })
+    expect(who.mock.calls.map(([locale]) => locale).sort()).toEqual(['fr', 'ja'])
+  })
+
+  it.each([
+    ['no params', {}, '{mode}'],
+    ['a param given undefined', { mode: undefined }, '{mode}'],
+  ] as const)('refuses %s for a param the default message takes', (_, params, missing) => {
+    expect(() => lookups.localizations('lookup.user', params as never)).toThrow(
+      `localizations("lookup.user", params): the message takes {mode}, and params give no value for ${missing}. A name or description is shown as written, so give a value for each.`,
+    )
+  })
+
+  it('refuses a param named as a key every object inherits, and fills it given as its own', () => {
+    const inherited = createTranslator({
+      default: 'en-US',
+      locales: { 'en-US': defineCatalog({ d: 'Show {constructor} by {toString}' }), ja: { d: '{toString}の{constructor}' } },
+    })
+
+    expect(() => inherited.localizations('d', {} as never)).toThrow('params give no value for {constructor}, {toString}.')
+    expect(inherited.localizations('d', { constructor: 'roles', toString: 'name' })).toEqual({ ja: 'nameのroles' })
+  })
+
+  it('names each param left out, of a typed catalog and of a JSON one', () => {
+    const typed = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ d: 'Ban {user} for {days} days, {user}' }) } })
+    expect(() => typed.localizations('d', { user: 'Ada' } as never)).toThrow('the message takes {user}, {days}, and params give no value for {days}.')
+    const loose = createTranslator({ default: 'en-US', locales: { 'en-US': { d: '{a} {b} {c}' }, ja: { d: '{a}' } } as never }) as unknown as {
+      localizations: (key: string, params?: Record<string, unknown>) => unknown
+    }
+    expect(() => loose.localizations('d', { b: 1 })).toThrow('the message takes {a}, {b}, {c}, and params give no value for {a}, {c}.')
   })
 })
 
