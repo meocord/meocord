@@ -5,7 +5,10 @@ import {
   defineCatalog,
   type LocaleCatalog,
   type LocalizationKey,
+  type LocalizationParam,
+  type LocalizationParams,
   type MessageKey,
+  type ParamLocalizationKey,
   type StringMessageKey,
   translateError,
   type Translator,
@@ -100,6 +103,54 @@ describe('localizations', () => {
     t.localizations('ban.done')
     const braces = createTranslator({ default: 'en-US', locales: { 'en-US': defineCatalog({ route: 'Opens ticket/{{id}}' }) } })
     braces.localizations('route')
+  })
+
+  it("takes a message's params, typed from the default message: a word, a number, or a function of the locale", () => {
+    expectTypeOf(t.localizations('ban.done', { user: 'Ada', days: 3 })).toEqualTypeOf<Partial<Record<Locale, string>>>()
+    t.localizations('ban.done', { user: (locale: Locale) => (locale === Locale.Japanese ? 'エイダ' : 'Ada'), days: () => 3 })
+    // @ts-expect-error `days` is missing
+    t.localizations('ban.done', { user: 'Ada' })
+    // @ts-expect-error `usr` is not a param
+    t.localizations('ban.done', { usr: 'Ada', days: 3 })
+    // @ts-expect-error a function gives a word or a number
+    t.localizations('ban.done', { user: () => true, days: 3 })
+    // @ts-expect-error `ping` takes no params
+    t.localizations('ping', { user: 'Ada' })
+    // @ts-expect-error names and descriptions have no plural forms
+    t.localizations('warnings', { count: 1, user: 'Ada' })
+  })
+
+  it('takes params for a message typed `string`, as a translator typed by hand has, and for Translator<any>', () => {
+    const json = null as unknown as Translator<{ lookup: { user: string } }>
+    expectTypeOf(json.localizations('lookup.user', { mode: 'Chaos', level: 3, name: (locale: Locale) => locale })).toEqualTypeOf<
+      Partial<Record<Locale, string>>
+    >()
+    json.localizations('lookup.user')
+    // @ts-expect-error a value is a word, a number or a function of the locale
+    json.localizations('lookup.user', { mode: true })
+    const loose = null as unknown as Translator<any>
+    loose.localizations('lookup.user', { mode: 'Chaos' })
+    loose.localizations('ping')
+  })
+
+  it('exports the types a helper uses, which read a message typed `string` as taking any params', () => {
+    expectTypeOf<ParamLocalizationKey<typeof enUS>>().toEqualTypeOf<'ban.done'>()
+    expectTypeOf<LocalizationParams<typeof enUS.ban.done>>().toEqualTypeOf<{ user: LocalizationParam; days: LocalizationParam }>()
+    expectTypeOf<LocalizationParam>().toEqualTypeOf<string | number | ((locale: Locale) => string | number)>()
+
+    expectTypeOf<ParamLocalizationKey<{ lookup: { user: string } }>>().toEqualTypeOf<'lookup.user'>()
+    expectTypeOf<ParamLocalizationKey<any>>().toEqualTypeOf<string>()
+    expectTypeOf<LocalizationParams<string>>().toEqualTypeOf<Record<string, LocalizationParam>>()
+    expectTypeOf<LocalizationParams<any>>().toEqualTypeOf<Record<string, LocalizationParam>>()
+    const describeIn = (translator: Translator<any>, key: ParamLocalizationKey<any>, params: LocalizationParams<any>) =>
+      translator.localizations(key, params)
+    describeIn(t, 'ban.done', { user: 'Ada', days: 3 })
+  })
+
+  it('declares the one-arg form last, which Parameters<> reads', () => {
+    type T = typeof t
+    const describeIn = (translator: T) => (key: Parameters<T['localizations']>[0]) => translator.localizations(key)
+    expectTypeOf(describeIn(t)).parameter(0).toEqualTypeOf<'ban.description' | 'ping'>()
   })
 })
 
