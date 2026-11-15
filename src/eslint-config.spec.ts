@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import fs from 'fs'
-import { createRequire } from 'module'
+import { createRequire, isBuiltin } from 'module'
 import os from 'os'
 import path from 'path'
 import { ESLint, type Linter } from 'eslint'
@@ -221,5 +221,39 @@ describe('@typescript-eslint/no-floating-promises', () => {
       expect(await floating('awaited.ts')).toEqual([])
       expect(await floating('voided.ts')).toEqual([])
     })
+  })
+})
+
+describe('the peer dependencies meocord/eslint needs', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    peerDependencies: Record<string, string>
+    peerDependenciesMeta?: Record<string, { optional?: boolean }>
+  }
+  // What every bot needs; every other peer is for meocord/eslint alone
+  const BOT_PEERS = new Set(['discord.js', 'dotenv'])
+  // Needed by the config without being imported: eslint runs it, typescript serves its typed rules and prettier its plugin
+  const UNIMPORTED_NEEDS = ['eslint', 'typescript', 'prettier']
+  // npm still checks an optional peer against the version a project has, so any range, a floor included, fails
+  // `npm install meocord` with ERESOLVE for a bot with an older or prerelease version that never uses the config
+  const ANY_VERSION = '*'
+  const packageName = (request: string) => request.split('/').slice(0, request.startsWith('@') ? 2 : 1).join('/')
+  const imported = (file: string) =>
+    [...fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').matchAll(/(?:from |require\(|resolve\()'([^']+)'/g)]
+      .map(([, request]) => request)
+      .filter(request => !isBuiltin(request))
+      .map(packageName)
+  const configPeers = Object.keys(manifest.peerDependencies).filter(name => !BOT_PEERS.has(name))
+
+  it.each(['meocord.eslint.mjs', 'meocord.eslint.cjs'])('declares every package %s imports as a peer', file => {
+    const packages = [...imported(file), ...UNIMPORTED_NEEDS]
+
+    expect(packages).toContain('eslint-plugin-import-x')
+    expect(packages.filter(name => !(name in manifest.peerDependencies))).toEqual([])
+  })
+
+  it('keeps each of them optional, constraining no version', () => {
+    expect(configPeers).toHaveLength(10)
+    expect(configPeers.filter(name => manifest.peerDependenciesMeta?.[name]?.optional !== true)).toEqual([])
+    expect(configPeers.filter(name => manifest.peerDependencies[name] !== ANY_VERSION)).toEqual([])
   })
 })
