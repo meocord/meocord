@@ -46,6 +46,9 @@ export function noteMockMade(): void {
  * discord.js's `InteractionCollector` expects. An answer marks the interaction `replied`, `deferred` or `responded`
  * once it resolves, as discord.js does, so code that doesn't await one fails as it would on a bot, within one run of
  * the test's code. The next major version (5.0) computes these values, and refuses those answers, without the call.
+ * With strict mocks or without, each `fetchReply()`, `editReply()` and `followUp()` resolves to a new message object,
+ * never one an earlier call gave, as in discord.js, so a test compares messages by `id`, and two edits by
+ * `editedTimestamp`.
  *
  * `invoke` also refuses a call that gives a handler fewer arguments than it declares where it builds none, such as a
  * reaction handler given its reaction without its `ReactionEvent`; without strict mocks, it warns once and calls it.
