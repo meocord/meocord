@@ -55,7 +55,10 @@ bun run test
    changed a public symbol's JSDoc, run `bun run build && bun run check:jsdoc-examples`. If you touched `src/testing/`, run
    `bun run build && bun run verify:runners`.
 7. If you added or removed a dependency, run `bun run notices` and commit the result. CI fails when it is out of date.
-8. Push and open a pull request against `main`.
+8. If you hold a dependency below a release line (`<2.3.0`), give the package's entry in `.github/dependabot.yml` an
+   `ignore` rule for that line (`versions: ['2.3.x']`), and remove the two together. Dependabot rewrites a range rather
+   than respect its cap, and `scripts/dependabot-config.spec.ts` fails while they differ.
+9. Push and open a pull request against `main`.
 
 Include a description of what changed and why, and add tests for any new behaviour. CI runs everything
 above, so nothing is lost if you forget a step — running it locally is just faster than waiting.
