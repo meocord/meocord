@@ -1,5 +1,5 @@
-import { ChatInputCommandInteraction } from 'discord.js'
-import { Command, Controller, Guard, MessageHandler, UseGuard } from '@src/decorator/index.js'
+import { AutocompleteInteraction, ButtonInteraction, ChatInputCommandInteraction, Message } from 'discord.js'
+import { Autocomplete, Command, Controller, Defer, Guard, MessageHandler, On, UseGuard } from '@src/decorator/index.js'
 import { CommandType, MetadataKey } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { createMetadata, SetMetadata } from '@src/common/index.js'
@@ -107,5 +107,126 @@ describe("inspectHandler's inheritedRoutes", () => {
       get: expect.any(Function),
       getAll: expect.any(Function),
     })
+  })
+})
+
+describe("inspectHandler's defer", () => {
+  @Controller()
+  class Deferred {
+    @Command('ping', CommandType.SLASH)
+    @Defer({ ephemeral: true })
+    async ping(_interaction: ChatInputCommandInteraction) {}
+
+    @Command('report', CommandType.SLASH)
+    @Defer({ mode: 'auto' })
+    async report(_interaction: ChatInputCommandInteraction) {}
+
+    @Command('save', CommandType.BUTTON)
+    @Defer({ mode: 'auto', after: 500, disable: 'clicked', suppressNotifications: true })
+    async save(_interaction: ButtonInteraction) {}
+
+    @Command('stats', CommandType.SLASH)
+    @Defer({ mode: 'eager', after: 500 })
+    async stats(_interaction: ChatInputCommandInteraction) {}
+
+    @Command('plain', CommandType.SLASH)
+    async plain(_interaction: ChatInputCommandInteraction) {}
+  }
+
+  it('reports the options with their defaults filled in, after only for auto', () => {
+    expect(inspectHandler(Deferred, 'ping').defer).toEqual({
+      ephemeral: true,
+      suppressNotifications: false,
+      disable: 'all',
+      mode: 'eager',
+    })
+    expect(inspectHandler(Deferred, 'report').defer).toEqual({
+      ephemeral: false,
+      suppressNotifications: false,
+      disable: 'all',
+      mode: 'auto',
+      after: 1500,
+    })
+    expect(inspectHandler(Deferred, 'save').defer).toEqual({
+      ephemeral: false,
+      suppressNotifications: true,
+      disable: 'clicked',
+      mode: 'auto',
+      after: 500,
+    })
+    expect(inspectHandler(Deferred, 'stats').defer).toEqual({
+      ephemeral: false,
+      suppressNotifications: false,
+      disable: 'all',
+      mode: 'eager',
+    })
+  })
+
+  it('is undefined for a handler without @Defer', () => {
+    expect(inspectHandler(Deferred, 'plain').defer).toBeUndefined()
+  })
+
+  it('reports the @Defer a handler inherits from the method it overrides', () => {
+    @Controller()
+    class Sub extends Deferred {
+      @Command('ping', CommandType.SLASH)
+      override async ping(_interaction: ChatInputCommandInteraction) {}
+    }
+
+    expect(inspectHandler(Sub, 'ping').defer).toEqual({
+      ephemeral: true,
+      suppressNotifications: false,
+      disable: 'all',
+      mode: 'eager',
+    })
+  })
+
+  it('is undefined for the handlers @Defer does not apply to', () => {
+    // Applied before the handler decorator, so the decorator itself does not refuse it; the bot does at startup
+    @Controller()
+    class Others {
+      @MessageHandler('hello')
+      @Defer()
+      async hello(_message: Message) {}
+
+      @On('guildCreate')
+      @Defer()
+      async joined() {}
+
+      @Autocomplete('ping', 'target')
+      @Defer()
+      async target(_interaction: AutocompleteInteraction) {}
+    }
+
+    expect(inspectHandler(Others, 'hello').defer).toBeUndefined()
+    expect(inspectHandler(Others, 'joined').defer).toBeUndefined()
+    expect(inspectHandler(Others, 'target').defer).toBeUndefined()
+  })
+
+  it('is read, but not compared by toEqual', () => {
+    const inspection = inspectHandler(Deferred, 'ping')
+
+    expect(inspection.defer).toBeDefined()
+    expect(Object.keys(inspection)).not.toContain('defer')
+    expect(inspection).toEqual({
+      controller: Deferred,
+      methodName: 'ping',
+      guards: [],
+      interceptors: [],
+      filters: [],
+      cooldowns: [],
+      pattern: undefined,
+      observers: [],
+      get: expect.any(Function),
+      getAll: expect.any(Function),
+    })
+  })
+
+  it('returns a frozen value, as it does for cooldowns', () => {
+    const { defer } = inspectHandler(Deferred, 'ping')
+
+    expect(defer).toBeDefined()
+    expect(() => Object.assign(defer!, { ephemeral: false })).toThrow()
+    expect(inspectHandler(Deferred, 'ping').defer?.ephemeral).toBe(true)
   })
 })

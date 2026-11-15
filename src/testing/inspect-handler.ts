@@ -4,6 +4,7 @@ import { type ExecutionContextType, HandlerExecutionContext } from '@src/common/
 import { type MetadataDecorator } from '@src/common/metadata.js'
 import { appStages, handlerStages } from '@src/core/handler-pipeline.js'
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
+import { AUTO_DEFER_AFTER_MS, type DeferOptions, handlerDefer, nonInteractionHandler } from '@src/core/defer.js'
 import {
   getAutocompleteHandlers,
   getCommandMap,
@@ -86,6 +87,14 @@ export interface HandlerInspection {
 
   /** The handler's cooldowns, the controller's first, with their defaults filled in. */
   readonly cooldowns: readonly InspectedCooldown[]
+
+  /**
+   * The `@Defer` options the handler runs with, its own or those it inherits, with their defaults filled in: `after`
+   * only for `mode: 'auto'`. `undefined` without `@Defer`, and for a message, reaction, event or autocomplete handler,
+   * which `@Defer` doesn't apply to. A test reads it; `toEqual` doesn't compare it, so an assertion on the other fields
+   * holds either way.
+   */
+  readonly defer: Readonly<DeferOptions> | undefined
 
   /** The `@MessageHandler` pattern, or `undefined` for a listener and for any other kind of handler. */
   readonly pattern: string | undefined
@@ -173,15 +182,15 @@ export interface InspectHandlerOptions {
  * Reports what runs when a handler is dispatched, and the metadata declared on it, without running anything.
  *
  * Use it to check that decorators set a handler up as intended: its guards with their params, its interceptors,
- * filters and cooldowns, in the order dispatch applies them. Under `useStrictMocks()`, the guards, interceptors and
- * observers are those dispatch runs for the handler's context types: a stage declared with `types` is listed only for
- * a handler of one of them, and an autocomplete lists no interceptors. Default mode lists every one, with a warning
- * once where dispatch runs fewer. To check what a handler does, run it with {@link TestingModule.invoke}.
+ * filters and cooldowns, in the order dispatch applies them, and its `@Defer`. Under `useStrictMocks()`, the guards,
+ * interceptors and observers are those dispatch runs for the handler's context types: a stage declared with `types` is
+ * listed only for a handler of one of them, and an autocomplete lists no interceptors. Default mode lists every one,
+ * with a warning once where dispatch runs fewer. To check what a handler does, run it with {@link TestingModule.invoke}.
  *
  * @param controller - The controller class declaring the handler.
  * @param methodName - The handler method's name.
  * @param options - `app`, to include the global stages and observers `@MeoCord` declares.
- * @returns The handler's stages in order, its message pattern, and readers for its metadata.
+ * @returns The handler's stages in order, its `@Defer` options, its message pattern, and readers for its metadata.
  *
  * @example
  * ```ts
@@ -233,6 +242,7 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
     getAll: (metadata: MetadataDecorator<unknown> | string | symbol) => context.getAll(metadata as string),
   }
   // Read by a test but not compared by toEqual, so an assertion on the result's other fields holds
+  Object.defineProperty(inspection, 'defer', { value: inspectedDefer(controller.prototype as object, methodName), enumerable: false })
   const routes = Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName, false))
   const withEvents = Object.freeze(inheritedRoutesOf(controller.prototype as object, methodName, true))
   Object.defineProperty(inspection, 'inheritedRoutes', {
@@ -250,6 +260,21 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
     enumerable: false,
   })
   return inspection as unknown as HandlerInspection
+}
+
+/** The `@Defer` options dispatch applies to the handler, with the defaults it applies filled in. */
+function inspectedDefer(prototype: object, methodName: string): Readonly<DeferOptions> | undefined {
+  const options = handlerDefer(prototype, methodName)
+  // At startup the bot refuses @Defer on a handler that doesn't answer an interaction
+  if (!options || nonInteractionHandler(prototype, methodName)) return undefined
+  const { ephemeral = false, suppressNotifications = false, disable = 'all', mode = 'eager' } = options
+  return Object.freeze({
+    ephemeral,
+    suppressNotifications,
+    disable,
+    mode,
+    ...(mode === 'auto' ? { after: options.after ?? AUTO_DEFER_AFTER_MS } : {}),
+  })
 }
 
 /** The context types dispatch calls `methodName` with: one for each kind of route it answers. */
