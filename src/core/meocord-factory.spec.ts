@@ -190,6 +190,51 @@ describe('MeoCordFactory.create()', () => {
     expect(result).toBeInstanceOf(MeoCordApp)
   })
 
+  describe('an app whose clientOptions.allowedMentions is unset', () => {
+    const MENTIONS_WARNING =
+      'Replies ping whoever their text mentions, since clientOptions.allowedMentions is unset. In the next major version (5.0) they ping no one unless a reply says so. Set clientOptions.allowedMentions to { parse: [] } to have that now, or to { parse: [\'users\', \'roles\', \'everyone\'], repliedUser: true } to keep every mention.'
+    const warn = () => (MeoCordFactory as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger.warn
+    const appWithClientOptions = (clientOptions: object) => {
+      class MentionsApp {}
+      Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions }, MentionsApp)
+      return MentionsApp
+    }
+    beforeEach(() => {
+      mockLoadConfig.mockReturnValue({ discordToken: 'test-token' })
+    })
+    afterEach(() => {
+      delete process.env.MEOCORD_REGISTER_ONLY
+      delete process.env.SHARDING_MANAGER
+    })
+
+    it('is warned once at startup that its replies ping whoever their text mentions', () => {
+      MeoCordFactory.create(appWithClientOptions({ intents: [] }))
+
+      expect(warn().mock.calls.filter(([text]) => text === MENTIONS_WARNING)).toHaveLength(1)
+    })
+
+    it.each([{ parse: [] }, { repliedUser: true }, { parse: ['users', 'roles', 'everyone'], repliedUser: true }])(
+      'is not warned once it sets allowedMentions to anything, such as %j',
+      allowedMentions => {
+        MeoCordFactory.create(appWithClientOptions({ intents: [], allowedMentions }))
+
+        expect(warn()).not.toHaveBeenCalledWith(MENTIONS_WARNING)
+      },
+    )
+
+    // `meocord register` sends no reply, and a shard's manager warns for every shard
+    it.each([
+      ['meocord register', 'MEOCORD_REGISTER_ONLY', '1'],
+      ['a shard process', 'SHARDING_MANAGER', 'true'],
+    ])('is not warned in %s', (_name, key, value) => {
+      process.env[key] = value
+
+      MeoCordFactory.create(appWithClientOptions({ intents: [] }))
+
+      expect(warn()).not.toHaveBeenCalledWith(MENTIONS_WARNING)
+    })
+  })
+
   it('runs the global guards of @MeoCord({ guards }) before a dispatched handler', async () => {
     mockLoadConfig.mockReturnValue({ discordToken: 'test-token' })
     const log: string[] = []

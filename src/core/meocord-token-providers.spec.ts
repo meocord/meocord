@@ -38,7 +38,7 @@ describe("a provider for a token MeoCord binds itself", () => {
     ['ThemeCache', ThemeCache],
     ['ExecutionContext', ExecutionContext],
   ] as const)('warns for %s, naming it, that the next major version refuses it, and still creates the app', (name, token) => {
-    @MeoCord({ controllers: [Ping], providers: [{ provide: token, useValue: {} }], clientOptions: { intents: [] } })
+    @MeoCord({ controllers: [Ping], providers: [{ provide: token, useValue: {} }], clientOptions: { allowedMentions: { parse: [] }, intents: [] } })
     class App {}
 
     expect(() => MeoCordFactory.create(App)).not.toThrow()
@@ -52,7 +52,7 @@ describe("a provider for a token MeoCord binds itself", () => {
     @MeoCord({
       controllers: [Ping],
       providers: [{ provide: Translator, useValue: createTranslator({ default: 'en-US', locales: { 'en-US': {} } }) }],
-      clientOptions: { intents: [] },
+      clientOptions: { allowedMentions: { parse: [] }, intents: [] },
     })
     class App {}
 
@@ -65,7 +65,7 @@ describe("a provider for a token MeoCord binds itself", () => {
 describe('the tokens the bot binds before an app\'s providers', () => {
   const i18n = createTranslator({ default: 'en-US', locales: { 'en-US': {} } })
   const refuses = (token: unknown) => {
-    @MeoCord({ controllers: [Ping], providers: [{ provide: token as never, useValue: {} }], i18n, clientOptions: { intents: [] } })
+    @MeoCord({ controllers: [Ping], providers: [{ provide: token as never, useValue: {} }], i18n, clientOptions: { allowedMentions: { parse: [] }, intents: [] } })
     class App {}
     try {
       MeoCordFactory.create(App)

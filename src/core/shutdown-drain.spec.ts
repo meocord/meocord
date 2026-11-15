@@ -95,7 +95,7 @@ async function startApp({ store = false } = {}): Promise<Client> {
   })
   vi.spyOn(Client.prototype, 'destroy').mockImplementation(async () => void order.push('client.destroy'))
 
-  @MeoCord({ controllers: [Owner], services: [Greeter, Db], cooldownStore: store ? Store : undefined, clientOptions: { intents: [GatewayIntentBits.Guilds] } })
+  @MeoCord({ controllers: [Owner], services: [Greeter, Db], cooldownStore: store ? Store : undefined, clientOptions: { allowedMentions: { parse: [] }, intents: [GatewayIntentBits.Guilds] } })
   class App {}
 
   app = MeoCordFactory.create(App)
@@ -233,7 +233,7 @@ describe('a stop during startup', () => {
     controllers: [],
     services: [Late],
     providers: [{ provide: SLOW, useFactory: () => factory.promise }],
-    clientOptions: { intents: [] },
+    clientOptions: { allowedMentions: { parse: [] }, intents: [] },
   })
   class SlowApp {}
 

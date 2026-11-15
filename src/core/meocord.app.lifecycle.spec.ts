@@ -87,7 +87,7 @@ async function startApp(
     cooldownStoreTimeoutMs: options.cooldownStoreTimeoutMs,
     cooldownStoreFailure: options.cooldownStoreFailure,
     themeFor: options.themeFor,
-    clientOptions: { intents: [] },
+    clientOptions: { allowedMentions: { parse: [] }, intents: [] },
   })
   class App {}
 
@@ -709,7 +709,7 @@ describe('lifecycle hooks', () => {
       const destroy = vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
       const exitCode = process.exitCode
 
-      @loaded.MeoCord({ controllers: [], clientOptions: { intents: [] } })
+      @loaded.MeoCord({ controllers: [], clientOptions: { allowedMentions: { parse: [] }, intents: [] } })
       class App {}
 
       try {
@@ -826,7 +826,7 @@ describe('lifecycle hooks', () => {
         }
       }
 
-      @loaded.MeoCord({ controllers: [], services: [Scheduler], clientOptions: { intents: [], rest: { api: fake.api } } })
+      @loaded.MeoCord({ controllers: [], services: [Scheduler], clientOptions: { allowedMentions: { parse: [] }, intents: [], rest: { api: fake.api } } })
       class App {}
 
       const login = vi.spyOn(loaded.discord.Client.prototype, 'login')

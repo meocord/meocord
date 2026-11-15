@@ -90,7 +90,8 @@ async function startApp(
     interceptors: options.interceptors,
     messages: options.messages,
     ...(options.globalStagesOnEvents !== undefined && { globalStagesOnEvents: options.globalStagesOnEvents }),
-    clientOptions,
+    // Set, so the only warnings are the ones each case is about
+    clientOptions: { allowedMentions: { parse: [] }, ...clientOptions },
   })
   class App {}
 
