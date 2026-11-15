@@ -7,7 +7,7 @@ import {
   type User,
   type UserSelectMenuInteraction,
 } from 'discord.js'
-import { route, type RouteParams } from '@src/common/index.js'
+import { route, type Route, type RouteMatch, type RouteParams } from '@src/common/index.js'
 import { Command, UsePipe, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type PipeInterface, type Piped, type StandardSchemaV1 } from '@src/interface/index.js'
@@ -15,6 +15,53 @@ import { type PipeInterface, type Piped, type StandardSchemaV1 } from '@src/inte
 /** Runs under `vitest --typecheck`: what a route's `build` takes, and that `@Command` takes a route. */
 
 describe('route', () => {
+  it("matches a customId into the values the route's handler receives", () => {
+    const settings = route('s/{text}/{count:int}/{ratio:number}/{on:bool}/{user:snowflake}/{session:uuid}/{order:asc|desc}')
+
+    expectTypeOf(settings.match('s')).toEqualTypeOf<
+      { text: string; count: number; ratio: number; on: boolean; user: string; session: string; order: 'asc' | 'desc' } | undefined
+    >()
+    expectTypeOf(settings.match('s')).toEqualTypeOf<RouteMatch<typeof settings.pattern> | undefined>()
+    expectTypeOf(route('refresh').match('refresh')).toEqualTypeOf<Record<never, never> | undefined>()
+    // @ts-expect-error the pattern has no {reason}
+    void settings.match('s')?.reason
+  })
+
+  it('types each param as its handler receives it, and a pattern without params as an empty object', () => {
+    expectTypeOf<RouteMatch<'ticket/{id:int}/close'>>().toEqualTypeOf<{ id: number }>()
+    expectTypeOf<RouteMatch<'t/{a}'>>().toEqualTypeOf<{ a: string }>()
+    expectTypeOf<RouteMatch<'t/{a:string}'>>().toEqualTypeOf<{ a: string }>()
+    expectTypeOf<RouteMatch<'t/{a:int}'>>().toEqualTypeOf<{ a: number }>()
+    expectTypeOf<RouteMatch<'t/{a:number}'>>().toEqualTypeOf<{ a: number }>()
+    expectTypeOf<RouteMatch<'t/{a:bool}'>>().toEqualTypeOf<{ a: boolean }>()
+    expectTypeOf<RouteMatch<'t/{a:snowflake}'>>().toEqualTypeOf<{ a: string }>()
+    expectTypeOf<RouteMatch<'t/{a:uuid}'>>().toEqualTypeOf<{ a: string }>()
+    expectTypeOf<RouteMatch<'t/{a:on|off}'>>().toEqualTypeOf<{ a: 'on' | 'off' }>()
+    expectTypeOf<RouteMatch<'refresh'>>().toEqualTypeOf<Record<never, never>>()
+  })
+
+  it("types a handler's params, which the route's check takes", () => {
+    const close = route('ticket/{id:int}/{order:asc|desc}')
+    class Tickets {
+      @Command(close, CommandType.BUTTON)
+      close(_interaction: ButtonInteraction, _params: RouteMatch<typeof close.pattern>) {
+        return undefined
+      }
+
+      @Command('ticket/{id:int}/{order:asc|desc}', CommandType.BUTTON)
+      byString(_interaction: ButtonInteraction, _params: RouteMatch<'ticket/{id:int}/{order:asc|desc}'>) {
+        return undefined
+      }
+    }
+    expectTypeOf(Tickets).toBeConstructibleWith()
+  })
+
+  it('needs match on a Route written by hand', () => {
+    // @ts-expect-error match is required, as route() makes it
+    const handWritten: Route<'refresh'> = { pattern: 'refresh', build: () => 'refresh', toString: () => 'refresh' }
+    void handWritten
+  })
+
   it("takes one value for each of the pattern's params, and no others", () => {
     const ticket = route('ticket/{id}/{action}')
 

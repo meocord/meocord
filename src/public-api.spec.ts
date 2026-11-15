@@ -220,6 +220,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'ResponseSendOptions',
     'ResponseState',
     'Route',
+    'RouteMatch',
     'RouteParams',
     'RouteValue',
     'RouteValues',

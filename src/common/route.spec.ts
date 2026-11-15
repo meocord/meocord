@@ -103,3 +103,80 @@ describe('route', () => {
     expect(() => route('card/{1}')).toThrow('Invalid pattern "card/{1}": {1} starts with a digit; start a param\'s name with a letter or _.')
   })
 })
+
+describe('Route.match', () => {
+  it("reads a customId's params, a typed one as its value, and undefined for one it doesn't match", () => {
+    const closeTicket = route('ticket/{id:int}/close')
+
+    expect(closeTicket.match('ticket/42/close')).toEqual({ id: 42 })
+    // 'new' is not an int
+    expect(closeTicket.match('ticket/new/close')).toBeUndefined()
+    expect(closeTicket.match('poll/1')).toBeUndefined()
+    expect(closeTicket.match('')).toBeUndefined()
+    expect(route('refresh').match('refresh')).toEqual({})
+  })
+
+  it('reads each segment type as its handler receives it', () => {
+    const settings = route('s/{text}/{count:int}/{ratio:number}/{on:bool}/{user:snowflake}/{session:uuid}/{order:asc|desc}')
+    const session = '0f8fad5b-d9cb-469f-a165-70867728950e'
+
+    expect(settings.match(`s/hi/-3/2.5/yes/123456789012345678/${session}/desc`)).toStrictEqual({
+      text: 'hi',
+      count: -3,
+      ratio: 2.5,
+      on: true,
+      user: '123456789012345678',
+      session,
+      order: 'desc',
+    })
+    expect(settings.match(`s/hi/-3/2.5/yes/123456789012345678/${session}/up`)).toBeUndefined()
+    expect(settings.match(`s/hi/1.5/2.5/yes/123456789012345678/${session}/asc`)).toBeUndefined()
+  })
+
+  it('reads back a value with / and % as build was given it', () => {
+    const values = { id: 'a/b%2F%', action: '100%/' }
+
+    expect(ticket.match(ticket.build(values))).toStrictEqual(values)
+  })
+
+  // Written by hand, apart from the reading dispatch and match share: what build writes, and what an id reads as
+  it.each<[string, string, unknown, string, string, unknown]>([
+    // name, pattern, value built, id it builds, id written by hand, what that id reads as
+    ['untyped text', 'r/{v}', 'abc', 'r/abc', 'r/a b', 'a b'],
+    ['string', 'r/{v:string}', 'a b', 'r/a b', 'r/xyz', 'xyz'],
+    ['int', 'r/{v:int}', -12, 'r/-12', 'r/7', 7],
+    ['number', 'r/{v:number}', 2.5, 'r/2.5', 'r/-0.25', -0.25],
+    ['bool', 'r/{v:bool}', true, 'r/true', 'r/yes', true],
+    ['snowflake', 'r/{v:snowflake}', '123456789012345678', 'r/123456789012345678', 'r/80351110224678912', '80351110224678912'],
+    ['uuid', 'r/{v:uuid}', '0f8fad5b-d9cb-469f-a165-70867728950e', 'r/0f8fad5b-d9cb-469f-a165-70867728950e', 'r/7c9e6679-7425-40de-944b-e07fc1f90ae7', '7c9e6679-7425-40de-944b-e07fc1f90ae7'],
+    ['a choice', 'r/{v:asc|desc}', 'desc', 'r/desc', 'r/asc', 'asc'],
+    ['%2F as text', 'r/{v}', '%2F', 'r/%252F', 'r/%252F', '%2F'],
+    ['%25 as text', 'r/{v}', '%25', 'r/%2525', 'r/%2525', '%25'],
+    ['a lower-case %2f', 'r/{v}', '%2f', 'r/%252f', 'r/a%2fb', 'a/b'],
+    ['%%2F2F, decoded once', 'r/{v}', '%%2F2F', 'r/%25%252F2F', 'r/%%2F2F', '%/2F'],
+    ['/', 'r/{v}', 'a/b', 'r/a%2Fb', 'r/%2F', '/'],
+    ['unicode', 'r/{v}', 'héllo ✓', 'r/héllo ✓', 'r/日本', '日本'],
+  ])('builds and reads %s', (_name, pattern, value, built, written, read) => {
+    const r = route(pattern) as unknown as { build: (values: { v: unknown }) => string; match: (customId: string) => unknown }
+
+    expect(r.build({ v: value })).toBe(built)
+    expect(r.match(built)).toStrictEqual({ v: value })
+    expect(r.match(written)).toStrictEqual({ v: read })
+  })
+
+  it('gives the params dispatch hands the handler for the same customId', async () => {
+    const customId = ticket.build({ id: 'x/%', action: 'close' })
+    await module.dispatch(click(customId))
+
+    expect(received).toEqual([ticket.match(customId)])
+  })
+
+  // A more specific pattern ranks first in the app, and match still reads its own route
+  it('reads its own route for a customId a more specific pattern takes in the app', async () => {
+    await module.dispatch(click('ticket/new/close'))
+
+    expect(received).toEqual([{ new: { action: 'close' } }])
+    expect(ticket.match('ticket/new/close')).toStrictEqual({ id: 'new', action: 'close' })
+    expect(newTicket.match('ticket/new/close')).toStrictEqual({ action: 'close' })
+  })
+})
