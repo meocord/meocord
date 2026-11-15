@@ -37,6 +37,8 @@ import {
 import { type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { type EventSource } from '@src/core/event-sources.js'
 import { waitForCooldownStore } from '@src/core/cooldown-runner.js'
+import { closeReadyGate, type ReadyGate } from '@src/core/ready-gate.js'
+import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import {
   type LifecycleEntry,
   lifecycleEntry,
@@ -293,6 +295,9 @@ export class MeoCordApp implements MeoCordApplication {
   /** Settles once the cooldown store's `onReady` has, which calls wait for before asking it. */
   private storeReady?: PromiseWithResolvers<void>
 
+  /** Where calls wait for the hooks of the classes they use, with `waitForReady`. */
+  private readyGate?: ReadyGate
+
   /**
    * Shows the next of the app's activities, in the order listed, starting again after the last. Guarded apart from
    * {@link runListener}: it runs on a timer, where a throw would be an uncaught exception.
@@ -457,6 +462,11 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.lifecycleUnits.some(unit => unit.cooldownStore)) {
       this.storeReady = Promise.withResolvers<void>()
       waitForCooldownStore(this.container, this.storeReady.promise)
+    }
+    // From here, with waitForReady, calls wait for the onReady hooks of the classes they use
+    if (globalStagesOf(this.container).waitForReady) {
+      const themeResolver = themeResolverClass(globalStagesOf(this.container).themeFor?.resolvers)
+      this.readyGate = closeReadyGate(this.container, this.lifecycleUnits, message => this.logger.warn(message), themeResolver)
     }
   }
 
@@ -753,7 +763,7 @@ export class MeoCordApp implements MeoCordApplication {
         hookFailed: (unit, error) => this.logger.error(`onReady failed in ${unit.name}:`, error),
         dependsOnFailed: (unit, failed) =>
           this.logger.warn(`Running onReady in ${unit.name} although it depends on ${failed.map(({ name }) => name).join(', ')}, which failed.`),
-        slow: (unit, waiting) => this.logger.warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting)),
+        slow: (unit, waiting) => this.logger.warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting, this.readyGate !== undefined)),
       },
       // Shutdown has begun: the client is going away, so no further hook starts
       {
@@ -762,13 +772,15 @@ export class MeoCordApp implements MeoCordApplication {
         settled: unit => {
           this.readySettled.add(unit.token)
           if (unit.cooldownStore) this.storeReady?.resolve()
+          this.readyGate?.settled(unit)
         },
         runOnReady: this.readyPass.runOnReady,
         made: unit => (this.attempt?.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
       },
     ))
-    // Also when shutdown stopped the hooks before the store's, so no call waits on it
+    // Also when shutdown stopped the hooks before the store's or a call's, so no call waits on them
     this.storeReady?.resolve()
+    this.readyGate?.finish()
   }
 
   /**

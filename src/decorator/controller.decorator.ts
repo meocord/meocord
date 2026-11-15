@@ -37,6 +37,7 @@ import { type Route, type RouteParams, type RouteValue, type RouteValues } from 
 import { declaring, decoratedName, refuse, refuseOnClass } from '@src/util/refusal.util.js'
 import { describeValue, withArticle } from '@src/util/value.util.js'
 import { META, type MetaKey } from '@src/util/metadata-keys.js'
+import { shared } from '@src/util/shared-state.util.js'
 
 /** What a handler was given in place of its interaction: another interaction's class, or what the value is. */
 function givenInstead(value: unknown): string {
@@ -46,6 +47,24 @@ function givenInstead(value: unknown): string {
 }
 
 const logger = new Logger('Command')
+
+/**
+ * Each `@Command` method's check of its interaction, by the class that declares the method, then by method; one for
+ * both builds, as a class decorated through one is dispatched through the other.
+ */
+const interactionChecks = shared('commandInteractionChecks', () => new WeakMap<object, Map<string, (self: unknown, interaction: unknown) => string | undefined>>())
+
+/**
+ * The message of the error a `@Command` handler of `instance` throws when called with `interaction`, or `undefined`
+ * when it takes it or is no `@Command` handler. Read before a call, so a call the handler refuses is refused before
+ * anything waits.
+ */
+export function commandInteractionRefusal(instance: object, method: string, interaction: unknown): string | undefined {
+  // The class whose own method a call reaches: an override without @Command does its own checking
+  let declaring = Object.getPrototypeOf(instance) as object | null
+  while (declaring && !Object.prototype.hasOwnProperty.call(declaring, method)) declaring = Object.getPrototypeOf(declaring) as object | null
+  return declaring ? interactionChecks.get(declaring)?.get(method)?.(instance, interaction) : undefined
+}
 
 /** The interaction types a method's `@Command` routes declare, each once. */
 function routeTypesOf(prototype: object, method: string): CommandType[] {
@@ -764,24 +783,28 @@ export function Command<
 
     // Wrap original method for interaction type validation
     const declaredAs = typeof builderOrType === 'function' ? builderOrType.name : `CommandType.${builderOrType}`
-    const checked: NonNullable<typeof _descriptor.value> = function (this: unknown, interaction, params) {
+    const refusal = (self: unknown, interaction: unknown): string | undefined => {
       // Every type the method's routes declare, in the class the call is made on: each @Command wraps it, so one alone
       // would refuse the others' interactions, and an override that adds a route type reaches this one through super
-      const called = typeof this === 'object' && this !== null && Object.prototype.isPrototypeOf.call(target, this) ? Object.getPrototypeOf(this) : target
+      const called = typeof self === 'object' && self !== null && Object.prototype.isPrototypeOf.call(target, self) ? Object.getPrototypeOf(self) : target
       const types = routeTypesOf(called as object, propertyKey)
-      if (!types.some(type => matchesCommandType(type, interaction))) {
-        throw new Error(
-          types.length <= 1
-            ? `${decoratedName(target, propertyKey)}: @Command('${commandName}', ${declaredAs}) takes ` +
-                `${interactionClassName(commandType)}${givenInstead(interaction)}.`
-            : `${decoratedName(target, propertyKey)}: its @Command routes take ${types.map(interactionClassName).join(' or ')}` +
-                `${givenInstead(interaction)}.`,
-        )
-      }
-
+      if (types.some(type => matchesCommandType(type, interaction))) return undefined
+      return types.length <= 1
+        ? `${decoratedName(target, propertyKey)}: @Command('${commandName}', ${declaredAs}) takes ` +
+            `${interactionClassName(commandType)}${givenInstead(interaction)}.`
+        : `${decoratedName(target, propertyKey)}: its @Command routes take ${types.map(interactionClassName).join(' or ')}` +
+            `${givenInstead(interaction)}.`
+    }
+    const checked: NonNullable<typeof _descriptor.value> = function (this: unknown, interaction, params) {
+      const refused = refusal(this, interaction)
+      if (refused !== undefined) throw new Error(refused)
       return (originalMethod as (...args: unknown[]) => R).apply(this, [interaction, params])
     }
     _descriptor.value = wrapsMethod(checked, originalMethod)
+    // The outermost @Command's, as the call meets it first
+    let checks = interactionChecks.get(target)
+    if (!checks) interactionChecks.set(target, (checks = new Map()))
+    checks.set(propertyKey, refusal)
 
     // This class's own map, inherited routes included
     const commands = ownCommandMap(target)

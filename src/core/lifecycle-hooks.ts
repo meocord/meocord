@@ -114,14 +114,15 @@ export const SLOW_READY_HOOK_MS = 10_000
 
 /**
  * The warning that `unit`'s `onReady` has run for `ranMs` while `waiting` hooks after it wait: it names the hook, the
- * time and what to do. Calls are handled meanwhile, as they don't wait for the hooks.
+ * time and what to do. Calls are handled meanwhile, unless `callsWait`, under `waitForReady`, holds those it reaches.
  */
-export function slowReadyWarning(unit: LifecycleUnit, ranMs: number, waiting: HooksAfter): string {
+export function slowReadyWarning(unit: LifecycleUnit, ranMs: number, waiting: HooksAfter, callsWait = false): string {
   const { count, unknown } = waiting
   const known = count === 1 ? '1 hook' : `${count} hooks`
   const hooks = !unknown ? (count === 0 ? 'no hooks' : known) : count === 0 ? 'an unknown number of hooks' : `at least ${known}`
+  const calls = callsWait ? 'the calls that use it or a class after it wait for it' : 'calls are already being handled'
   return (
-    `onReady in ${unit.name} has run for ${seconds(ranMs)}, holding back ${hooks} after it; calls are already being handled. ` +
+    `onReady in ${unit.name} has run for ${seconds(ranMs)}, holding back ${hooks} after it; ${calls}. ` +
     'Start long work without awaiting it in onReady, and stop it in onShutdown.'
   )
 }

@@ -163,8 +163,9 @@ export interface ReadyInfo {
  * Called on every controller and service the app binds, including services no handler has used yet, and on every
  * value `@MeoCord({ providers })` provides, after the client is ready. Hooks run one at a time in dependency
  * order, so a service's hook runs after the hooks of the services it injects. Command registration runs alongside
- * and never delays them. A hook that throws is logged and the next one still runs. Calls are handled meanwhile, and
- * a hook still running after 10 seconds is warned about, naming how many hooks wait behind it, unless
+ * and never delays them. A hook that throws is logged and the next one still runs. Calls are handled meanwhile,
+ * unless `@MeoCord({ waitForReady: true })` holds each until the hooks of the classes it uses have settled. A hook
+ * still running after 10 seconds is warned about, naming how many hooks wait behind it, unless
  * `@MeoCord({ warnSlow: false })`: start long work without awaiting it, and stop it in `onShutdown`.
  *
  * @example

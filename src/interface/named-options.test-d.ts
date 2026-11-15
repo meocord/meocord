@@ -92,6 +92,7 @@ describe('named decorator options', () => {
     expectTypeOf<MeoCordOptions['answerDenied']>().toEqualTypeOf<boolean | undefined>()
     expectTypeOf<MeoCordOptions['globalStagesOnEvents']>().toEqualTypeOf<boolean | undefined>()
     expectTypeOf<MeoCordOptions['warnSlow']>().toEqualTypeOf<boolean | undefined>()
+    expectTypeOf<MeoCordOptions['waitForReady']>().toEqualTypeOf<boolean | undefined>()
   })
 
   it("name an entry point builder's build() result", () => {

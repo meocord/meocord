@@ -318,11 +318,14 @@ export function themeTargets(args: readonly unknown[]): { guildId?: string; user
 export function lookupLayers(
   caches: ThemeResolverCaches,
   args: readonly unknown[],
+  after?: Promise<void>,
 ): [ThemeOverride | undefined, ThemeOverride | undefined] | Promise<[ThemeOverride | undefined, ThemeOverride | undefined]> | undefined {
   const { guildId, userId } = themeTargets(args)
   const byGuild = caches.guild && guildId !== undefined ? caches.guild : undefined
   const byUser = caches.user && userId !== undefined ? caches.user : undefined
   if (!byGuild && !byUser) return undefined
+  // Once `after` settles, as a call under waitForReady starts its lookup only when its wait for the hooks is over
+  if (after) return after.then(() => lookupLayers(caches, args)!)
   const now = performance.now()
   const guild = byGuild?.lookup(guildId!, now)
   const user = byUser?.lookup(userId!, now)

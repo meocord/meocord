@@ -455,6 +455,22 @@ export interface ResponseState {
   error(error: unknown, options?: ResponseErrorOptions): Promise<void>
 }
 
+/**
+ * What Discord has been told about an interaction, as a wait for hooks under `@Defer` reads it: `told` once it has an
+ * acknowledgement or an answer, `under way` while one is scheduled or on its way, `nothing` otherwise.
+ */
+export type Told = 'told' | 'under way' | 'nothing'
+
+/**
+ * Each state's Discord calls on their way, whether one went through and the step waiting for its theme before sending,
+ * with whether its answer is private, and a promise settled at each change; kept beside the state rather than on it,
+ * so a state's own keys, which a test may spread or compare, stay as they are.
+ */
+const tellings = new WeakMap<
+  InteractionResponse,
+  { inFlight: number; answered: boolean; preparing?: { ephemeral: boolean }; changed: PromiseWithResolvers<void> }
+>()
+
 /** The response state behind `respond()`, with what `@Defer` and the testing helpers use besides. */
 export class InteractionResponse implements ResponseState {
   // An own key, where it has always been, made a getter by the constructor: it reads the interaction's guildId, which
@@ -513,6 +529,35 @@ export class InteractionResponse implements ResponseState {
     return this.phase
   }
 
+  /** What Discord has been told: an acknowledgement or answer it has, one scheduled or on its way, or nothing. */
+  get told(): Told {
+    const telling = this.telling()
+    if (this.phase !== 'unanswered' || telling.answered) return 'told'
+    if (this.timer !== undefined || telling.inFlight > 0) return 'under way'
+    // Answered with a raw discord.js call, which marks the interaction once Discord has it; read without moving the
+    // phase, which a test's mock may mark before its call settles
+    return this.interaction.replied || this.interaction.deferred ? 'told' : 'nothing'
+  }
+
+  /** Settles at the next change of what Discord has been told. */
+  toldChanged(): Promise<void> {
+    return this.telling().changed.promise
+  }
+
+  private telling() {
+    let telling = tellings.get(this)
+    if (!telling) tellings.set(this, (telling = { inFlight: 0, answered: false, changed: Promise.withResolvers() }))
+    return telling
+  }
+
+  /** Wakes the waits that read {@link told}. */
+  private toldChange(): void {
+    const telling = this.telling()
+    const { changed } = telling
+    telling.changed = Promise.withResolvers()
+    changed.resolve()
+  }
+
   get message(): Message | undefined {
     // A deleted answer, or a follow-up in its place, leaves the component's own message behind
     if (this.answer.kind !== 'original') return this.lastMessage
@@ -539,11 +584,23 @@ export class InteractionResponse implements ResponseState {
     const call: ResponseCall = { method, payload }
     stampCall(call)
     this.calls.push(call)
+    // Every call but the first answer is made once Discord has one, so any call that goes through means it has
+    const telling = this.telling()
+    telling.inFlight++
+    this.toldChange()
     try {
-      return await startOwnCall(run)
+      const result = await startOwnCall(run)
+      telling.answered = true
+      return result
     } catch (error) {
       call.error = error
+      // Refused as answered already, the interaction has an answer Discord holds
+      if (errorCode(error) === ALREADY_ACKNOWLEDGED) telling.answered = true
       throw error
+    } finally {
+      // Before the caller moves the phase on, so `answered` is what a woken wait reads
+      telling.inFlight--
+      this.toldChange()
     }
   }
 
@@ -616,7 +673,9 @@ export class InteractionResponse implements ResponseState {
 
   /**
    * Acknowledges after `delayMs` unless the interaction is answered first, as `@Defer({ mode: 'auto' })`
-   * does. A timer cannot fire while synchronous work blocks the event loop.
+   * does: an answer's Discord call cancels it, while one still waiting for its theme does not, and is sent after it. A
+   * timer cannot fire while synchronous work blocks the event loop. Until it fires or is cancelled, Discord's
+   * acknowledgement counts as under way in {@link told}.
    */
   scheduleAcknowledge(delayMs: number, options: { ephemeral?: boolean } = {}): void {
     this.cancelScheduled()
@@ -624,21 +683,41 @@ export class InteractionResponse implements ResponseState {
       this.timer = undefined
       this.sync()
       if (this.phase !== 'unanswered') {
+        this.toldChange()
         this.warnIfAnsweredOutside()
         return
       }
-      this.queued(async () => {
-        await this.acknowledgeNow(options)
-        if (this.pendingLock) await this.lockNow(this.pendingLock)
-      }).catch(error => logFailedSend(logger, 'acknowledge in time', error))
+      const telling = this.telling()
+      // A step that only waits for its theme, as an answer outside a call may, would hold the acknowledgement past its
+      // time: it goes first, without the lock asked for, which would wait for the same theme, and the step answers once
+      // it settles. Standing in for that answer's own first reply, it is as private as that answer: steps run one at a
+      // time, so only the one preparing counts
+      const { preparing } = telling
+      // On its way from here, though queued behind earlier steps, so no wait reads `nothing` before it is sent
+      telling.inFlight++
+      const acknowledging = preparing
+        ? this.acknowledgeNow({ ...options, ephemeral: preparing.ephemeral })
+        : this.queued(async () => {
+            await this.acknowledgeNow(options)
+            if (this.pendingLock) await this.lockNow(this.pendingLock)
+          })
+      acknowledging
+        .catch(error => logFailedSend(logger, 'acknowledge in time', error))
+        .finally(() => {
+          telling.inFlight--
+          this.toldChange()
+        })
     }, delayMs)
     this.timer.unref?.()
+    this.toldChange()
   }
 
   private cancelScheduled(): void {
+    const scheduled = this.timer !== undefined
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
     this.pendingLock = undefined
+    if (scheduled) this.toldChange()
   }
 
   private warnIfAnsweredOutside(): void {
@@ -655,7 +734,8 @@ export class InteractionResponse implements ResponseState {
   }
 
   private async lockNow({ disable = 'all' }: ResponseLockOptions): Promise<void> {
-    if (this.snapshot || disable === 'none' || answersWithOwnMessage(this.interaction)) return
+    // An answer already sent to the message leaves nothing to hold, nor to put back over it
+    if (this.snapshot || this.settled || disable === 'none' || answersWithOwnMessage(this.interaction)) return
     const message = 'message' in this.interaction ? this.interaction.message : undefined
     if (!message) return
     if (this.timer) {
@@ -817,12 +897,11 @@ export class InteractionResponse implements ResponseState {
   }
 
   send(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
-    this.cancelScheduled()
     return this.queued(async () => {
       this.sync()
       this.refuseAfterModal()
       const body = this.withRestore(await this.themed(payload, options))
-      if (this.phase !== 'unanswered') return this.editMessage(body)
+      if (this.phase !== 'unanswered') return this.editMessage(this.keptPrivate(body))
       return answersWithOwnMessage(this.interaction) ? this.reply(body) : this.update(body)
     })
   }
@@ -832,7 +911,6 @@ export class InteractionResponse implements ResponseState {
   }
 
   followUp(payload: ResponsePayload, options?: ResponseSendOptions): Promise<Message | undefined> {
-    this.cancelScheduled()
     return this.queued(() => this.followUpNow(payload, options))
   }
 
@@ -845,10 +923,7 @@ export class InteractionResponse implements ResponseState {
     if (this.phase === 'deferred' && answersWithOwnMessage(this.interaction) && this.answer.kind === 'original') {
       // Discord makes a follow-up to a deferred, unsent reply that reply, ignoring its flags: a private one
       // would be shown to everyone on a public deferral, so that deferral is deleted, and the follow-up is the answer.
-      const requested = Number(MessageFlagsBitField.resolve(body.flags ?? 0))
-      if (!hasEphemeral(requested)) return this.editMessage(body)
-      // A private deferral is already what the flag asks for, which an edit cannot take
-      if (this.interaction.ephemeral) return this.editMessage({ ...body, flags: requested & ~MessageFlags.Ephemeral })
+      if (!hasEphemeral(Number(MessageFlagsBitField.resolve(body.flags ?? 0))) || this.interaction.ephemeral) return this.editMessage(this.keptPrivate(body))
       await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
       this.phase = 'replied'
       return this.answerWith(body)
@@ -909,7 +984,6 @@ export class InteractionResponse implements ResponseState {
   }
 
   async modal(modal: JSONEncodable<APIModalInteractionResponseCallbackData> | ModalComponentData): Promise<void> {
-    this.cancelScheduled()
     this.sync()
     // Refused at once while any answer is in flight, since a modal can only be the first
     if (this.phase !== 'unanswered' || this.pending > 0) {
@@ -921,6 +995,8 @@ export class InteractionResponse implements ResponseState {
       )
     }
     if (!('showModal' in this.interaction)) throw new Error('This interaction cannot show a modal.')
+    // Only a modal that will be shown replaces the scheduled acknowledgement
+    this.cancelScheduled()
     const target = this.interaction
     return this.queued(async () => {
       // A first answer like a reply: one refused as already acknowledged leaves the interaction answered elsewhere
@@ -933,7 +1009,33 @@ export class InteractionResponse implements ResponseState {
   /** The payload as a body, filled with the theme's primary colour unless `fill: false` asks for it as written. */
   private async themed(payload: ResponsePayload, options: ResponseSendOptions | undefined): Promise<Body> {
     const body = toBody(payload)
-    return options?.fill === false ? body : withThemeColours(body, await themeForInteraction(this.interaction))
+    return options?.fill === false ? body : withThemeColours(body, await this.answerTheme(hasEphemeral(Number(MessageFlagsBitField.resolve(body.flags ?? 0)))))
+  }
+
+  /**
+   * An answer asking to be private, as an edit of a private deferral, which already is what the flag asks for: the
+   * flag an edit can't take left out rather than dropped with a warning, for a `send()` and a `followUp()` alike.
+   */
+  private keptPrivate(body: Body): Body {
+    const requested = Number(MessageFlagsBitField.resolve(body.flags ?? 0))
+    if (!hasEphemeral(requested) || this.phase !== 'deferred' || this.answer.kind !== 'original' || !this.interaction.ephemeral) return body
+    return { ...body, flags: requested & ~MessageFlags.Ephemeral }
+  }
+
+  /**
+   * The theme an answer is drawn in, which outside a call may wait for the theme resolver's hooks. Meanwhile the step
+   * counts as preparing, so a scheduled acknowledgement that comes due goes ahead of it, as private as `ephemeral`
+   * says the answer is; the step goes on once that settles, from where it leaves the interaction.
+   */
+  private async answerTheme(ephemeral: boolean): Promise<ResolvedTheme> {
+    const telling = this.telling()
+    telling.preparing = { ephemeral }
+    try {
+      return await themeForInteraction(this.interaction)
+    } finally {
+      telling.preparing = undefined
+      await this.acknowledging?.catch(() => undefined)
+    }
   }
 
   /** Omitted components and embeds put back the message as it was before the lock. */
@@ -1120,7 +1222,7 @@ export class InteractionResponse implements ResponseState {
     // A UserError is the user's own mistake: its message, for them alone, unless told otherwise
     const own = error instanceof UserError
     const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
-    const theme = await themeForInteraction(this.interaction)
+    const theme = await this.answerTheme(visibility === 'private')
     // Drawn before anything is sent; a presenter that fails is answered for with MeoCord's own view, then thrown to
     // the caller, which reports it as the call's fault rather than passing it for a refusal
     const { view, failure, gone } = await this.drawnView(error, message, theme)

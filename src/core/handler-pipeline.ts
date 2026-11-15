@@ -5,6 +5,7 @@ import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from 
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
 import { deferMisuseError, handlerDefer, nonInteractionHandler, startDefer } from '@src/core/defer.js'
+import { type ReadyBound, readyBoundFor, type ReadyWait, readyGateOf } from '@src/core/ready-gate.js'
 import {
   callGuardedHandler,
   classLevelGuards,
@@ -50,9 +51,10 @@ import { handlerCooldowns, methodCooldowns, peekCooldowns } from '@src/core/cool
 import { Logger } from '@src/common/logger.js'
 import { beginCallTheme, configureThemes } from '@src/core/theme-runtime.js'
 import { runInThemeScope } from '@src/core/theme-scope.js'
-import { type ThemeResolverOptions } from '@src/core/theme-resolvers.js'
+import { themeResolverClass, type ThemeResolverOptions } from '@src/core/theme-resolvers.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
 import {
+  commandInteractionRefusal,
   getAutocompleteHandlers,
   getCommandMap,
   getMessageHandlers,
@@ -93,6 +95,8 @@ export interface GlobalStages {
   globalStagesOnEvents?: boolean
   /** The app's `@MeoCord({ warnSlow })`, when it sets one. */
   warnSlow?: boolean
+  /** The app's `@MeoCord({ waitForReady })`, when it sets one. */
+  waitForReady?: boolean
 }
 
 const NO_GLOBAL_STAGES: GlobalStages = { guards: [], interceptors: [], filters: [] }
@@ -114,6 +118,7 @@ export function appStages(app: object): GlobalStages {
         answerDenied?: boolean
         globalStagesOnEvents?: boolean
         warnSlow?: boolean
+        waitForReady?: boolean
       }
     | undefined
   if (!options) {
@@ -130,6 +135,7 @@ export function appStages(app: object): GlobalStages {
     ...(options.answerDenied !== undefined && { answerDenied: options.answerDenied }),
     ...(options.globalStagesOnEvents !== undefined && { globalStagesOnEvents: options.globalStagesOnEvents }),
     ...(options.warnSlow !== undefined && { warnSlow: options.warnSlow }),
+    ...(options.waitForReady !== undefined && { waitForReady: options.waitForReady }),
   }
 }
 
@@ -594,11 +600,15 @@ export async function runHandler(
   args: unknown[],
   options: RunOptions = {},
 ): Promise<HandlerOutcome> {
-  // The handler's theme, with the call's server's and user's over it, for everything the call runs
-  const theme = beginCallTheme(container, args, Object.getPrototypeOf(instance), methodName)
+  const prototype = Object.getPrototypeOf(instance) as object
+  // Settled when the gate lets the call go ahead at its bound, which its own theme lookup then follows: one decision
+  const ahead = Promise.withResolvers<void>()
+  // The handler's theme, with the call's server's and user's over it, for everything the call runs; with waitForReady,
+  // looked up once the theme resolver's hooks have settled, within the call's own bound
+  const theme = beginCallTheme(container, args, prototype, methodName, () => callBound(args, options, ahead.promise))
   return theme
-    ? runInThemeScope(theme.scope, () => runPipeline(container, instance, methodName, args, options, theme.ready))
-    : runPipeline(container, instance, methodName, args, options)
+    ? runInThemeScope(theme.scope, () => runPipeline(container, instance, methodName, args, options, ahead.resolve, theme.ready))
+    : runPipeline(container, instance, methodName, args, options, ahead.resolve)
 }
 
 /** {@link runHandler}'s pipeline, in the call's theme. */
@@ -608,6 +618,7 @@ async function runPipeline(
   methodName: string,
   args: unknown[],
   options: RunOptions,
+  wentAhead: () => void,
   themeReady?: Promise<void>,
 ): Promise<HandlerOutcome> {
   const controller = instance.constructor as new (...args: any[]) => unknown
@@ -641,6 +652,23 @@ async function runPipeline(
   try {
     // @Defer's first step, inside the filters so a failed acknowledgement reaches them.
     if (response) await startDefer(response, defer!, receivedAt)
+    // After @Defer's acknowledgement, which cannot wait, and before the guards, which may read what the hooks prepare
+    const gate = readyGateOf(container)
+    if (gate) {
+      const call: ReadyWait = {
+        controller,
+        methodName,
+        classes: () => callClasses(container, controller, methodName, { guards, interceptors, filters }),
+      }
+      if (gate.holds(call)) {
+        // A call its @Command handler refuses fails as it would at the handler, rather than after waiting for hooks
+        const refused = commandInteractionRefusal(instance, methodName, first)
+        if (refused !== undefined) throw new Error(refused)
+        // Read only for a call that waits: an interaction's bound follows what Discord has been told of it
+        call.bound = readyBoundFor(type, first, response !== undefined)
+        if (await gate.wait(call)) wentAhead()
+      }
+    }
     // After @Defer's acknowledgement, which cannot wait, and before anything reads or renders the theme
     if (themeReady) await themeReady
     if (options.parseArgs) {
@@ -683,6 +711,8 @@ async function runPipeline(
     else await runInterceptors(running, container, contextOf(), handler, cls => (returnedEarly = cls))
     return { ran }
   } catch (error) {
+    // The answer to an error is in the call's theme, which a call that failed before reading it waits for here
+    if (themeReady) await themeReady.catch(() => undefined)
     outcome = outcomeOf(error)
     failure = { error }
     const unanswered = await handleError(filters, container, contextOf(), error, options)
@@ -702,6 +732,39 @@ async function runPipeline(
     // After the answer and the release, so the duration covers the whole call
     await observe(container, contextOf, { outcome, startedAt, handled, failure, deniedBy: denial.by }, options)
   }
+}
+
+/**
+ * The classes a call to `methodName` runs: its controller, its theme resolver, its stages, global ones included, and
+ * the presenter.
+ */
+function callClasses(
+  container: Container,
+  controller: new (...args: any[]) => unknown,
+  methodName: string,
+  { guards, interceptors, filters }: Pick<HandlerStages, 'guards' | 'interceptors' | 'filters'>,
+): unknown[] {
+  const presenter = appPresenterOf(container)
+  return [
+    controller,
+    // The app's theme resolver, which themes the call
+    ...[themeResolverClass(globalStagesOf(container).themeFor?.resolvers)].filter(cls => cls !== undefined),
+    ...[...guards, ...interceptors, ...filters.flat()].map(stageClass),
+    ...handlerInputStages(controller.prototype as object, methodName).pipes.map(({ entry }) => pipeClass(entry)),
+    ...(presenter ? [presenter.constructor] : []),
+  ]
+}
+
+/**
+ * The bound of a call with `args`, which its theme lookup waits within as the call does, counted from
+ * the interaction's creation. An interaction's follows what Discord was told: while an acknowledgement or an answer is
+ * scheduled or on its way, the lookup waits for it, neither going ahead nor warning; once Discord has one, the lookup
+ * has no bound; told nothing, the bound holds. Once the call goes ahead at its own bound, settling `ahead`, so does
+ * the lookup, whatever Discord has been told since.
+ */
+function callBound(args: readonly unknown[], options: RunOptions, ahead: Promise<void>): ReadyBound {
+  const bound = readyBoundFor(options.type ?? inferContextType(args[0]), args[0])
+  return bound && { ...bound, ahead }
 }
 
 /**

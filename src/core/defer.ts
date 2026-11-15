@@ -13,7 +13,8 @@ import { META } from '@src/util/metadata-keys.js'
  */
 export interface DeferOptions {
   /**
-   * Makes a command's deferred reply private.
+   * Makes a command's deferred reply private. Under `mode: 'auto'`, an acknowledgement sent while an answer waits for
+   * its theme stands in for that answer's own reply, and is as private as that answer instead.
    *
    * @defaultValue `false`
    */
@@ -36,9 +37,10 @@ export interface DeferOptions {
   disable?: 'all' | 'clicked' | 'none'
 
   /**
-   * When to acknowledge: `'eager'` at once, or `'auto'` only if nothing answered after `after` milliseconds, so
-   * a fast handler answers with a single reply. `'auto'` suits a handler that waits on I/O: a timer cannot fire
-   * while synchronous work blocks the event loop.
+   * When to acknowledge: `'eager'` at once, or `'auto'` only if no answer has been sent to Discord after `after`
+   * milliseconds, so a fast handler answers with a single reply. An answer still waiting for its theme, as from a slow
+   * `themeFor` resolver, doesn't count: the acknowledgement goes first, as private as that answer, which then edits it
+   * in. `'auto'` suits a handler that waits on I/O: a timer cannot fire while synchronous work blocks the event loop.
    *
    * @defaultValue `'eager'`
    */

@@ -72,7 +72,8 @@ async function startApp(
     cooldownStoreFailure?: 'deny' | 'allow'
     themeFor?: any
     warnSlow?: boolean
-    /** More `@MeoCord` options, such as providers. */
+    waitForReady?: boolean
+    /** More `@MeoCord` options, such as global guards or a presenter. */
     extra?: object
   },
 ) {
@@ -91,6 +92,7 @@ async function startApp(
     cooldownStoreFailure: options.cooldownStoreFailure,
     themeFor: options.themeFor,
     ...(options.warnSlow !== undefined && { warnSlow: options.warnSlow }),
+    ...(options.waitForReady !== undefined && { waitForReady: options.waitForReady }),
     ...options.extra,
     clientOptions: { allowedMentions: { parse: [] }, intents: [] },
   })
@@ -1101,6 +1103,195 @@ describe('lifecycle hooks', () => {
   })
 
   // MeoCord asks the store on every call with a cooldown, so it opens before the first and closes after the last
+  describe('with waitForReady', () => {
+    /** A cache whose onReady records `events`, resolves `began`, then waits for `warm`, and a command that reads it. */
+    function cacheApp(loaded: Loaded, events: string[], warm: Promise<void>, began: PromiseWithResolvers<void>) {
+      @loaded.Service()
+      class Cache implements OnReady {
+        async onReady() {
+          events.push('cache warming')
+          began.resolve()
+          await warm
+          events.push('cache warm')
+        }
+      }
+      @loaded.Controller()
+      class Prices {
+        constructor(@loaded.inject(Cache) readonly cache: Cache) {}
+        // Deferred, so it waits as long as the hook runs
+        @loaded.Defer()
+        @loaded.Command('price', loaded.CommandType.SLASH)
+        price() {
+          events.push('price runs')
+        }
+      }
+      return { Cache, Prices }
+    }
+
+    const call = (client: Client, interaction: unknown) =>
+      Promise.all(client.listeners('interactionCreate').map(listener => listener(interaction)))
+    const price = (loaded: Loaded) => loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'price' })
+
+    it('holds a call that comes while the hook of a class it uses runs, and runs it once the hook settles', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const warm = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
+      const { Cache, Prices } = cacheApp(loaded, events, warm.promise, began)
+
+      const { client } = await startApp(loaded, { controllers: [Prices], services: [Cache], waitForReady: true })
+      const ready = becomeReady(client)
+      await began.promise
+      const handled = call(client, price(loaded))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).toEqual(['cache warming'])
+
+      warm.resolve()
+      await Promise.all([ready, handled])
+      expect(events).toEqual(['cache warming', 'cache warm', 'price runs'])
+    })
+
+    // The bot orders a class only a stage or the presenter injects after the controllers: only the stage holds the call
+    it.each(['a global guard', 'a method guard', 'a pipe', 'the presenter'] as const)(
+      "holds a call for the hook of %s's dependency",
+      async role => {
+        const loaded = await load()
+        const events: string[] = []
+        const warm = Promise.withResolvers<void>()
+        const began = Promise.withResolvers<void>()
+
+        @loaded.Service()
+        class Cache implements OnReady {
+          async onReady() {
+            events.push('cache warming')
+            began.resolve()
+            await warm.promise
+            events.push('cache warm')
+          }
+        }
+        @loaded.Guard()
+        class Allow {
+          constructor(@loaded.inject(Cache) readonly cache: Cache) {}
+          canActivate() {
+            return true
+          }
+        }
+        @loaded.Pipe()
+        class ToNumber {
+          constructor(@loaded.inject(Cache) readonly cache: Cache) {}
+          transform(value: string) {
+            return Number(value)
+          }
+        }
+        @loaded.Service()
+        class Shown {
+          constructor(@loaded.inject(Cache) readonly cache: Cache) {}
+          loading() {
+            return { text: '…' }
+          }
+          error() {
+            return { text: 'failed' }
+          }
+        }
+        const stages: ((target: object, method: string, descriptor: PropertyDescriptor) => void)[] = []
+        if (role === 'a method guard') stages.push(loaded.UseGuard(Allow) as never)
+        if (role === 'a pipe') stages.push(loaded.UsePipe('id', ToNumber) as never)
+        @loaded.Controller()
+        class Picker {
+          @loaded.Command('pick/{id}', loaded.CommandType.BUTTON)
+          pick() {
+            events.push('pick runs')
+          }
+        }
+        for (const stage of stages) stage(Picker.prototype, 'pick', Object.getOwnPropertyDescriptor(Picker.prototype, 'pick')!)
+        const extra = role === 'a global guard' ? { guards: [Allow] } : role === 'the presenter' ? { presenter: Shown } : {}
+
+        const { client } = await startApp(loaded, { controllers: [Picker], waitForReady: true, extra })
+        const ready = becomeReady(client)
+        await began.promise
+        const handled = call(client, loaded.createMockInteraction(loaded.discord.ButtonInteraction, { customId: 'pick/1' }))
+        await new Promise(resolve => setTimeout(resolve, 20))
+        expect(events).toEqual(['cache warming'])
+
+        warm.resolve()
+        await Promise.all([ready, handled])
+        expect(events).toEqual(['cache warming', 'cache warm', 'pick runs'])
+      },
+    )
+
+    it('runs a call at once while the hooks run without it, as before', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const warm = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
+      const { Cache, Prices } = cacheApp(loaded, events, warm.promise, began)
+
+      const { client } = await startApp(loaded, { controllers: [Prices], services: [Cache] })
+      const ready = becomeReady(client)
+      await began.promise
+      await call(client, price(loaded))
+      expect(events).toEqual(['cache warming', 'price runs'])
+
+      warm.resolve()
+      await ready
+    })
+
+    // A waiting call is a running call: the drain waits for it within its share of shutdownTimeout, as for any call
+    it('ends a stop while a call waits as the drain does', async () => {
+      const loaded = await load()
+      config.shutdownTimeout = 400
+      const events: string[] = []
+      const warm = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
+      const { Cache, Prices } = cacheApp(loaded, events, warm.promise, began)
+
+      const { client } = await startApp(loaded, { controllers: [Prices], services: [Cache], waitForReady: true })
+      const ready = becomeReady(client)
+      await began.promise
+      const handled = call(client, price(loaded))
+      await loaded.shutdownAndExit(false)
+
+      expect(events).toEqual(['cache warming'])
+      // Registration's own warning aside: this client has no application
+      expect(logged.warn.flat().filter(text => !String(text).startsWith('registerCommands()'))).toEqual([
+        'onReady in Cache is still running after 200 ms; shutting down without waiting for it.',
+        'Calls still running after 200 ms: interaction "/price"; running the onShutdown hooks in the 200 ms left.',
+      ])
+      // Once the hook settles, the pass starts no more, and the call it held runs, as a call the drain outlasted does
+      warm.resolve()
+      await Promise.all([ready, handled])
+      expect(events).toEqual(['cache warming', 'cache warm', 'price runs'])
+    })
+    it("looks a theme up only once the hooks of the themeFor class's dependency have settled", async () => {
+      const loaded = await load()
+      const events: string[] = []
+      const warm = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
+      const { Cache, Prices } = cacheApp(loaded, events, warm.promise, began)
+      @loaded.Service()
+      class CacheThemes {
+        constructor(@loaded.inject(Cache) readonly cache: InstanceType<typeof Cache>) {}
+        user() {
+          events.push('themes asked')
+          return { colors: { primary: '#0000D1' as const } }
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [Prices], waitForReady: true, themeFor: CacheThemes })
+      const ready = becomeReady(client)
+      await began.promise
+      // No handler takes it, so only its answer's theme waits
+      const unrouted = loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'nothere' })
+      const handled = call(client, unrouted)
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).toEqual(['cache warming'])
+
+      warm.resolve()
+      await Promise.all([ready, handled])
+      expect(events).toEqual(['cache warming', 'cache warm', 'themes asked'])
+    })
+  })
+
   describe('of a themeFor class', () => {
     it('runs onReady after the service it injects and onShutdown before it, and answers a call through that service', async () => {
       const loaded = await load()
