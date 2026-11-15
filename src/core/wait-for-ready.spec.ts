@@ -109,6 +109,11 @@ class Ping {
   ping() {
     events.push('ping runs')
   }
+
+  @MessageHandler('ping', { prefix: false })
+  pingMessage(_message: Message) {
+    events.push('ping message runs')
+  }
 }
 
 /** A controller ordered after Ping, with a hook of its own. */
@@ -252,6 +257,31 @@ describe('a call with waitForReady', () => {
     await expect(ready).rejects.toThrow('Broken failed')
     await handled
     expect(events).toEqual(['Broken begins', 'Broken ready', 'use runs'])
+  })
+
+  // Strict mocks order a class only a stage injects after the controllers, as the bot does: only the stage holds it
+  it("waits under strict mocks for the hook of a global guard's dependency ordered after its controller", async () => {
+    @Guard()
+    class Allowlist {
+      constructor(@inject(Cache) readonly cache: Cache) {}
+      canActivate() {
+        return true
+      }
+    }
+    useStrictMocks()
+    const module = compile({ waitForReady: true, services: [], controllers: [Ping, Jobs], extra: { guards: [Allowlist] } })
+    const ready = module.init({ ready: true })
+    await hook('Jobs').began.promise
+    hook('Jobs').settle()
+    await hook('Cache').began.promise
+
+    const handled = module.dispatch(createMockMessage({ content: 'ping' }))
+    await tick()
+    expect(events).toEqual(['Jobs begins', 'Jobs ready', 'Cache begins'])
+
+    hook('Cache').settle()
+    await Promise.all([ready, handled])
+    expect(events.at(-1)).toBe('ping message runs')
   })
 
   it('acknowledges a deferred command first, and waits past the bound of one without @Defer', async () => {

@@ -396,7 +396,39 @@ export class TestingModule {
     private readonly app?: object,
     /** Whether `emit` answers a denial and a `UserError` with the bot's event fallback; unset, it rejects and warns. */
     private readonly eventFallback?: boolean,
+    /** The units in the bot's hook order, which strict mocks run them in. */
+    private readonly botLifecycle?: readonly LifecycleUnit[],
   ) {}
+
+  /**
+   * The units in the order a hook runs in: the bot's under strict mocks. Without them, the module's own, with one
+   * warning a run when the units `runs` the hook for come in another order than in the bot.
+   */
+  private hookOrder(runs: (unit: LifecycleUnit) => boolean): readonly LifecycleUnit[] {
+    const botLifecycle = this.botLifecycle ?? this.lifecycle
+    if (strictMocks()) return botLifecycle
+    const here = this.lifecycle.filter(runs)
+    const bot = botLifecycle.filter(runs)
+    const moved = here.find((unit, index) => unit.token !== bot[index]?.token)
+    if (moved) {
+      warnOnce(
+        new Logger('TestingModule'),
+        `${moved.name}'s lifecycle hooks run in another order here than in the bot, which runs those of a class only a ` +
+          "stage or the presenter injects after the controllers' and observers'. useStrictMocks() runs them in the bot's " +
+          'order here; in the next major version (5.0) the testing module does without the call ' +
+          '(https://github.com/meocord/meocord/issues/441).',
+      )
+    }
+    return this.lifecycle
+  }
+
+  /** Whether `unit` has `hook`: read from its instance once made, else from its class. */
+  private hasHook(unit: LifecycleUnit, hook: 'onReady' | 'onShutdown'): boolean {
+    const target = this.constructed.has(unit.token)
+      ? (this.container.get(unit.token as ServiceIdentifier) as Record<string, unknown> | null)
+      : (unit.token as { prototype?: Record<string, unknown> }).prototype
+    return typeof target?.[hook] === 'function'
+  }
 
   private resolving?: Promise<void>
   /** The instances whose `@On` and `@Once` handlers `emit` runs, read at `init()`. */
@@ -412,8 +444,9 @@ export class TestingModule {
    * depends on an asynchronous factory. Calling it again does nothing more.
    *
    * With `{ ready: true }`, it then runs every `onReady` hook once, as the bot does once it is online:
-   * one at a time, each class after the classes and providers it injects, the observers' last. Every
-   * hook runs even when one fails. Pair it with {@link close}, which runs the `onShutdown` hooks. With
+   * one at a time, each class after the classes and providers it injects, the observers' last, then, under
+   * `useStrictMocks()`, a class only a stage or the presenter injects, as in the bot. Every hook runs even when one
+   * fails. Pair it with {@link close}, which runs the `onShutdown` hooks. With
    * `@MeoCord({ waitForReady: true })`, a `dispatch`, `invoke` or `emit` made while they run waits for the hooks of
    * the classes it uses, as the bot's calls do.
    *
@@ -534,7 +567,7 @@ export class TestingModule {
       // down whatever they constructed
       await this.resolving?.catch(() => undefined)
       const entries = (): LifecycleEntry[] =>
-        this.lifecycle
+        this.hookOrder(unit => this.constructed.has(unit.token) && this.hasHook(unit, 'onShutdown'))
           .filter(unit => this.constructed.has(unit.token))
           // Already made, so this returns the instance; a provided value may be anything, null included
           .map(unit => lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}))
@@ -571,22 +604,23 @@ export class TestingModule {
     const failures: { name: string; error: unknown }[] = []
     const failed = (unit: LifecycleUnit, error: unknown) => failures.push({ name: unit.name, error })
     const warn = (message: string) => new Logger('TestingModule').warn(message)
+    const units = this.hookOrder(unit => this.hasHook(unit, 'onReady'))
     // With waitForReady, a call made while these hooks run waits for those of the classes it uses, as the bot's does
     const stages = globalStagesOf(this.container)
-    const gate = stages.waitForReady === true ? closeReadyGate(this.container, this.lifecycle, warn, themeResolverClass(stages.themeFor?.resolvers)) : undefined
+    const gate = stages.waitForReady === true ? closeReadyGate(this.container, units, warn, themeResolverClass(stages.themeFor?.resolvers)) : undefined
     try {
       // No warning for a hook whose dependency failed: the test sees the dependency's own error
       await runReadyHooks(
         this.container,
-        this.lifecycle,
+        units,
         client,
         { primary },
         { resolveFailed: failed, hookFailed: failed, slow: (unit, waiting) => warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting, gate !== undefined)) },
         // A test's fake clock can pass the time inside a hook, so the warning waits to be asked for
         {
           runOnReady: this.readyPass.runOnReady,
-          slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
           made: unit => (this.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
+          slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
           ...(gate && { settled: (unit: LifecycleUnit) => gate.settled(unit) }),
         },
       )
@@ -1766,22 +1800,20 @@ export class TestingModuleBuilder {
         // What the stages and presenter inject, as the bot makes it; a stage the test replaced contributes nothing
         const stageServices = stageDependencies(startup, providers, appPresenterClass)
         for (const service of stageServices) bindClass(service)
-        // The order the app runs lifecycle hooks in: its cooldown store, then providers, controllers and observers, each
-        // after what it injects
-        const lifecycle: LifecycleUnit[] = resolutionOrder(container, providers, [
-          ...(boundStore ? [boundStore] : []),
-          ...providers.keys(),
-          ...services,
-          ...stageServices,
-          ...(themeResolver ? [themeResolver] : []),
-          ...(this.options.controllers ?? []),
-          ...observers,
-        ]).map(token => ({
+        const unitOf = (token: unknown): LifecycleUnit => ({
           token,
           name: tokenName(token),
           dependencies: tokenDependencies(container, providers, token),
           ...(token === boundStore && { cooldownStore: true }),
-        }))
+        })
+        const listed = [...providers.keys(), ...services]
+        const run = [...(themeResolver ? [themeResolver] : []), ...(this.options.controllers ?? []), ...observers]
+        const first = boundStore ? [boundStore] : []
+        // The lifecycle hooks' order without strict mocks: the cooldown store, providers, services and what the stages
+        // inject, then the controllers and observers, each after what it injects
+        const lifecycle = resolutionOrder(container, providers, [...first, ...listed, ...stageServices, ...run]).map(unitOf)
+        // The bot's, which strict mocks use: what only the stages inject comes after the controllers and observers
+        const botLifecycle = resolutionOrder(container, providers, [...first, ...listed, ...run, ...stageServices]).map(unitOf)
         // Recorded as the container makes each one, before anything can be made, so close() shuts down exactly what exists
         const constructed = new Set<unknown>()
         for (const { token } of lifecycle) {
@@ -1820,6 +1852,7 @@ export class TestingModuleBuilder {
           this.options.shutdownTimeout ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
           this.options.app,
           this.options.eventFallback,
+          botLifecycle,
         )
       })
     } catch (error) {

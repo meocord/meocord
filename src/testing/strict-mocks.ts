@@ -63,6 +63,10 @@ export function noteMockMade(): void {
  * `compile()` also refuses an `overrideGuard`, `overrideInterceptor` or `overrideFilter` stub without the stage's
  * method, `canActivate`, `intercept` or `catch`; without strict mocks, it warns and builds the module.
  *
+ * `init({ ready: true })` and `close()` also run the lifecycle hooks of a class only a stage or the presenter injects
+ * in the bot's order, after the controllers' and observers'; without strict mocks they run before the controllers', and
+ * a module whose hooks would run in another order warns once.
+ *
  * @throws Error when a mock already exists, which was made without it.
  *
  * @example
