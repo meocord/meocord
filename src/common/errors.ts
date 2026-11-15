@@ -8,14 +8,14 @@ import { sharedKey } from '@src/util/shared-state.util.js'
  *
  * Use it where returning `false`, which denies silently, would leave the user guessing. The built-in fallback shows
  * the message privately to the user who made an interaction, and as a reply to a message command; a listener's or a
- * reaction's denial is only logged. A filter can catch it to answer otherwise.
+ * reaction's denial is only logged. A filter can catch it to answer otherwise. {@link OwnerGuard} denies this way.
  *
  * @example
  * ```ts
- * @Guard()
- * export class OwnerGuard implements GuardInterface {
- *   canActivate(interaction: ButtonInteraction, { ownerId }: { ownerId: string }): boolean {
- *     if (interaction.user.id !== ownerId) throw new GuardDeniedError('Only the owner can use this.')
+ * @Guard({ types: ['interaction'] })
+ * export class ModeratorGuard implements GuardInterface {
+ *   canActivate(interaction: ChatInputCommandInteraction): boolean {
+ *     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) throw new GuardDeniedError('Only moderators can use this.')
  *     return true
  *   }
  * }
@@ -24,6 +24,7 @@ import { sharedKey } from '@src/util/shared-state.util.js'
  * @group Responses
  * @category Errors
  * @see {@link Guard}
+ * @see {@link OwnerGuard}
  * @see {@link UserError}
  */
 export class GuardDeniedError extends Error {

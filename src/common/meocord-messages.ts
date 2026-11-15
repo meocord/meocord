@@ -39,6 +39,9 @@ export const MEOCORD_MESSAGES = {
       until: 'Slow down: try again {when}.',
       storeDown: "Cooldowns can't be checked right now: try again shortly.",
     },
+    guard: {
+      notOwner: 'Only the user who opened this can use it.',
+    },
     fallback: {
       notFound: 'Command not found!',
       error: 'An error occurred while executing the command.',

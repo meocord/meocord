@@ -47,6 +47,7 @@ const PUBLIC_API: Record<string, string[]> = {
     'Logger',
     'MemoryCooldownStore',
     'MessageUsageError',
+    'OwnerGuard',
     'RedisCooldownStore',
     'SetMetadata',
     'ShardedCooldownStore',

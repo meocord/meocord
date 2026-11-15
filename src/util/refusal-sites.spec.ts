@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync } from 'fs'
 import path from 'path'
 import { type ChatInputCommandInteraction, type Message } from 'discord.js'
-import { Command, Controller, Cooldown, Defer, MessageHandler, On, Validate } from '@src/decorator/index.js'
+import { Command, Controller, Cooldown, Defer, MessageHandler, On, UseGuard, Validate } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type StandardSchemaV1 } from '@src/interface/index.js'
+import { OwnerGuard } from '@src/common/index.js'
 import { appStages } from '@src/core/handler-pipeline.js'
 import { buildComponentRoutes } from '@src/core/component-routes.js'
 import { MeoCordTestingModule } from '@src/testing/index.js'
@@ -77,6 +78,26 @@ describe('an application MeoCord refuses as it loads', () => {
     return Deferred
   }
 
+  const ownedSlash = () => {
+    @Controller()
+    class Owned {
+      @Command('card', CommandType.SLASH)
+      @UseGuard(OwnerGuard)
+      async card(_interaction: ChatInputCommandInteraction) {}
+    }
+    return Owned
+  }
+
+  const ownedWithoutParam = () => {
+    @Controller()
+    class Owned {
+      @Command('card/{id}', CommandType.BUTTON)
+      @UseGuard(OwnerGuard)
+      card() {}
+    }
+    return Owned
+  }
+
   const overlapping = () => {
     @Controller()
     class Profile {
@@ -102,6 +123,8 @@ describe('an application MeoCord refuses as it loads', () => {
     { site: '@Validate on an event handler', load: () => compile(validatedEvent())(), subject: 'Validated.joined' },
     { site: '@Cooldown on an event handler', load: () => compile(limitedEvent())(), subject: 'Limited.joined' },
     { site: '@Defer written below @MessageHandler', load: () => compile(deferredMessage())(), subject: 'Deferred.hi' },
+    { site: 'OwnerGuard on a slash command', load: () => compile(ownedSlash())(), subject: 'Owned.card' },
+    { site: 'OwnerGuard on a route without its param', load: () => compile(ownedWithoutParam())(), subject: 'Owned.card' },
     { site: 'two component patterns that match the same customIds', load: () => buildComponentRoutes(overlapping()), subject: 'Profile.show' },
     { site: 'an app class without @MeoCord', load: () => appStages(class PlainApp {}), subject: 'PlainApp' },
     {
@@ -129,6 +152,7 @@ describe('an application MeoCord refuses as it loads', () => {
  * src/bin, src/build and src/testing are left out: the CLI and a test get the error with its stack.
  */
 const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
+  'common/owner.guard.ts': { count: 1, why: 'OwnerGuard denying a user, as it runs' },
   'common/redis-cooldown-store.ts': { count: 1, why: "a Redis script's reply, read as a cooldown is taken" },
   'common/response/response-state.ts': { count: 6, why: 'a handler answering its interaction' },
   'common/route.ts': { count: 7, why: 'route().build(), called as a handler builds a customId' },
