@@ -152,8 +152,10 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     providerMap(options.providers ?? [], `${target.name}: @MeoCord({ providers })`)
     assertMessageOptions(target.name, options.messages, options.i18n)
     assertCooldownPolicy(target.name, options)
-    if (options.warnUnanswered !== undefined && typeof options.warnUnanswered !== 'boolean') {
-      throw refuse(new TypeError(`${target.name}: @MeoCord({ warnUnanswered }) takes true or false.`))
+    for (const name of ['warnUnanswered', 'answerDenied'] as const) {
+      if (options[name] !== undefined && typeof options[name] !== 'boolean') {
+        throw refuse(new TypeError(`${target.name}: @MeoCord({ ${name} }) takes true or false.`))
+      }
     }
     assertThemeFor(target.name, options)
     // Copied first, so what is checked is what the app runs with, whatever happens to the object afterwards

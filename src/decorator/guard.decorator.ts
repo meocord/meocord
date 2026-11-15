@@ -38,9 +38,10 @@ function ownHandlerDescriptor(prototype: object, methodName: string): PropertyDe
  * often a handler runs, use {@link Cooldown} instead.
  *
  * @remarks
- * `canActivate` returns `true` to let the call through and `false` to stop it silently; throwing
- * `GuardDeniedError` tells the user why. A new instance is made for every call unless the guard is bound
- * once, in `services` or `providers`, when each call still reads its own `params`.
+ * `canActivate` returns `true` to let the call through and `false` to stop it silently, or, on an interaction in an
+ * app with `@MeoCord({ answerDenied: true })`, with "You can't use this."; throwing `GuardDeniedError` tells the user
+ * why. A new instance is made for every call unless the guard is bound once, in `services` or `providers`, when each
+ * call still reads its own `params`.
  *
  * @param options - `types`, the context types the guard runs for; every type unless given.
  * @throws Error when `types` is empty, as the decorator applies.

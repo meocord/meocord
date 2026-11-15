@@ -60,6 +60,8 @@ import {
 } from '@src/decorator/controller.decorator.js'
 import { appliesTo, stageClass } from '@src/core/stage-scope.js'
 import { OWNER_PARAM } from '@src/common/owner.guard.js'
+import { GuardDeniedError } from '@src/common/errors.js'
+import { textFor } from '@src/common/meocord-text.js'
 import { CommandType } from '@src/enum/index.js'
 import { META } from '@src/util/metadata-keys.js'
 
@@ -83,6 +85,8 @@ export interface GlobalStages {
   theme?: ThemeOverride
   /** The app's `@MeoCord({ themeFor })`, with its cache's options and lookup timeout. */
   themeFor?: ThemeResolverOptions
+  /** The app's `@MeoCord({ answerDenied })`: whether a guard's `false` on an interaction is answered. */
+  answerDenied?: boolean
 }
 
 const NO_GLOBAL_STAGES: GlobalStages = { guards: [], interceptors: [], filters: [] }
@@ -101,6 +105,7 @@ export function appStages(app: object): GlobalStages {
         themeFor?: ThemeResolvers
         themeCache?: ThemeResolverOptions['cache']
         themeForTimeoutMs?: number
+        answerDenied?: boolean
       }
     | undefined
   if (!options) {
@@ -114,6 +119,7 @@ export function appStages(app: object): GlobalStages {
     ...(options.themeFor !== undefined && {
       themeFor: { resolvers: options.themeFor, cache: options.themeCache, timeoutMs: options.themeForTimeoutMs },
     }),
+    ...(options.answerDenied !== undefined && { answerDenied: options.answerDenied }),
   }
 }
 
@@ -589,11 +595,8 @@ async function runPipeline(
   themeReady?: Promise<void>,
 ): Promise<HandlerOutcome> {
   const controller = instance.constructor as new (...args: any[]) => unknown
-  const { guards, interceptors, filters } = handlerStages(
-    Object.getPrototypeOf(instance),
-    methodName,
-    globalStagesOf(container),
-  )
+  const globals = globalStagesOf(container)
+  const { guards, interceptors, filters } = handlerStages(Object.getPrototypeOf(instance), methodName, globals)
   const type = options.type ?? inferContextType(args[0])
   // One cell for the whole call, so every stage's context reads the arguments as they stand now
   const currentArgs: CurrentArgs = { current: args }
@@ -630,6 +633,8 @@ async function runPipeline(
     }
     if (!(await runGuards(guards, { container, controller, methodName, args, type, currentArgs, denial }))) {
       outcome = 'denied'
+      // Answered as a thrown denial is, through the filters and the fallback, in the user's language
+      if (type === 'interaction' && globals.answerDenied) throw new GuardDeniedError(textFor(first as object, { key: 'meocord.guard.denied' }))
       // Without @Defer too, so a denied component is acknowledged rather than left to fail
       const denied = response ?? (type === 'interaction' && first?.isRepliable?.() ? responseOf(first as Parameters<typeof responseOf>[0]) : undefined)
       await denied?.abandon()

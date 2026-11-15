@@ -41,6 +41,7 @@ export const MEOCORD_MESSAGES = {
     },
     guard: {
       notOwner: 'Only the user who opened this can use it.',
+      denied: "You can't use this.",
     },
     fallback: {
       notFound: 'Command not found!',
