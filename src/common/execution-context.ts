@@ -13,6 +13,7 @@ import { type MetadataDecorator } from '@src/common/metadata.js'
 import { respond, type ResponseState } from '@src/common/response/response-state.js'
 import { type DeepReadonly, type MeoCordTheme } from '@src/interface/theme.interface.js'
 import { useTheme } from '@src/core/theme-scope.js'
+import { sharedClass } from '@src/util/shared-state.util.js'
 
 /**
  * What an {@link ExecutionContext} is running a handler for: an interaction, an autocomplete, a message, a
@@ -53,6 +54,7 @@ export type ExecutionContextType = 'interaction' | 'autocomplete' | 'message' | 
  * @see {@link StageParams}
  * @see {@link https://meocord.dev/docs/4.2/guards | Guards}
  */
+@sharedClass('ExecutionContext')
 export abstract class ExecutionContext {
   /**
    * The response state of the interaction being handled, the same one `respond(interaction)` returns,

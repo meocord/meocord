@@ -1,4 +1,4 @@
-import { sharedKey } from '@src/util/shared-state.util.js'
+import { shared, sharedClass, sharedKey } from '@src/util/shared-state.util.js'
 
 /**
  * How many calls a cooldown allows, and in how long a window.
@@ -116,6 +116,7 @@ export function singleVerdict({ allowed, retryAfterMs, retryTimestamp }: Cooldow
  * @group Utilities
  * @category Cooldown stores
  */
+@sharedClass('CooldownStore')
 export abstract class CooldownStore {
   /**
    * Records a call for `key` if the limit allows it: at most `limit.uses` calls within the last
@@ -217,11 +218,14 @@ export interface RecordedCall {
   at: number
 }
 
-/** Each memory store's calls, for {@link forgetRecorded}, which an undo from another process reaches the store by. */
-const callsOf = new WeakMap<MemoryCooldownStore, Map<string, CallTimes>>()
+/**
+ * Each memory store's calls, for {@link forgetRecorded}, which an undo from another process reaches the store by; one
+ * for both builds, as either build's code may undo the other's store's calls.
+ */
+const callsOf = shared('cooldownCalls', () => new WeakMap<MemoryCooldownStore, Map<string, CallTimes>>())
 
-/** The calls a memory store's allowed verdict recorded, which a shard's undo carries back to its manager. */
-const recordedCalls = new WeakMap<CooldownBatchVerdict, readonly RecordedCall[]>()
+/** The calls each allowed verdict of a memory store recorded, carried back by a shard's undo; one for both builds. */
+const recordedCalls = shared('cooldownRecordedCalls', () => new WeakMap<CooldownBatchVerdict, readonly RecordedCall[]>())
 
 /** The calls a memory store recorded for `verdict`, or undefined for any other verdict. */
 export function recordedOf(verdict: CooldownBatchVerdict): readonly RecordedCall[] | undefined {
@@ -300,6 +304,7 @@ function verdictOf(entry: CallTimes, { uses, windowMs }: CooldownLimit, now: num
  * @category Cooldown stores
  * @see {@link CooldownStore}
  */
+@sharedClass('MemoryCooldownStore')
 export class MemoryCooldownStore extends CooldownStore {
   private readonly calls = new Map<string, CallTimes>()
 

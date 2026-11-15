@@ -10,6 +10,9 @@
  *   for the check: each inversify release pins its own @inversifyjs/core, and the range promises each works beside
  *   the bundled one. That install has no lockfile, so its packages' own dependencies resolve afresh, as for a
  *   consumer on the floor: a failure here can come from one of their new releases.
+ * - The classes MeoCord binds (Translator, ThemeCache, ExecutionContext, CooldownStore, HandlerRegistry, ShardContext)
+ *   and MemoryCooldownStore are one class object for both builds of a version, so a file typed against either build
+ *   is given the app's instance, while a copy of `dist` with another version keeps its own.
  * - Each build's Logger writes the same lines, colour forced on, forced off, and left to the environment, under Node.
  *
  * A run keeps its temporary files in one folder named for its host and process. A run killed by a signal leaves it, and
@@ -147,6 +150,39 @@ else {
   } finally {
     rmSync(lowest, { recursive: true, force: true })
   }
+}
+
+// A copy of dist whose builds say another version, beside the real one: what the builds share is keyed per version
+const { version } = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string }
+const VERSION_LINE = `var version = ${JSON.stringify(version)};`
+const copy = path.join(runFolder, 'copy')
+try {
+  mkdirSync(copy)
+  cpSync(path.join(repoRoot, 'dist'), path.join(copy, 'dist'), { recursive: true })
+  // A junction needs no elevation on Windows, and is a plain symlink elsewhere
+  symlinkSync(path.join(repoRoot, 'node_modules'), path.join(copy, 'node_modules'), 'junction')
+  let rewritten = 0
+  for (const file of readdirSync(path.join(copy, 'dist'), { recursive: true, encoding: 'utf8' })) {
+    if (!/\.c?js$/.test(file)) continue
+    const full = path.join(copy, 'dist', file)
+    const text = readFileSync(full, 'utf8')
+    if (!text.includes(VERSION_LINE)) continue
+    writeFileSync(full, text.replaceAll(VERSION_LINE, `var version = ${JSON.stringify(`${version}-copy`)};`))
+    rewritten++
+  }
+  if (rewritten < BUILDS.length) failures.push(`the copy of dist: found \`${VERSION_LINE}\` in ${rewritten} files, expected one per build`)
+  else {
+    for (const runtime of RUNTIMES) {
+      for (const first of BUILDS) {
+        const label = `${runtime}, a copy with another version, ${first} loaded first`
+        const result = runProbe(runtime, ['versions', first, path.join(copy, 'dist')]) as { problems: string[] }
+        for (const problem of result.problems) failures.push(`${label}: ${problem}`)
+        if (result.problems.length === 0) console.log(`${label}: each version keeps its own classes`)
+      }
+    }
+  }
+} finally {
+  rmSync(copy, { recursive: true, force: true })
 }
 
 // Under Node only: Bun's console writes past process.stdout.write and process.stderr.write, which the probe captures

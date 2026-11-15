@@ -3,9 +3,10 @@ import ts from 'typescript'
 
 const SRC = path.resolve(import.meta.dirname, '..')
 
-/** The keys of other tools MeoCord reads or writes: TypeScript's parameter types and inversify's two. */
+/** The keys of other tools MeoCord reads or writes: two of TypeScript's design types and inversify's two. */
 const FOREIGN_KEYS = new Set([
   'design:paramtypes',
+  'design:type',
   '@inversifyjs/core/classIsInjectableFlagReflectKey',
   '@inversifyjs/core/classMetadataReflectKey',
 ])

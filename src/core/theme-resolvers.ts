@@ -4,7 +4,7 @@ import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@sr
 import { themeProblems } from '@src/core/theme-validation.js'
 import { copyLayer, outsideThemeScope } from '@src/core/theme-scope.js'
 import { quoteForLog } from '@src/util/user-text.util.js'
-import { shared } from '@src/util/shared-state.util.js'
+import { shared, sharedClass } from '@src/util/shared-state.util.js'
 
 /** How long a resolver's result is kept, in seconds, unless `themeCache.ttlSeconds` says otherwise. */
 export const DEFAULT_THEME_TTL_SECONDS = 300
@@ -358,6 +358,7 @@ const stores = shared('themeCaches', () => new WeakMap<ThemeCache, ThemeResolver
  *
  * @group Utilities
  */
+@sharedClass('ThemeCache')
 export class ThemeCache {
   /**
    * Forgets a server's theme, so the next call from it looks it up again.

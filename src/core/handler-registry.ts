@@ -27,6 +27,7 @@ import { type CommandMeta } from '@src/interface/command-decorator.interface.js'
 import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
 import { type Translator } from '@src/common/translator.js'
 import { usageOf } from '@src/core/message-params.js'
+import { shared, sharedClass } from '@src/util/shared-state.util.js'
 
 type HandlerClass = new (...args: any[]) => unknown
 
@@ -287,8 +288,11 @@ function messageCommand(
   }
 }
 
-/** The message routes the app's dispatcher reads, by the app's registry, so its help and dispatch read one table. */
-const dispatchedRoutes = new WeakMap<HandlerRegistry, readonly MessageRoute[]>()
+/**
+ * The message routes the app's dispatcher reads, by the app's registry, so its help and dispatch read one table; one
+ * for both builds, as the registry's methods may be the other build's.
+ */
+const dispatchedRoutes = shared('registryRoutes', () => new WeakMap<HandlerRegistry, readonly MessageRoute[]>())
 
 /** What every entry has: its class and method, and the metadata on them. */
 function entryBase(controller: HandlerClass, method: string): HandlerEntryBase {
@@ -298,9 +302,8 @@ function entryBase(controller: HandlerClass, method: string): HandlerEntryBase {
 
 type LateEventSources = readonly { cls: HandlerClass; handlers: readonly EventHandlerMetadata[] }[]
 
-const lateEventSources = new WeakMap<HandlerRegistry, LateEventSources>()
-// The late sources each registry's cached entries were read with, so a list made before they arrived is read again
-const collectedWith = new WeakMap<HandlerRegistry, LateEventSources | undefined>()
+// One for both builds, as the registry's methods may be the other build's
+const lateEventSources = shared('registryLateSources', () => new WeakMap<HandlerRegistry, LateEventSources>())
 
 /**
  * Has `registry` list the `@On` and `@Once` handlers that run on `sources`, the instances the app attaches them for,
@@ -346,8 +349,11 @@ export function shareMessageRoutes(registry: HandlerRegistry, routes: readonly M
  * @see {@link HandlerEntry}
  * @see {@link https://meocord.dev/docs/4.2/handler-discovery | Handler discovery}
  */
+@sharedClass('HandlerRegistry')
 export class HandlerRegistry {
   private entries?: HandlerEntry[]
+  /** The late sources `entries` was read with, so a list made before they arrived is read again. */
+  private entriesWith?: LateEventSources
   /** Built from the controllers for a registry no dispatcher shares its routes with yet. */
   private messageRoutes?: MessageRoute[]
 
@@ -374,9 +380,9 @@ export class HandlerRegistry {
    */
   list<K extends HandlerKind = HandlerKind>(filter: HandlerFilter<K> = {}): Extract<HandlerEntry, { kind: K }>[] {
     const late = lateEventSources.get(this)
-    if (!this.entries || collectedWith.get(this) !== late) {
+    if (!this.entries || this.entriesWith !== late) {
       this.entries = this.collect()
-      collectedWith.set(this, late)
+      this.entriesWith = late
     }
     return this.entries.filter(
       entry =>

@@ -2,7 +2,7 @@ import { type Guild, type Interaction, Locale } from 'discord.js'
 import { type MeoCordMessages } from '@src/interface/index.js'
 import { refuse } from '@src/util/refusal.util.js'
 import { Logger } from '@src/common/logger.js'
-import { sharedName } from '@src/util/shared-state.util.js'
+import { sharedClass, sharedName } from '@src/util/shared-state.util.js'
 import { type IsWord } from '@src/util/word-chars.util.js'
 
 /**
@@ -351,6 +351,7 @@ export type TranslatorOptions<
  * @group Utilities
  * @category Localisation
  */
+@sharedClass('Translator')
 export abstract class Translator<C = CatalogShape> {
   /** The locale whose catalog is the default. */
   abstract readonly defaultLocale: Locale
