@@ -26,7 +26,7 @@ import path from 'path'
 import { pathToFileURL } from 'url'
 import { ControllerType } from '../src/enum/controller.enum.js'
 import { AUTOCOMPLETE_QUERY_OPTION } from '../src/bin/generator.js'
-import { startFakeDiscord } from './lib/fake-discord.js'
+import { type FakeCommands, startFakeDiscord } from './lib/fake-discord.js'
 import { cleanEnv, eslintScriptOf, installedCliOf, isRunning, mustRun, outputOf, pack, renderApp } from './lib/packed-app.js'
 
 type Tier = 'fast' | 'slow'
@@ -66,8 +66,11 @@ interface Scenario {
   signal?: { name: NodeJS.Signals; after: string; times?: number; to?: 'group' | 'cli'; repeatAfterMs?: number }
   /** Files changed while it runs, each once the output shows `after` `times` times; restored afterwards. */
   edits?: { after: string; times?: number; files: Record<string, (current: string) => string> }[]
-  /** Runs a local Discord, given to the app in `DISCORD_API_ENV`, whose gateway answers IDENTIFY that late. */
-  discord?: { readyDelayMs: number }
+  /**
+   * Runs a local Discord, given to the app in `DISCORD_API_ENV`, whose gateway answers IDENTIFY that late, holding
+   * `commands` for registration and `register --prune` to find.
+   */
+  discord?: { readyDelayMs: number; commands?: FakeCommands }
   timeoutMs?: number
   expect: {
     code: number
@@ -221,6 +224,13 @@ export default class App {}
 
 /** Where a scenario's local Discord listens; see `Scenario.discord`. */
 const DISCORD_API_ENV = 'MEOCORD_SCENARIO_DISCORD_API'
+
+/** The generated app, its REST requests sent to the scenario's local Discord, registration and `--prune` included. */
+const pruneApp = templateFile('src/app.ts', ['clientOptions: {', `clientOptions: {\n    rest: { api: process.env.${DISCORD_API_ENV} },`])
+
+/** A server the configuration doesn't name, left holding a command the app declares and one it doesn't. */
+const OLD_SERVER_ID = '111111111111111111'
+const OLD_SERVER: FakeCommands = { servers: { [OLD_SERVER_ID]: { name: 'Old test server', commands: [{ name: 'sample-slash' }, { name: 'legacy' }] } } }
 
 /** An application that logs in to the scenario's local Discord, with an onReady hook that says it ran. */
 const readyApp = `import { MeoCord } from 'meocord/decorator'
@@ -817,6 +827,60 @@ const scenarios: Scenario[] = [
     files: { '.env': 'DISCORD_TOKEN=abc\n', dist: null },
     argv: ['register'],
     expect: { code: 1, says: ['main.js) not found', 'meocord register --build'] },
+  },
+
+  // register --prune: a mistyped option is refused before anything is built or sent
+  ...(
+    [
+      [['--prune', 'bogus'], "--prune takes no value or 'all', not 'bogus'."],
+      [['--prune=bogus'], "--prune takes no value or 'all', not 'bogus'."],
+      [['--dry-run'], '--dry-run applies only with --prune.'],
+      [['--yes', '--prune-guild', '1'], '--yes, --prune-guild apply only with --prune.'],
+    ] as const
+  ).map(
+    ([args, refusal]): Scenario => ({
+      name: `register ${args.join(' ')} is refused, naming why`,
+      tier: 'fast',
+      files: { '.env': 'DISCORD_TOKEN=abc\n' },
+      argv: ['register', ...args],
+      expect: { code: 1, says: [refusal], never: ['Building', 'Registered'], writesNothing: true },
+    }),
+  ),
+  {
+    name: 'register --prune --dry-run reports what it would remove from a server the config no longer names, and sends nothing',
+    tier: 'fast',
+    files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': pruneApp },
+    discord: { readyDelayMs: 0, commands: OLD_SERVER },
+    before: [['build', '--prod']],
+    argv: ['register', '--prune', '--dry-run'],
+    expect: {
+      code: 0,
+      says: [
+        '--prune only reports what it would remove: this is a dry run (--dry-run).',
+        "Checking 1 server the configuration doesn't name…",
+        `Old test server (${OLD_SERVER_ID}): would remove 1 (sample-slash); kept 1 not declared by this build (legacy)`,
+        '--prune would remove 1 command, kept 1 not declared by this build, found 0 servers without command access, and failed in 0.',
+        'Servers the bot is not in are checked only with --prune-guild <id>.',
+      ],
+      never: ['Registered'],
+    },
+  },
+  {
+    name: 'register --prune all outside a terminal lists the undeclared commands, keeps them and exits 1 without --yes',
+    tier: 'fast',
+    files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': pruneApp },
+    discord: { readyDelayMs: 0, commands: OLD_SERVER },
+    before: [['build', '--prod']],
+    argv: ['register', '--prune', 'all'],
+    expect: {
+      code: 1,
+      says: [
+        'Registered',
+        `--prune all also removes the commands not declared by this build:\n  Old test server (${OLD_SERVER_ID}): legacy`,
+        `Old test server (${OLD_SERVER_ID}): removed 1 (sample-slash); kept 1 not declared by this build (legacy)`,
+        'Pass --yes to remove them.',
+      ],
+    },
   },
 
   // Configuration

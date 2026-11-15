@@ -53,13 +53,14 @@ import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
 import { claimAmbientAppTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
 import { planTargets, registerCommands, registrationRest } from '@src/core/command-registration.js'
+import { pruneAfterRegistration } from '@src/core/command-prune.js'
 import { collectCommands, SILENT_LOGGER } from '@src/core/command-identity.js'
 import { discordCommandIds, provideCommandIds, startRegistration, storeCommandIds } from '@src/core/command-ids.js'
 import { undoFailedLogin } from '@src/core/failed-login.js'
 import { Dispatcher, ownInteractionListener } from '@src/core/dispatcher.js'
 import { deliverUncachedDmReactions } from '@src/core/dm-reactions.js'
 import { loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
-import { FORCE_REGISTER_ENV, isRegisterOnly, REGISTER_GUILD_ENV, registersAsDevelopment } from '@src/util/registration-mode.util.js'
+import { FORCE_REGISTER_ENV, isRegisterOnly, pruneRequestOf, registerGuildOf, registersAsDevelopment } from '@src/util/registration-mode.util.js'
 import { shutdownTimeoutOf } from '@src/util/shutdown-timeout.util.js'
 import { escapeForLog } from '@src/util/user-text.util.js'
 
@@ -629,17 +630,20 @@ export class MeoCordApp implements MeoCordApplication {
       process.exit(1)
     }
 
-    const registered = await registerCommands({
+    const prune = pruneRequestOf()
+    const options = {
       rest,
       applicationId,
       controllerClasses: this.controllerClasses,
       logger: this.logger,
       config: loadMeoCordConfig()?.commands,
       development: registersAsDevelopment(),
-      onlyGuild: process.env[REGISTER_GUILD_ENV],
-      force: true,
-    })
-    process.exit(registered ? 0 : 1)
+      onlyGuild: registerGuildOf(),
+    }
+    // A dry run registers nothing, and reports against the commands the build declares
+    const registered = prune?.dryRun ? true : await registerCommands({ ...options, force: true })
+    const succeeded = prune ? await pruneAfterRegistration({ ...options, request: prune, registered }) : registered
+    process.exit(succeeded ? 0 : 1)
   }
 
   /**

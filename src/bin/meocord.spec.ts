@@ -299,6 +299,21 @@ describe('spawning the application', () => {
     const registerEnv = (env: unknown) =>
       Object.fromEntries(Object.entries((env ?? {}) as NodeJS.ProcessEnv).filter(([key]) => key.startsWith('MEOCORD_') && key.includes('REGISTER')))
 
+    // Each variable the CLI tells the bundle how to register with, and a value that would steer the run if inherited
+    const STEERING: [string, string][] = [
+      ['MEOCORD_REGISTER_ONLY', '1'],
+      ['MEOCORD_REGISTER_GUILD', '111111111111111111'],
+      ['MEOCORD_FORCE_REGISTER', '1'],
+      ['MEOCORD_REGISTER_MODE', 'development'],
+      ['MEOCORD_REGISTER_PRUNE', 'all'],
+      ['MEOCORD_REGISTER_PRUNE_GUILDS', '222222222222222222'],
+      ['MEOCORD_REGISTER_PRUNE_AFTER', '333333333333333333'],
+      ['MEOCORD_REGISTER_PRUNE_DRY_RUN', '1'],
+      ['MEOCORD_REGISTER_PRUNE_YES', '1'],
+    ]
+    const BLANK = Object.fromEntries(STEERING.map(([key]) => [key, '']))
+    const REGISTER_ONLY = { ...BLANK, MEOCORD_REGISTER_ONLY: '1', MEOCORD_FORCE_REGISTER: '1', MEOCORD_REGISTER_MODE: 'production' }
+
     afterEach(() => {
       vi.mocked(existsSync).mockReturnValue(true)
     })
@@ -308,7 +323,27 @@ describe('spawning the application', () => {
 
       const { args, options } = lastSpawn()
       expect(entryArgs(args)).toEqual([expect.stringContaining('main.js')])
-      expect(registerEnv(options.env)).toEqual({ MEOCORD_REGISTER_ONLY: '1', MEOCORD_FORCE_REGISTER: '1', MEOCORD_REGISTER_MODE: 'production' })
+      expect(registerEnv(options.env)).toEqual(REGISTER_ONLY)
+    })
+
+    // Set to '' rather than left out, so neither the parent's value nor a .env file the bundle loads (dotenv and Bun
+    // leave a set variable alone) gives the bundle what this run's flags did not
+    it.each(STEERING)('gives the bundle only what the flags say when the parent environment sets %s', async (key, value) => {
+      vi.stubEnv(key, value)
+      const cli = new MeoCordCLI()
+      await cli.register()
+      vi.unstubAllEnvs()
+
+      expect(registerEnv(lastSpawn().options.env)).toEqual(REGISTER_ONLY)
+    })
+
+    it.each(STEERING)('starts the bot with none of them when the parent environment sets %s', async (key, value) => {
+      vi.stubEnv(key, value)
+      const cli = new MeoCordCLI()
+      await cli.startProd()
+      vi.unstubAllEnvs()
+
+      expect(registerEnv(lastSpawn().options.env)).toEqual({ ...BLANK, MEOCORD_REGISTER_MODE: 'production' })
     })
 
     // A bundle built with bundleDependencies has NODE_ENV written in, so the command's mode reaches it on its own

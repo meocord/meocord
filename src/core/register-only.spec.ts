@@ -14,7 +14,7 @@ vi.mock('@src/common/index.js', () => ({
 }))
 
 const { rest, mockLoadConfig } = vi.hoisted(() => ({
-  rest: { get: vi.fn(), put: vi.fn(), setToken: vi.fn() },
+  rest: { get: vi.fn(), put: vi.fn(), delete: vi.fn(), setToken: vi.fn() },
   mockLoadConfig: vi.fn(),
 }))
 
@@ -67,6 +67,7 @@ describe('MeoCordApp.start() in register-only mode', () => {
   afterEach(() => {
     delete process.env.MEOCORD_REGISTER_ONLY
     delete process.env.MEOCORD_REGISTER_GUILD
+    for (const name of ['MEOCORD_REGISTER_PRUNE', 'MEOCORD_REGISTER_PRUNE_DRY_RUN']) delete process.env[name]
     vi.clearAllMocks()
     exit.mockRestore()
   })
@@ -146,5 +147,45 @@ describe('MeoCordApp.start() in register-only mode', () => {
     await start()
 
     expect(exit).toHaveBeenCalledWith(1)
+  })
+
+  describe('with --prune', () => {
+    /** Answers the application, the servers the bot is in, and one leftover `ping` in server 7. */
+    const leftovers = () =>
+      rest.get.mockImplementation(async (route: string) =>
+        route === '/applications/@me' ? { id: 'app-id' } : route === '/users/@me/guilds' ? [{ id: '7', name: 'Old' }] : [{ id: 'c1', name: 'ping', type: 1 }],
+      )
+
+    beforeEach(() => {
+      process.env.MEOCORD_REGISTER_PRUNE = 'declared'
+      leftovers()
+    })
+
+    it('registers, then removes the leftovers, and exits 0', async () => {
+      await start()
+
+      expect(rest.put.mock.calls.map(([route]) => route)).toEqual(['/applications/app-id/commands'])
+      expect(rest.delete).toHaveBeenCalledExactlyOnceWith('/applications/app-id/guilds/7/commands/c1')
+      expect(exit).toHaveBeenCalledWith(0)
+    })
+
+    it('registers nothing and removes nothing with --dry-run', async () => {
+      process.env.MEOCORD_REGISTER_PRUNE_DRY_RUN = '1'
+
+      await start()
+
+      expect(rest.put).not.toHaveBeenCalled()
+      expect(rest.get).toHaveBeenCalledWith('/applications/app-id/guilds/7/commands')
+      expect(exit).toHaveBeenCalledWith(0)
+    })
+
+    it('prunes nothing and exits 1 when registration fails', async () => {
+      rest.put.mockRejectedValue(new Error('Invalid Form Body'))
+
+      await start()
+
+      expect(rest.get).not.toHaveBeenCalledWith('/users/@me/guilds', expect.anything())
+      expect(exit).toHaveBeenCalledWith(1)
+    })
   })
 })
