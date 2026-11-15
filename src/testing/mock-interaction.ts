@@ -64,6 +64,11 @@ import {
   GuildMemberRoleManager,
   GuildMessageManager,
   GuildManager,
+  InteractionCallback,
+  InteractionCallbackResource,
+  InteractionCallbackResponse,
+  InteractionResponse,
+  InteractionResponseType,
   InteractionType,
   Locale,
   MentionableSelectMenuInteraction,
@@ -124,6 +129,7 @@ import { Logger } from '@src/common/logger.js'
 import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
 import { asDiscordStores, embedsAsDiscordStores } from '@src/testing/discord-shape.js'
 import { MOCK_BOT_ID, nextSnowflake } from '@src/testing/snowflake.js'
+import { isOwnCall } from '@src/common/response/call-order.js'
 import { noteMockMade, strictMocks } from '@src/testing/strict-mocks.js'
 import { RESPONSE_LOG } from '@src/testing/response-log.js'
 
@@ -1047,6 +1053,75 @@ type Behaviour = (...args: any[]) => any
  */
 type AnswerGate = (args: unknown[], byTest: boolean) => { undo?: () => void; land?: () => void; settle?: () => void }
 
+/** What default mode warns, once, where an app's or a test's call to one of these answers gets `undefined`. */
+export const UNDEFINED_ANSWER_WARNING =
+  'reply(), deferReply(), update() and deferUpdate() resolve to undefined here, where discord.js resolves to an ' +
+  'InteractionResponse, or with withResponse to an InteractionCallbackResponse; under useStrictMocks() they resolve to ' +
+  'mock ones. In the next major version (5.0) they do so without the call (https://github.com/meocord/meocord/issues/441).'
+
+/**
+ * A mock `InteractionResponse` for an answer to `interaction`, as discord.js resolves one: `edit`, `delete` and `fetch`
+ * reach the interaction's `editReply`, `deleteReply` and `fetchReply`, and its other methods are mock functions, as on
+ * a mock message.
+ */
+function mockInteractionResponse(interaction: Record<string, any>, id?: string): DeepMocked<InteractionResponse> {
+  const response = Object.assign(Object.create(InteractionResponse.prototype) as object, {
+    interaction,
+    id: id ?? (interaction.id as string),
+    client: interaction.client as unknown,
+  })
+  const stubs = new Map<string, StubValue>([
+    ['edit', createMockFn((options: unknown) => interaction.editReply(options))],
+    ['delete', createMockFn(() => interaction.deleteReply())],
+    ['fetch', createMockFn(() => interaction.fetchReply())],
+  ])
+  return stubDeep(response, stubs) as DeepMocked<InteractionResponse>
+}
+
+/** What Discord answers a callback with, for {@link mockCallbackResponse}. */
+interface CallbackAnswer {
+  /** The resource's type, or `undefined` for an answer Discord gives no resource. */
+  readonly resourceType: InteractionResponseType | undefined
+  /** The message the resource holds. */
+  readonly message: Message | null
+  /** The message the callback names: the one sent, or the one a component is on. */
+  readonly messageId: string | null
+  readonly loading: boolean
+  readonly ephemeral: boolean
+}
+
+/**
+ * An `InteractionCallbackResponse` for an answer to `interaction`, as discord.js builds it from what Discord answers a
+ * callback sent `with_response` (discord.js 14.27.0, src/structures/InteractionCallbackResponse.js:23-29). The
+ * callback's `type` is the interaction's, as Discord sends it.
+ */
+function mockCallbackResponse(interaction: Record<string, any>, answer: CallbackAnswer): InteractionCallbackResponse {
+  const client = interaction.client as unknown
+  const callback = Object.assign(Object.create(InteractionCallback.prototype) as object, {
+    id: interaction.id as string,
+    type: interaction.type as InteractionType,
+    activityInstanceId: null,
+    responseMessageId: answer.messageId,
+    responseMessageLoading: answer.loading,
+    responseMessageEphemeral: answer.ephemeral,
+  })
+  const resource =
+    answer.resourceType === undefined
+      ? null
+      : Object.assign(Object.create(InteractionCallbackResource.prototype) as object, { type: answer.resourceType, activityInstance: null, message: answer.message })
+  const response = Object.assign(Object.create(InteractionCallbackResponse.prototype) as object, { interaction: callback, resource })
+  // Not enumerable, as discord.js defines it
+  for (const part of [callback, resource, response]) if (part) Object.defineProperty(part, 'client', { value: client })
+  return response as InteractionCallbackResponse
+}
+
+/** The id of the interaction that sent `message`, when it names one, as discord.js names an update's response. */
+function interactionMetadataId(message: unknown): string | undefined {
+  const metadata = (message as { interactionMetadata?: unknown } | null | undefined)?.interactionMetadata
+  const id = (metadata as { id?: unknown } | null | undefined)?.id
+  return typeof id === 'string' ? id : undefined
+}
+
 /**
  * A mock of an answer method, `impl` its behaviour, that records each call in `log` as it is made, with what it sent
  * and, once it settles, what it rejected with. The record wraps every behaviour the mock is given, its own and any a
@@ -1273,7 +1348,10 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
  * `update()` sent; after `deleteReply()`, or before any answer, fetching, editing or deleting the original response
  * rejects with 10008 (Unknown Message), while follow-ups stay reachable by their id. Flags are read as discord.js
- * reads them, and its errors carry its codes, such as `InteractionAlreadyReplied`.
+ * reads them, and its errors carry its codes, such as `InteractionAlreadyReplied`. `reply()`, `deferReply()`,
+ * `update()` and `deferUpdate()` resolve to `undefined`; under `useStrictMocks()` they resolve as discord.js's do, to
+ * a mock `InteractionResponse`, or with `withResponse` to an `InteractionCallbackResponse` whose `resource.message` is
+ * the message sent, as `fetchReply()` reads it then, and `null` for a deferral.
  *
  * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
  * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
@@ -1682,8 +1760,67 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     const answer = (method: ResponseCall['method'], impl: Behaviour, gate: AnswerGate) =>
       stubs.set(method, recordedMock(method, impl, log, gate))
 
-    answer('reply', async () => undefined, first('reply', 'replied', ([options]) => (original = hold('reply', () => sent(options, false)))))
-    answer('deferReply', async () => undefined, first('deferReply', 'deferred', () => (original = sent(undefined))))
+    // The message the answer being sent names, read by its behaviour right after the gate set it: the one it made, a
+    // deferral's loading message, or for deferUpdate the component's
+    let answerMade: Held | undefined
+    /**
+     * What an answer resolves to: `undefined` in default mode, which warns once where an app's or a test's call reads
+     * it; under strict mocks, as discord.js resolves it, an InteractionResponse, or with `withResponse` an
+     * InteractionCallbackResponse. Its callback is what Discord answered each of the four with in a live check
+     * (2026-11-15, a server's slash command, and a button on its reply or on an ephemeral one): a reply's and a
+     * deferral's resource is of type ChannelMessageWithSource and holds the message, the deferral's loading until an
+     * edit, which keeps it ephemeral; an update's is of type UpdateMessage and holds the updated message; deferUpdate
+     * has none. Each names the message, the component's for an update, ephemeral as that message is, with `loading`
+     * true only for the deferral. A reply or a deferral from a component, a modal submission, a direct message and a
+     * user install weren't checked, and are answered the same way.
+     */
+    const resolvedAnswer = (method: 'reply' | 'deferReply' | 'update' | 'deferUpdate', responseId?: (interaction: Record<string, any>) => string | undefined): Behaviour =>
+      async function (this: unknown, options?: unknown) {
+        const made = answerMade
+        if (!strict) return undefined
+        // The mock the method was called on, so the response's interaction is the one the test holds
+        const interaction = (this ?? instance) as Record<string, any>
+        if (!(options as { withResponse?: boolean } | undefined)?.withResponse) return mockInteractionResponse(interaction, responseId?.(interaction))
+        const held = made === undefined ? undefined : built(made)
+        // Its id when first read, as fetchReply() would give it, kept for every later read
+        if (held && held.id === '') held.id = nextSnowflake()
+        const updating = method === 'update' || method === 'deferUpdate'
+        return mockCallbackResponse(interaction, {
+          resourceType:
+            method === 'deferUpdate' ? undefined : method === 'update' ? InteractionResponseType.UpdateMessage : InteractionResponseType.ChannelMessageWithSource,
+          message: held && method !== 'deferUpdate' ? messageFrom(held, madeFor(held.id), ...answeredIn()) : null,
+          messageId: held?.id || null,
+          loading: method === 'deferReply',
+          // An update leaves the message's flags; a reply and a deferral set them
+          ephemeral: updating ? Boolean(held?.flags && new MessageFlagsBitField(held.flags).has(MessageFlags.Ephemeral)) : hasEphemeralFlag(options),
+        })
+      }
+    // Default mode warns once where an app's or a test's call gets the undefined; a behaviour a test set answers for itself
+    const resolvesUndefined =
+      (gate: AnswerGate): AnswerGate =>
+      (args, byTest) => {
+        if (!strict && !byTest && !isOwnCall()) warnOnce(mockLogger, UNDEFINED_ANSWER_WARNING)
+        return gate(args, byTest)
+      }
+    // An update's response is named by the interaction that sent the component's message, as discord.js names it
+    const updateResponseId = (interaction: Record<string, any>) => readPlaceQuietly(() => interactionMetadataId(interaction.message))
+
+    answer(
+      'reply',
+      resolvedAnswer('reply'),
+      resolvesUndefined(first('reply', 'replied', ([options]) => (original = answerMade = hold('reply', () => sent(options, false))))),
+    )
+    answer(
+      'deferReply',
+      resolvedAnswer('deferReply'),
+      resolvesUndefined(
+        first('deferReply', 'deferred', ([options]) => {
+          // Strict mocks hold it loading, as Discord does until it is edited, and ephemeral when asked
+          const flags = strict ? { flags: new MessageFlagsBitField(MessageFlags.Loading | (hasEphemeralFlag(options) ? MessageFlags.Ephemeral : 0)) } : {}
+          original = answerMade = { ...sent(undefined), ...flags }
+        }),
+      ),
+    )
     answer(
       'followUp',
       // The follow-up as sent, which an edit, fetch or delete reaches by its id
@@ -1764,14 +1901,20 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     if (isComponent || instance.type === InteractionType.ModalSubmit) {
       answer(
         'update',
-        async () => undefined,
-        first('update', 'replied', ([options]) => {
-          // Discord updates only a message a component is on; a modal from a command has none
-          if (!onMessage()) refuseModalUpdate()
-          original = hold('update', () => edited(heldFrom(instance.message, false), options))
-        }),
+        resolvedAnswer('update', updateResponseId),
+        resolvesUndefined(
+          first('update', 'replied', ([options]) => {
+            // Discord updates only a message a component is on; a modal from a command has none
+            if (!onMessage()) refuseModalUpdate()
+            original = answerMade = hold('update', () => edited(heldFrom(instance.message, false), options))
+          }),
+        ),
       )
-      answer('deferUpdate', async () => undefined, first('deferUpdate', 'deferred', () => (original = componentMessage())))
+      answer(
+        'deferUpdate',
+        resolvedAnswer('deferUpdate', updateResponseId),
+        resolvesUndefined(first('deferUpdate', 'deferred', () => (original = answerMade = componentMessage()))),
+      )
     }
   }
 
@@ -3383,6 +3526,9 @@ function edited(held: HeldMessage, options: unknown): HeldMessage {
       reprocessed: true,
     }),
     ...(edit.embeds !== undefined && { embeds: embedsAsDiscordStores(edit.embeds.map(jsonOf)) }),
+    // An edit ends a deferral's loading, as Discord shows the message sent once the deferral is edited
+    ...(held.flags !== undefined &&
+      new MessageFlagsBitField(held.flags).has(MessageFlags.Loading) && { flags: new MessageFlagsBitField(held.flags).remove(MessageFlags.Loading) }),
     ...(edit.flags !== undefined && { flags: edit.flags }),
     // Later than the last edit, even within one millisecond or under fake timers
     editedTimestamp: Math.max(Date.now(), (held.editedTimestamp ?? 0) + 1),

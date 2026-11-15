@@ -8,13 +8,15 @@ import { CommandType } from '@src/enum/index.js'
 import { type GuardInterface } from '@src/interface/index.js'
 import { createMockInteraction, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { UNDEFINED_ANSWER_WARNING } from '@src/testing/mock-interaction.js'
 
 let warned: string[]
 beforeEach(() => {
   forgetStrictMocks()
   forgetDeprecationWarnings()
   warned = []
-  vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
+  // The warning that an answer resolves to undefined has its own spec, mock-interaction-response.spec
+  vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void (String(text) === UNDEFINED_ANSWER_WARNING || warned.push(String(text))))
 })
 afterEach(() => vi.restoreAllMocks())
 afterAll(() => forgetStrictMocks())
