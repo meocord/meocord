@@ -9,7 +9,24 @@ export type ResolvedTheme = DeepReadonly<MeoCordTheme>
 /** The theme of the call in progress. A per-server or per-user theme still being looked up replaces it once found. */
 export interface ThemeScope {
   theme: ResolvedTheme
+  /**
+   * For a bound function's call, which no pipeline waits for: settles once a per-server or per-user theme still being
+   * looked up is in `theme`, so an answer can wait for it.
+   */
+  ready?: Promise<void>
+  /**
+   * The scope a function bound in this call runs a later call in: the handler's theme with the server's and user's
+   * themes over it of whatever the call's `args` name, such as an interaction, a message, a reaction or a member, or
+   * `undefined` when `args` name neither.
+   */
+  rebuild?: RebuildTheme
 }
+
+/**
+ * Builds the theme scope of a call with `args` for a bound function, from the server and user they name, as a handler's
+ * call is themed, or gives `undefined` when `args` name no server or user.
+ */
+export type RebuildTheme = (args: readonly unknown[]) => ThemeScope | undefined
 
 // One per process for this meocord version, so a call's theme reads the same from its ES module and CommonJS builds
 const scope = shared('themeScope', () => new AsyncLocalStorage<ThemeScope>())
@@ -88,6 +105,7 @@ const state = shared('themeState', () => ({
   ambient: undefined as { owner: object; theme: () => ResolvedTheme } | undefined,
   ambientVersion: 0,
   themeOutsideCalls: undefined as ((interaction: object) => ResolvedTheme | Promise<ResolvedTheme>) | undefined,
+  rebuildOutsideCalls: undefined as RebuildTheme | undefined,
 }))
 
 /** MeoCord's defaults, with what the deprecated `Theme` statics set over them. */
@@ -159,12 +177,20 @@ export function setThemeOutsideCalls(resolve: (interaction: object) => ResolvedT
 }
 
 /**
+ * Sets how a function bound outside a call's scope builds the scope of each call: from the app of the client its first
+ * argument carries, with the themes of the server and user the arguments name.
+ */
+export function setRebuildOutsideCalls(rebuild: RebuildTheme): void {
+  state.rebuildOutsideCalls = rebuild
+}
+
+/**
  * The theme an answer to `interaction` uses: the running call's, or, outside any call, as in a collector's callback,
  * the theme of the app the interaction came to, with its server's and user's themes over it.
  */
 export function themeForInteraction(interaction: object): ResolvedTheme | Promise<ResolvedTheme> {
   const call = scope.getStore()
-  if (call) return call.theme
+  if (call) return call.ready ? call.ready.then(() => call.theme) : call.theme
   return state.themeOutsideCalls?.(interaction) ?? useTheme()
 }
 
@@ -200,17 +226,21 @@ export function useTheme(): ResolvedTheme {
 }
 
 /**
- * Makes a function run in the theme of the call that binds it, wherever it is called from later.
+ * Makes a function run in the handler's theme, rebuilt for the server and user each call's arguments name.
  *
  * Wrap a listener a handler registers in it, such as a collector's `collect` callback or a `client.on(...)` handler.
  * Such a listener runs in its emitter's context, so without it a `useTheme()` inside reads the theme outside any call.
  * Timers and promises the handler starts keep its theme without it.
  *
- * The theme is the binding call's whole theme, its server's and user's themes included, so every later call, whoever
- * it is for, is answered in the starting member's theme.
+ * Each call's theme is built as a handler's call is: the app's theme, the `@UseTheme` layers of the handler that
+ * bound it, then `@MeoCord`'s `themeFor` for the server and the user its arguments name, as an interaction, a message,
+ * a reaction or a member does. Every member who clicks a collector's button is answered in their own server's and
+ * user's theme. A theme `themeFor` is still looking up replaces the handler's once found, so `respond()` waits for it
+ * and `useTheme()` reads the handler's until then. A call whose arguments name neither a server nor a user, such as a
+ * collector's `end`, runs in the whole theme of the call that bound it.
  *
- * @param fn - The function to run in the call's theme; `this` and its arguments are passed through.
- * @returns A function that runs `fn` in the theme `useTheme()` returns where `bindTheme` is called.
+ * @param fn - The function to run in the handler's theme; `this` and its arguments are passed through.
+ * @returns A function that runs `fn` in that theme, and returns what `fn` returns.
  *
  * @example
  * ```ts
@@ -218,8 +248,7 @@ export function useTheme(): ResolvedTheme {
  * async poll(message: Message) {
  *   const collector = message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60_000 })
  *   collector.on('collect', bindTheme(async (click: ButtonInteraction) => {
- *     const { emojis } = useTheme() // the starting member's theme, @UseTheme included
- *     await click.reply(`${emojis.success} Picked`)
+ *     await respond(click).send({ embeds: [{ description: 'Picked' }] }) // the clicker's theme, @UseTheme included
  *   }))
  * }
  * ```
@@ -227,8 +256,11 @@ export function useTheme(): ResolvedTheme {
  * @group Responses
  */
 export function bindTheme<F extends (...args: any[]) => unknown>(fn: F): F {
+  const call = scope.getStore()
   const theme = useTheme()
+  // Without a call's scope the handler's theme is the app's, which the outside rebuild starts from
+  const rebuild = call ? call.rebuild : state.rebuildOutsideCalls
   return function (this: unknown, ...args: unknown[]) {
-    return runWithTheme(theme, () => fn.apply(this, args))
+    return scope.run(rebuild?.(args) ?? { theme, rebuild }, () => fn.apply(this, args))
   } as F
 }
