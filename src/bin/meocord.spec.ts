@@ -41,7 +41,7 @@ import path from 'node:path'
 import { MeoCordCLI, RELOAD_DEBOUNCE_MS } from '@src/bin/meocord.js'
 import { REPEAT_SIGNAL_WINDOW_MS } from '@src/util/stop-request.util.js'
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS, FORCE_STOP_GRACE_MS, MAX_SHUTDOWN_TIMEOUT_MS } from '@src/util/shutdown-timeout.util.js'
-import { namePathProblem, nextStepFor } from '@src/bin/generator.js'
+import { appListingFor, namePathProblem, nextStepFor } from '@src/bin/generator.js'
 import { ControllerType } from '@src/enum/controller.enum.js'
 import { RUNTIME_OVERRIDE_ENV } from '@src/util/runtime.util.js'
 import { PLATFORM_MANIFEST } from '@src/util/platform.util.js'
@@ -1172,8 +1172,35 @@ describe('namePathProblem', () => {
   })
 })
 
-// Generating never edits src/app.ts, so it says where each kind of class goes for it to take part
+describe('appListingFor', () => {
+  it.each([
+    ['controller', 'ticket', ControllerType.BUTTON, 'TicketButtonController', ['controllers', 'button', 'ticket.button.controller.ts'], 'controllers'],
+    ['controller', 'admin/ban', ControllerType.SLASH, 'AdminBanSlashController', ['controllers', 'slash', 'admin', 'ban.slash.controller.ts'], 'controllers'],
+    ['controller', 'pick', ControllerType.USER_SELECT_MENU, 'PickUserSelectMenuController', ['controllers', 'user-select-menu', 'pick.user-select-menu.controller.ts'], 'controllers'],
+    ['observer', 'audit/metrics', undefined, 'AuditMetricsObserver', ['observers', 'audit', 'metrics.observer.ts'], 'observers'],
+  ] as const)('names the class a %s %s exports, its file and its list', (component, name, type, className, file, list) => {
+    expect(appListingFor(component, name, type, '/app')).toEqual({ className, file: path.join('/app', 'src', ...file), list })
+  })
+
+  it.each(['service', 'guard', 'interceptor', 'filter', 'pipe'])('lists no %s, which code names where it is used', component => {
+    expect(appListingFor(component, 'admin')).toBeUndefined()
+  })
+})
+
+// A controller or observer not yet listed in src/app.ts, as with --skip-app, is told where it goes; every kind says how it takes part
 describe('nextStepFor', () => {
+  it('says nothing more for a controller or observer it listed', () => {
+    expect(nextStepFor('controller', 'ticket', ControllerType.BUTTON, true)).toBeUndefined()
+    expect(nextStepFor('observer', 'metrics', undefined, true)).toBeUndefined()
+  })
+
+  it('still asks a listed autocomplete controller for the option it completes', () => {
+    expect(nextStepFor('controller', 'admin/search', ControllerType.AUTOCOMPLETE, true)).toBe(
+      "Next: declare the option it completes on /admin-search's builder: .addStringOption(option => option.setName('query')" +
+        ".setDescription('What to search for').setAutocomplete(true))",
+    )
+  })
+
   it.each([
     ['controller', 'ticket', ControllerType.BUTTON, 'Next: add TicketButtonController to @MeoCord({ controllers }) in src/app.ts.'],
     ['controller', 'admin/ban', ControllerType.SLASH, 'Next: add AdminBanSlashController to @MeoCord({ controllers }) in src/app.ts.'],

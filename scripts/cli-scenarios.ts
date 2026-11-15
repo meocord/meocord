@@ -159,11 +159,10 @@ ${templateMain}`
 
 /** Names for each generator: a nested one ends like a flat one, and its class name carries its folder. */
 const generatedNames = [
-  { name: 'Generated', dir: '', className: 'Generated', file: 'generated' },
-  { name: 'second', dir: '', className: 'Second', file: 'second' },
-  { name: 'admin/second', dir: 'admin/', className: 'AdminSecond', file: 'second' },
+  { name: 'Generated', dir: '', file: 'generated' },
+  { name: 'second', dir: '', file: 'second' },
+  { name: 'admin/second', dir: 'admin/', file: 'second' },
 ]
-const pascal = (kebab: string) => kebab.replace(/(^|-)([a-z])/g, (_, _dash, letter: string) => letter.toUpperCase())
 
 /** Every generator run for three of each kind of component. */
 const generateThreeOfEach = generatedNames.flatMap(({ name }) => [
@@ -179,23 +178,29 @@ const autocompleteOptions = Object.fromEntries(
   ]),
 )
 
-/** The template's app.ts with every generated controller and observer listed beside the samples. */
-const appWithGenerated = (() => {
-  const controllers = generatedNames.flatMap(({ dir, className, file }) =>
-    Object.values(ControllerType).map(type => ({
-      name: `${className}${pascal(type)}Controller`,
-      from: `@src/controllers/${type}/${dir}${file}.${type}.controller`,
-    })),
-  )
-  const observers = generatedNames.map(({ dir, className, file }) => ({ name: `${className}Observer`, from: `@src/observers/${dir}${file}.observer` }))
-  const imports = [...controllers, ...observers].map(({ name, from }) => `import { ${name} } from '${from}'`).join('\n')
-  const app = templateFile(
-    'src/app.ts',
-    ['  controllers: [\n', `  controllers: [\n${controllers.map(({ name }) => `    ${name},\n`).join('')}`],
-    ['  presenter: AppPresenter,\n', `  presenter: AppPresenter,\n  observers: [${observers.map(({ name }) => name).join(', ')}],\n`],
-  )
-  return `${imports}\n${app}`
-})()
+/** An app.ts whose controllers are held in a variable, which generate leaves alone. */
+/** An app file the app's own lint passes, with two sample controllers listed as `controllers` and room around them. */
+const smallApp = ({ controllers, imports = '', options = '', after = '' }: { controllers: string; imports?: string; options?: string; after?: string }) =>
+  "import { MeoCord } from 'meocord/decorator'\n" +
+  "import { SampleSlashController } from '@src/controllers/slash/sample.slash.controller'\n" +
+  "import { SampleButtonController } from '@src/controllers/button/sample.button.controller'\n" +
+  imports +
+  `\n@MeoCord({\n  ${controllers}\n  clientOptions: { intents: [], allowedMentions: { parse: [] } },\n${options}})\nexport default class App {}\n${after}`
+
+/** Runs the app's own ESLint on src/app.ts, with no fixing, and its typecheck, as the app's lint does. */
+const LINT_APP = [
+  "const { execFileSync } = require('child_process')",
+  "execFileSync(process.execPath, ['node_modules/eslint/bin/eslint.js', 'src/app.ts'], { stdio: 'inherit' })",
+  "execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '--noEmit'], { stdio: 'inherit' })",
+].join('\n')
+
+const LISTED_IN_A_VARIABLE = `import { MeoCord } from 'meocord/decorator'
+
+const allControllers = []
+
+@MeoCord({ controllers: allControllers, clientOptions: { intents: [] } })
+export default class App {}
+`
 
 /** Where the stalled API listens: it accepts requests and never answers them. */
 const STALLED_API_ENV = 'MEOCORD_SCENARIO_STALLED_API'
@@ -734,6 +739,9 @@ function run(command: string, args: string[], dir: string, scenario: Scenario): 
 /** Runs one scenario, returning what went wrong, or nothing when it behaved. */
 async function check(scenario: Scenario): Promise<string[]> {
   const dir = dirOf(scenario)
+  // generate lists what it writes in src/app.ts, so the next scenario gets the app.ts this one started with
+  const appFile = path.join(dir, 'src', 'app.ts')
+  const restoreApp = applyFiles(dir, existsSync(appFile) ? { [path.join('src', 'app.ts')]: readFileSync(appFile, 'utf8') } : {})
   const restore = applyFiles(dir, scenario.files)
   const createdBefore = new Set((scenario.expect.creates ?? []).filter(file => existsSync(path.join(dir, file))))
   const filesBefore = new Set(filesIn(dir))
@@ -800,6 +808,7 @@ async function check(scenario: Scenario): Promise<string[]> {
     // Anything the run wrote goes, so the next scenario starts from the same app.
     for (const file of filesIn(dir)) if (!filesBefore.has(file)) rmSync(path.join(dir, file), { force: true })
     restore()
+    restoreApp()
   }
 }
 
@@ -1186,6 +1195,125 @@ const scenarios: Scenario[] = [
     expect: { code: 1, says: ['--message applies to context-menu controllers only.'], writesNothing: true },
   },
   {
+    name: 'g co button lists the controller in src/app.ts, after the last import and the last controller',
+    tier: 'fast',
+    windows: true,
+    argv: ['g', 'co', 'button', 'Probe'],
+    expect: {
+      code: 0,
+      says: ['Added ProbeButtonController to src/app.ts.'],
+      never: ['Next: add'],
+      contains: {
+        'src/app.ts': [
+          "import { AppPresenter } from '@src/presenters/app.presenter'\nimport { ProbeButtonController } from '@src/controllers/button/probe.button.controller'\n",
+          '    SampleModalSubmitController,\n    ProbeButtonController,\n  ],',
+        ],
+      },
+    },
+  },
+  {
+    name: 'g ob adds observers to src/app.ts with the observer',
+    tier: 'fast',
+    argv: ['g', 'ob', 'Probe'],
+    expect: { code: 0, says: ['Added ProbeObserver to src/app.ts.'], contains: { 'src/app.ts': ['  observers: [ProbeObserver],\n'] } },
+  },
+  {
+    name: 'g co button --skip-app leaves src/app.ts alone and says where the controller goes',
+    tier: 'fast',
+    argv: ['g', 'co', 'button', 'Probe', '--skip-app'],
+    expect: { code: 0, says: ['Next: add ProbeButtonController to @MeoCord({ controllers }) in src/app.ts.'], keeps: ['src/app.ts'] },
+  },
+  {
+    name: 'g co button warns, prints the lines to add and changes nothing when controllers is a variable',
+    tier: 'fast',
+    files: { 'src/app.ts': LISTED_IN_A_VARIABLE },
+    argv: ['g', 'co', 'button', 'Probe'],
+    expect: {
+      code: 0,
+      says: [
+        'Could not add ProbeButtonController to src/app.ts: controllers is not a list written in place. Add:',
+        "  import { ProbeButtonController } from '@src/controllers/button/probe.button.controller'",
+        '  ProbeButtonController, in @MeoCord({ controllers })',
+      ],
+      // Once: the warning holds the lines to add, so no next step repeats them
+      never: ['Next: add'],
+      creates: ['src/controllers/button/probe.button.controller.ts'],
+      keeps: ['src/app.ts'],
+    },
+  },
+  // An app file its lint passes still passes once generate edits it, or generate leaves it as it was
+  ...(
+    [
+      ['the template', undefined],
+      ['a list over lines holding only a comment', smallApp({ controllers: 'controllers: [\n    // none yet\n  ],', after: 'void [SampleSlashController, SampleButtonController]\n' })],
+      [
+        'a list whose last entry has a comment holding commas before its trailing comma',
+        smallApp({ controllers: 'controllers: [\n    SampleSlashController,\n    SampleButtonController /* kept last: the button handlers below rely on it, see docs, issue 12 */,\n  ],' }),
+      ],
+      [
+        'a comment after the last import',
+        smallApp({
+          controllers: 'controllers: [SampleSlashController, SampleButtonController],',
+          imports: "import { AppPresenter } from '@src/presenters/app.presenter' // views\n",
+          options: '  presenter: AppPresenter,\n',
+        }),
+      ],
+    ] as const
+  ).map(
+    ([shape, app]): Scenario => ({
+      name: `g co button lists the controller in ${shape}, and the app's lint and typecheck still pass with no fixing`,
+      tier: 'fast',
+      files: app ? { 'src/app.ts': app } : {},
+      before: [['g', 'co', 'button', 'Foo']],
+      command: ['node', '-e', LINT_APP],
+      expect: { code: 0, contains: { 'src/app.ts': ['FooButtonController'] } },
+    }),
+  ),
+  {
+    // A rule that reads the syntax tree, which a typed config takes from the file on disk, not prettier's text
+    name: "g co button changes nothing when the import it adds breaks a rule of the app's own ESLint config, and says why",
+    tier: 'fast',
+    files: {
+      'src/app.ts': smallApp({ controllers: 'controllers: [SampleSlashController, SampleButtonController],' }),
+      'eslint.config.ts': templateFile('eslint.config.ts', [
+        'export default [...meocordESLint, customConfig, specConfig]',
+        "export default [...meocordESLint, customConfig, specConfig, { files: ['src/app.ts'], rules: { 'no-restricted-imports': ['error', { paths: [{ name: '@src/controllers/button/foo.button.controller', message: 'Buttons are listed by their feature module.' }] }] } }]",
+      ]),
+    },
+    argv: ['g', 'co', 'button', 'Foo'],
+    expect: {
+      code: 0,
+      says: ["Could not add FooButtonController to src/app.ts: the edit would fail your project's ESLint (no-restricted-imports:"],
+      never: ['Added FooButtonController'],
+      keeps: ['src/app.ts'],
+    },
+  },
+  {
+    name: 'g co button lists the controller and says it went unchecked when the app has no ESLint',
+    tier: 'fast',
+    hides: ['node_modules/eslint'],
+    argv: ['g', 'co', 'button', 'Foo'],
+    expect: {
+      code: 0,
+      says: ['Added FooButtonController to src/app.ts, not checked with ESLint: your project has no ESLint.'],
+      contains: { 'src/app.ts': ['FooButtonController,'] },
+    },
+  },
+  {
+    name: "g ob changes nothing when adding observers would break the app's lint, and says why",
+    tier: 'fast',
+    files: {
+      'src/app.ts': "import { MeoCord } from 'meocord/decorator'\n\n@MeoCord({ controllers: [], clientOptions: { intents: [], allowedMentions: { parse: [] } } })\nexport default class App {}\n",
+    },
+    argv: ['g', 'ob', 'Audit'],
+    expect: {
+      code: 0,
+      says: ["Could not add AuditObserver to src/app.ts: the edit would fail your project's ESLint (prettier/prettier:", '  AuditObserver, in @MeoCord({ observers })'],
+      never: ['Added AuditObserver', 'Next: add'],
+      keeps: ['src/app.ts'],
+    },
+  },
+  {
     name: 'g co button writes no builder',
     tier: 'fast',
     argv: ['g', 'co', 'button', 'Probe'],
@@ -1327,9 +1455,9 @@ const scenarios: Scenario[] = [
   },
 
   {
-    name: 'three of every generated component, listed beside the samples, build and start without a routing warning',
+    name: 'three of every generated component, listed beside the samples by generate, build and start without a routing warning',
     tier: 'slow',
-    files: { '.env': INVALID_TOKEN_ENV, 'src/app.ts': appWithGenerated, dist: null },
+    files: { '.env': INVALID_TOKEN_ENV, dist: null },
     before: generateThreeOfEach,
     thenEdits: autocompleteOptions,
     argv: ['start', '--prod', '--build'],
