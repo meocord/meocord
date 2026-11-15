@@ -42,7 +42,9 @@ export function noteMockMade(): void {
  * reply is flagged `Loading` until it is edited, and `respond()`'s `send()` resolves to the message a reply or an
  * update sent. A client from `createMockClient()` has a working emitter, and `dispatch` leaves a component or modal no
  * route takes to its `interactionCreate` listeners, such as a collector's. A mock interaction or message shares its
- * client with what it holds, its user, member, channel and server, as discord.js reaches them through its caches. A
+ * client with what it holds, its user, member, channel and server, as discord.js reaches them through its caches, and
+ * a mock message's, response's and channel's `createMessageComponentCollector()` and `awaitMessageComponent()` run
+ * discord.js's own collector on that client, so a click built from a reply reaches the reply's collector. A
  * message an interaction sends names it in `interactionMetadata`, and a command's `message` and a message's raw
  * `channel_id` and `guild_id` read `undefined`, as discord.js's `InteractionCollector` expects. An answer marks the
  * interaction `replied`, `deferred` or `responded` once it resolves, as discord.js does, so code that doesn't await one

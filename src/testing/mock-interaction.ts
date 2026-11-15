@@ -74,6 +74,7 @@ import {
   Locale,
   MentionableSelectMenuInteraction,
   Message,
+  MessageComponentInteraction,
   MessageFlags,
   MessageFlagsBitField,
   MessageMentions,
@@ -115,7 +116,6 @@ import {
   type ChatInputCommandInteraction,
   type CommandInteraction,
   type ContextMenuCommandInteraction,
-  type MessageComponentInteraction,
   MessageContextMenuCommandInteraction,
   type ModalSubmitInteraction,
   type OmitPartialGroupDMChannel,
@@ -602,6 +602,34 @@ const SELF_METHODS = new Set(['ban', 'delete', 'disableCommunicationUntil', 'edi
 // Collectors that resolve to what they collected: nothing, for a mock no one answers
 const COLLECTING_METHODS = new Set(['awaitMessages', 'awaitReactions'])
 
+// The component collectors of a message, a response and a text-based channel, the discord.js classes that have them,
+// which run discord.js's own on a strict mock client
+const COMPONENT_COLLECTORS = new Set(['createMessageComponentCollector', 'awaitMessageComponent'])
+
+/** What default mode warns, once, where an app's or a test's call reaches a mock's component collector. */
+const INERT_COLLECTOR_WARNING =
+  "A mock message's, response's and channel's createMessageComponentCollector() and awaitMessageComponent() collect " +
+  "nothing here and return undefined; under useStrictMocks() they run discord.js's own collector on the mock client. " +
+  'In the next major version (5.0) they do so without the call (https://github.com/meocord/meocord/issues/441).'
+
+/**
+ * A mock message's, response's or channel's `createMessageComponentCollector` or `awaitMessageComponent`: on a mock
+ * client, a mock function that calls through to discord.js's own under strict mocks, where the client's emitter works,
+ * so a real `InteractionCollector` collects what reaches it; in default mode it does nothing and returns `undefined`,
+ * with a warning once.
+ * A mock on a real `Client` stays inert, with no warning, as strict mocks keep it.
+ */
+function componentCollectorStub(key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
+  return createMockFn((...args: unknown[]) => {
+    const self = receiver()
+    if (isMockClient(readPlaceQuietly(() => (self as { client?: unknown }).client))) {
+      if (strictMocks()) return method.apply(self, args)
+      warnOnce(mockLogger, INERT_COLLECTOR_WARNING)
+    }
+    return key === 'awaitMessageComponent' ? Promise.resolve(undefined) : undefined
+  })
+}
+
 // The DM channel of each user, made once, as Discord keeps one per user
 const dmChannels = new WeakMap<object, object>()
 /**
@@ -854,6 +882,7 @@ function recentMessages(manager: object, options: unknown): Collection<string, M
  * `undefined`.
  */
 function methodStub(target: object, key: string, method: (...args: unknown[]) => unknown, receiver: () => object): Mock {
+  if (COMPONENT_COLLECTORS.has(key)) return componentCollectorStub(key, method, receiver)
   if (!returnsPromise(target, key, method)) return createMockFn()
   // A member's DMs go through its user, and a user's through its one DM channel, as discord.js sends them
   if (target instanceof GuildMember && (key === 'createDM' || key === 'send')) {
@@ -1440,6 +1469,17 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * with `withResponse` to an `InteractionCallbackResponse` whose `resource.message` is the message sent, as
  * `fetchReply()` reads it then, and `null` for a deferral.
  *
+ * Under `useStrictMocks()` a response's, a message's and a channel's `createMessageComponentCollector()` and
+ * `awaitMessageComponent()` run discord.js's own collector on the mock client, and stay mock functions that record
+ * each call. The collector takes a click on its message, or in its channel, that `dispatch` delivers, or that a test
+ * emits on that client; a component a route takes goes to the route alone and never reaches a collector. A click
+ * built from a reply, given its `message` and no `client`, is on the reply's client, so it reaches the reply's
+ * collector; give `client` for a click meant for a collector on another client. discord.js times a collector's `time`
+ * and `idle` with `node:timers`, so a test's fake timers don't move them; end a collector in a test with `max` or
+ * `collector.stop()`. To answer `awaitMessageComponent()`, start the handler without awaiting it, dispatch the click
+ * once the handler has replied, then await the handler. Without strict mocks both collector methods return
+ * `undefined`, with a warning once. On a real `Client` both stay inert, with strict mocks or without.
+ *
  * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
  * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
  *
@@ -1469,6 +1509,29 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * expect(after).not.toBe(before)
  * expect(after.id).toBe(before.id)
  * expect(before.content).toBe('Starting.')
+ * ```
+ *
+ * @example
+ * ```ts
+ * import { expect } from 'vitest'
+ *
+ * // Under useStrictMocks(): a command that collects a click on its reply
+ * @Controller()
+ * class PickController {
+ *   @Command('pick', CommandType.SLASH)
+ *   async pick(interaction: ChatInputCommandInteraction) {
+ *     const response = await interaction.reply({ content: 'Pick one.', withResponse: true })
+ *     const collector = response.resource!.message!.createMessageComponentCollector({ max: 1 })
+ *     collector.on('collect', click => click.update({ content: `Picked ${click.customId}.` }))
+ *   }
+ * }
+ *
+ * const module = MeoCordTestingModule.create({ controllers: [PickController] }).compile()
+ * const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'pick' })
+ * await module.dispatch(command)
+ * const click = createMockInteraction(ButtonInteraction, { customId: 'red', message: await command.fetchReply() })
+ * await module.dispatch(click)
+ * expect(getResponse(click).calls.map(call => call.method)).toEqual(['update'])
  * ```
  *
  * @group Testing
@@ -2898,7 +2961,9 @@ type ChannelOf<T> = T extends ThreadChannel ? AnyThreadChannel : T
  * and `members` on threads, each with a real, empty `cache` and the channel as its `channel`, or `thread`. A subclass gets the managers of the class it extends.
  * Type guards such as `isTextBased()`, `isDMBased()` and `isThread()` run discord.js's own logic, so each answers what
  * the channel is. A thread is typed as discord.js types every thread it gives, a public or a private one, so it fits
- * an interaction's `channel`, a guild's channels and the `threadCreate` event.
+ * an interaction's `channel`, a guild's channels and the `threadCreate` event. Under `useStrictMocks()` a text-based
+ * channel's `createMessageComponentCollector()` and `awaitMessageComponent()` run discord.js's own collector on its
+ * mock client, as {@link createMockInteraction} describes; without them they return `undefined`, with a warning once.
  *
  * @param Class - The discord.js channel class to mock.
  * @param props - Values for the channel's properties, such as its `id`, `name` or `topic`; see {@link MockProps}.
@@ -3814,11 +3879,13 @@ function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JS
  * `delete()`, `edit()`, `reply()`, `react()`, `pin()` and `unpin()` throw once the message is deleted. `edit()` changes
  * this message and resolves to it, and `reply()` resolves to the reply, sent in this message's channel and holding what
  * was sent, as a channel's `send()` does. Under `useStrictMocks()` a message the bot sends is its `client.user`'s, and
- * one sent in a DM is in that DM. Without overrides the message is empty, in a server, from a new person who is its
- * `member`; with `guild: null` it is a direct message. Give `author` to send several messages as one user, such as to
- * reach a per-user cooldown. An author given, and the users, roles and channels the content mentions, are cached as the
- * gateway delivers them. It is typed as discord.js emits a message, never in a group DM, so it fits `messageCreate` and
- * the other message events.
+ * one sent in a DM is in that DM, and `createMessageComponentCollector()` and `awaitMessageComponent()` run
+ * discord.js's own collector on the message's client, as {@link createMockInteraction} describes; without them they
+ * return `undefined`, with a warning once. Without overrides the message is empty, in a server, from a new person who
+ * is its `member`; with `guild: null` it is a direct message. Give `author` to send several messages as one user, such
+ * as to reach a per-user cooldown. An author given, and the users, roles and channels the content mentions, are cached
+ * as the gateway delivers them. It is typed as discord.js emits a message, never in a group DM, so it fits
+ * `messageCreate` and the other message events.
  *
  * Under `useStrictMocks()` the message shares one client with its author, member, channel and server and the users it
  * mentions, as in discord.js: the `client` given, else the mock client its `channel` or `guild` already holds, else a
