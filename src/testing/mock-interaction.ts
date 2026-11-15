@@ -459,7 +459,7 @@ function warnPlaceholderRead(target: object, key: string, strictValue: string): 
   )
 }
 
-// The client of a structure made without one: the one its guild has, else one of its own, made once
+// The client of a structure made without one: the one its guild has, else one of its own, made once; a guild's too
 const ownClients = new WeakMap<object, unknown>()
 function clientOf(target: object): unknown {
   const guild = Object.getOwnPropertyDescriptor(target, 'guild')?.value as unknown
@@ -467,6 +467,66 @@ function clientOf(target: object): unknown {
   let client = ownClients.get(target)
   if (client === undefined) ownClients.set(target, (client = createMockClient()))
   return client
+}
+
+/**
+ * The mock client `structure` is already on, making none: its own, its guild's, or the one its first read made. None
+ * for a structure that has no client yet, or is on a real one.
+ */
+export function heldClient(structure: unknown): Client | undefined {
+  if (typeof structure !== 'object' || structure === null) return undefined
+  const target = mockTargets.get(structure) ?? structure
+  const own = Object.getOwnPropertyDescriptor(target, 'client')
+  const guild = Object.getOwnPropertyDescriptor(target, 'guild')?.value as unknown
+  const held = own ? (own.get ? ownClients.get(target) : own.value) : guild instanceof Guild ? heldClient(guild) : ownClients.get(target)
+  return isMockClient(held) ? (held as Client) : undefined
+}
+
+/**
+ * Puts `structure` on the mock client `client` where it has no client yet, as discord.js reaches a structure through
+ * the client's caches: through its guild for one in a server. One already on a client keeps it.
+ */
+export function joinClient(structure: unknown, client: unknown): void {
+  if (!isMockClient(client) || typeof structure !== 'object' || structure === null) return
+  const target = mockTargets.get(structure) ?? structure
+  const own = Object.getOwnPropertyDescriptor(target, 'client')
+  if (own) {
+    // A guild's client is made on its first read, until then joinable
+    if (own.get && !ownClients.has(target)) ownClients.set(target, client)
+    return
+  }
+  const guild = Object.getOwnPropertyDescriptor(target, 'guild')?.value as unknown
+  if (guild instanceof Guild) joinClient(guild, client)
+  else if (!ownClients.has(target)) ownClients.set(target, client)
+}
+
+/** Puts two structures on one client: the one either already holds, else a new one. */
+export function shareClient(first: unknown, second: unknown): void {
+  const client = heldClient(first) ?? heldClient(second) ?? createMockClient()
+  joinClient(first, client)
+  joinClient(second, client)
+}
+
+/** What default mode warns, once, where code reads a held structure's client that strict mocks share. */
+const OWN_CLIENT_WARNING =
+  "A structure a mock interaction or message holds, such as its user, channel or guild, has a client of its own here, " +
+  "not the interaction's or the message's; under useStrictMocks() they share one, as in discord.js. In the next major " +
+  'version (5.0) they do so without the call (https://github.com/meocord/meocord/issues/441).'
+
+/**
+ * In default mode, has a read of `structure`'s client warn once where it isn't `owner`'s, which strict mocks give it;
+ * the mock's own reads stay quiet.
+ */
+function warnOnOwnClient(structure: unknown, owner: () => unknown): void {
+  if (strictMocks() || typeof structure !== 'object' || structure === null) return
+  const target = (mockTargets.get(structure) ?? structure) as Record<string, unknown>
+  // One read gives one warning: a user's DM channel already warns that its client is not the user's
+  if (readWarnings.get(target)?.has('client')) return
+  warnOnRead(target, 'client', () => {
+    if (readingPlace > 0 || isOwnCall()) return
+    if (readPlaceQuietly(() => (structure as { client?: unknown }).client) === owner()) return
+    warnOnce(mockLogger, OWN_CLIENT_WARNING)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -559,9 +619,10 @@ function dmChannelOf(user: object): object {
       const place = (target: object, key: string, value: unknown) => Object.defineProperty(target, key, { value, writable: true, configurable: true })
       place(made, 'recipient', user)
       place(user, 'dmChannel', made)
-      if (user.client instanceof Client) {
-        if (strictMocks()) place(made, 'client', user.client)
-        else warnOnClientRead(made, user.client)
+      const client = readPlaceQuietly(() => user.client)
+      if (client instanceof Client) {
+        if (strictMocks()) place(made, 'client', client)
+        else warnOnClientRead(made, client)
       }
     }
     channel = made
@@ -1247,6 +1308,9 @@ const INVALID_CHANNEL_TYPE = 'CommandInteractionOptionInvalidChannelType' as Dis
 /** The names of a mock options resolver's entity options, for one given to an autocomplete. */
 const optionEntities = new WeakMap<object, string[]>()
 
+/** The users, members, roles and channels a mock options resolver resolves to, for the interaction to hold. */
+const optionStructures = new WeakMap<object, Base[]>()
+
 /** The resolvers whose entity options a warning has named. */
 const warnedEntities = new WeakSet<object>()
 
@@ -1348,6 +1412,20 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * would fail. Every method is a mock function, and one that returns a promise in discord.js resolves. What the mock
  * computes for itself, such as `memberPermissions` and `appPermissions`, calls none of them and caches nothing, so a
  * stub a test sets stays for its own code.
+ *
+ * Under `useStrictMocks()` the interaction shares one client with what it holds, as in discord.js: its user, member,
+ * channel and server, a reply's channel, the users, members, roles and channels its options or a select menu resolve
+ * to, and a user context menu's `targetUser`. A user its options or a select menu resolve to is cached on the mock
+ * client it is on unless one with its id is there already, as discord.js keeps the one cached first, and
+ * `options.getUser()` still returns the user the test gave; a `targetUser` given is the one cached on the interaction's
+ * client. The client is the `client` given, else the mock client a `message` or a message context menu's
+ * `targetMessage`, a `channel` or a `guild` given already holds, in that order, else a new one. So a collector made on
+ * `interaction.channel.client` hears a click on the reply. A structure given that is already on another client keeps
+ * it. A real `Client` given as `client` is the interaction's own client, which caches its user, server and channel and
+ * a `targetUser` given; what it holds keeps mock clients of its own, and a real `Client` a structure given holds is
+ * never taken nor written to. A structure made with `createMock()` holds no mock client to share: make it with
+ * `createMockChannel()`, `createMockGuild()` or `createMockMessage()` for that. In default mode each keeps a client of
+ * its own, and code that reads one strict mocks would give otherwise warns once.
  *
  * An answer keeps that order whatever it is set to do: one a test gives a value with `mockResolvedValue` replies or
  * defers as a real one would, and one that rejects changes nothing. `fetchReply()` reads back what `reply()` or
@@ -1484,6 +1562,22 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
   // mock lacks: a guildId is a guild, a guild object with it a cached one, neither a DM. A member
   // not given is the user's on an interaction, and the auto-stub elsewhere, so only one set to null or undefined fails.
   const own = (key: string) => (Object.prototype.hasOwnProperty.call(instance, key) ? instance[key] : undefined)
+  // A structure the interaction holds: on its client under strict mocks, warned of where it isn't in default mode
+  const holdOnClient = (structure: unknown) =>
+    strictMocks() ? joinClient(structure, instance.client) : warnOnOwnClient(structure, () => readPlaceQuietly(() => instance.client))
+  // A user, member, role or channel the interaction resolves, held as discord.js caches each on its client. Under
+  // strict mocks a user is cached on the mock client it is on, unless one with its id is there already: discord.js
+  // keeps one object for each id, the one cached first
+  const holdResolved = (structure: unknown) => {
+    const user = structure instanceof GuildMember ? structure.user : structure
+    for (const each of new Set([structure, user])) holdOnClient(each)
+    if (strictMocks() && user instanceof User) cached(cacheOf(heldClient(user)?.users), user.id, () => user)
+  }
+  // What options given to the interaction resolve to; an autocomplete's hold ids alone under strict mocks
+  const holdOptions = (options: unknown) => {
+    if (typeof options !== 'object' || options === null || (strictMocks() && ownedByAutocomplete(options))) return
+    for (const structure of optionStructures.get(options) ?? []) holdResolved(structure)
+  }
   let strictPlace: StrictPlace | undefined
   const hasMember = () => !Object.prototype.hasOwnProperty.call(instance, 'member') || Boolean(instance.member)
   const guildChecks = {
@@ -2104,8 +2198,21 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
     const userGiven = !unset('user')
     if (!userGiven) instance.user = mockUser()
-    // Assigned once by discord.js's Base constructor, as on a message, and the gateway caches the user on it
-    if (unset('client')) Object.defineProperty(instance, 'client', { value: createMockClient(), writable: true, configurable: true })
+    // Assigned once by discord.js's Base constructor, as on a message, and the gateway caches the user on it. Under
+    // strict mocks it is the mock client its message or target message, channel or guild already holds, in that order,
+    // as Discord sends a click or a menu to the bot whose message it is; what it holds then joins it, as discord.js
+    // reaches each through the client's caches. Default mode keeps their own clients, and a read of one warns once
+    if (unset('client')) {
+      const held = strictMocks() ? [own('message'), own('targetMessage'), own('channel'), own('guild')].map(heldClient).find(Boolean) : undefined
+      Object.defineProperty(instance, 'client', { value: held ?? createMockClient(), writable: true, configurable: true })
+    }
+    for (const key of ['user', 'channel', 'guild', 'member']) holdOnClient(own(key))
+    holdOptions(own('options'))
+    // What a select menu is given, resolved as an option is
+    for (const key of ['users', 'members', 'roles', 'channels']) {
+      const given = own(key)
+      if (given instanceof Collection) for (const structure of given.values()) holdResolved(structure)
+    }
     // The client caches the guild the interaction came from
     const guildGiven = own('guild')
     if (guildGiven instanceof Guild) cached(cacheOf((instance.client as Client).guilds), guildGiven.id, () => guildGiven)
@@ -2142,6 +2249,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         get: () => {
           if (channel === undefined || (own('guildId') && own('guild') instanceof Guild)) {
             channel = channelFor(own('guild'), own('guildId') as string | null, own('channelId') as string, own('user') as object)
+            holdOnClient(channel)
             cacheChannel(channel as object, own('guild'), own('client'))
           }
           return channel
@@ -2155,7 +2263,11 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     let member: unknown
     if (unset('member')) {
       Object.defineProperty(instance, 'member', {
-        get: () => (own('guildId') ? (member ??= memberFor(own('guild'), own('user') as { id: string }, userGiven, own('guildId') as string)) : null),
+        get: () => {
+          if (!own('guildId')) return null
+          if (member === undefined) holdOnClient((member = memberFor(own('guild'), own('user') as { id: string }, userGiven, own('guildId') as string)))
+          return member
+        },
         set: (value: unknown) => Object.defineProperty(instance, 'member', { value, writable: true, enumerable: true, configurable: true }),
         enumerable: true,
         configurable: true,
@@ -2168,11 +2280,17 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       // Under strict mocks a target user given is the client's cached one, as discord.js resolves it, so its member is
       // that user's; default mode keeps the member's own user, and a read of targetMember warns once
       const givenTarget = own('targetUser') as User | undefined
-      const users = cacheOf((instance.client as Client).users)
-      if (strictMocks() && typeof givenTarget === 'object' && givenTarget !== null) users?.set(givenTarget.id, givenTarget)
+      if (typeof givenTarget === 'object' && givenTarget !== null) {
+        holdOnClient(givenTarget)
+        if (strictMocks()) cacheOf((instance.client as Client).users)?.set(givenTarget.id, givenTarget)
+      }
       const targetUser = (): User => {
         const id = own('targetId') as string
-        return cached(cacheOf((instance.client as Client).users), id, () => mockUser(id)) as User
+        return cached(cacheOf((instance.client as Client).users), id, () => {
+          const made = mockUser(id)
+          holdOnClient(made)
+          return made
+        }) as User
       }
       const live = (key: string, read: () => unknown) =>
         Object.defineProperty(instance, key, {
@@ -2300,7 +2418,9 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
 
   // Options assigned after creation, directly or through Object.assign, belong to it as those given do
   mock = stubDeep(instance, stubs, (prop, value) => {
-    if (prop === 'options') ownOptions(instance, value)
+    if (prop !== 'options') return
+    ownOptions(instance, value)
+    holdOptions(value)
   }) as Record<string, unknown>
   return mock as DeepMocked<T>
 }
@@ -2848,10 +2968,17 @@ export function createMockChannel<T extends BaseChannel>(
 
 const CHANNEL_TYPE_GUARDS = ['isThread', 'isTextBased', 'isDMBased', 'isVoiceBased', 'isThreadOnly', 'isSendable'] as const
 
-/** A member of `guild` as the user with `id`: its id, user and guild own values, as the gateway delivers a member. */
-function memberIn(guild: unknown, id: string, user: unknown, guildId?: string): object {
-  // The guild stays writable, for the guild createMockGuild puts the member in
-  const own = { id: { value: id }, user: { value: user }, ...(guild ? { guild: { value: guild, writable: true, configurable: true } } : {}) }
+/**
+ * A member of `guild` as the user with `id`: its id, user and guild own values, as the gateway delivers a member;
+ * `readUser`, where given, reads its user live instead.
+ */
+function memberIn(guild: unknown, id: string, user: unknown, guildId?: string, readUser?: () => unknown): object {
+  // The guild stays writable, for the guild createMockGuild puts the member in; `readUser` reads the user live
+  const own = {
+    id: { value: id },
+    user: readUser ? { get: readUser } : { value: user },
+    ...(guild ? { guild: { value: guild, writable: true, configurable: true } } : {}),
+  }
   const member = Object.defineProperties(Object.create(GuildMember.prototype), own) as object
   // A server the mock has only the id of, as one the bot isn't in
   if (!guild && guildId) Object.defineProperty(member, RAW_GUILD_ID, { value: guildId })
@@ -3292,13 +3419,19 @@ function placeWarning(name: string, key: string, place: StrictPlace): string {
   return `${name}.${key} reads ${why[0]} here; in the next major version (5.0) ${why[1]}. ${why[2]}`
 }
 
+/** The keys whose reads warn, by the instance read. */
+const readWarnings = new WeakMap<object, Set<string>>()
+
 /** Has a read of `instance`'s `key` call `warn` first, and what that read reads in turn stay quiet. */
 function warnOnRead(instance: Record<string, unknown>, key: string, warn: () => void): void {
+  readWarnings.set(instance, (readWarnings.get(instance) ?? new Set()).add(key))
   const descriptor = Object.getOwnPropertyDescriptor(instance, key)
   // One the mock answers with a stub stays unset, as the mock's own checks read it, and warns as the stub is read
   if (!descriptor) {
     if (!stubReadWarnings.has(instance)) stubReadWarnings.set(instance, new Map())
-    stubReadWarnings.get(instance)!.set(key, warn)
+    const warnings = stubReadWarnings.get(instance)!
+    const earlier = warnings.get(key)
+    warnings.set(key, earlier ? () => (earlier(), warn()) : warn)
     return
   }
   const read = () => (descriptor.get ? descriptor.get.call(instance) : descriptor.value)
@@ -3434,8 +3567,11 @@ function homeManagers(instance: Record<string, unknown>, guild: object): void {
  */
 function settleGuild(instance: Record<string, unknown>, guild: object): void {
   homeManagers(instance, guild)
-  let client: unknown
-  Object.defineProperty(instance, 'client', { get: () => (client ??= createMockClient()), set: value => (client = value), configurable: true })
+  Object.defineProperty(instance, 'client', {
+    get: () => clientOf(instance),
+    set: (value: unknown) => void ownClients.set(instance, value),
+    configurable: true,
+  })
   const members = instance.members as object
   const botMember = (keep: boolean) => {
     const { user } = (guild as Guild).client
@@ -3448,8 +3584,9 @@ function settleGuild(instance: Record<string, unknown>, guild: object): void {
       if (!Object.prototype.hasOwnProperty.call(item, 'guild')) (item as Record<string, unknown>).guild = guild
     }
   }
-  // Strict mocks cache the bot's member from the start, as the gateway does when the bot joins, so lookups find it
-  if (strictMocks()) void (members as { me: unknown }).me
+  // Strict mocks cache the bot's member from the start, as the gateway does when the bot joins, so lookups find it; its
+  // user is read from the guild's client when read, so the guild can still join a client after it is made
+  if (strictMocks()) cached(cacheOf(members), MOCK_BOT_ID, () => memberIn(guild, MOCK_BOT_ID, undefined, undefined, () => (guild as Guild).client.user))
 }
 
 /**
@@ -3683,6 +3820,15 @@ function asHeld<T>(value: T | JSONEncodable<T>, kind: 'component' | 'embed'): JS
  * gateway delivers them. It is typed as discord.js emits a message, never in a group DM, so it fits `messageCreate` and
  * the other message events.
  *
+ * Under `useStrictMocks()` the message shares one client with its author, member, channel and server and the users it
+ * mentions, as in discord.js: the `client` given, else the mock client its `channel` or `guild` already holds, else a
+ * new one. A structure already on another client keeps it. A real `Client` given as `client` is the message's own and
+ * that of the server and channel it makes for itself; its author, the users it mentions and a structure given keep mock
+ * clients of their own, and a real `Client` a structure given holds is never taken nor written to. A structure made
+ * with `createMock()` holds no mock client to share: make it with `createMockChannel()` or `createMockGuild()` for
+ * that. In default mode each keeps a client of its own, and code that reads one strict mocks would give otherwise warns
+ * once.
+ *
  * @param overrides - The message's content, components and the rest; see {@link MockMessageOverrides}.
  *
  * @example
@@ -3743,8 +3889,16 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
 
   instance.deleted = false
 
+  // Under strict mocks the client is chosen first: the one given, else the mock client its channel or guild already
+  // holds, so the author, and a DM channel made through it, join that client as they are made
+  const strictClient = strictMocks() ? (overrides.client ?? [overrides.channel, overrides.guild].map(heldClient).find(Boolean) ?? createMockClient()) : undefined
+
   // Constructor-assigned — set as prototype-based stubs; a user rather than a bot, as dispatch handles only those
   instance.author = overrides.author ?? (made.author ??= mockUser())
+  // What the message holds: on its client under strict mocks, warned of where it isn't in default mode
+  const holdOnClient = (structure: unknown) =>
+    strictClient ? joinClient(structure, strictClient) : warnOnOwnClient(structure, () => readPlaceQuietly(() => instance.client))
+  holdOnClient(instance.author)
 
   // Getters on the prototype, which the proxy would answer with a stub object: own properties shadow them
   // A channel given says where the message was sent, unless its guild is given too
@@ -3812,8 +3966,10 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
 
   // Assigned once by discord.js's Base constructor, so an own value, as it is on a real message; a guild the message
   // made for itself has the same client, which caches the guild
-  const client = overrides.client ?? createMockClient()
+  const client = strictClient ?? overrides.client ?? createMockClient()
   if (guild && overrides.guild === undefined) (guild as Record<string, unknown>).client = client
+  holdOnClient(overrides.channel)
+  holdOnClient(overrides.guild)
   Object.defineProperty(instance, 'client', { value: client, writable: true, configurable: true })
   if (guild instanceof Guild) cached(cacheOf(client.guilds), guild.id, () => guild)
   if (channel) cacheChannel(channel, guild, client)
@@ -3822,6 +3978,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
 
   // MessageMentions — constructor-assigned; what the content mentions, cached as the gateway delivers it
   instance.mentions = mentionsOf(overrides.content, client, guild)
+  if (strictClient) for (const user of [...(overrides.users ?? []), ...(instance.mentions as MessageMentions).users.values()]) joinClient(user, client)
 
   // Data a message always has, real rather than stubbed, so code reading it sees an empty message
   instance.flags = new MessageFlagsBitField(overrides.flags)
@@ -4342,6 +4499,7 @@ export function createChatInputOptions<Cached extends CacheType = any>(
   const resolver = stubDeep(base)
   const entities = Object.entries(values).filter(([name, value]) => name !== focused && typeof value === 'object' && value !== null)
   optionEntities.set(resolver, entities.map(([name]) => name))
+  optionStructures.set(resolver, entities.map(([, value]) => value).filter(value => value instanceof Base))
   return resolver as unknown as DeepMocked<CommandInteractionOptionResolver<Cached>>
 }
 
@@ -4363,4 +4521,5 @@ const discordDefault = discordDefaults({
   ownedManager,
   readPlaceAs,
   readPlaceQuietly,
+  shareClient,
 })

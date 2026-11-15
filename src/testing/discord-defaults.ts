@@ -70,6 +70,7 @@ import type {
   ownedManager,
   readPlaceAs,
   readPlaceQuietly,
+  shareClient,
 } from '@src/testing/mock-interaction.js'
 import { createModalFields } from '@src/testing/modal-fields.js'
 import { nextSnowflake } from '@src/testing/snowflake.js'
@@ -194,6 +195,7 @@ export interface MockMakers {
   ownedManager: typeof ownedManager
   readPlaceAs: typeof readPlaceAs
   readPlaceQuietly: typeof readPlaceQuietly
+  shareClient: typeof shareClient
 }
 
 /**
@@ -201,7 +203,7 @@ export interface MockMakers {
  * class, the default of the nearest class that has one, strict ones first.
  */
 export function discordDefaults(makers: MockMakers): (target: object, key: string) => Default<unknown, never> | undefined {
-  const { botMemberOf, createChatInputOptions, createMockChannel, createMockGuild, createMockMessage, createMockUser, heldChannelOf, isRawMember, isUnsetEveryone, madeAt, memberRoles, NEW_SERVER_EVERYONE_PERMISSIONS, ownedManager, readPlaceAs, readPlaceQuietly } = makers
+  const { botMemberOf, createChatInputOptions, createMockChannel, createMockGuild, createMockMessage, createMockUser, heldChannelOf, isRawMember, isUnsetEveryone, madeAt, memberRoles, NEW_SERVER_EVERYONE_PERMISSIONS, ownedManager, readPlaceAs, readPlaceQuietly, shareClient } = makers
 
   /**
    * A member's permissions where an interaction was made, as Discord computes them: under strict mocks, every permission
@@ -278,12 +280,15 @@ export function discordDefaults(makers: MockMakers): (target: object, key: strin
   }
 
   /**
-   * The server of a channel or thread made without one: the one its own guildId names, else one of its own. Its own
-   * value is read, not its default, which reads the guild in turn.
+   * The server of a channel or thread made without one, on the channel's client, as discord.js reaches it there: the
+   * one its own guildId names, else one of its own. Its own value is read, not its default, which reads the guild in
+   * turn.
    */
   function guildFromOwnId(channel: GuildChannel | ThreadChannel): Guild {
     const id: unknown = Object.getOwnPropertyDescriptor(channel, 'guildId')?.value
-    return createMockGuild(typeof id === 'string' ? { id } : {}) as unknown as Guild
+    const guild = createMockGuild(typeof id === 'string' ? { id } : {}) as unknown as Guild
+    shareClient(channel, guild)
+    return guild
   }
 
   /** The bot's message a component interaction was used on, in the interaction's channel, holding that component. */
@@ -384,8 +389,12 @@ export function discordDefaults(makers: MockMakers): (target: object, key: strin
       name: () => 'role',
       // Above @everyone, which a server's role manager makes at position 0
       position: () => 1,
-      // Every role has a server; one made without is in one of its own, unless a guild given it takes it in
-      guild: () => createMockGuild(),
+      // Every role has a server; one made without is in one of its own, on its client, unless a guild given takes it in
+      guild: role => {
+        const guild = createMockGuild()
+        shareClient(role, guild)
+        return guild as unknown as Guild
+      },
       rawPosition: role => role.position,
       permissions: noPermissions,
       hoist: () => false,
