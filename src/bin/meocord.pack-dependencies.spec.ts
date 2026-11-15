@@ -16,7 +16,10 @@ vi.mock('@src/common/index.js', () => ({
 
 const { MeoCordCLI } = await import('@src/bin/meocord.js')
 
-interface PackingCli { packDependencies: (config: object, natives: Map<string, unknown>) => void; logger: { info: ReturnType<typeof vi.fn> } }
+interface PackingCli {
+  packDependencies: (config: object, natives: { found: Map<string, unknown>; copies: Map<string, unknown> }) => void
+  logger: { info: ReturnType<typeof vi.fn> }
+}
 
 describe('packing dependencies into dist', () => {
   let project: string
@@ -42,7 +45,7 @@ describe('packing dependencies into dist', () => {
     }
     const cli = new MeoCordCLI() as unknown as PackingCli
 
-    cli.packDependencies({ externals }, new Map())
+    cli.packDependencies({ externals }, { found: new Map(), copies: new Map() })
 
     expect(cli.logger.info).toHaveBeenCalledWith(message)
   })
