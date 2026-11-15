@@ -5,11 +5,14 @@ import {
   assertNoBundledNativeAddons,
   bundledModuleFiles,
   copyPackagesInto,
+  copyPath,
   installedPackages,
   isBuiltFor,
   createNativeExternals,
-  otherCopiesWarning,
+  OTHER_COPIES_DIR,
+  dependencyChains,
   findBundledNativeAddons,
+  installedCopies,
   packageFromPath,
   packageNameOfRequest,
 } from '@src/build/native-addons.js'
@@ -109,6 +112,8 @@ describe('bundledModuleFiles', () => {
             modules: [
               { nameForCondition: '/app/src/main.ts', modules: [{ nameForCondition: '/app/node_modules/a/index.js' }] },
               { children: [{ identifier: 'loader!/app/node_modules/b/index.js' }] },
+              // A packed copy's file, kept out of the bundle
+              { identifier: 'external import "./node_modules/.meocord/c-2.0.0-1a2b3c4d/node_modules/c/index.js"' },
             ],
           },
         ],
@@ -261,21 +266,210 @@ describe('createNativeExternals', () => {
     expect(found.get('sqlite-native')?.dir).toBe(path.join(parent, 'node_modules', 'sqlite-native'))
   })
 
-  // The bundle loads one copy for every importer, so another copy some importer resolves to is named, not packed
-  it('records another installed copy that bundled code imports, once, and keeps both requests external', () => {
+  /**
+   * Runs the externals function with a resolver, as Rspack gives one, that answers a request with `entry` inside the
+   * package it resolves to from the importer, or, for `null`, fails as an `exports` with no match does.
+   */
+  function decideWithResolver(
+    externals: ReturnType<typeof createNativeExternals>['externals'],
+    request: string,
+    context: string,
+    entry: string | null = 'index.js',
+    dependencyType = 'esm',
+  ) {
+    const getResolve = () => async (from: string, asked: string) => {
+      const name = packageNameOfRequest(asked)!
+      const dir = [from, ...Array.from({ length: 8 }, (_, up) => path.resolve(from, ...Array(up + 1).fill('..')))]
+        .map(dir => path.join(dir, 'node_modules', name))
+        .find(dir => existsSync(path.join(dir, 'package.json')))
+      if (!dir || entry === null) throw new Error(`Package subpath is not defined by "exports"`)
+      return path.join(realpathSync(dir), entry)
+    }
+    return new Promise<{ error?: Error; result?: string }>(resolve => {
+      externals({ request, context, dependencyType, getResolve }, (error, result) => resolve({ error, result }))
+    })
+  }
+
+  // The bundle's bare request answers one copy; any other some importer resolves to goes in a place of its own
+  it('names another installed copy by its entry file in a place of its own, and keeps the root copy bare', async () => {
     install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
     const wrap = path.join(root, 'node_modules', 'wrap')
     install(wrap, 'wrap')
-    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
-    const { externals, found, otherCopies } = createNativeExternals(root)
+    const nested = path.join(wrap, 'node_modules', 'natpkg')
+    install(nested, 'natpkg', { binary: 'addon.node' })
+    const { externals, found, copies } = createNativeExternals(root)
 
+    const fromWrap = await decideWithResolver(externals, 'natpkg', path.join(wrap, 'lib'))
     expect(decide(externals, 'natpkg')).toBe('natpkg')
-    expect(decide(externals, 'natpkg', path.join(wrap, 'lib'))).toBe('natpkg')
-    expect(decide(externals, 'natpkg', wrap)).toBe('natpkg')
-    expect(decide(externals, 'natpkg', root)).toBe('natpkg')
 
+    const copy = copies.get(nested)!
+    expect(copy.place).toMatch(new RegExp(`^${OTHER_COPIES_DIR}/natpkg-1\\.0\\.0-[0-9a-f]{8}$`))
+    expect(fromWrap).toEqual({ error: undefined, result: `./node_modules/${copy.place}/node_modules/natpkg/index.js` })
+    expect(copies.size).toBe(1)
     expect(found.get('natpkg')?.dir).toBe(path.join(root, 'node_modules', 'natpkg'))
-    expect([...otherCopies]).toEqual([['natpkg', [path.join(wrap, 'node_modules', 'natpkg')]]])
+  })
+
+  it("names the file a subpath request resolves to in the other copy, with the request's dependency type", async () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const { externals, copies } = createNativeExternals(root)
+
+    const { result } = await decideWithResolver(externals, 'natpkg/feature', wrap, path.join('lib', 'feature.cjs'), 'commonjs')
+
+    const [copy] = copies.values()
+    expect(result).toBe(`./node_modules/${copy.place}/node_modules/natpkg/lib/feature.cjs`)
+  })
+
+  it('gives two copies of one version at different places two places', async () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    for (const wrapper of ['one', 'two']) {
+      install(path.join(root, 'node_modules', wrapper, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    }
+    const { externals, copies } = createNativeExternals(root)
+
+    await decideWithResolver(externals, 'natpkg', path.join(root, 'node_modules', 'one'))
+    await decideWithResolver(externals, 'natpkg', path.join(root, 'node_modules', 'two'))
+
+    const places = [...copies.values()].map(copy => copy.place)
+    expect(places).toHaveLength(2)
+    expect(new Set(places).size).toBe(2)
+  })
+
+  it('gives a copy the same place in any checkout of the project, a linked one included', async () => {
+    const placeIn = async (project: string, linkedAs = project) => {
+      install(path.join(project, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+      const wrap = path.join(project, 'node_modules', 'wrap')
+      install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+      const { externals, copies } = createNativeExternals(linkedAs)
+      await decideWithResolver(externals, 'natpkg', path.join(linkedAs, 'node_modules', 'wrap'))
+      return [...copies.values()].map(copy => copy.place)
+    }
+    const other = realpathSync(mkdtempSync(path.join(tmpdir(), 'meocord-native-other-')))
+    const link = path.join(other, 'linked')
+    try {
+      const here = await placeIn(root)
+      mkdirSync(path.join(other, 'checkout'))
+      symlinkSync(path.join(other, 'checkout'), link)
+      expect(await placeIn(path.join(other, 'checkout'), link)).toEqual(here)
+      expect(here).toHaveLength(1)
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+    }
+  })
+
+  it('names a copy by its path through the project, with the same separators on every system', () => {
+    const posix = copyPath('/home/ada/bot/node_modules/wrap/node_modules/natpkg', '/home/ada/bot', path.posix)
+    const windows = copyPath('D:\\work\\bot\\node_modules\\wrap\\node_modules\\natpkg', 'D:\\work\\bot', path.win32)
+
+    expect(posix).toBe('node_modules/wrap/node_modules/natpkg')
+    expect(windows).toBe(posix)
+  })
+
+  it("flattens a scoped package's name in its place, so the place does not nest", async () => {
+    install(path.join(root, 'node_modules', '@scope', 'nat'), '@scope/nat', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(path.join(wrap, 'node_modules', '@scope', 'nat'), '@scope/nat', { binary: 'addon.node' })
+    const { externals, copies } = createNativeExternals(root)
+
+    const { result } = await decideWithResolver(externals, '@scope/nat', wrap)
+
+    const [copy] = copies.values()
+    expect(copy.place).toMatch(new RegExp(`^${OTHER_COPIES_DIR}/@scope\\+nat-1\\.0\\.0-[0-9a-f]{8}$`))
+    expect(result).toBe(`./node_modules/${copy.place}/node_modules/@scope/nat/index.js`)
+  })
+
+  it('stops the build, naming the copy and the request, when the other copy has no file for it', async () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const { externals } = createNativeExternals(root)
+
+    const { error, result } = await decideWithResolver(externals, 'natpkg/missing', wrap, null, 'commonjs')
+
+    expect(result).toBeUndefined()
+    expect(error?.message).toBe(
+      `natpkg/missing resolves to a second installed copy of natpkg, 1.0.0 in ${path.join('node_modules', 'wrap', 'node_modules', 'natpkg')}, ` +
+        'and the bundler resolves a require of it to no file of that copy (Package subpath is not defined by "exports"). ' +
+        'A self-contained build packs each copy of a native package for the code that imports it, and needs that file. ' +
+        'Install one version of natpkg, for example with `npm dedupe` or an `overrides` entry.',
+    )
+  })
+
+  /** Runs the externals function with `getResolve` as given, which may be missing, and reports what it decided. */
+  function decideWith(externals: ReturnType<typeof createNativeExternals>['externals'], request: string, context: string, getResolve?: () => () => Promise<false>) {
+    return new Promise<{ error?: Error; result?: string }>(resolve => {
+      externals({ request, context, dependencyType: 'esm', getResolve }, (error, result) => resolve({ error, result }))
+    })
+  }
+
+  it('names no cause it did not check when the bundler resolves the request to nothing, as an alias to false does', async () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const { externals } = createNativeExternals(root)
+
+    const { error } = await decideWith(externals, 'natpkg', wrap, () => async () => false)
+
+    expect(error?.message).toContain('and the bundler resolves an import of it to no file of that copy. A self-contained build')
+    expect(error?.message).not.toContain('exports')
+  })
+
+  it('says the bundler gave no resolver when it gives none, without naming exports', async () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const { externals } = createNativeExternals(root)
+
+    const { error } = await decideWith(externals, 'natpkg', wrap)
+
+    expect(error?.message).toContain('and the bundler gives no resolver to tell which file of that copy it loads.')
+    expect(error?.message).not.toContain('exports')
+  })
+
+  // With no copy at the root, whichever import the bundler meets first must not decide which copy is bare
+  it('answers bare requests with the same copy in any order, the first the dependencies reach, when the root has none', async () => {
+    const copyIn = (wrap: string) => path.join(root, 'node_modules', wrap, 'node_modules', 'natpkg')
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { 'wrap-a': '1.0.0', 'wrap-b': '1.0.0' } }))
+    for (const wrap of ['wrap-a', 'wrap-b']) {
+      install(path.join(root, 'node_modules', wrap), wrap, { dependencies: ['natpkg'] })
+      install(copyIn(wrap), 'natpkg', { binary: 'addon.node' })
+    }
+    const decided = async (order: string[]) => {
+      const { externals, found, copies } = createNativeExternals(root)
+      const results: Record<string, string | undefined> = {}
+      for (const wrap of order) results[wrap] = (await decideWithResolver(externals, 'natpkg', path.join(root, 'node_modules', wrap))).result
+      return { results, bare: found.get('natpkg')?.dir, other: [...copies.values()].map(copy => copy.dir) }
+    }
+
+    const forward = await decided(['wrap-a', 'wrap-b'])
+    const backward = await decided(['wrap-b', 'wrap-a'])
+
+    expect(forward.bare).toBe(copyIn('wrap-a'))
+    expect(forward.results['wrap-a']).toBe('natpkg')
+    expect(forward.other).toEqual([realpathSync(copyIn('wrap-b'))])
+    expect(backward).toEqual(forward)
+  })
+
+  it('stops the build when the bundler resolves the request outside the copy its importer finds', async () => {
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const wrap = path.join(root, 'node_modules', 'wrap')
+    install(path.join(wrap, 'node_modules', 'natpkg'), 'natpkg', { binary: 'addon.node' })
+    const { externals } = createNativeExternals(root)
+    // As an alias of the name would: the root copy's file, for an importer that finds its own copy
+    const getResolve = () => async () => path.join(root, 'node_modules', 'natpkg', 'index.js')
+
+    const { error, result } = await new Promise<{ error?: Error; result?: string }>(resolve => {
+      externals({ request: 'natpkg', context: wrap, dependencyType: 'esm', getResolve }, (error, result) => resolve({ error, result }))
+    })
+
+    expect(result).toBeUndefined()
+    expect(error?.message).toBe(
+      `natpkg resolves to a second installed copy of natpkg, 1.0.0 in ${path.join('node_modules', 'wrap', 'node_modules', 'natpkg')}, ` +
+        `but the bundler resolves it to ${path.join('node_modules', 'natpkg', 'index.js')}, outside that copy, so a ` +
+        'self-contained build cannot tell which copy to pack. Install one version of natpkg, for example with `npm dedupe` ' +
+        'or an `overrides` entry.',
+    )
   })
 
   // pnpm links one store copy under several names
@@ -287,12 +481,12 @@ describe('createNativeExternals', () => {
     install(wrap, 'wrap')
     mkdirSync(path.join(wrap, 'node_modules'), { recursive: true })
     symlinkSync(store, path.join(wrap, 'node_modules', 'natpkg'), 'junction')
-    const { externals, otherCopies } = createNativeExternals(root)
+    const { externals, copies } = createNativeExternals(root)
 
-    decide(externals, 'natpkg')
-    decide(externals, 'natpkg', wrap)
+    expect(decide(externals, 'natpkg')).toBe('natpkg')
+    expect(decide(externals, 'natpkg', wrap)).toBe('natpkg')
 
-    expect(otherCopies.size).toBe(0)
+    expect(copies.size).toBe(0)
   })
 
   it('keeps the same request external every time it is met, and reads each package once', () => {
@@ -304,6 +498,111 @@ describe('createNativeExternals', () => {
     expect(decide(externals, 'bindings-lib/sub.js')).toBe('bindings-lib/sub.js')
   })
 })
+
+/**
+ * One project, installed three ways, with no copy of natpkg at its root: wrap-a needs natpkg 2.0.0 and wrap-b needs
+ * 1.0.0. npm nests each copy under its importer; pnpm keeps each package in a store, inside the project or outside it,
+ * with its dependencies linked beside it.
+ */
+function installTwoCopies(layout: 'npm' | 'pnpm' | 'outside store'): void {
+  // Listed out of order, so the chains' own order shows
+  writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { 'wrap-b': '1.0.0', 'wrap-a': '1.0.0' } }))
+  const native = (dir: string, version: string) => {
+    install(dir, 'natpkg', { binary: 'addon.node' })
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'natpkg', version }))
+  }
+  const needs = { 'wrap-a': '2.0.0', 'wrap-b': '1.0.0' }
+  if (layout === 'npm') {
+    for (const [wrap, version] of Object.entries(needs)) {
+      install(path.join(root, 'node_modules', wrap), wrap, { dependencies: ['natpkg'] })
+      native(path.join(root, 'node_modules', wrap, 'node_modules', 'natpkg'), version)
+    }
+    return
+  }
+  const store = layout === 'pnpm' ? path.join(root, 'node_modules', '.pnpm') : path.join(root, '..', `${path.basename(root)}-store`)
+  for (const [wrap, version] of Object.entries(needs)) {
+    const copy = path.join(store, `natpkg@${version}`, 'node_modules', 'natpkg')
+    native(copy, version)
+    const wrapDir = path.join(store, `${wrap}@1.0.0`, 'node_modules', wrap)
+    install(wrapDir, wrap, { dependencies: ['natpkg'] })
+    symlinkSync(copy, path.join(store, `${wrap}@1.0.0`, 'node_modules', 'natpkg'), 'junction')
+    mkdirSync(path.join(root, 'node_modules'), { recursive: true })
+    symlinkSync(wrapDir, path.join(root, 'node_modules', wrap), 'junction')
+  }
+}
+
+describe('dependencyChains', () => {
+  afterEach(() => {
+    rmSync(`${root}-store`, { recursive: true, force: true })
+  })
+
+  it.each(['npm', 'pnpm', 'outside store'] as const)('gives each package the chain of names that reaches it, installed by %s', layout => {
+    installTwoCopies(layout)
+    const chains = dependencyChains(root)
+    const versionOf = (dir: string) => JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version as string
+
+    expect([...chains.values()]).toEqual(['wrap-a', 'wrap-b', 'wrap-a>natpkg', 'wrap-b>natpkg'])
+    expect(installedCopies('natpkg', chains).map(versionOf)).toEqual(['2.0.0', '1.0.0'])
+  })
+
+  it('keeps the shortest chain to a package many reach, and walks undeclared top-level packages last', () => {
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { zeta: '1.0.0' }, devDependencies: { alpha: '1.0.0' } }))
+    install(path.join(root, 'node_modules', 'alpha'), 'alpha', { dependencies: ['natpkg'] })
+    install(path.join(root, 'node_modules', 'zeta'), 'zeta', { dependencies: ['alpha'] })
+    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg')
+    install(path.join(root, 'node_modules', 'aaa-undeclared'), 'aaa-undeclared', { dependencies: ['nested'] })
+    install(path.join(root, 'node_modules', 'aaa-undeclared', 'node_modules', 'nested'), 'nested')
+    install(path.join(root, 'node_modules', '@scope', 'phantom'), '@scope/phantom')
+
+    expect([...dependencyChains(root).values()]).toEqual(['alpha', 'zeta', 'alpha>natpkg', '@scope/phantom', 'aaa-undeclared', 'aaa-undeclared>nested'])
+  })
+})
+
+describe('createNativeExternals with no copy at the root', () => {
+  afterEach(() => {
+    rmSync(`${root}-store`, { recursive: true, force: true })
+  })
+
+  /** What a build decides for each importer: the version bare requests load, and the place of the other copy. */
+  async function decided() {
+    const { externals, found, copies } = createNativeExternals(root)
+    for (const wrap of ['wrap-a', 'wrap-b']) await decideFrom(externals, 'natpkg', realpathSync(path.join(root, 'node_modules', wrap)))
+    const bare = found.get('natpkg')?.dir
+    return {
+      bare: bare && JSON.parse(readFileSync(path.join(bare, 'package.json'), 'utf8')).version,
+      places: [...copies.values()].map(copy => copy.place),
+    }
+  }
+
+  // npm orders the copies by wrap-a and wrap-b, pnpm's store by version, and a store outside the project by its own paths
+  it('answers bare requests with the copy the dependencies reach first, and names the other alike, under npm and pnpm, its store inside the project or outside it', async () => {
+    const results: unknown[] = []
+    for (const layout of ['npm', 'pnpm', 'outside store'] as const) {
+      rmSync(path.join(root, 'node_modules'), { recursive: true, force: true })
+      rmSync(`${root}-store`, { recursive: true, force: true })
+      installTwoCopies(layout)
+      results.push(await decided())
+    }
+
+    expect(results[0]).toEqual({ bare: '2.0.0', places: [expect.stringMatching(new RegExp(`^${OTHER_COPIES_DIR}/natpkg-1\\.0\\.0-[0-9a-f]{8}$`))] })
+    expect(results[1]).toEqual(results[0])
+    expect(results[2]).toEqual(results[0])
+  })
+})
+
+/** Runs the externals function with a resolver that finds `request` from its importer as Node does. */
+function decideFrom(externals: ReturnType<typeof createNativeExternals>['externals'], request: string, context: string) {
+  const getResolve = () => async (from: string, asked: string) => {
+    const name = packageNameOfRequest(asked)!
+    const dir = [from, ...Array.from({ length: 8 }, (_, up) => path.resolve(from, ...Array(up + 1).fill('..')))]
+      .map(dir => path.join(dir, 'node_modules', name))
+      .find(dir => existsSync(path.join(dir, 'package.json')))
+    return path.join(realpathSync(dir!), 'index.js')
+  }
+  return new Promise<{ error?: Error; result?: string }>(resolve => {
+    externals({ request, context, dependencyType: 'esm', getResolve }, (error, result) => resolve({ error, result }))
+  })
+}
 
 describe('installedPackages', () => {
   it('returns only the listed packages that are installed, marking the one that carries a binary', () => {
@@ -716,22 +1015,5 @@ describe('isBuiltFor', () => {
 
     expect(isBuiltFor(dir, { platform: 'darwin', arch: 'arm64' })).toBe(expected)
     expect(isBuiltFor(dir, { platform: 'win32', arch: 'x64' })).toBe(expected)
-  })
-})
-
-describe('otherCopiesWarning', () => {
-  it('names each copy with its version and place, the one packed, and what to do', () => {
-    install(path.join(root, 'node_modules', 'natpkg'), 'natpkg')
-    const nested = path.join(root, 'node_modules', 'wrap', 'node_modules', 'natpkg')
-    mkdirSync(nested, { recursive: true })
-    writeFileSync(path.join(nested, 'package.json'), JSON.stringify({ name: 'natpkg', version: '2.0.0' }))
-
-    expect(otherCopiesWarning('natpkg', path.join(root, 'node_modules', 'natpkg'), [nested], root)).toBe(
-      `natpkg is installed more than once for bundled code: 1.0.0 in ${path.join('node_modules', 'natpkg')}, 2.0.0 in ` +
-        `${path.join('node_modules', 'wrap', 'node_modules', 'natpkg')}. A self-contained build packs one copy of a native ` +
-        `package, 1.0.0 in ${path.join('node_modules', 'natpkg')}, and every importer loads it, so code that needs another ` +
-        'version gets this one. Install one version of natpkg, for example with `npm dedupe` or an `overrides` entry. The ' +
-        'next major version (5.0) stops the build here.',
-    )
   })
 })

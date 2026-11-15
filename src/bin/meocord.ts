@@ -37,11 +37,10 @@ import {
   bundledModuleFiles,
   copyPackagesInto,
   createNativeExternals,
-  otherCopiesWarning,
   findBundledNativeAddons,
   installedPackages,
-  type NativePackage,
   packageNameOfRequest,
+  sortedBy,
 } from '@src/build/native-addons.js'
 import { PLATFORM_MANIFEST, writePlatformManifest } from '@src/util/platform.util.js'
 import { loadMeoCordSourceConfig } from '@src/util/meocord-source-config.util.js'
@@ -490,12 +489,14 @@ copies or substantial portions of the Software.
    * Makes a bundled build's dist runnable on its own: copies every package the bundle still
    * imports -- the native addons found while building, anything listed in `externals`, and the
    * optional externals, discord.js's accelerators included, if they are installed -- into `dist/node_modules`, and
-   * marks dist as ESM. Deploying is then copying dist, with no install step.
+   * marks dist as ESM. Each other installed copy of a native addon goes in a place of its own there, beside its own
+   * dependencies. Deploying is then copying dist, with no install step.
    */
-  private packDependencies(meocordConfig: MeoCordConfig, natives: Map<string, NativePackage>) {
+  private packDependencies(meocordConfig: MeoCordConfig, natives: ReturnType<typeof createNativeExternals>) {
     const dist = path.join(this.projectRoot, 'dist')
-    const packages = new Map<string, string>([...natives].map(([name, { dir }]) => [name, dir]))
-    const nativeNames = new Set(natives.keys())
+    // By name, not the order the bundler met them in: the first written takes the top place of a shared dependency
+    const packages = new Map<string, string>(sortedBy(natives.found, ([name]) => name).map(([name, { dir }]) => [name, dir]))
+    const nativeNames = new Set([...packages.keys(), ...[...natives.copies.values()].map(copy => copy.name)])
 
     // The package a string external is in, so one naming a file inside a package, such as 'lodash/fp.js', packs it
     const listed = (meocordConfig.externals ?? []).flatMap(item => (typeof item === 'string' ? (packageNameOfRequest(item) ?? []) : []))
@@ -508,6 +509,9 @@ copies or substantial portions of the Software.
     // Replaced rather than merged, so a package dropped from the application does not linger.
     fs.rmSync(path.join(dist, 'node_modules'), { recursive: true, force: true })
     const copied = copyPackagesInto(packages, this.projectRoot, dist)
+    for (const copy of natives.copies.values()) {
+      copied.push(...copyPackagesInto(new Map([[copy.name, copy.dir]]), this.projectRoot, path.join(dist, 'node_modules', copy.place)))
+    }
     fs.writeFileSync(path.join(dist, 'package.json'), `${JSON.stringify({ type: 'module' }, null, 2)}\n`)
 
     if (nativeNames.size > 0) {
@@ -552,10 +556,7 @@ copies or substantial portions of the Software.
         // A safety net behind the externals function: a native addon that still reached the
         // bundle would run on this machine -- through its node_modules -- and fail in production.
         assertNoBundledNativeAddons(findBundledNativeAddons(bundledFiles, this.projectRoot))
-        for (const [name, others] of natives.otherCopies) {
-          this.logger.warn(otherCopiesWarning(name, natives.found.get(name)!.dir, others, this.projectRoot))
-        }
-        this.packDependencies(meocordConfig, natives.found)
+        this.packDependencies(meocordConfig, natives)
       } else if (!meocordConfig?.bundleDependencies) {
         this.removePackedOutputs()
       }
