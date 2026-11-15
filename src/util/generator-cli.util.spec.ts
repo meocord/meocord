@@ -1,14 +1,14 @@
 import path from 'path'
 import { vi } from 'vitest'
 
-const { mockExistsSync, mockMkdirSync, mockWriteFileSync, mockReadFileSync, mockExecFile, mockLoggerLog, mockLoggerError, mockLoggerWarn } =
+const { mockExistsSync, mockMkdirSync, mockWriteFileSync, mockReadFileSync, mockLoggerLog, mockLoggerError, mockLoggerWarn, mockResolve } =
   vi.hoisted(() => ({
+    mockResolve: vi.fn(),
     mockLoggerWarn: vi.fn(),
     mockExistsSync: vi.fn(),
     mockMkdirSync: vi.fn(),
     mockWriteFileSync: vi.fn(),
     mockReadFileSync: vi.fn(),
-    mockExecFile: vi.fn(),
     mockLoggerLog: vi.fn(),
     mockLoggerError: vi.fn(),
   }))
@@ -26,9 +26,8 @@ vi.mock('fs', () => ({
   readFileSync: mockReadFileSync,
 }))
 
-vi.mock('child_process', () => ({
-  execFile: mockExecFile,
-}))
+// Where the project's eslint resolves from its root, as Node would find it
+vi.mock('module', () => ({ createRequire: () => ({ resolve: mockResolve }) }))
 
 // Logger is constructed with `new`, so the implementation has to be a class or
 // function — vitest 4 refuses to construct an arrow. The shared log/error mocks
@@ -54,7 +53,6 @@ const {
   createDirectoryIfNotExists,
   generateFile,
   writeFiles,
-  formatGeneratedFiles,
   buildTemplate,
   populateTemplate,
 } = await import('@src/util/generator-cli.util.js')
@@ -195,7 +193,6 @@ describe('createDirectoryIfNotExists', () => {
 describe('generateFile', () => {
   beforeEach(() => {
     mockWriteFileSync.mockReset()
-    mockExecFile.mockReset()
     mockExistsSync.mockReset()
   })
 
@@ -243,93 +240,6 @@ describe('generateFile', () => {
 
     expect(writeFiles([['/a.ts', 'a'], ['/b.ts', 'b'], ['/c.ts', 'c']])).toEqual(['/a.ts', '/c.ts'])
     process.exitCode = exitCode
-  })
-})
-
-describe('formatGeneratedFiles', () => {
-  const ESLINT_MANIFEST = JSON.stringify({ name: 'eslint', bin: { eslint: './bin/eslint.js' } })
-  const eslintScript = () => path.resolve(process.cwd(), 'node_modules', 'eslint', 'bin', 'eslint.js')
-  type Done = (error: (Error & { code?: number }) | null, stdout: string, stderr: string) => void
-  const eslintExits = (error: (Error & { code?: number }) | null, stderr = '') =>
-    mockExecFile.mockImplementation((_file: string, _args: string[], done: Done) => done(error, '', stderr))
-
-  beforeEach(() => {
-    mockExecFile.mockReset()
-    mockExistsSync.mockReset().mockReturnValue(true)
-    mockReadFileSync.mockReset().mockReturnValue(ESLINT_MANIFEST as any)
-    mockLoggerLog.mockClear()
-    mockLoggerWarn.mockClear()
-  })
-
-  // One run builds the project's type information once; a run per file would build it for each
-  // On Windows a .cmd shim can't be spawned without a shell, so the script runs with this runtime there too.
-  it.each(['linux', 'win32'])("formats every generated file in one run of the project's eslint, by this runtime, on %s", async platform => {
-    const spy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform as NodeJS.Platform)
-    eslintExits(null)
-
-    await formatGeneratedFiles(['/src/a.service.ts', '/src/a.service.spec.ts'])
-    spy.mockRestore()
-
-    expect(mockExecFile).toHaveBeenCalledTimes(1)
-    expect(mockExecFile).toHaveBeenCalledWith(
-      process.execPath,
-      [eslintScript(), '--fix', '/src/a.service.ts', '/src/a.service.spec.ts'],
-      expect.any(Function),
-    )
-    expect(mockLoggerLog).toHaveBeenCalledWith("Formatting with your project's ESLint...")
-    expect(mockLoggerWarn).not.toHaveBeenCalled()
-  })
-
-  // The command waits for it, so it ends once the files are formatted, and no later
-  it('settles only once the eslint run has finished', async () => {
-    let finish: () => void = () => {}
-    mockExecFile.mockImplementation((_file: string, _args: string[], done: Done) => (finish = () => done(null, '', '')))
-    let settled = false
-
-    const formatting = formatGeneratedFiles(['/src/a.ts']).then(() => (settled = true))
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(settled).toBe(false)
-
-    finish()
-    await formatting
-    expect(settled).toBe(true)
-  })
-
-  // The files are written either way: what went wrong is said, and the command's code is left alone
-  it.each([
-    ['rules it could not fix', () => eslintExits(Object.assign(new Error('Command failed'), { code: 1 })), 'ESLint reports problems it could not fix'],
-    [
-      'eslint that could not run, naming the cause after its banner',
-      () =>
-        eslintExits(
-          Object.assign(new Error('Command failed'), { code: 2 }),
-          "\nOops! Something went wrong! :(\n\nESLint: 10.11.0\n\nError [ERR_MODULE_NOT_FOUND]: Cannot find module './missing.mjs'\n    at finalizeResolution\n",
-        ),
-      "Error \\[ERR_MODULE_NOT_FOUND\\]: Cannot find module './missing.mjs'",
-    ],
-    ['eslint that could not run, with only its first line', () => eslintExits(Object.assign(new Error('Command failed'), { code: 2 }), 'Invalid option --fixx\n'), 'Invalid option --fixx'],
-    ['a spawn that throws', () => mockExecFile.mockImplementation(() => { throw new Error('spawn EINVAL') }), 'spawn EINVAL'],
-  ])('says it could not format, and keeps a success code, for %s', async (_case, fail, reason) => {
-    fail()
-    const exitCode = process.exitCode
-    process.exitCode = undefined
-
-    await formatGeneratedFiles(['/src/a.ts'])
-
-    expect(process.exitCode).toBeUndefined()
-    expect(mockLoggerWarn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^Could not format the generated files: ${reason}`)))
-    process.exitCode = exitCode
-  })
-
-  // Reaching for npx would start downloading eslint into a project that deliberately has none
-  it('runs nothing and says nothing when the project has no eslint, or nothing was written', async () => {
-    mockExistsSync.mockReturnValue(false)
-    await formatGeneratedFiles(['/src/a.ts'])
-    mockExistsSync.mockReturnValue(true)
-    await formatGeneratedFiles([])
-
-    expect(mockExecFile).not.toHaveBeenCalled()
-    expect(mockLoggerLog).not.toHaveBeenCalled()
   })
 })
 

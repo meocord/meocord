@@ -69,11 +69,12 @@ function pack(): string {
 /**
  * Runs the built CLI once per argument list, reported as one step.
  *
- * Always before the project has node_modules: a generator formats what it writes with the project's
- * own `eslint --fix` when it finds one, which would hide the lint failures this check looks for.
+ * Always before the project has its ESLint: a generator formats what it writes with the project's own `eslint --fix`
+ * when it finds one, which would hide the lint failures this check looks for. The project's TypeScript, which
+ * `generate` lists a controller or observer in src/app.ts with, is linked in first where the project has an app.ts.
  */
 function generate(label: string, cwd: string, commands: string[][]): void {
-  if (existsSync(path.join(cwd, 'node_modules'))) throw new Error(`${label}: generate before installing`)
+  if (existsSync(path.join(cwd, 'node_modules', 'eslint'))) throw new Error(`${label}: generate before installing`)
 
   const started = performance.now()
   for (const args of commands) run(`${label}: meocord ${args.join(' ')}`, process.execPath, [builtCli, ...args], cwd, { quiet: true })
@@ -101,7 +102,11 @@ function generateComponents(): void {
     ['g', 'pi', name],
     ['g', 'ob', name],
   ])
+  // Only TypeScript, which generate edits src/app.ts with; the install replaces it
+  mkdirSync(path.join(appDir, 'node_modules'), { recursive: true })
+  symlinkSync(path.join(repoRoot, 'node_modules', 'typescript'), path.join(appDir, 'node_modules', 'typescript'), 'junction')
   generate('components in the application', appDir, commands)
+  rmSync(path.join(appDir, 'node_modules'), { recursive: true, force: true })
   run('install the application', process.execPath, ['install'], appDir)
   if (!existsSync(installedCli)) throw new Error(`The packed framework has no CLI at ${path.relative(appDir, installedCli)}`)
 }
@@ -140,21 +145,19 @@ function exportedClasses(dir: string, suffix: string): { name: string; from: str
 }
 
 /**
- * Lists every controller and observer in the application, as its developer would after generating them,
- * with a spec that its routes are apart and that it builds; and imports an image and a Markdown file, as
- * the docs show. The application's own checks then cover all of it.
+ * Checks `generate` listed every controller and observer in src/app.ts itself, and adds a spec that the app's routes
+ * are apart and that it builds; and imports an image and a Markdown file, as the docs show. The application's own
+ * checks then cover all of it, its lint without `--fix` proving the edited src/app.ts passes as written.
  */
 function registerComponents(): void {
   const controllers = exportedClasses('controllers', '.controller.ts')
   const observers = exportedClasses('observers', '.observer.ts')
-  const imports = [...controllers, ...observers].map(({ name, from }) => `import { ${name} } from '${from}'`).join('\n')
-  writeFileSync(
-    path.join(appDir, 'src', 'app.ts'),
-    `import { GatewayIntentBits, Partials } from 'discord.js'\nimport { MeoCord } from 'meocord/decorator'\n${imports}\n\n` +
-      `@MeoCord({\n  controllers: [${controllers.map(({ name }) => name).join(', ')}],\n  observers: [${observers.map(({ name }) => name).join(', ')}],\n` +
-      `  clientOptions: {\n    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMessageReactions, GatewayIntentBits.MessageContent],\n` +
-      `    partials: [Partials.Message, Partials.Reaction],\n  },\n})\nexport default class App {}\n`,
+  const app = readFileSync(path.join(appDir, 'src', 'app.ts'), 'utf8')
+  // Imported, and named once more: in its list
+  const unlisted = [...controllers, ...observers].filter(
+    ({ name, from }) => !app.includes(`import { ${name} } from '${from}'`) || (app.match(new RegExp(`\\b${name}\\b`, 'g'))?.length ?? 0) < 2,
   )
+  if (unlisted.length > 0) throw new Error(`generate left these out of src/app.ts: ${unlisted.map(({ name }) => name).join(', ')}`)
   writeFileSync(
     path.join(appDir, 'src', 'app.spec.ts'),
     `import { findRouteConflicts, MeoCordTestingModule } from 'meocord/testing'\nimport App from '@src/app'\n${controllers.map(({ name, from }) => `import { ${name} } from '${from}'`).join('\n')}\n\n` +
@@ -170,9 +173,9 @@ function registerComponents(): void {
     `type Logo = typeof import('@src/assets/logo.png').default\ntype Notes = typeof import('@src/assets/notes.md').default\n\n` +
       `describe('asset imports', () => {\n  it('give an image as its path and Markdown as its text', () => {\n    expectTypeOf<Logo>().toEqualTypeOf<string>()\n    expectTypeOf<Notes>().toEqualTypeOf<string>()\n  })\n})\n`,
   )
-  // Written by a script rather than by hand, so formatted as a developer's editor would
-  run('format the registered application', process.execPath, ['run', 'prettier', '--write', 'src/app.ts', 'src/app.spec.ts', 'src/assets.spec.ts'], appDir, { quiet: true })
-  console.log(`  ok  register ${controllers.length} controllers and ${observers.length} observers, and import assets`)
+  // Written by a script rather than by hand, so formatted as a developer's editor would; src/app.ts is generate's own
+  run('format the specs written here', process.execPath, ['run', 'prettier', '--write', 'src/app.spec.ts', 'src/assets.spec.ts'], appDir, { quiet: true })
+  console.log(`  ok  generate listed ${controllers.length} controllers and ${observers.length} observers in src/app.ts; assets imported`)
 }
 
 /**

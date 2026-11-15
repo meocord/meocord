@@ -11,7 +11,8 @@ import { FilterGeneratorHelper } from '@src/bin/helper/filter-generator.helper.j
 import { PipeGeneratorHelper } from '@src/bin/helper/pipe-generator.helper.js'
 import { ObserverGeneratorHelper } from '@src/bin/helper/observer-generator.helper.js'
 import wait from '@src/util/wait.util.js'
-import { formatGeneratedFiles, toClassName, validateAndFormatName } from '@src/util/generator-cli.util.js'
+import { ESLintBudget, formatGeneratedFiles, toClassName, validateAndFormatName } from '@src/util/generator-cli.util.js'
+import { type AppList, listingProblemMessage, listInApp } from '@src/bin/app-listing.js'
 
 /**
  * Why a name cannot be a path inside the kind's folder: one that climbs out with `..`, starts at the
@@ -24,27 +25,54 @@ export function namePathProblem(name: string, folder: string): string | undefine
     : undefined
 }
 
+/** What `--skip-app` does, as `generate controller --help` and `generate observer --help` say it. */
+const SKIP_APP_HELP = 'Leave src/app.ts alone, and print the lines to add instead'
+
 /** The option a generated autocomplete controller completes, as its command's builder declares it. */
 export const AUTOCOMPLETE_QUERY_OPTION =
   ".addStringOption(option => option.setName('query').setDescription('What to search for').setAutocomplete(true))"
 
 /**
- * What to do with a generated class for it to take part: generating writes files and never edits
- * `src/app.ts`, so a controller or observer does nothing until it is listed there.
+ * The class a generated controller or observer exports, the file it is in and the `@MeoCord` list it must be in to
+ * take part; undefined for any other kind, whose class is used by naming it in code.
  */
-export function nextStepFor(component: string, name: string, type?: ControllerType): string | undefined {
+export function appListingFor(
+  component: string,
+  name: string,
+  type?: ControllerType,
+  root = process.cwd(),
+): { className: string; file: string; list: AppList } | undefined {
+  const { parts, kebabCaseName, className } = validateAndFormatName(name)
+  if (component === 'controller' && type) {
+    return {
+      className: `${className}${toClassName(type.replace(/-/g, ' '))}Controller`,
+      file: path.join(root, 'src', 'controllers', type, ...parts, `${kebabCaseName}.${type}.controller.ts`),
+      list: 'controllers',
+    }
+  }
+  if (component === 'observer') {
+    return { className: `${className}Observer`, file: path.join(root, 'src', 'observers', ...parts, `${kebabCaseName}.observer.ts`), list: 'observers' }
+  }
+  return undefined
+}
+
+/**
+ * What to do with a generated class for it to take part. A controller or observer does nothing until it is listed in
+ * `src/app.ts`, which `generate` does, or says how to, unless `--skip-app` is given; with `listed`, that is handled and
+ * the step is only what remains, such as an autocomplete controller's option.
+ */
+export function nextStepFor(component: string, name: string, type?: ControllerType, listed = false): string | undefined {
   const { className, commandName } = validateAndFormatName(name)
   switch (component) {
     case 'controller': {
-      const add = `Next: add ${className}${toClassName((type ?? '').replace(/-/g, ' '))}Controller to @MeoCord({ controllers }) in src/app.ts`
+      const option = `declare the option it completes on /${commandName}'s builder: ${AUTOCOMPLETE_QUERY_OPTION}`
       // The command it completes already exists, with its own builder, which the generator leaves alone
-      if (type === ControllerType.AUTOCOMPLETE) {
-        return `${add}, and declare the option it completes on /${commandName}'s builder: ${AUTOCOMPLETE_QUERY_OPTION}`
-      }
-      return `${add}.`
+      if (listed) return type === ControllerType.AUTOCOMPLETE ? `Next: ${option}` : undefined
+      const add = `Next: add ${className}${toClassName((type ?? '').replace(/-/g, ' '))}Controller to @MeoCord({ controllers }) in src/app.ts`
+      return type === ControllerType.AUTOCOMPLETE ? `${add}, and ${option}` : `${add}.`
     }
     case 'observer':
-      return `Next: add ${className}Observer to @MeoCord({ observers }) in src/app.ts.`
+      return listed ? undefined : `Next: add ${className}Observer to @MeoCord({ observers }) in src/app.ts.`
     case 'guard':
       return `Next: put @UseGuard(${className}Guard) on a handler or controller, or add ${className}Guard to @MeoCord({ guards }) in src/app.ts for every call.`
     case 'interceptor':
@@ -97,12 +125,14 @@ export class GeneratorCLI {
       )
       .addArgument(new Argument('<name>', 'Name of the controller'))
       .option('--message', 'For a context-menu controller: a message context menu command, rather than a user one')
-      .action(async (type, name, options: { message?: boolean }) => {
+      .option('--skip-app', SKIP_APP_HELP)
+      .action(async (type, name, options: { message?: boolean; skipApp?: boolean }) => {
         await this.handleGenerateComponent({
           component: 'controller',
           type: type as ControllerType,
           name,
           message: options.message === true,
+          skipApp: options.skipApp === true,
         })
       })
 
@@ -171,10 +201,12 @@ export class GeneratorCLI {
       .alias('ob')
       .addArgument(new Argument('<name>', 'Name of the observer.'))
       .description('Generate a dispatch observer component')
-      .action(async name => {
+      .option('--skip-app', SKIP_APP_HELP)
+      .action(async (name, options: { skipApp?: boolean }) => {
         await this.handleGenerateComponent({
           component: 'observer',
           name,
+          skipApp: options.skipApp === true,
         })
       })
 
@@ -186,6 +218,7 @@ export class GeneratorCLI {
     name: string
     type?: ControllerType
     message?: boolean
+    skipApp?: boolean
   }): Promise<void> {
     const { component, type } = args
     let { name } = args
@@ -260,13 +293,27 @@ export class GeneratorCLI {
         process.exit(1)
     }
 
-    await formatGeneratedFiles(written)
+    // One time limit for every ESLint run: once one is stopped, src/app.ts's check is not started and says so
+    const eslintBudget = new ESLintBudget()
+    await formatGeneratedFiles(written, eslintBudget)
 
     // A file that failed to write sets the exit code; there is no next step then
-    if (!process.exitCode) {
-      const next = nextStepFor(component, name, type)
-      if (next) this.logger.log(next)
+    if (process.exitCode) return
+    // After the formatting, which src/app.ts is kept out of: the user's own file changes only by the inserted lines
+    const listing = args.skipApp ? undefined : appListingFor(component, name, type)
+    if (listing) {
+      const result = await listInApp(process.cwd(), listing.file, listing.className, listing.list, eslintBudget)
+      // A refusal prints the lines to add itself, so the next step leaves them out either way
+      if ('problem' in result) {
+        this.logger.warn(listingProblemMessage(process.cwd(), listing.file, listing.className, listing.list, result.problem))
+      } else {
+        if ('listed' in result) this.logger.log(`${listing.className} is already in src/app.ts.`)
+        else if (result.unchecked) this.logger.warn(`Added ${listing.className} to src/app.ts, not checked with ESLint: ${result.unchecked}.`)
+        else this.logger.log(`Added ${listing.className} to src/app.ts.`)
+      }
     }
+    const next = nextStepFor(component, name, type, listing !== undefined)
+    if (next) this.logger.log(next)
   }
 
   private async handleGenerateController(args: { name: string; type: ControllerType; message: boolean }): Promise<string[]> {
