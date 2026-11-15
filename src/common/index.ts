@@ -64,6 +64,8 @@ export { isExplainedError } from '@src/common/explained-error.js'
 export type { InstallContext } from '@src/common/response/install-context.js'
 export { bindTheme, useTheme } from '@src/core/theme-scope.js'
 export { ThemeCache } from '@src/core/theme-resolvers.js'
+export { DiscordLimits } from '@src/common/discord-limits.js'
+export { splitMessage, truncate } from '@src/common/split-message.js'
 // discord.js's formatters under its own names, from the bot's own discord.js; `version` and `underscore` stay out
 export {
   applicationDirectory,

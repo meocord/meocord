@@ -1,4 +1,5 @@
-import { createRegexFromPattern, literalBraces, MAX_CUSTOM_ID_LENGTH } from '@src/decorator/controller.decorator.js'
+import { DiscordLimits } from '@src/common/discord-limits.js'
+import { createRegexFromPattern, literalBraces } from '@src/decorator/controller.decorator.js'
 import { parseSegment } from '@src/core/scalar-types.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce } from '@src/common/deprecation.js'
@@ -178,9 +179,9 @@ export function route<const T extends string>(pattern: T): Route<T> {
       }
       return encodeSegment(text)
     })
-    if (id === '') throw new RangeError(`route('${pattern}').build() made an empty customId; Discord's customIds are 1 to ${MAX_CUSTOM_ID_LENGTH} characters.`)
-    if (id.length > MAX_CUSTOM_ID_LENGTH) {
-      throw new RangeError(`route('${pattern}').build() made a customId of ${id.length} characters, over Discord's ${MAX_CUSTOM_ID_LENGTH}: "${id}".`)
+    if (id === '') throw new RangeError(`route('${pattern}').build() made an empty customId; Discord's customIds are 1 to ${DiscordLimits.customId} characters.`)
+    if (id.length > DiscordLimits.customId) {
+      throw new RangeError(`route('${pattern}').build() made a customId of ${id.length} characters, over Discord's ${DiscordLimits.customId}: "${id}".`)
     }
     return id
   }

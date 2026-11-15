@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { DiscordLimits } from '@src/common/discord-limits.js'
 import { type EventHandlerMetadata } from '@src/decorator/event.decorator.js'
 import {
   ApplicationCommandType,
@@ -481,9 +482,6 @@ export function literalBraces(pattern: string): string | undefined {
 /** The character a parameter will not cross, so one pattern segment maps to one value. */
 export const PARAM_SEPARATOR = '/'
 
-/** The longest customId Discord accepts; the shortest is one character. */
-export const MAX_CUSTOM_ID_LENGTH = 100
-
 /** Escapes a literal stretch of a pattern so only placeholders stay meaningful. */
 const escapeLiteral = (literal: string): string => literal.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')
 
@@ -866,11 +864,11 @@ export function Command<
       dynamicParams = pattern.params
       specificity = pattern.specificity
       // Warned rather than refused, so a bot that carries such a handler still starts
-      if (pattern.shortest === 0 || pattern.shortest > MAX_CUSTOM_ID_LENGTH) {
+      if (pattern.shortest === 0 || pattern.shortest > DiscordLimits.customId) {
         const length = pattern.shortest === 0 ? 'the pattern is empty' : `its shortest is ${pattern.shortest} characters`
         logger.warn(
           `${decoratedName(target, propertyKey)}: the pattern "${commandName}" matches no customId: Discord's customIds ` +
-            `are 1 to ${MAX_CUSTOM_ID_LENGTH} characters, and ${length}, so the handler never runs.`,
+            `are 1 to ${DiscordLimits.customId} characters, and ${length}, so the handler never runs.`,
         )
       }
     }

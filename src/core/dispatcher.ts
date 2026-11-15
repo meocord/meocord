@@ -44,7 +44,8 @@ import {
   runHandler,
   runInAppTheme,
 } from '@src/core/handler-pipeline.js'
-import { computeMessageHelp, helpInvocation, helpWords, isListable, matchHelpRequest, renderMessageHelp, splitReply } from '@src/core/message-help.js'
+import { computeMessageHelp, helpInvocation, helpWords, isListable, matchHelpRequest, renderMessageHelp } from '@src/core/message-help.js'
+import { splitMessage } from '@src/common/split-message.js'
 import { messageLocale, textRenderer } from '@src/common/meocord-text.js'
 import { logFailedSend } from '@src/common/response/send-failure.js'
 import { Translator } from '@src/common/translator.js'
@@ -612,7 +613,7 @@ export class Dispatcher {
     await runInAppTheme(this.container, [message], async () => {
       const presenter = appPresenterOf(this.container)
       const written = presenter?.messageHelp ? await presenter.messageHelp(help, message) : this.helpText(renderMessageHelp(help, render))
-      const replies = typeof written === 'string' ? splitReply(written).map(content => ({ content })) : [written]
+      const replies = typeof written === 'string' ? splitMessage(written).map(content => ({ content })) : [written]
       try {
         for (const reply of replies) await message.reply({ allowedMentions: { repliedUser: false, parse: [] }, ...reply })
       } catch (failure) {
