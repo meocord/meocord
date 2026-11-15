@@ -3,6 +3,7 @@ import { warnDeprecatedBehaviour, warnOnce } from '@src/common/deprecation.js'
 import { isExplainedError } from '@src/common/explained-error.js'
 import { Logger } from '@src/common/logger.js'
 import { isBuiltApplication, STARTUP_ERRORS_KEY } from '@src/util/bundle-entry.util.js'
+import { appListenerCount, meocordListener } from '@src/util/process-listener.util.js'
 import { comparablePath, framePath } from '@src/util/source-path.util.js'
 import { shared } from '@src/util/shared-state.util.js'
 
@@ -286,13 +287,14 @@ export function reportRefusals(
   })
   if (!bun) return
 
-  const onRejection = (reason: unknown) => {
+  const onRejection = meocordListener((reason: unknown) => {
     // An application that listens for rejections handles them, a refusal too, as under Node, where the monitor sees
     // none it handles; this listener stays, for when it no longer does
-    if (process.listenerCount('unhandledRejection') > 1) return
+    if (appListenerCount('unhandledRejection') > 0) return
     if (isRefusal(reason)) return report(reason)
     process.off('unhandledRejection', onRejection)
     reject(reason)
-  }
-  process.on('unhandledRejection', onRejection)
+  })
+  // First, so it sees an application listener that removes itself as it runs, as `process.once` adds one
+  process.prependListener('unhandledRejection', onRejection)
 }
