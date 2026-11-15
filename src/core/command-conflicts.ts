@@ -375,6 +375,37 @@ export function warnInheritedRoutes(controllerClasses: readonly ControllerClass[
   )
 }
 
+/** The parameters a handler declares up to its params argument: the interaction, then the params. */
+const WITH_PARAMS = 2
+
+/**
+ * Warns of context menu handlers whose method declares a params argument, which it is never given: a context menu
+ * command has no options, so the second argument is always `{}`. It reads the method's `length`, which stops before a
+ * parameter with a default value and leaves out a rest parameter, `(...args)`, so a handler whose second parameter is
+ * either goes unnamed; the next major version (5.0) refuses every such handler to compile.
+ */
+export function warnContextMenuParams(controllerClasses: readonly ControllerClass[]): void {
+  // A set, so a method that handles two context menu commands is named once
+  const problems = new Set<string>()
+  for (const controllerClass of new Set(controllerClasses)) {
+    for (const metas of Object.values(getCommandMap(controllerClass.prototype) ?? {})) {
+      for (const meta of metas) {
+        if (meta.type !== CommandType.CONTEXT_MENU) continue
+        const method: unknown = (controllerClass.prototype as Record<string, unknown>)[meta.methodName]
+        if (typeof method !== 'function' || method.length < WITH_PARAMS) continue
+        problems.add(`  ${where({ controllerClass, meta })}: a context menu command has no options, so its second argument is always {}.`)
+      }
+    }
+  }
+  if (problems.size === 0) return
+
+  const one = problems.size === 1
+  logger.warn(
+    `${problems.size} context menu ${one ? 'handler declares a params argument it is' : 'handlers declare a params argument they are'} never given:\n` +
+      `${[...problems].join('\n')}\nRemove the argument. In the next major version (5.0), such a handler fails to compile.`,
+  )
+}
+
 /**
  * Warns of customId patterns of one component type that rank equally and can match one customId, naming an id both
  * match and the handler that runs. An app with such a pair works, so it starts; the next major version (5.0) refuses.

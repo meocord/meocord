@@ -69,7 +69,7 @@ describe('a handler that returns a value', () => {
     void Handlers
   })
 
-  it('compiles @Autocomplete with its unused type argument', () => {
+  it('compiles @Autocomplete with its deprecated, unused type argument', () => {
     class Handlers {
       @Autocomplete<void>('search', 'query')
       async complete(interaction: AutocompleteInteraction) {

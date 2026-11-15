@@ -61,6 +61,7 @@ import { assertValidTheme, themeForProblem } from '@src/core/theme-validation.js
 import { buildMessageRoutes, messageParamsFor } from '@src/core/message-routes.js'
 import {
   assertDistinctCommands,
+  warnContextMenuParams,
   warnHandlersOffControllers,
   warnInheritedRoutes,
   warnOverlappingPatterns,
@@ -1552,6 +1553,7 @@ export class TestingModuleBuilder {
         warnInheritedRoutes(this.options.controllers ?? [])
         warnOverlappingPatterns(this.options.controllers ?? [])
         warnHandlersOffControllers(this.options.controllers ?? [], startup.classes)
+        warnContextMenuParams(this.options.controllers ?? [])
         for (const warning of perCallEventWarnings(startup, providers, appPresenterClass)) new Logger('TestingModule').warn(warning)
 
         const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
