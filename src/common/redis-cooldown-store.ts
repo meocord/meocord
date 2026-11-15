@@ -186,12 +186,21 @@ export class RedisCooldownStore extends CooldownStore {
    *
    * @example
    * ```ts
+   * import { createClient } from 'redis'
+   *
    * // node-redis, sending the script by its SHA1 once the server has it
+   * const redis = await createClient({ url: process.env.REDIS_URL }).connect()
    * RedisCooldownStore.using((script, keys, args) => redis.eval(script, { keys, arguments: args }), {
    *   evalsha: (sha, keys, args) => redis.evalSha(sha, { keys, arguments: args }),
    * })
+   * ```
+   *
+   * @example
+   * ```ts
+   * import { Redis } from 'ioredis'
    *
    * // ioredis
+   * const redis = new Redis()
    * RedisCooldownStore.using((script, keys, args) => redis.eval(script, keys.length, ...keys, ...args), {
    *   prefix: 'mybot:cooldown:',
    * })

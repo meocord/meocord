@@ -30,6 +30,30 @@ export const STAGES = [
   'observers-settled',
 ]
 
+/** Where a member's example sits, which decides how it compiles. */
+export interface MemberSite {
+  /** The member's own name */
+  name: string
+  kind: 'property' | 'method' | 'other'
+  /**
+   * The type of an object holding the member, as an example file names it, such as `NonNullable<Settings>["limits"]`;
+   * none where no chain of names reaches it, as for a parameter of an overloaded method
+   */
+  holder?: string
+  /** The member's key as a type, such as `"level"` or `0`; none for an index signature, which has no one key */
+  key?: string
+}
+
+/** A JSDoc `@example` to compile, under the label a problem in it is reported with. */
+export interface Example {
+  /** What it documents, such as `TestingModule.dispatch (signature 1)` */
+  owner: string
+  label: string
+  code: string
+  /** For a member's example, where the member sits */
+  member?: MemberSite
+}
+
 export interface PublicSymbol {
   name: string
   entries: string[]
@@ -44,7 +68,7 @@ export interface PublicSymbol {
   group?: string
   category?: string
   stages: string[]
-  examples: string[]
+  examples: Example[]
 }
 
 interface ParsedDoc {
@@ -53,34 +77,58 @@ interface ParsedDoc {
 }
 
 /**
- * A symbol's JSDoc, read from its declaration's comment as TypeDoc reads it: a line starting with `@` inside a code
- * fence is code, where TypeScript's own parser takes an example's decorators for tags.
+ * A declaration's JSDoc, read from its comment as TypeDoc reads it: a line starting with `@` inside a code fence is
+ * code, where TypeScript's own parser takes an example's decorators for tags.
  */
+export function docOf(declaration: ts.Node): ParsedDoc | undefined {
+  const comment = ts.getJSDocCommentsAndTags(declaration).find(ts.isJSDoc)
+  if (!comment) return undefined
+  const lines = comment
+    .getSourceFile()
+    .text.slice(comment.pos, comment.end)
+    // A one-line comment, `/** @internal */`, has its text beside the delimiters
+    .replace(/^\/\*\*\s*|\s*\*\/$/g, '')
+    .split('\n')
+    .map(line => line.replace(/^\s*\* ?/, ''))
+  const description: string[] = []
+  const tags: { name: string; text: string[] }[] = []
+  let fenced = false
+  for (const line of lines) {
+    const tag = !fenced && /^@(\w+)\s?(.*)$/.exec(line)
+    if (tag) tags.push({ name: tag[1], text: [tag[2]] })
+    else (tags.at(-1)?.text ?? description).push(line)
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
+  }
+  return {
+    summary: description.join('\n').trim().split(/\n\s*\n/)[0] ?? '',
+    tags: tags.map(({ name, text }) => ({ name, text: text.join('\n').trim() })),
+  }
+}
+
+/** A symbol's JSDoc, from the first of its declarations that has a comment. */
 function parsedDoc(symbol: ts.Symbol): ParsedDoc {
   for (const declaration of symbol.declarations ?? []) {
-    const comment = ts.getJSDocCommentsAndTags(declaration).find(ts.isJSDoc)
-    if (!comment) continue
-    const lines = comment
-      .getSourceFile()
-      .text.slice(comment.pos, comment.end)
-      .replace(/^\/\*\*|\*\/$/g, '')
-      .split('\n')
-      .map(line => line.replace(/^\s*\* ?/, ''))
-    const description: string[] = []
-    const tags: { name: string; text: string[] }[] = []
-    let fenced = false
-    for (const line of lines) {
-      const tag = !fenced && /^@(\w+)\s?(.*)$/.exec(line)
-      if (tag) tags.push({ name: tag[1], text: [tag[2]] })
-      else (tags.at(-1)?.text ?? description).push(line)
-      if (/^\s*(```|~~~)/.test(line)) fenced = !fenced
-    }
-    return {
-      summary: description.join('\n').trim().split(/\n\s*\n/)[0] ?? '',
-      tags: tags.map(({ name, text }) => ({ name, text: text.join('\n').trim() })),
-    }
+    const doc = docOf(declaration)
+    if (doc) return doc
   }
   return { summary: '', tags: [] }
+}
+
+/** Whether a declaration is one signature of a function or a method, which overloads declare several of. */
+export const isSignature = (declaration: ts.Node): boolean =>
+  ts.isFunctionDeclaration(declaration) || ts.isMethodSignature(declaration) || ts.isMethodDeclaration(declaration)
+
+/** How a problem names one signature of an overloaded function or method, such as ` (signature 2)`; empty for one. */
+export function signatureName(declaration: ts.Node, declarations: readonly ts.Declaration[] | undefined): string {
+  const signatures = (declarations ?? []).filter(isSignature)
+  const index = signatures.indexOf(declaration as ts.Declaration)
+  return signatures.length > 1 && index >= 0 ? ` (signature ${index + 1})` : ''
+}
+
+/** The `@example`s of one comment, numbered when it has more than one. */
+export function examplesIn(doc: ParsedDoc | undefined, owner: string, member?: MemberSite): Example[] {
+  const codes = (doc?.tags ?? []).filter(tag => tag.name === 'example').map(tag => fencedCode(tag.text))
+  return codes.map((code, index) => ({ owner, label: `${owner}: its example${codes.length > 1 ? ` ${index + 1}` : ''}`, code, member }))
 }
 
 /** An example's code, without its fence. */
@@ -126,7 +174,10 @@ export function publicSymbols(program: ts.Program, entries: Map<string, string>,
         group: tags.find(tag => tag.name === 'group')?.text,
         category: tags.find(tag => tag.name === 'category')?.text,
         stages: tags.filter(tag => tag.name === 'pipeline').map(tag => tag.text.split(/\s/)[0]),
-        examples: tags.filter(tag => tag.name === 'example').map(tag => fencedCode(tag.text)),
+        // Each overload signature's comment is its own, and the reference shows its examples with it
+        examples: (symbol.declarations ?? []).flatMap(declaration =>
+          examplesIn(docOf(declaration), `${exported.name}${signatureName(declaration, symbol.declarations)}`),
+        ),
       })
     }
   }
@@ -154,7 +205,7 @@ const commented = (declaration: ts.Node) =>
  * shows each signature apart, with its own comment.
  */
 function uncommentedOverloads(declarations: readonly ts.Declaration[] | undefined): number[] {
-  const signatures = (declarations ?? []).filter(declaration => ts.isFunctionDeclaration(declaration) || ts.isMethodSignature(declaration) || ts.isMethodDeclaration(declaration))
+  const signatures = (declarations ?? []).filter(isSignature)
   if (signatures.length < 2) return []
   return signatures.flatMap((signature, index) => (commented(signature) ? [] : [index + 1]))
 }

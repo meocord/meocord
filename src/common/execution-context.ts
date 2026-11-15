@@ -167,10 +167,12 @@ export abstract class ExecutionContext {
    * ```typescript
    * @Interceptor()
    * export class AuditInterceptor implements InterceptorInterface {
+   *   private readonly logger = new Logger(AuditInterceptor.name)
+   *
    *   async intercept(context: ExecutionContext, next: CallHandler) {
    *     const result = await next.handle()
    *     // Validated and piped by now, as the handler received them
-   *     audit.record(context.getHandlerName(), context.getHandlerParams<{ uid: string }>()?.uid)
+   *     this.logger.log(`${context.getHandlerName()} ran for ${context.getHandlerParams<{ uid: string }>()?.uid}`)
    *     return result
    *   }
    * }
