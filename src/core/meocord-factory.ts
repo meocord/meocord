@@ -4,6 +4,7 @@ import { Container, type ServiceIdentifier } from 'inversify'
 import { Client } from 'discord.js'
 import { Logger } from '@src/common/index.js'
 import { MeoCordApp, registerOnlyClient, type StartAttempt } from '@src/core/meocord.app.js'
+import { allowedMentionsWarning } from '@src/core/allowed-mentions.js'
 import { compiledConfigMessage, loadMeoCordConfig } from '@src/util/meocord-config-loader.util.js'
 import { bunDevelopmentValues, bunDevelopmentWarning } from '@src/util/inherited-env.util.js'
 import { isRegisterOnly } from '@src/util/registration-mode.util.js'
@@ -250,6 +251,9 @@ export class MeoCordFactory {
       if (developmentEnv.keys.length > 0) {
         this.logger.warn(bunDevelopmentWarning(developmentEnv))
       }
+      // `meocord register` sends no reply
+      const mentions = isRegisterOnly() ? undefined : allowedMentionsWarning(options.clientOptions)
+      if (mentions) this.logger.warn(mentions)
     }
 
     // `meocord register` reads the commands from the controllers' prototypes and sends them over REST,

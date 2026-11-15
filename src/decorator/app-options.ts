@@ -61,6 +61,11 @@ export interface MeoCordOptions<
    * Options for the discord.js `Client`, such as its intents and partials. The shards it runs as are set in
    * `meocord.config.ts`, under `sharding`.
    *
+   * `allowedMentions` is the default every message the client sends falls back to, `respond()`'s and the app's own
+   * `message.reply` and `channel.send` alike: `{ parse: [] }` stops replies pinging whoever their text mentions, and a
+   * reply that should ping passes its own, such as `{ users: [id] }`. Left unset, MeoCord warns at startup, since the
+   * next major version (5.0) makes `{ parse: [] }` the default (https://github.com/meocord/meocord/issues/501).
+   *
    * @see {@link MeoCordConfig}
    */
   clientOptions: ClientOptions

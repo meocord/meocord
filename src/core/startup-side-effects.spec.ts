@@ -84,7 +84,7 @@ const failures: { name: string; classes: () => object[]; run: (classes: object[]
       return [Ping, Ctx]
     },
     run: ([Ping, Ctx]) => {
-      @MeoCord({ controllers: [Ping as never], services: [Ctx as never], clientOptions: { intents: [] }, messages: { help: true } })
+      @MeoCord({ controllers: [Ping as never], services: [Ctx as never], clientOptions: { allowedMentions: { parse: [] }, intents: [] }, messages: { help: true } })
       class App {}
       return MeoCordFactory.create(App)
     },
@@ -94,7 +94,7 @@ const failures: { name: string; classes: () => object[]; run: (classes: object[]
     sharded: true,
     classes: sameNamed,
     run: controllers => {
-      @MeoCord({ controllers: controllers as never, clientOptions: { intents: [] }, messages: { help: true } })
+      @MeoCord({ controllers: controllers as never, clientOptions: { allowedMentions: { parse: [] }, intents: [] }, messages: { help: true } })
       class App {}
       return MeoCordFactory.create(App)
     },
@@ -113,7 +113,7 @@ const failures: { name: string; classes: () => object[]; run: (classes: object[]
       return [Chat]
     },
     run: controllers => {
-      @MeoCord({ controllers: controllers as never, clientOptions: { intents: [] }, messages: { help: true } })
+      @MeoCord({ controllers: controllers as never, clientOptions: { allowedMentions: { parse: [] }, intents: [] }, messages: { help: true } })
       class App {}
       return MeoCordFactory.create(App)
     },

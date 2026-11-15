@@ -90,7 +90,7 @@ async function startApp(): Promise<{ client: Client; ready: Promise<void> }> {
   })
   vi.spyOn(Client.prototype, 'destroy').mockImplementation(async () => void order.push('client.destroy'))
 
-  @MeoCord({ controllers: [Ping], services: [Early, Pool, Later], clientOptions: { intents: [] } })
+  @MeoCord({ controllers: [Ping], services: [Early, Pool, Later], clientOptions: { allowedMentions: { parse: [] }, intents: [] } })
   class App {}
 
   app = MeoCordFactory.create(App)

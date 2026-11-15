@@ -34,6 +34,8 @@ import { AppPresenter } from '@src/presenters/app.presenter'
       GatewayIntentBits.MessageContent,
     ],
     partials: [Partials.Message, Partials.Reaction],
+    // Replies ping no one unless they set allowedMentions themselves
+    allowedMentions: { parse: [] },
   },
   // How loading and error views look; see src/presenters/app.presenter.ts
   presenter: AppPresenter,
