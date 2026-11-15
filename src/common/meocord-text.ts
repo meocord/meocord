@@ -20,11 +20,11 @@ export type TextParam = string | number | TextList | MeoCordText
 /**
  * Words to join as a list. A `unit` list is joined by the text `joinerKey` names, read in the locale the list renders
  * in, or else with `joiner`, a comma unless given, in every language; an `or` list in an app's catalog reads in its
- * locale's words, and in MeoCord's English with `joiner`.
+ * locale's words, and in MeoCord's English with `joiner`; an `and` list reads in its locale's words, English included.
  */
 export interface TextList {
   readonly list: readonly string[]
-  readonly style: 'or' | 'unit'
+  readonly style: 'and' | 'or' | 'unit'
   readonly joiner?: string
   readonly joinerKey?: string
 }
@@ -74,10 +74,11 @@ function findText(translator: Translator<any> | undefined, locale: TextLocale, k
 
 const lists = new Map<string, Intl.ListFormat>()
 
-/** An `or` list in a locale's words, such as "a, b, or c" in en-US. */
-function orListIn(locale: string, items: readonly string[]): string {
-  let format = lists.get(locale)
-  if (!format) lists.set(locale, (format = new Intl.ListFormat(locale, { type: 'disjunction' })))
+/** A list in a locale's words: "a, b, and c" or "a, b, or c" in en-US. */
+export function listIn(locale: string, items: readonly string[], type: 'conjunction' | 'disjunction'): string {
+  const key = `${locale} ${type}`
+  let format = lists.get(key)
+  if (!format) lists.set(key, (format = new Intl.ListFormat(locale, { type })))
   return format.format(items)
 }
 
@@ -87,26 +88,36 @@ function orListIn(locale: string, items: readonly string[]): string {
  * with nothing in zh-CN and with a space in ja.
  */
 export function joinList(translator: Translator<any> | undefined, locale: TextLocale, list: TextList): string {
+  if (list.style === 'and') return listIn(locale ?? translator?.defaultLocale ?? ENGLISH, list.list, 'conjunction')
   const joiner = list.joiner ?? ', '
   if (list.style !== 'unit' || list.joinerKey === undefined) return list.list.join(joiner)
   return list.list.join(renderText(translator, locale, { key: list.joinerKey, fallback: joiner }))
 }
 
 /**
- * A text in `locale`, as {@link findText} finds it. An `or` list in an app's catalog reads in the words of the locale
- * that has it; any other list is joined as {@link joinList} joins it.
+ * A text in `locale`, as {@link findText} finds it. An `and` list, and an `or` list in an app's catalog, read in the
+ * words of the locale that has the text; any other list is joined as {@link joinList} joins it.
  */
 export function renderText(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): string {
+  return renderTextIn(translator, locale, text).text
+}
+
+/** A text as {@link renderText} gives it, with the locale its words are in: `undefined` for its fallback. */
+export function renderTextIn(translator: Translator<any> | undefined, locale: TextLocale, text: MeoCordText): { text: string; locale?: string } {
   const params = text.params ?? {}
   const found = findText(translator, locale, text.key, params.count)
-  if (!found) return text.fallback ?? text.key
-  return fillPlaceholders(pluralForm(found, params.count), (name, whole) => {
+  if (!found) return { text: text.fallback ?? text.key }
+  const filled = fillPlaceholders(pluralForm(found, params.count), (name, whole) => {
     if (!Object.hasOwn(params, name)) return whole
     const value = params[name]
     if (typeof value !== 'object') return String(value)
-    if ('list' in value) return found.own && value.style === 'or' ? orListIn(found.locale, value.list) : joinList(translator, locale, value)
+    if ('list' in value) {
+      if (value.style === 'and') return listIn(found.locale, value.list, 'conjunction')
+      return found.own && value.style === 'or' ? listIn(found.locale, value.list, 'disjunction') : joinList(translator, locale, value)
+    }
     return renderText(translator, locale, value)
   })
+  return { text: filled, locale: found.locale }
 }
 
 /** Renders texts in one locale through one translator: a word or number as it is, a text in the locale's words. */

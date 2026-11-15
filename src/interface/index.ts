@@ -844,7 +844,8 @@ export interface MessageHelpParam {
 
 /**
  * MeoCord's own texts for users, in English, by key under `meocord`: usage replies, the built-in help, cooldown
- * refusals, guard denials, the units `formatDuration` writes, the fallback's answers and the default presenter's views.
+ * refusals, guard denials, the units `formatDuration` writes, the permission labels `permissionNames` gives, the
+ * fallback's answers and the default presenter's views.
  *
  * Translate any of them by adding a `meocord` group to a catalog; a text a locale leaves out stays in English. A key
  * MeoCord lacks, or a `{param}` its English text lacks, fails to compile.

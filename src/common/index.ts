@@ -68,6 +68,8 @@ export { DiscordLimits } from '@src/common/discord-limits.js'
 export { splitMessage, truncate } from '@src/common/split-message.js'
 export { formatDuration } from '@src/common/format-duration.js'
 export type { DurationUnit, FormatDurationOptions } from '@src/common/format-duration.js'
+export { permissionNames } from '@src/common/permission-names.js'
+export type { PermissionNamesOptions } from '@src/common/permission-names.js'
 // discord.js's formatters under its own names, from the bot's own discord.js; `version` and `underscore` stay out
 export {
   applicationDirectory,
