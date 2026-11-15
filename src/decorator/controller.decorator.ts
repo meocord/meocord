@@ -928,6 +928,16 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
   return Reflect.getMetadata(META.commands, controller)
 }
 
+/** What `@Autocomplete` returns: a decorator for a handler that takes the interaction, and its params or nothing. */
+type AutocompleteDecorator = <P extends Record<string, any>, R>(
+  target: object,
+  propertyKey: string,
+  descriptor:
+    | TypedPropertyDescriptor<(interaction: AutocompleteInteraction, params: P) => R>
+    | TypedPropertyDescriptor<(interaction: AutocompleteInteraction) => R>
+    | TypedPropertyDescriptor<() => R>,
+) => void
+
 /**
  * Suggests values for an option of a chat input command as the user types.
  *
@@ -947,8 +957,6 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
  * @param optionName - The option to complete. Leave it out to handle every option, branching on
  *   `interaction.options.getFocused(true)`.
- * @typeParam _R - Not used: the handler's return type is inferred. It is kept so `@Autocomplete<void>(…)` still
- *   compiles, and goes in 5.0.
  *
  * @example
  * ```ts
@@ -966,7 +974,32 @@ export function getCommandMap<T extends string>(controller: any): Record<string,
  * @see {@link Command}
  * @see {@link https://meocord.dev/docs/4.2/autocomplete | Autocomplete}
  */
-export function Autocomplete<_R = unknown>(commandPath: string, optionName?: string) {
+export function Autocomplete(commandPath: string, optionName?: string): AutocompleteDecorator
+/**
+ * Suggests values for an option of a chat input command as the user types, as `@Autocomplete` without a type
+ * argument does.
+ *
+ * @deprecated Since 4.3, and removed in the next major version (5.0). Drop the type argument: the handler's return
+ * type is inferred.
+ *
+ * @param commandPath - The command, such as `search`, or a subcommand's path, such as `settings notify email`.
+ * @param optionName - The option to complete. Leave it out to handle every option.
+ * @typeParam _R - Not used: the handler's return type is inferred.
+ */
+// Spelled out rather than through AutocompleteDecorator, so it stays the very signature code with a type argument
+// compiles against, and an API check matches it as unchanged
+export function Autocomplete<_R = unknown>(
+  commandPath: string,
+  optionName?: string,
+): <P extends Record<string, any>, R>(
+  target: object,
+  propertyKey: string,
+  _descriptor:
+    | TypedPropertyDescriptor<(interaction: AutocompleteInteraction, params: P) => R>
+    | TypedPropertyDescriptor<(interaction: AutocompleteInteraction) => R>
+    | TypedPropertyDescriptor<() => R>,
+) => void
+export function Autocomplete(commandPath: string, optionName?: string): AutocompleteDecorator {
   return declaring(function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,

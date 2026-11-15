@@ -46,6 +46,7 @@ import { type MeoCordApplication } from '@src/interface/index.js'
 import { ShardManager } from '@src/core/shard-manager.js'
 import {
   assertDistinctCommands,
+  warnContextMenuParams,
   warnHandlersOffControllers,
   warnInheritedRoutes,
   warnOverlappingPatterns,
@@ -247,6 +248,7 @@ export class MeoCordFactory {
       warnInheritedRoutes(options.controllers)
       warnOverlappingPatterns(options.controllers)
       warnHandlersOffControllers(options.controllers, runs.classes)
+      warnContextMenuParams(options.controllers)
       const developmentEnv = bunDevelopmentValues()
       if (developmentEnv.keys.length > 0) {
         this.logger.warn(bunDevelopmentWarning(developmentEnv))

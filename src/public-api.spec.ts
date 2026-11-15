@@ -367,6 +367,7 @@ const TYPE_NAMES: Record<string, string[]> = {
 // What goes in the next major version: each name here is removed, or for an internal one stops being exported. A
 // behaviour deprecated without a name, such as retrying start() after a failed login, warns at runtime instead.
 const DEPRECATED = [
+  'Autocomplete<_R>',
   'AutocompleteMetadata',
   'CheckedParams',
   'CommandMeta.specificity',
@@ -388,9 +389,9 @@ const DEPRECATED = [
   'Theme.warningColor',
 ]
 
-// A tag names its replacement and why, or says the name is internal
+// A tag names its replacement and why, says what to drop, or says the name is internal
 const DEPRECATION_TAG =
-  /^Since 4\.[1-3], and removed in the next major version \(5\.0\)\. (Use `[^`]+` instead\. \S.*|Internal: nothing replaces it\.( \S.*)?)$/
+  /^Since 4\.[1-3], and removed in the next major version \(5\.0\)\. (Use `[^`]+` instead\. \S.*|Drop the type argument: \S.*|Internal: nothing replaces it\.( \S.*)?)$/
 
 const ENTRY_FILES: Record<string, string> = {
   'meocord/core': 'src/core/index.ts',
@@ -451,7 +452,9 @@ function deprecatedTags(program: ts.Program): Record<string, string> {
   const visit = (node: ts.Node): void => {
     const tag = ts.getJSDocDeprecatedTag(node)
     if (tag && tag.parent.parent === node) {
-      tags[qualifiedName(node)] = (ts.getTextOfJSDocComment(tag.comment) ?? '').replace(/\s+/g, ' ').trim()
+      // An overload signature is named with its type parameters, apart from the function's other signatures
+      const signature = ts.isFunctionDeclaration(node) && !node.body && node.typeParameters ? `<${node.typeParameters.map(param => param.name.text).join(', ')}>` : ''
+      tags[qualifiedName(node) + signature] = (ts.getTextOfJSDocComment(tag.comment) ?? '').replace(/\s+/g, ' ').trim()
     }
     ts.forEachChild(node, visit)
   }
