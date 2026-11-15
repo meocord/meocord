@@ -294,6 +294,7 @@ const TYPE_NAMES: Record<string, string[]> = {
     'MockResult',
     'MockSettledResult',
     'MockState',
+    'MockTypeOptions',
     'MockedFunction',
     'Provider',
     'ProviderToken',

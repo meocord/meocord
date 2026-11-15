@@ -4,5 +4,5 @@
     "types": ["node", "vitest/globals", "reflect-metadata"]
   },
   "include": ["src/**/*.ts", "src/**/*.spec.ts"],
-  "exclude": ["node_modules", "src/interface/theme-augmented"]
+  "exclude": ["node_modules", "src/interface/theme-augmented", "src/testing/typed-values"]
 }

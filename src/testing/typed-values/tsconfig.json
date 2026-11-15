@@ -1,0 +1,8 @@
+{
+  // Its own program, since the augmentation reaches every file compiled with it; excluded from the others for the
+  // same reason. `files` with an empty `include`, so a renamed probe fails with TS6053 instead of going unread.
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "files": ["typed-values.augmented.ts"],
+  "include": []
+}
