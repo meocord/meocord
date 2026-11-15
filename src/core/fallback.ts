@@ -25,6 +25,7 @@ import {
 } from '@src/common/response/presenter.js'
 import { escapeForLog, quoteForLog } from '@src/util/user-text.util.js'
 import { timerKeepsSeconds } from '@src/util/timer-limit.util.js'
+import { isExpired, reportExpiredAutocomplete } from '@src/core/autocomplete-timing.js'
 
 /** The app's message options the fallback's replies to messages follow. */
 type MessageReplyOptions = Pick<MessageCommandOptions, 'deleteUsageRepliesAfter' | 'replyEmoji' | 'dmOnError' | 'dmOnCooldown'>
@@ -45,7 +46,6 @@ export interface FallbackOptions {
   storeDownNotice?: (who: string) => boolean
 }
 
-const UNKNOWN_INTERACTION = 10062
 /** Discord's refusal of a direct message: the member's are closed, or they blocked the bot. */
 const CANNOT_MESSAGE_USER = 50007
 
@@ -61,14 +61,18 @@ function errorCode(error: unknown): unknown {
   return typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined
 }
 
-/** Closes an autocomplete menu that nothing else answered. Never throws. */
-export async function closeAutocomplete(interaction: AutocompleteInteraction, logger: Logger): Promise<void> {
+/**
+ * Closes an autocomplete menu that nothing else answered. Never throws. A close Discord refuses because the three
+ * seconds have passed goes to `expired` when given; otherwise it is reported with the handler's time, for a call a
+ * handler claimed that names slow calls, and logged as any failed send is for any other.
+ */
+export async function closeAutocomplete(interaction: AutocompleteInteraction, logger: Logger, expired?: (error: unknown) => void): Promise<void> {
   if (interaction.responded) return
   try {
     await interaction.respond([])
   } catch (error) {
-    // The three-second window may already have closed, which is not actionable
-    logFailedSend(logger, 'close the autocomplete window', error)
+    if (expired && isExpired(error)) expired(error)
+    else if (!(isExpired(error) && reportExpiredAutocomplete(interaction, logger))) logFailedSend(logger, 'close the autocomplete window', error)
   }
 }
 
@@ -420,6 +424,8 @@ export function createFallback(
     }
 
     if (interaction.isAutocomplete()) {
+      // The handler answered past the three seconds, so the menu can't be closed either
+      if (isExpired(error) && reportExpiredAutocomplete(interaction, logger)) return
       // The menu closes either way; a denial or a refusal is the user's outcome there as on a command
       if (!logUserOutcome(logger, error, describeInteraction(interaction))) logger.error(`Error handling ${describeInteraction(interaction)}:`, error)
       await closeAutocomplete(interaction, logger)
@@ -431,7 +437,7 @@ export function createFallback(
       return
     }
 
-    if (errorCode(error) === UNKNOWN_INTERACTION) {
+    if (isExpired(error)) {
       logger.warn(`${describeInteraction(interaction)} expired before it could be answered:`, error)
       return
     }

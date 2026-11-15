@@ -163,7 +163,9 @@ export interface ReadyInfo {
  * Called on every controller and service the app binds, including services no handler has used yet, and on every
  * value `@MeoCord({ providers })` provides, after the client is ready. Hooks run one at a time in dependency
  * order, so a service's hook runs after the hooks of the services it injects. Command registration runs alongside
- * and never delays them. A hook that throws is logged and the next one still runs.
+ * and never delays them. A hook that throws is logged and the next one still runs. Calls are handled meanwhile, and
+ * a hook still running after 10 seconds is warned about, naming how many hooks wait behind it, unless
+ * `@MeoCord({ warnSlow: false })`: start long work without awaiting it, and stop it in `onShutdown`.
  *
  * @example
  * ```ts
@@ -750,8 +752,9 @@ export interface MessageCommandOptions {
   /**
    * Warns, once per handler, when a message's handler takes 5 seconds or more with listeners waiting after it, under
    * `handlers: 'sequential'`, naming the handler and how many it held back. A testing module warns only when this is
-   * `true`, since a test's fake clock can pass 5 seconds inside a handler.
-   * @defaultValue `true` in a running bot, `false` in a `MeoCordTestingModule`
+   * `true`, since a test's fake clock can pass 5 seconds inside a handler. Left unset, it follows
+   * `@MeoCord({ warnSlow })`, so one `warnSlow: false` silences every slow warning; set, it wins for message handlers.
+   * @defaultValue `@MeoCord({ warnSlow })`: `true` in a running bot, `false` in a `MeoCordTestingModule`
    */
   slowHandlerWarning?: boolean
 }

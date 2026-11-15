@@ -32,6 +32,7 @@ import {
   bindAppPresenter,
   bindGlobalStages,
   type GlobalStages,
+  globalStagesOf,
   type HandlerOutcome,
   prepareAppPresenter,
   prepareHandlerStages,
@@ -79,7 +80,16 @@ import { assertStartupChecked, markStartupChecked } from '@src/core/startup-chec
 import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
-import { callsSettled, type LifecycleEntry, lifecycleEntry, ReadyPass, runReadyHooks, runShutdownSequence } from '@src/core/lifecycle-hooks.js'
+import {
+  callsSettled,
+  type LifecycleEntry,
+  lifecycleEntry,
+  ReadyPass,
+  runReadyHooks,
+  runShutdownSequence,
+  SLOW_READY_HOOK_MS,
+  slowReadyWarning,
+} from '@src/core/lifecycle-hooks.js'
 import { applyDispatchedReaction, createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
 
 // Taken as the module loads, before a test fakes the timers, so the wait after a client's listeners holds
@@ -563,8 +573,13 @@ export class TestingModule {
       this.lifecycle,
       client,
       { primary },
-      { resolveFailed: failed, hookFailed: failed },
-      { runOnReady: this.readyPass.runOnReady },
+      { resolveFailed: failed, hookFailed: failed, slow: (unit, waiting) => new Logger('TestingModule').warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting)) },
+      // A test's fake clock can pass the time inside a hook, so the warning waits to be asked for
+      {
+        runOnReady: this.readyPass.runOnReady,
+        slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
+        made: unit => (this.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
+      },
     )
     throwFailures('onReady', failures)
   }
@@ -936,8 +951,19 @@ export class TestingModule {
       controllerClasses: this.controllers,
       messageOptions: this.messageOptions,
       logger,
-      // A test's fake clock can pass 5 s inside a handler, so the slow-handler warning waits to be asked for
-      warnSlowMessageHandlers: false,
+      // A test's fake clock can pass a slow warning's time inside a handler, so they wait to be asked for
+      warnSlow: globalStagesOf(this.container).warnSlow === true,
+      // The bot closes it; default mode keeps what a passing test sees, an untouched interaction, and says so once
+      leaveUnansweredAutocompleteOpen: () => {
+        if (strictMocks()) return false
+        warnOnce(
+          logger,
+          "dispatch() here leaves open the menu of an autocomplete its handler returned from without answering; the bot " +
+            'closes it with no choices, as useStrictMocks() does here. In the next major version (5.0) the testing module ' +
+            'closes it without the call (https://github.com/meocord/meocord/issues/441).',
+        )
+        return true
+      },
       fallback,
       // A mock's client is the one bot every mock client is, so a mention of it starts a command
       botUserId: event => {

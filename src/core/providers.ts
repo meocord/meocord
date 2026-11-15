@@ -129,6 +129,31 @@ export function forgetFactoryValues(container: Container): void {
 }
 
 /**
+ * What a provided token shows of its lifecycle hooks before its turn, read without making anything: the value it gives,
+ * its class's prototype, or `unmade` for a factory that has not run yet.
+ */
+export type ProvidedHooks = { instance: object } | { prototype: object } | 'unmade'
+
+/** For each container, how to read each provided token's {@link ProvidedHooks}. */
+const providedHooks = new WeakMap<Container, Map<unknown, () => ProvidedHooks | undefined>>()
+
+/** What `token`, provided in `container`, shows of its hooks without being made; `undefined` for no provider. */
+export function providedHooksOf(container: Container, token: unknown): ProvidedHooks | undefined {
+  return providedHooks.get(container)?.get(token)?.()
+}
+
+/** Records how to read `token`'s hooks before its turn. */
+function readHooksBy(container: Container, token: unknown, read: () => ProvidedHooks | undefined): void {
+  const reads = providedHooks.get(container) ?? new Map<unknown, () => ProvidedHooks | undefined>()
+  providedHooks.set(container, reads)
+  reads.set(token, read)
+}
+
+/** An object a value may carry hooks on; anything else carries none. */
+const asInstance = (value: unknown): ProvidedHooks | undefined =>
+  typeof value === 'object' && value !== null ? { instance: value } : undefined
+
+/**
  * Binds one provider into `container` as a singleton. `bindClass` binds a class a provider depends
  * on, as the app binds its own, so a provided class or a factory's `inject` can name any class.
  */
@@ -136,12 +161,14 @@ export function bindProvider(container: Container, provider: Provider, bindClass
   const token = provider.provide as ServiceIdentifier
   if (isValueProvider(provider)) {
     container.bind(token).toConstantValue(provider.useValue)
+    readHooksBy(container, token, () => asInstance(provider.useValue))
     return
   }
   if (isClassProvider(provider)) {
     const cls = provider.useClass
     makeInjectable(cls)
     container.bind(token).to(cls).inSingletonScope()
+    readHooksBy(container, token, () => ({ prototype: cls.prototype as object }))
     for (const dependency of injectedTokens(cls)) if (isAppClassToken(dependency)) bindClass(dependency)
     return
   }
@@ -150,6 +177,8 @@ export function bindProvider(container: Container, provider: Provider, bindClass
   // resolve, so a start() after it failed tries it again. Resolves while one is pending share it.
   let kept: { value: unknown } | undefined
   madeValues.set(container, [...(madeValues.get(container) ?? []), () => (kept = undefined)])
+  // A factory's value is known once it has settled; a pending one is not made yet
+  readHooksBy(container, token, () => (kept && !(kept.value instanceof Promise) ? asInstance(kept.value) : 'unmade'))
   container.bind(token).toDynamicValue(context => {
     if (kept) return kept.value
     // Resolved in dependency order before anything needs it, so each injected value is already made

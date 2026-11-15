@@ -71,6 +71,9 @@ async function startApp(
     cooldownStoreTimeoutMs?: number
     cooldownStoreFailure?: 'deny' | 'allow'
     themeFor?: any
+    warnSlow?: boolean
+    /** More `@MeoCord` options, such as providers. */
+    extra?: object
   },
 ) {
   const clients: Client[] = []
@@ -87,6 +90,8 @@ async function startApp(
     cooldownStoreTimeoutMs: options.cooldownStoreTimeoutMs,
     cooldownStoreFailure: options.cooldownStoreFailure,
     themeFor: options.themeFor,
+    ...(options.warnSlow !== undefined && { warnSlow: options.warnSlow }),
+    ...options.extra,
     clientOptions: { allowedMentions: { parse: [] }, intents: [] },
   })
   class App {}
@@ -338,12 +343,114 @@ describe('lifecycle hooks', () => {
 
       const ready = becomeReady(client)
       await vi.advanceTimersByTimeAsync(loaded.SLOW_READY_HOOK_MS)
-      expect(logged.warn.flat().join(' ')).toContain('onReady in SlowCache has run for over')
+      expect(logged.warn.flat().join(' ')).toContain(
+        'onReady in SlowCache has run for 10.0 s, holding back 1 hook after it; calls are already being handled. ' +
+          'Start long work without awaiting it in onReady, and stop it in onShutdown.',
+      )
       expect(ran).toEqual([])
 
       await vi.advanceTimersByTimeAsync(5_000)
       await ready
       expect(ran).toEqual(['later'])
+    })
+
+    it('says nothing of a hook that runs too long with warnSlow: false', async () => {
+      const loaded = await load()
+
+      @loaded.Service()
+      class SlowCache implements OnReady {
+        onReady() {
+          return new Promise<void>(resolve => setTimeout(resolve, loaded.SLOW_READY_HOOK_MS + 5_000))
+        }
+      }
+
+      const { client } = await startApp(loaded, { controllers: [], services: [SlowCache], warnSlow: false })
+      vi.useFakeTimers()
+
+      const ready = becomeReady(client)
+      await vi.advanceTimersByTimeAsync(loaded.SLOW_READY_HOOK_MS + 5_000)
+      await ready
+      expect(logged.warn.flat().join(' ')).not.toContain('onReady in SlowCache')
+    })
+
+    // Counting the hooks after a slow one reads their classes: a later unit is made at its turn, after what it injects
+    it.each([
+      ['constructs', false],
+      ['throws as it is made', true],
+    ] as const)('makes no later unit before its turn to count it, one whose constructor %s', async (_label, throws) => {
+      const loaded = await load()
+      let made = 0
+
+      @loaded.Service()
+      class SlowCache implements OnReady {
+        onReady() {
+          return new Promise<void>(resolve => setTimeout(resolve, loaded.SLOW_READY_HOOK_MS + 5_000))
+        }
+      }
+      class Later implements OnReady {
+        constructor(readonly cache: SlowCache) {
+          made++
+          if (throws) throw new Error('constructor failed')
+        }
+        onReady() {}
+      }
+      Reflect.defineMetadata('design:paramtypes', [SlowCache], Later)
+
+      const { client } = await startApp(loaded, { controllers: [], services: [SlowCache], extra: { providers: [{ provide: Later, useClass: Later }] } })
+      vi.useFakeTimers()
+      const ready = becomeReady(client)
+      await vi.advanceTimersByTimeAsync(loaded.SLOW_READY_HOOK_MS)
+      expect(made).toBe(0)
+      await vi.advanceTimersByTimeAsync(5_000)
+      await ready
+
+      expect(made).toBe(1)
+      expect(logged.warn.flat().filter(text => String(text).startsWith('onReady in SlowCache'))).toEqual([
+        expect.stringContaining('holding back 1 hook after it'),
+      ])
+      expect(logged.error.map(([text]) => text)).toEqual(throws ? ['Could not resolve Later to run its lifecycle hooks:'] : [])
+    })
+
+    // A provider is counted by what it gives: its class, or the value its factory made before login
+    it.each([
+      ['a class under a string token', 1],
+      ['a class token given a class without hooks', 0],
+      ['a factory that injects the slow class, its value with onReady', 1],
+    ] as const)('counts %s among the hooks after a slow one', async (shape, count) => {
+      const loaded = await load()
+      @loaded.Service()
+      class SlowCache implements OnReady {
+        onReady() {
+          return new Promise<void>(resolve => setTimeout(resolve, loaded.SLOW_READY_HOOK_MS + 5_000))
+        }
+      }
+      @loaded.Service()
+      class Hooked implements OnReady {
+        constructor(@loaded.inject(SlowCache) readonly cache: SlowCache) {}
+        onReady() {}
+      }
+      @loaded.Service()
+      class Plain {
+        constructor(@loaded.inject(SlowCache) readonly cache: SlowCache) {}
+      }
+      const providers = {
+        'a class under a string token': [{ provide: 'LATER', useClass: Hooked }],
+        'a class token given a class without hooks': [{ provide: Hooked, useClass: Plain }],
+        'a factory that injects the slow class, its value with onReady': [
+          { provide: 'LATER', useFactory: () => ({ onReady: () => undefined }), inject: [SlowCache] },
+        ],
+      }[shape]
+
+      const { client } = await startApp(loaded, { controllers: [], services: [SlowCache], extra: { providers } })
+      vi.useFakeTimers()
+      const ready = becomeReady(client)
+      await vi.advanceTimersByTimeAsync(loaded.SLOW_READY_HOOK_MS + 5_000)
+      await ready
+
+      const hooks = count === 0 ? 'no hooks' : '1 hook'
+      expect(logged.warn.flat().filter(text => String(text).startsWith('onReady in SlowCache'))).toEqual([
+        expect.stringContaining(`holding back ${hooks} after it`),
+      ])
     })
 
     it('runs without waiting for command registration, which never finishes here', async () => {
