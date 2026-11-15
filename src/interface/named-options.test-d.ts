@@ -90,6 +90,7 @@ describe('named decorator options', () => {
 
   it('take the opt-ins for the pipeline as booleans', () => {
     expectTypeOf<MeoCordOptions['answerDenied']>().toEqualTypeOf<boolean | undefined>()
+    expectTypeOf<MeoCordOptions['globalStagesOnEvents']>().toEqualTypeOf<boolean | undefined>()
   })
 
   it("name an entry point builder's build() result", () => {

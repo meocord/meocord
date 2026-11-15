@@ -12,7 +12,7 @@ import {
   inferContextType,
   UnroutedExecutionContext,
 } from '@src/common/execution-context.js'
-import { appliesTo } from '@src/core/stage-scope.js'
+import { applicable as applicableTo, type GlobalHead } from '@src/core/stage-scope.js'
 import { Logger } from '@src/common/logger.js'
 import { GuardDeniedError } from '@src/common/errors.js'
 import {
@@ -248,6 +248,8 @@ export interface GuardedCall {
   currentArgs?: CurrentArgs
   /** Filled with the guard that denied the call, by returning `false` or throwing `GuardDeniedError`. */
   denial?: { by?: abstract new (...args: any[]) => unknown }
+  /** The app's global guards at the head of the list, when it starts with them. */
+  global?: GlobalHead
 }
 
 /**
@@ -260,10 +262,10 @@ export async function runGuards(guards: readonly GuardEntry[], call: GuardedCall
 
   // Guards declared for other context types are skipped; with none left, no context is built
   const type = call.type ?? inferContextType(call.args[0])
-  const applicable = guards.filter(guard => appliesTo(guard, type))
+  const applicable = applicableTo(guards, type, call.global)
   if (applicable.length === 0) return true
 
-  const { container, controller, methodName, ...handlerCall } = call
+  const { container, controller, methodName, global: _global, ...handlerCall } = call
   const context =
     controller && methodName !== undefined
       ? new HandlerExecutionContext({ ...handlerCall, controller, methodName, type })

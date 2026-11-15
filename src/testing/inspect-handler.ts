@@ -16,7 +16,7 @@ import {
   ownEventHandlers,
 } from '@src/decorator/controller.decorator.js'
 import { getEventHandlers } from '@src/decorator/event.decorator.js'
-import { appliesTo } from '@src/core/stage-scope.js'
+import { appliesTo, type GlobalHead } from '@src/core/stage-scope.js'
 import { Logger } from '@src/common/logger.js'
 import { warnOnce } from '@src/common/deprecation.js'
 import { strictMocks } from '@src/testing/strict-mocks.js'
@@ -212,9 +212,9 @@ export function inspectHandler<C extends new (...args: any[]) => unknown>(
 ): HandlerInspection {
   const context = new HandlerExecutionContext({ controller, methodName, args: [] })
   const globals = options.app ? appStages(options.app) : undefined
-  const { guards, interceptors, filters } = handlerStages(controller.prototype as object, methodName, globals)
+  const { guards, interceptors, filters, global } = handlerStages(controller.prototype as object, methodName, globals)
   const observers = options.app ? appObservers(options.app) : []
-  const stages = runStages(controller.prototype as object, methodName, { guards, interceptors, observers })
+  const stages = runStages(controller.prototype as object, methodName, { guards, interceptors, observers }, global)
 
   const inspection = {
     controller,
@@ -275,16 +275,17 @@ function runStages<T extends { guards: readonly Stage[]; interceptors: readonly 
   prototype: object,
   methodName: string,
   all: T,
+  global?: { guards: GlobalHead; interceptors: GlobalHead },
 ): T {
   const types = handlerContextTypes(prototype, methodName)
   if (types.length === 0) return all
-  const forTypes = (entries: readonly Stage[], among: readonly ExecutionContextType[]) =>
-    entries.filter(entry => among.some(type => appliesTo(entry, type)))
+  const forTypes = (entries: readonly Stage[], among: readonly ExecutionContextType[], head?: GlobalHead) =>
+    entries.filter((entry, index) => among.some(type => appliesTo(entry, type, head && index < head.count ? head : undefined)))
   const run = {
     ...all,
-    guards: forTypes(all.guards, types),
+    guards: forTypes(all.guards, types, global?.guards),
     // Autocomplete answers within three seconds and has no reply to shape, so it runs no interceptors
-    interceptors: forTypes(all.interceptors, types.filter(type => type !== 'autocomplete')),
+    interceptors: forTypes(all.interceptors, types.filter(type => type !== 'autocomplete'), global?.interceptors),
     observers: forTypes(all.observers, types),
   }
   if (strictMocks()) return run
@@ -293,8 +294,9 @@ function runStages<T extends { guards: readonly Stage[]; interceptors: readonly 
   if (count(run) < count(all)) {
     warnOnce(
       new Logger('inspectHandler'),
-      `inspectHandler() here lists the guards, interceptors and observers of every context type for ${handlerName}, ` +
-        "where dispatch runs only those of its own; under useStrictMocks() it lists the ones dispatch runs.",
+      `inspectHandler() here lists every guard, interceptor and observer declared for ${handlerName}, where dispatch ` +
+        "runs only those of its own context type and, for an event handler under globalStagesOnEvents: false, none of the " +
+        "app's untyped guards and interceptors; under useStrictMocks() it lists the ones dispatch runs.",
     )
   }
   return all

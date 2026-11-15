@@ -45,7 +45,7 @@ import { processState } from '@src/core/process-state.js'
 import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
 import { explainLoginFailure, type FatalLoginCode, fatalLoginCode, isRefusedToken, tokenMessage } from '@src/core/login-failure.js'
 import { markExplained } from '@src/common/explained-error.js'
-import { warnDeprecatedBehaviour } from '@src/common/deprecation.js'
+import { warnDeprecatedBehaviour, warnOnce } from '@src/common/deprecation.js'
 import { GuardDeniedError, UserError } from '@src/common/errors.js'
 import { managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
@@ -96,6 +96,9 @@ function shutDown(): Promise<void> {
 
 /** The errors {@link stoppedBeforeOnline} made, which end a start without being its failure. */
 const stops = new WeakSet<Error>()
+
+/** Where the next major version's change to global stages on gateway events is planned. */
+const GLOBAL_STAGES_ON_EVENTS_ISSUE = 'https://github.com/meocord/meocord/issues/502'
 
 /** What `start()` rejects with when shutdown begins before the bot came online, which shutdown has logged. */
 function stoppedBeforeOnline(): Error {
@@ -460,7 +463,7 @@ export class MeoCordApp implements MeoCordApplication {
     const sources = this.eventSources()
     this.attachEventHandlers(sources)
     this.warnAboutMissingRequirements(sources)
-    this.noteGlobalStagesOnEvents(sources)
+    this.warnGlobalStagesOnEvents(sources)
   }
 
   /** Logs the bot in, setting the exit code when that fails and clearing it when a later attempt succeeds. */
@@ -631,22 +634,25 @@ export class MeoCordApp implements MeoCordApplication {
   }
 
   /**
-   * Says, once per stage, which global guards and interceptors declare no `types` and so also run
-   * before `@On` and `@Once` handlers, when the app has any.
+   * Warns, once per stage, of the global guards and interceptors that declare no `types` and so also run before `@On`
+   * and `@Once` handlers, when the app has any and has not set `globalStagesOnEvents`.
    */
-  private noteGlobalStagesOnEvents(sources: readonly EventSource[]): void {
+  private warnGlobalStagesOnEvents(sources: readonly EventSource[]): void {
     if (sources.length === 0) return
 
-    const { guards, interceptors } = globalStagesOf(this.container)
+    const { guards, interceptors, globalStagesOnEvents } = globalStagesOf(this.container)
+    if (globalStagesOnEvents !== undefined) return
     for (const [label, decorator, entries] of [
       ['guard', 'Guard', guards],
       ['interceptor', 'Interceptor', interceptors],
     ] as const) {
       for (const entry of entries) {
         if (stageTypes(entry)) continue
-        this.logger.info(
-          `Global ${label} ${stageClass(entry).name} also runs on gateway events; declare ` +
-            `@${decorator}({ types: [...] }) to limit it.`,
+        warnOnce(
+          this.logger,
+          `Global ${label} ${stageClass(entry).name} also runs before @On and @Once handlers; in the next major ` +
+            `version (5.0) it no longer does unless it declares types (${GLOBAL_STAGES_ON_EVENTS_ISSUE}). Declare ` +
+            `@${decorator}({ types: [...] }), or set @MeoCord({ globalStagesOnEvents }) to true or false.`,
         )
       }
     }

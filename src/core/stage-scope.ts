@@ -82,7 +82,24 @@ export function stageTypes(entry: StageEntry): readonly ExecutionContextType[] |
   return Reflect.getMetadata(META.stageTypes, stageClass(entry)) as ExecutionContextType[] | undefined
 }
 
-/** Whether a stage runs for a call of `type`. */
-export function appliesTo(entry: StageEntry, type: ExecutionContextType): boolean {
-  return stageTypes(entry)?.includes(type) ?? true
+/** The app's global stages at the head of a stage list: how many there are, and whether they run before gateway events. */
+export interface GlobalHead {
+  readonly count: number
+  /** The app's `globalStagesOnEvents`, `true` unless it sets one. */
+  readonly onEvents: boolean
+}
+
+/**
+ * Whether a stage runs for a call of `type`. A stage that declares types runs for those alone; one that declares none
+ * runs for every type, except `'event'` when it is global and the app sets `globalStagesOnEvents: false`.
+ */
+export function appliesTo(entry: StageEntry, type: ExecutionContextType, global?: GlobalHead): boolean {
+  const types = stageTypes(entry)
+  if (types) return types.includes(type)
+  return !(type === 'event' && global?.onEvents === false)
+}
+
+/** The entries of a stage list that run for a call of `type`, the first `global.count` of them the app's global ones. */
+export function applicable<T extends StageEntry>(entries: readonly T[], type: ExecutionContextType, global?: GlobalHead): T[] {
+  return entries.filter((entry, index) => appliesTo(entry, type, global && index < global.count ? global : undefined))
 }
