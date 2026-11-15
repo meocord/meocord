@@ -88,6 +88,10 @@ describe('named decorator options', () => {
     void [Ping, Base]
   })
 
+  it('take the opt-ins for the pipeline as booleans', () => {
+    expectTypeOf<MeoCordOptions['answerDenied']>().toEqualTypeOf<boolean | undefined>()
+  })
+
   it("name an entry point builder's build() result", () => {
     expectTypeOf<PrimaryEntryPointCommandData>().toEqualTypeOf<CommandBuildResult<CommandType.PRIMARY_ENTRY_POINT>>()
   })

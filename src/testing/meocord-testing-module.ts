@@ -574,6 +574,7 @@ export class TestingModule {
    *
    * expect(ran).toBe(false)
    * expect(interaction.reply).not.toHaveBeenCalled()
+   * // In a module whose app sets @MeoCord({ answerDenied: true }), that false rejects with GuardDeniedError instead, as below
    *
    * // A guard that throws GuardDeniedError, or a handler that throws UserError
    * await expect(module.invoke(ModerationController, 'kick', interaction)).rejects.toThrow(GuardDeniedError)

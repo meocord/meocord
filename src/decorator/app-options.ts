@@ -156,6 +156,17 @@ export interface MeoCordOptions<
   warnUnanswered?: boolean
 
   /**
+   * Answers a guard's `false` on an interaction as if the guard had thrown `GuardDeniedError`: a command, context menu,
+   * component or modal is told privately "You can't use this.", `meocord.guard.denied` in the user's language. The
+   * denial takes a thrown one's path, so a filter catching `GuardDeniedError` sees it, observers get its `deniedBy`, and
+   * a call with `@Defer` is answered into its deferral. Autocomplete still closes its menu, an event handler still
+   * skips the event, and a message command stays silent; a guard that throws its own `GuardDeniedError` keeps its words.
+   *
+   * @defaultValue `false`
+   */
+  answerDenied?: boolean
+
+  /**
    * The app's theme: the roles it changes from MeoCord's defaults, and every role the app adds. It applies to every
    * handler, beneath each `@UseTheme`; code reads it with `useTheme()`. Each token is checked as the decorator
    * applies, so a bad one stops the bot before it logs in.
