@@ -139,6 +139,20 @@ export interface ValidationIssue {
   message: string
   /** Where it is, such as `['minutes']`; empty for the input as a whole. */
   path: PropertyKey[]
+  /**
+   * The issue exactly as the schema's `validate` reported it, with the library's own fields, such as zod's `code` and
+   * `minimum`, for words of your own in the user's language. Only an issue from a schema has it, and it is
+   * non-enumerable, so `toEqual({ message, path })` and a serialised issue leave it out.
+   *
+   * @example
+   * ```ts
+   * declare const issue: ValidationIssue
+   *
+   * const raw = issue.raw as { code?: string; minimum?: number } | undefined
+   * const tooSmall = raw?.code === 'too_small' ? raw.minimum : undefined
+   * ```
+   */
+  readonly raw?: StandardSchemaV1Issue
 }
 
 /** A path as the user reads it; a symbol key shows its description. */
@@ -175,17 +189,19 @@ export class ValidationError extends Error {
   }
 
   /**
-   * The issues a Standard Schema reported, with each path reduced to its keys.
+   * The issues a Standard Schema reported, with each path reduced to its keys and the schema's own issue kept as
+   * {@link ValidationIssue.raw}.
    *
    * @param issues - The issues, as the schema's `validate` reported them.
    * @returns The error, its issues in the schema's order.
    */
   static fromSchemaIssues(issues: readonly StandardSchemaV1Issue[]): ValidationError {
     return new ValidationError(
-      issues.map(({ message, path = [] }) => ({
-        message,
-        path: path.map(segment => (typeof segment === 'object' ? segment.key : segment)),
-      })),
+      issues.map(raw => {
+        const issue: ValidationIssue = { message: raw.message, path: (raw.path ?? []).map(segment => (typeof segment === 'object' ? segment.key : segment)) }
+        // Out of the issue's keys, so a comparison or serialisation of { message, path } is unchanged
+        return Object.defineProperty(issue, 'raw', { value: raw, enumerable: false })
+      }),
     )
   }
 }
