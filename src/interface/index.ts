@@ -742,7 +742,7 @@ export interface MessageCommandOptions {
    *
    * @example
    * ```ts
-   * @MeoCord({ controllers: [Commands, Moderation], messages: { prefix: '!', handlers: 'concurrent' } })
+   * @MeoCord({ controllers: [], clientOptions: { intents: [] }, messages: { prefix: '!', handlers: 'concurrent' } })
    * class App {}
    * ```
    */

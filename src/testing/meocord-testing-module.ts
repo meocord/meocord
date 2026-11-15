@@ -372,9 +372,22 @@ export class TestingModule {
    *
    * @example
    * ```ts
+   * import { expect } from 'vitest'
+   *
+   * const DATABASE = createToken<{ connected: boolean }>('Database')
+   * @Service()
+   * class NotesStore {
+   *   loaded = false
+   *   constructor(@Inject(DATABASE) private readonly db: { connected: boolean }) {}
+   *   onReady() {
+   *     this.loaded = this.db.connected
+   *   }
+   * }
    * const module = await MeoCordTestingModule.create({
-   *   controllers: [NotesController],
-   *   providers: [{ provide: DATABASE, useFactory: async () => createTestDatabase() }],
+   *   providers: [
+   *     { provide: NotesStore, useClass: NotesStore },
+   *     { provide: DATABASE, useFactory: async () => ({ connected: true }) },
+   *   ],
    * })
    *   .compile()
    *   .init({ ready: true })
@@ -434,13 +447,27 @@ export class TestingModule {
    *
    * @example
    * ```ts
-   * const module = await MeoCordTestingModule.create({ providers: [{ provide: POOL, useFactory: createPool }] })
+   * import { expect } from 'vitest'
+   *
+   * const POOL = createToken<object>('Pool')
+   * const closed: string[] = []
+   * @Service()
+   * class Notes {
+   *   constructor(@Inject(POOL) readonly pool: object) {}
+   *   onShutdown() {
+   *     closed.push('notes')
+   *   }
+   * }
+   * const module = await MeoCordTestingModule.create({
+   *   providers: [{ provide: Notes, useClass: Notes }, { provide: POOL, useFactory: async () => ({ onShutdown: () => closed.push('pool') }) }],
+   * })
    *   .compile()
    *   .init()
+   * module.get(Notes)
    *
    * await module.close()
    *
-   * expect(module.get(POOL).ended).toBe(true)
+   * expect(closed).toEqual(['notes', 'pool'])
    * ```
    */
   async close(): Promise<void> {
@@ -506,12 +533,22 @@ export class TestingModule {
    *
    * @example
    * ```ts
-   * const guild = vi.fn(() => ({ colors: { primary: '#26A042' as const } }))
-   * const module = MeoCordTestingModule.create({ app: App, controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
+   * import { expect, vi } from 'vitest'
    *
-   * await module.dispatch(interaction)
-   * module.themeCache.invalidateGuild(interaction.guildId!)
-   * await module.dispatch(interaction)
+   * @Controller()
+   * class ShopController {
+   *   @Command('buy', CommandType.BUTTON)
+   *   async buy(interaction: ButtonInteraction) {
+   *     await respond(interaction).send(`Paid, in ${useTheme().colors.primary}.`)
+   *   }
+   * }
+   * const guild = vi.fn(() => ({ colors: { primary: '#26A042' as const } }))
+   * const module = MeoCordTestingModule.create({ controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
+   * const press = () => createMockInteraction(ButtonInteraction, { customId: 'buy', guildId: '123456789012345678' })
+   *
+   * await module.dispatch(press())
+   * module.themeCache.invalidateGuild('123456789012345678')
+   * await module.dispatch(press())
    *
    * expect(guild).toHaveBeenCalledTimes(2)
    * ```
@@ -589,6 +626,34 @@ export class TestingModule {
    *
    * @example
    * ```ts
+   * import { expect } from 'vitest'
+   *
+   * @Guard()
+   * class ModeratorGuard implements GuardInterface {
+   *   canActivate() {
+   *     return false
+   *   }
+   * }
+   * @Guard()
+   * class OwnerGuard implements GuardInterface {
+   *   canActivate(): boolean {
+   *     throw new GuardDeniedError('Only the server owner can kick.')
+   *   }
+   * }
+   * @Controller()
+   * class ModerationController {
+   *   @Command('ban', CommandType.SLASH)
+   *   @UseGuard(ModeratorGuard)
+   *   async ban(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send('Banned.')
+   *   }
+   *
+   *   @Command('kick', CommandType.SLASH)
+   *   @UseGuard(OwnerGuard)
+   *   async kick(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send('Kicked.')
+   *   }
+   * }
    * const module = MeoCordTestingModule.create({ controllers: [ModerationController] }).compile()
    * const interaction = createMockInteraction(ChatInputCommandInteraction)
    *
@@ -907,7 +972,16 @@ export class TestingModule {
    *
    * @example
    * ```ts
-   * const module = MeoCordTestingModule.create({ app: App, controllers: [CardController] }).compile()
+   * import { expect } from 'vitest'
+   *
+   * @Controller()
+   * class CardController {
+   *   @Command('card/summary/{id}', CommandType.BUTTON)
+   *   async summary(interaction: ButtonInteraction, { id }: { id: string }) {
+   *     await respond(interaction).send(`Card ${id}`)
+   *   }
+   * }
+   * const module = MeoCordTestingModule.create({ controllers: [CardController] }).compile()
    * const interaction = createMockInteraction(ButtonInteraction, { customId: 'card/summary/7' })
    *
    * const { handlers } = await module.dispatch(interaction)
@@ -987,6 +1061,15 @@ export class TestingModule {
    *
    * @example
    * ```ts
+   * import { expect } from 'vitest'
+   *
+   * @Controller()
+   * class WelcomeController {
+   *   @On('guildMemberAdd')
+   *   async greet(member: GuildMember) {
+   *     await member.send('Welcome!')
+   *   }
+   * }
    * const module = MeoCordTestingModule.create({ controllers: [WelcomeController] }).compile()
    * const member = createMock<GuildMember>()
    *
@@ -1131,7 +1214,19 @@ export class TestingModuleBuilder {
    * @param token - The provider to replace.
    * @example
    * ```ts
-   * builder.overrideProvider(UserService).useValue({ findUser: vi.fn() })
+   * import { vi } from 'vitest'
+   *
+   * @Controller()
+   * class ProfileController {
+   *   constructor(private readonly profiles: ProfileService) {}
+   *
+   *   @Command('profile', CommandType.SLASH)
+   *   async profile(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send({ embeds: [await this.profiles.render(interaction.user.id)] })
+   *   }
+   * }
+   * const builder = MeoCordTestingModule.create({ controllers: [ProfileController] })
+   * builder.overrideProvider(ProfileService).useValue({ render: vi.fn() })
    * ```
    */
   overrideProvider<T>(token: ProviderToken<T> | ServiceIdentifier<T>): { useValue: (value: Partial<T>) => TestingModuleBuilder } {
@@ -1153,7 +1248,16 @@ export class TestingModuleBuilder {
    * @param guard - The guard class to replace.
    * @example
    * ```ts
-   * builder.overrideGuard(RateLimitGuard).useValue({ canActivate: () => true })
+   * @Controller()
+   * class ShopController {
+   *   @Command('refund', CommandType.SLASH)
+   *   @UseGuard(StaffGuard)
+   *   async refund(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send('Refunded.')
+   *   }
+   * }
+   * const builder = MeoCordTestingModule.create({ controllers: [ShopController] })
+   * builder.overrideGuard(StaffGuard).useValue({ canActivate: () => true })
    * ```
    */
   overrideGuard(guard: new (...args: any[]) => GuardInterface): {
@@ -1178,7 +1282,16 @@ export class TestingModuleBuilder {
    * @param interceptor - The interceptor class to replace.
    * @example
    * ```ts
-   * builder.overrideInterceptor(TimingInterceptor).useValue({ intercept: (_context, next) => next.handle() })
+   * @Controller()
+   * class ShopController {
+   *   @Command('refund', CommandType.SLASH)
+   *   @UseInterceptor(TimingInterceptor)
+   *   async refund(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send('Refunded.')
+   *   }
+   * }
+   * const builder = MeoCordTestingModule.create({ controllers: [ShopController] })
+   * builder.overrideInterceptor(TimingInterceptor).useValue({ intercept: (_context: ExecutionContext, next: CallHandler) => next.handle() })
    * ```
    */
   overrideInterceptor(interceptor: new (...args: any[]) => InterceptorInterface): {
@@ -1203,7 +1316,18 @@ export class TestingModuleBuilder {
    * @param filter - The filter class to replace.
    * @example
    * ```ts
-   * builder.overrideFilter(RateLimitedFilter).useValue({ catch: vi.fn() })
+   * import { vi } from 'vitest'
+   *
+   * @Controller()
+   * class ShopController {
+   *   @Command('refund', CommandType.SLASH)
+   *   @UseFilter(CooldownFilter)
+   *   async refund(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send('Refunded.')
+   *   }
+   * }
+   * const builder = MeoCordTestingModule.create({ controllers: [ShopController] })
+   * builder.overrideFilter(CooldownFilter).useValue({ catch: vi.fn() })
    * ```
    */
   overrideFilter(filter: new (...args: any[]) => ExceptionFilter<any>): {
@@ -1226,7 +1350,14 @@ export class TestingModuleBuilder {
    * @throws Error naming each token that is not valid.
    * @example
    * ```ts
-   * const module = MeoCordTestingModule.create({ app: App, controllers: [ShopController] })
+   * @Controller()
+   * class ShopController {
+   *   @Command('buy', CommandType.BUTTON)
+   *   async buy(interaction: ButtonInteraction) {
+   *     await respond(interaction).send(`Paid, in ${useTheme().colors.primary}.`)
+   *   }
+   * }
+   * const module = MeoCordTestingModule.create({ controllers: [ShopController] })
    *   .overrideTheme({ colors: { primary: '#E3606D' } })
    *   .compile()
    * ```
@@ -1249,8 +1380,17 @@ export class TestingModuleBuilder {
    *   method.
    * @example
    * ```ts
+   * import { vi } from 'vitest'
+   *
+   * @Controller()
+   * class ShopController {
+   *   @Command('buy', CommandType.BUTTON)
+   *   async buy(interaction: ButtonInteraction) {
+   *     await respond(interaction).send(`Paid, in ${useTheme().colors.primary}.`)
+   *   }
+   * }
    * const guild = vi.fn(() => ({ colors: { primary: '#26A042' as const } }))
-   * const module = MeoCordTestingModule.create({ app: App, controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
+   * const module = MeoCordTestingModule.create({ controllers: [ShopController] }).overrideThemeFor({ guild }).compile()
    * ```
    */
   overrideThemeFor(resolvers: ThemeResolvers | (new (...args: any[]) => ThemeResolver) | undefined): TestingModuleBuilder {
@@ -1271,6 +1411,19 @@ export class TestingModuleBuilder {
    * @throws RangeError when no controller of this module declares a slash command of that name.
    * @example
    * ```ts
+   * @CommandBuilder(CommandType.SLASH)
+   * class SettingsBuilder {
+   *   build(name: string) {
+   *     return new SlashCommandBuilder().setName(name).setDescription('Change the settings')
+   *   }
+   * }
+   * @Controller()
+   * class SettingsController {
+   *   @Command('settings', SettingsBuilder)
+   *   async settings(interaction: ChatInputCommandInteraction) {
+   *     await respond(interaction).send(`Saved. Change them again with ${await commandMention('settings', interaction)}.`)
+   *   }
+   * }
    * const module = MeoCordTestingModule.create({ controllers: [SettingsController] })
    *   .overrideCommandId('settings', '123456789012345678')
    *   .compile()

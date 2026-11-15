@@ -181,8 +181,10 @@ Write as for any comment here: the code as it is now, with no history.
 
 ### Examples compile
 
-`bun run check:jsdoc-examples`, after `bun run build`, compiles the example of every public symbol that has a
-`@group` against `dist`, and CI runs it. It compiles the README's `typescript` blocks the same way, so the landing
+`bun run check:jsdoc-examples`, after `bun run build`, compiles the examples of every public symbol that has a
+`@group` against `dist`: its own, each overload signature's, and its members' at any depth, the fields of an
+options object or a namespace's functions included. CI runs it. An example in such a declaration that the check
+can't reach is an error, not a skip. It compiles the README's `typescript` blocks the same way, so the landing
 page's example works as a reader copies it; a README block imports what it uses, each import on one line. So an
 example:
 
@@ -191,6 +193,14 @@ example:
 - **may be class members.** A snippet of decorated methods, with a constructor for what it injects, is compiled
   inside a `@Controller()` class; module code before the first member, such as a decorator it defines, stays
   outside it.
+- **may be the member it documents,** for a property or a method: written as in an object, `level: 'quiet',` (or
+  `level: 'quiet';`, as an interface writes it), as a class property, `level = 'quiet'`, or as the method
+  implemented, `onReady(client) { … }`. It is checked as a piece of an object of the type that holds the member.
+  Of a union, that is each object type with a member of that name, so a value another one's member takes passes.
+  `level: 'loud'` with nothing around it reads as a label and checks nothing, so a label anywhere in a member's
+  example is an error. Where no chain of names reaches the type, as for a parameter of an overloaded method or a
+  member with a computed key such as `[Symbol.iterator]`, the member written as in an object is an error too: write
+  code that uses the member instead.
 - **may use a fixture**, declared in `scripts/jsdoc-examples/fixtures.ts`: the guards `StaffGuard` and
   `ChannelGuard` (with `params: { channelIds }`), `TimingInterceptor`, `CooldownFilter` (for `CooldownError`),
   `TrimPipe`, and `ProfileService` (`render(userId)` gives an `EmbedBuilder`). An example uses one as a dependency,

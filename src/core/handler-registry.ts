@@ -398,6 +398,8 @@ export class HandlerRegistry {
    *
    * @example
    * ```ts
+   * constructor(private readonly handlers: HandlerRegistry) {}
+   *
    * @MessageHandler('help {command...?}')
    * async help(message: Message, { command }: { command?: string }) {
    *   const help = await this.handlers.messageHelp(message, command)
