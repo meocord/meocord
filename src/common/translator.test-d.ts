@@ -48,6 +48,8 @@ describe('LocaleCatalog', () => {
   it("takes MeoCord's own texts in a locale's meocord group, as createTranslator does", () => {
     const id: LocaleCatalog<typeof enUS> = { ping: 'Pong!', meocord: { help: { aliases: 'Juga: {aliases}' } } }
     void id
+    const ja: LocaleCatalog<typeof enUS> = { ping: 'ポン！', meocord: { help: { listJoiner: '、', paramJoiner: '、' } } }
+    void ja
     // @ts-expect-error not one of MeoCord's groups
     const wrong: LocaleCatalog<typeof enUS> = { meocord: { nope: 'x' } }
     void wrong

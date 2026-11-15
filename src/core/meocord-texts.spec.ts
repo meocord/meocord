@@ -169,6 +169,23 @@ describe("MeoCord's own texts", () => {
     expect((await repliesTo(client, ['!help tag'], serverIn(locale)))[0]).toBe(`Usage: !tag <names…> [--loud]\nTags things.\n${lines}`)
   })
 
+  it("joins help's params and aliases with the catalog's own separators, and MeoCord's English where it has none", async () => {
+    const translated = createTranslator({
+      default: 'en-US',
+      locales: {
+        'en-US': enUS,
+        'zh-CN': { meocord: { help: { params: '参数：{params}', aliases: '别名：{aliases}', listJoiner: '、', paramJoiner: '、' } } },
+        ja: { meocord: { help: { aliases: '別名: {aliases}', listJoiner: '、' } } },
+      },
+    })
+    const client = await startApp(translated)
+
+    expect([(await repliesTo(client, ['!help tag'], serverIn('zh-CN')))[0], (await repliesTo(client, ['!help tag'], serverIn('ja')))[0]]).toEqual([
+      'Usage: !tag <names…> [--loud]\nTags things.\n参数：names: text, one or more、--loud (optional): on when given\n别名：!label、!mark、!t',
+      'Usage: !tag <names…> [--loud]\nTags things.\nnames: text, one or more · --loud (optional): on when given\n別名: !label、!mark、!t',
+    ])
+  })
+
   it("answers an English server in MeoCord's English when the default locale is another language", async () => {
     const idDefault = defineCatalog({
       types: { color: 'warna hex' },

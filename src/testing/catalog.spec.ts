@@ -3,6 +3,7 @@ import { Controller, MeoCord, Service } from '@src/decorator/index.js'
 import { expectCompleteCatalog, MeoCordTestingModule } from '@src/testing/index.js'
 import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
 import { placeholderNames } from '@src/common/translator.js'
+import { MEOCORD_MESSAGES } from '@src/common/meocord-messages.js'
 
 const enUS = defineCatalog({
   ban: { description: 'Ban a member', done: 'Banned {user}.' },
@@ -152,6 +153,21 @@ describe('expectCompleteCatalog', () => {
     expect(id).toContain('missing meocord.usage.headingMany; missing meocord.usage.missing')
     expect(id).not.toContain('missing meocord.usage.heading;')
     expect(report).not.toMatch(/en-GB: .*meocord/)
+  })
+
+  it("names help's two separators, with meocord: true, in a locale that translates the rest of its help", () => {
+    const { listJoiner, paramJoiner, ...help } = MEOCORD_MESSAGES.meocord.help
+    void [listJoiner, paramJoiner]
+    const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, ja: { meocord: { help } } } })
+    const report = (() => {
+      try {
+        expectCompleteCatalog(t, { meocord: true })
+      } catch (error) {
+        return (error as Error).message
+      }
+    })()!
+
+    expect(report.match(/meocord\.help\.\w+/g)).toEqual(['meocord.help.listJoiner', 'meocord.help.paramJoiner'])
   })
 
   it("names a {param} a translation uses that the default message doesn't take, from the strings themselves", () => {
