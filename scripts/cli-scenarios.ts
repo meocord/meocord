@@ -133,6 +133,23 @@ const selfExitingMain = `console.log('Leaving before logging in')\nprocess.exitC
 
 const templateMain = templateFile('src/main.ts')
 
+/** An entry that imports the app, so its controllers are built, and exits with code 3 before logging in. */
+const appThenExitMain = `import App from '@src/app'\nconsole.log(\`Leaving before logging in, with \${App.name}\`)\nprocess.exitCode = 3\n`
+/** A sample controller the app imports, which the stale-build scenarios edit. */
+const SAMPLE_CONTROLLER = 'src/controllers/slash/sample.slash.controller.ts'
+/** What start --prod and register warn when the source changed since the build in dist. */
+const STALE_BUILD = 'dist was built before'
+/** Every source file the app's build reads, from the template: its own src, the config and tsconfig.json. */
+const builtSources = [
+  ...readdirSync(path.join(import.meta.dirname, '..', 'src', 'bin', 'app-template', 'src'), { recursive: true, encoding: 'utf8' })
+    .filter(file => file.endsWith('.ts.template') && !file.endsWith('.spec.ts.template'))
+    .map(file => `src/${file.replace(/\\/g, '/').replace(/\.template$/, '')}`),
+  'meocord.config.ts',
+  'tsconfig.json',
+]
+/** The same content written again, as a checkout or a copy writes it, with a new mtime. */
+const rewritten = (current: string) => current
+
 /** The template's configuration with its dependencies bundled, and an eval devtool set as a hook sets one. */
 const evalBundledConfig = edited('meocord.config.ts', configWith('bundleDependencies: true,'), [
   '    return config',
@@ -1518,6 +1535,118 @@ const scenarios: Scenario[] = [
     expect: { code: 1, says: [REFUSED_TOKEN, 'Reset Token'], never: ['Could not read the application'] },
   },
 
+  // A build older than the source: start --prod and register without --build say so, and run it anyway
+  {
+    name: 'start --prod right after a build says nothing of its age, and the build records what it read',
+    tier: 'fast',
+    windows: true,
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, dist: null },
+    before: [['build', '--prod']],
+    argv: ['start', '--prod'],
+    expect: {
+      code: 3,
+      says: ['Leaving before logging in'],
+      never: [STALE_BUILD, 'development build'],
+      contains: { 'dist/meocord.build.json': ['"mode": "production"', `"path": "${SAMPLE_CONTROLLER}"`, '"path": "meocord.config.ts"', '"path": "tsconfig.json"'] },
+    },
+  },
+  {
+    name: 'start --prod names the controller edited since the build, and starts the build it has',
+    tier: 'fast',
+    windows: true,
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, [SAMPLE_CONTROLLER]: templateFile(SAMPLE_CONTROLLER), dist: null },
+    before: [['build', '--prod']],
+    thenEdits: { [SAMPLE_CONTROLLER]: current => `${current}// Edited after the build\n` },
+    argv: ['start', '--prod'],
+    expect: {
+      code: 3,
+      says: [`${STALE_BUILD} ${SAMPLE_CONTROLLER} changed, so start --prod runs the previous build. Add --build`, 'Leaving before logging in'],
+    },
+  },
+  {
+    name: 'start --prod names meocord.config.ts edited since the build',
+    tier: 'slow',
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, 'meocord.config.ts': validConfig, dist: null },
+    before: [['build', '--prod']],
+    thenEdits: { 'meocord.config.ts': current => `${current}// Edited after the build\n` },
+    argv: ['start', '--prod'],
+    expect: { code: 3, says: [`${STALE_BUILD} meocord.config.ts changed`, 'Leaving before logging in'] },
+  },
+  {
+    name: "register names the file edited since the build, saying it sends the previous build's commands",
+    tier: 'slow',
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, [SAMPLE_CONTROLLER]: templateFile(SAMPLE_CONTROLLER), dist: null },
+    before: [['build', '--prod']],
+    thenEdits: { [SAMPLE_CONTROLLER]: current => `${current}// Edited after the build\n` },
+    argv: ['register'],
+    expect: { code: 3, says: [`${STALE_BUILD} ${SAMPLE_CONTROLLER} changed, so register sends the previous build's commands`] },
+  },
+  {
+    name: 'start --prod after a development build says dist holds one',
+    tier: 'fast',
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, dist: null },
+    before: [['build', '--dev']],
+    argv: ['start', '--prod'],
+    expect: { code: 3, says: ['dist holds a development build', 'Add --build to start a production one.', 'Leaving before logging in'], never: [STALE_BUILD] },
+  },
+  {
+    name: 'start --dev records a development build, which a later start --prod warns of, and its restarts warn of nothing',
+    tier: 'slow',
+    platforms: ['linux', 'darwin'],
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, dist: null },
+    argv: ['start', '--dev'],
+    // An edit rebuilds and restarts the bot; the check is for commands that run dist without building it
+    edits: [{ after: 'waiting for changes', files: { [SAMPLE_CONTROLLER]: current => `${current}// Edited while watching\n` } }],
+    signal: { name: 'SIGINT', after: 'waiting for changes', times: 2 },
+    timeoutMs: 60_000,
+    expect: {
+      code: 0,
+      counts: { 'Leaving before logging in': 2 },
+      never: [STALE_BUILD, 'dist holds a development build'],
+      contains: { 'dist/meocord.build.json': ['"mode": "development"', `"path": "${SAMPLE_CONTROLLER}"`, '"path": "meocord.config.ts"'] },
+    },
+  },
+  {
+    name: 'start --prod with bundleDependencies names a lockfile changed since the build, as an upgrade changes it',
+    tier: 'slow',
+    files: {
+      '.env': INVALID_TOKEN_ENV,
+      'src/main.ts': appThenExitMain,
+      'meocord.config.ts': configWith('bundleDependencies: true,'),
+      'package-lock.json': '{}\n',
+      dist: null,
+    },
+    before: [['build', '--prod']],
+    thenEdits: { 'package-lock.json': () => '{ "upgraded": true }\n' },
+    argv: ['start', '--prod'],
+    expect: { code: 3, says: [`${STALE_BUILD} package-lock.json changed`, 'Leaving before logging in'] },
+  },
+  ...(
+    [
+      ['a source file saved again unchanged', { [SAMPLE_CONTROLLER]: rewritten }],
+      ['a copy of the project, every file with a new mtime', Object.fromEntries(builtSources.map(file => [file, rewritten]))],
+    ] as const
+  ).map(
+    ([what, thenEdits]): Scenario => ({
+      name: `start --prod says nothing of the build's age after ${what}`,
+      tier: 'slow',
+      files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, dist: null },
+      before: [['build', '--prod']],
+      thenEdits,
+      argv: ['start', '--prod'],
+      expect: { code: 3, says: ['Leaving before logging in'], never: [STALE_BUILD] },
+    }),
+  ),
+  {
+    name: "start --prod says nothing of the build's age with src gone, as on a server with dist alone",
+    tier: 'slow',
+    files: { '.env': INVALID_TOKEN_ENV, 'src/main.ts': appThenExitMain, dist: null },
+    before: [['build', '--prod']],
+    hides: ['src'],
+    argv: ['start', '--prod'],
+    expect: { code: 3, says: ['Leaving before logging in'], never: [STALE_BUILD] },
+  },
+
   // Slow: a bundled build runs where no node_modules is installed, as a deployed dist does
   {
     name: 'with bundleDependencies, the build runs with node_modules gone',
@@ -2311,6 +2440,25 @@ const scenarios: Scenario[] = [
     timeoutMs: 60_000,
     expect: { code: 1, says: ['Failed to start: hook broke'] },
   },
+  // A refused token in watch mode, for the app npm installed and on the bun runtime
+  ...(
+    [
+      ['in an app npm installed', { cwd: 'npm-app' }],
+      ['on bun', { runtime: 'bun' }],
+    ] as const
+  ).map(
+    ([where, how]): Scenario => ({
+      name: `start --dev ${where} keeps watching when Discord refuses the token`,
+      tier: 'slow',
+      platforms: ['linux', 'darwin'],
+      ...how,
+      files: { '.env': INVALID_TOKEN_ENV },
+      argv: ['start', '--dev'],
+      signal: { name: 'SIGINT', after: LOGIN_FAILED_IN_WATCH },
+      timeoutMs: 60_000,
+      expect: { code: 0, says: ['Starting watch mode', REFUSED_TOKEN, LOGIN_FAILED_IN_WATCH] },
+    }),
+  ),
   {
     name: 'start --dev keeps watching when the bot cannot log in, and starts it again, without a build, for an edit to .env',
     tier: 'slow',
