@@ -36,10 +36,13 @@ export function noteMockMade(): void {
  * A message the bot sends is its `client.user`'s, and one it sends in a DM is in that DM. Give the bot's member a role
  * to let it do more, such as kick a member its role ranks above. A value the test sets on a mock wins over the computed
  * one. An interaction's answer that discord.js would refuse, such as a second `reply()` after one a test set with
- * `mockResolvedValue`, is refused too, where without it the mock runs it and warns. An answer marks the interaction
- * `replied`, `deferred` or `responded` once it resolves, as discord.js does, so code that doesn't await one fails as it
- * would on a bot, within one run of the test's code. The next major version (5.0) computes these values, and refuses
- * those answers, without the call.
+ * `mockResolvedValue`, is refused too, where without it the mock runs it and warns. An interaction's `reply()`,
+ * `deferReply()`, `update()` and `deferUpdate()` resolve to a mock `InteractionResponse`, or with `withResponse` to an
+ * `InteractionCallbackResponse` holding what Discord answers, where without it they resolve to `undefined`, a deferred
+ * reply is flagged `Loading` until it is edited, and `respond()`'s `send()` resolves to the message a reply or an
+ * update sent. An answer marks the interaction `replied`, `deferred` or `responded` once it resolves, as discord.js
+ * does, so code that doesn't await one fails as it would on a bot, within one run of the test's code. The next major
+ * version (5.0) computes these values, and refuses those answers, without the call.
  *
  * `invoke` also refuses a call that gives a handler fewer arguments than it declares where it builds none, such as a
  * reaction handler given its reaction without its `ReactionEvent`; without strict mocks, it warns once and calls it.

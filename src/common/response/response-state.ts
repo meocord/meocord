@@ -54,7 +54,7 @@ import {
   V2_COMPONENT_LIMIT,
   withoutRenderedViews,
 } from '@src/common/response/components.js'
-import { stampCall } from '@src/common/response/call-order.js'
+import { stampCall, startOwnCall } from '@src/common/response/call-order.js'
 import { type ResponseContext, type ResponsePresenter, type ResponseView } from '@src/interface/index.js'
 import { isUserOutcome } from '@src/common/user-outcome.js'
 import { type ResolvedTheme, themeForInteraction } from '@src/core/theme-scope.js'
@@ -540,7 +540,7 @@ export class InteractionResponse implements ResponseState {
     stampCall(call)
     this.calls.push(call)
     try {
-      return await run()
+      return await startOwnCall(run)
     } catch (error) {
       call.error = error
       throw error

@@ -5,6 +5,7 @@ import { Logger } from '@src/common/logger.js'
 import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { createMockChannel, createMockGuild, createMockInteraction, createMockMember, createMockMessage, isRawMember } from '@src/testing/mock-interaction.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { UNDEFINED_ANSWER_WARNING } from '@src/testing/mock-interaction.js'
 
 const ELSEWHERE = '1400000000000009999'
 
@@ -13,7 +14,8 @@ beforeEach(() => {
   forgetStrictMocks()
   forgetDeprecationWarnings()
   warned = []
-  vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
+  // The warning that an answer resolves to undefined has its own spec, mock-interaction-response.spec
+  vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void (String(text) === UNDEFINED_ANSWER_WARNING || warned.push(String(text))))
 })
 afterEach(() => vi.restoreAllMocks())
 afterAll(() => forgetStrictMocks())

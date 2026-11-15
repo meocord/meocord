@@ -6,13 +6,15 @@ import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { respond } from '@src/common/response/response-state.js'
 import { createMockInteraction } from '@src/testing/mock-interaction.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { UNDEFINED_ANSWER_WARNING } from '@src/testing/mock-interaction.js'
 
 let warned: string[]
 beforeEach(() => {
   forgetStrictMocks()
   forgetDeprecationWarnings()
   warned = []
-  vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void warned.push(String(text)))
+  // The warning that an answer resolves to undefined has its own spec, mock-interaction-response.spec
+  vi.spyOn(Logger.prototype, 'warn').mockImplementation((text: unknown) => void (String(text) === UNDEFINED_ANSWER_WARNING || warned.push(String(text))))
 })
 afterEach(() => vi.restoreAllMocks())
 afterAll(() => forgetStrictMocks())
