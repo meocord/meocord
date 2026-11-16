@@ -25,6 +25,18 @@ function compared(before: string, after: string): { breaks: ApiBreak[]; review: 
   return apiBreaks(program.getTypeChecker(), program.getSourceFile('/before.d.ts')!, program.getSourceFile('/after.d.ts')!)
 }
 
+/** Whether `calls` compile against `declarations`, as tsc judges code written for the old version against the new one. */
+function compiles(declarations: string, calls: string): boolean {
+  const name = '/calls.ts'
+  const options: ts.CompilerOptions = { strict: true, noEmit: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext }
+  const host = ts.createCompilerHost(options)
+  const read = host.getSourceFile.bind(host)
+  host.getSourceFile = (file, language) => (file === name ? ts.createSourceFile(file, `${declarations}\n${calls}\n`, language) : read(file, language))
+  host.fileExists = file => file === name || ts.sys.fileExists(file)
+  const program = ts.createProgram([name], options, host)
+  return ts.getPreEmitDiagnostics(program, program.getSourceFile(name)).length === 0
+}
+
 describe('apiBreaks', () => {
   it.each([
     ['an export removed', 'export declare const a: number; export declare const b: number', 'export declare const a: number', ['b is no longer exported']],
@@ -125,6 +137,90 @@ describe('apiBreaks', () => {
 
     it('lists nothing for one unchanged but for its type parameters’ names', () => {
       expect(compare('export declare function f<T>(a: T): T[]', 'export declare function f<U>(a: U): U[]').review).toEqual([])
+    })
+  })
+
+  describe('type parameters', () => {
+    // Each case: the declarations before and after, code written against the old ones, and the breaks expected
+    const CASES: [string, string, string, string, string[]][] = [
+      ['a function gaining one without a default', 'export declare function f<T>(a: T): T', 'export declare function f<T, U>(a: T): T', "f<string>('x')", ['f requires 2 type arguments where it took 1']],
+      [
+        'a method gaining one without a default',
+        'export declare class K { m<T>(a: T): T }',
+        'export declare class K { m<T, U>(a: T): T }',
+        "declare const k: K; k.m<string>('x')",
+        ['K.m requires 2 type arguments where it took 1'],
+      ],
+      ['an interface gaining one without a default', 'export interface Box<T> { v: T }', 'export interface Box<T, U> { v: T }', 'declare const b: Box<string>', ['Box requires 2 type arguments where it took 1']],
+      ['a type alias gaining one without a default', 'export type A<T> = { v: T }', 'export type A<T, U> = { v: T }', 'declare const a: A<string>', ['A requires 2 type arguments where it took 1']],
+      [
+        'a class gaining one without a default, reported once',
+        'export declare class C<T> { constructor(a: T) }',
+        'export declare class C<T, U> { constructor(a: T) }',
+        "declare const c: C<string>; new C<string>('x')",
+        ['C requires 2 type arguments where it took 1'],
+      ],
+      ['a function made generic, its calls inferring the type argument', 'export declare function f(a: string): string', 'export declare function f<T extends string>(a: T): string', "f('x')", []],
+      [
+        'a method made generic, its calls inferring the type argument',
+        'export declare class K { m(a: string): string }',
+        'export declare class K { m<T extends string>(a: T): string }',
+        "declare const k: K; k.m('x')",
+        [],
+      ],
+      [
+        'a class made generic, which a type reference without arguments no longer names',
+        'export declare class C { constructor(a: string) }',
+        'export declare class C<T> { constructor(a: T) }',
+        "declare const c: C; new C('x')",
+        ['C requires 1 type arguments where it took 0'],
+      ],
+      [
+        "a class's constraint narrowed, reported once",
+        'export declare class C<T extends string | number> { constructor(a: T) }',
+        'export declare class C<T extends string> { constructor(a: T) }',
+        'new C<number>(1)',
+        ['C narrowed type parameter T: extends string | number → extends string'],
+      ],
+      [
+        'a class losing a default, reported once',
+        'export declare class C<T = string> { constructor(a: T) }',
+        'export declare class C<T> { constructor(a: T) }',
+        'declare const c: C',
+        ['C requires type parameter T, which had a default'],
+      ],
+      [
+        'a class losing one, reported once',
+        'export declare class C<T, U> { constructor(a: T) }',
+        'export declare class C<T> { constructor(a: T) }',
+        'declare const c: C<string, number>',
+        ['C has 1 type parameters where it had 2'],
+      ],
+      ['one losing its default as another is added with one', 'export type A<T = string> = { v: T }', 'export type A<T, U = string> = { v: T }', 'declare const a: A', ['A requires type parameter T, which had a default']],
+      [
+        'two reordered, the constrained one first',
+        'export type A<T, U extends string> = { u: U; t: T }',
+        'export type A<U extends string, T> = { u: U; t: T }',
+        "declare const a: A<number, 'x'>",
+        ['A narrowed type parameter T: extends unknown → extends string'],
+      ],
+      ['a function gaining one with a default', 'export declare function f<T>(a: T): T', 'export declare function f<T, U = string>(a: T): T', "f<string>('x')", []],
+      ['a method gaining one with a default', 'export declare class K { m<T>(a: T): T }', 'export declare class K { m<T, U = string>(a: T): T }', "declare const k: K; k.m<string>('x')", []],
+      ['an interface gaining one with a default', 'export interface Box<T> { v: T }', 'export interface Box<T, U = string> { v: T }', 'declare const b: Box<string>', []],
+      ['a type alias gaining one with a default', 'export type A<T> = { v: T }', 'export type A<T, U = string> = { v: T }', 'declare const a: A<string>', []],
+      [
+        'a class gaining one with a default',
+        'export declare class C<T> { constructor(a: T) }',
+        'export declare class C<T, U = string> { constructor(a: T) }',
+        "declare const c: C<string>; new C<string>('x')",
+        [],
+      ],
+    ]
+
+    it.each(CASES)('%s: reports exactly what stops the old code compiling', (_, before, after, uses, expected) => {
+      expect(compiles(before, uses)).toBe(true)
+      expect(compiles(after, uses)).toBe(expected.length === 0)
+      expect(compare(before, after).breaks).toEqual(expected)
     })
   })
 })
