@@ -48,17 +48,40 @@ type IsPlural<T> = T extends object
  * A key with a `.` in its own name is left out, as a lookup reads it as a path and never finds it; `createTranslator`
  * warns about one. Nest it as a group.
  *
+ * For a translator typed without its catalog, as a bare `Translator` is, it is a sentence saying what to write, so a
+ * key given to one fails to compile with that sentence.
+ *
  * @group Types
  */
-export type MessageKey<C> = {
+export type MessageKey<C> = IsUntypedCatalog<C> extends true ? UntypedCatalogKey : CatalogKeys<C>
+
+/** The dotted path to each message or plural of a catalog. */
+type CatalogKeys<C> = {
   [K in keyof C & string]: K extends `${string}.${string}`
     ? never
     : C[K] extends string
     ? K
     : IsPlural<C[K]> extends true
       ? K
-      : `${K}.${MessageKey<C[K]>}`
+      : `${K}.${CatalogKeys<C[K]>}`
 }[keyof C & string]
+
+/** What a key is checked against for a translator typed without its catalog, so the compiler's error says what to write. */
+type UntypedCatalogKey =
+  'This Translator has no catalog type: type it as Translator<typeof enUS>, with your default catalog, to translate with it'
+
+/**
+ * Whether `C` has no message keys and is an index signature that takes any catalog, as `CatalogShape`, a bare
+ * `Translator`'s, does. A catalog typed `any` or by hand, such as `Record<string, string>`, has keys, an empty one isn't
+ * an index signature, and a narrower one, such as an interface extending `CatalogShape`, was typed by hand.
+ */
+type IsUntypedCatalog<C> = [CatalogKeys<C>] extends [never]
+  ? string extends keyof C
+    ? [CatalogShape] extends [C]
+      ? true
+      : false
+    : false
+  : false
 
 /**
  * The keys whose message is a single string rather than plural forms, with or without `{params}`.
@@ -82,9 +105,10 @@ export type StringMessageKey<C> = {
  *
  * @group Types
  */
-export type LocalizationKey<C> = {
-  [K in StringMessageKey<C>]: [Placeholders<MessageAt<C, K>>] extends [never] ? K : never
-}[StringMessageKey<C>]
+export type LocalizationKey<C> =
+  IsUntypedCatalog<C> extends true
+    ? UntypedCatalogKey
+    : { [K in StringMessageKey<C>]: [Placeholders<MessageAt<C, K>>] extends [never] ? K : never }[StringMessageKey<C>]
 
 /**
  * The keys {@link Translator.localizations} takes with params: a single string with `{params}`, filled in every
@@ -103,9 +127,10 @@ export type LocalizationKey<C> = {
  * @see {@link Translator.localizations}
  * @see {@link LocalizationKey}
  */
-export type ParamLocalizationKey<C> = {
-  [K in StringMessageKey<C>]: [ParamNames<MessageAt<C, K>>] extends [never] ? never : K
-}[StringMessageKey<C>]
+export type ParamLocalizationKey<C> =
+  IsUntypedCatalog<C> extends true
+    ? UntypedCatalogKey
+    : { [K in StringMessageKey<C>]: [ParamNames<MessageAt<C, K>>] extends [never] ? never : K }[StringMessageKey<C>]
 
 /**
  * A value {@link Translator.localizations} fills into a `{param}`: a word or a number, the same in every locale, or a
@@ -410,7 +435,8 @@ export type TranslatorOptions<
  * names it once.
  *
  * @typeParam C - The default catalog. Every locale's keys are checked against it, and so are the `{params}` of
- *   each message whose text the compiler can read; see {@link createTranslator}.
+ *   each message whose text the compiler can read; see {@link createTranslator}. A `Translator` without it only passes
+ *   a translator on, as to `translateError`; inject `Translator<typeof enUS>` to translate with it.
  *
  * @example
  * ```ts
@@ -491,7 +517,7 @@ export abstract class Translator<C = CatalogShape> {
    * @returns The message keyed by locale.
    * @throws When the default catalog's message takes params, as one from a JSON file can.
    */
-  abstract localizations(key: LocalizationKey<C>): Partial<Record<Locale, string>>
+  abstract localizations<K extends LocalizationKey<C>>(key: K): Partial<Record<Locale, string>>
 
   /**
    * Translates for the user of an interaction, in the language their Discord client uses.
@@ -717,7 +743,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
   }
 
   localizations<K extends ParamLocalizationKey<C>>(key: K, params: LocalizationParams<MessageAt<C, K>>): Partial<Record<Locale, string>>
-  localizations(key: LocalizationKey<C>): Partial<Record<Locale, string>>
+  localizations<K extends LocalizationKey<C>>(key: K): Partial<Record<Locale, string>>
   localizations(key: string, params?: Readonly<Record<string, LocalizationParam>>): Partial<Record<Locale, string>> {
     const original = lookup(this.catalogs[this.defaultLocale], key)
     if (original === undefined) this.warnUnknown(key)

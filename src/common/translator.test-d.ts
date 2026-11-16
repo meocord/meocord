@@ -12,9 +12,9 @@ import {
   type ParamLocalizationKey,
   type StringMessageKey,
   translateError,
-  type Translator,
+  Translator,
 } from '@src/common/index.js'
-import { type CatalogIssues, type CatalogShape, type LocaleIssues, type Placeholders } from '@src/common/translator.js'
+import { type CatalogIssues, type CatalogShape, type LocaleIssues, type MessageAt, type Placeholders, type Translate } from '@src/common/translator.js'
 import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
 
 const enUS = defineCatalog({
@@ -262,6 +262,99 @@ describe('localizations', () => {
     type T = typeof t
     const describeIn = (translator: T) => (key: Parameters<T['localizations']>[0]) => translator.localizations(key)
     expectTypeOf(describeIn(t)).parameter(0).toEqualTypeOf<'ban.description' | 'ping'>()
+  })
+
+  it('reads the one-arg key through Parameters<> of the method itself, as generic as the params form', () => {
+    expectTypeOf<Parameters<typeof t.localizations>[0]>().toEqualTypeOf<'ban.description' | 'ping'>()
+  })
+
+  it('lets a class that extends Translator declare the one-arg form without a type parameter, as a test double may', () => {
+    type Catalog = typeof enUS
+    class Double extends Translator<Catalog> {
+      readonly defaultLocale = Locale.EnglishUS
+      readonly locales = [Locale.EnglishUS]
+      default(): string {
+        return ''
+      }
+      localizations<K extends ParamLocalizationKey<Catalog>>(key: K, params: LocalizationParams<MessageAt<Catalog, K>>): Partial<Record<Locale, string>>
+      localizations(key: LocalizationKey<Catalog>): Partial<Record<Locale, string>>
+      localizations(): Partial<Record<Locale, string>> {
+        return {}
+      }
+      for() {
+        return t.for(interaction)
+      }
+      forGuild() {
+        return t.forGuild(guild)
+      }
+      locale() {
+        return t.locale(Locale.EnglishUS)
+      }
+    }
+    const double: Translator<Catalog> = new Double()
+    double.localizations('ping')
+  })
+})
+
+describe('a Translator without its catalog type', () => {
+  type Untyped = 'This Translator has no catalog type: type it as Translator<typeof enUS>, with your default catalog, to translate with it'
+  // The parameters of an overloaded method's first and last signature
+  type Overloads<F> = F extends { (...args: infer First): unknown; (...args: infer Last): unknown } ? [First, Last] : never
+  const bare = null as unknown as Translator
+
+  it('refuses every key with a sentence saying what to write, in every method that takes one', () => {
+    expectTypeOf<Parameters<Translator['default']>[0]>().toEqualTypeOf<Untyped>()
+    expectTypeOf<Parameters<Translate<CatalogShape>>[0]>().toEqualTypeOf<Untyped>()
+    expectTypeOf<Overloads<Translator['localizations']>[0][0]>().toEqualTypeOf<Untyped>()
+    expectTypeOf<Overloads<Translator['localizations']>[1][0]>().toEqualTypeOf<Untyped>()
+    expectTypeOf<MessageKey<CatalogShape>>().toEqualTypeOf<Untyped>()
+    expectTypeOf<LocalizationKey<CatalogShape>>().toEqualTypeOf<Untyped>()
+    expectTypeOf<ParamLocalizationKey<CatalogShape>>().toEqualTypeOf<Untyped>()
+    // @ts-expect-error a bare Translator translates no key
+    bare.default('ping')
+    // @ts-expect-error with or without params
+    bare.default('ban.done', { user: 'Ada' })
+    // @ts-expect-error through a locale
+    bare.locale(Locale.Japanese)('ping')
+    // @ts-expect-error through an interaction
+    bare.for(interaction)('ping')
+    // @ts-expect-error through a server
+    bare.forGuild(guild)('ping')
+    // @ts-expect-error a name or description
+    bare.localizations('ping')
+    // @ts-expect-error one with params
+    bare.localizations('ban.done', { user: 'Ada' })
+  })
+
+  it('passes a translator on, and assigns to and from a typed one as it did', () => {
+    translateError(new Error('down'), bare, 'en-US')
+    const asBare: Translator = t
+    const back: Translator<typeof enUS> = bare
+    void [asBare, back]
+  })
+
+  it('leaves Translator<any>, a catalog typed by hand as an index signature and an empty one as they were', () => {
+    expectTypeOf<MessageKey<Record<never, never>>>().toEqualTypeOf<never>()
+    // Typed by hand, narrower than any catalog: no keys found, as before, and no sentence telling them to type it
+    interface Extended extends CatalogShape {
+      ping: 'Pong'
+      greet: 'Hi {name}'
+    }
+    expectTypeOf<MessageKey<Record<string, string | { one: string; other: string }>>>().toEqualTypeOf<never>()
+    expectTypeOf<MessageKey<Extended>>().toEqualTypeOf<never>()
+    expectTypeOf<LocalizationKey<Extended>>().toEqualTypeOf<never>()
+    expectTypeOf<ParamLocalizationKey<Extended>>().toEqualTypeOf<never>()
+    expectTypeOf<MessageKey<Record<string, string>>>().toEqualTypeOf<string>()
+    expectTypeOf<MessageKey<Record<string, Record<string, string>>>>().toEqualTypeOf<`${string}.${string}`>()
+    const loose = null as unknown as Translator<any>
+    loose.default('anything')
+    loose.localizations('anything')
+    loose.localizations('anything', { mode: 'Chaos' })
+    const records = null as unknown as Translator<Record<string, string>>
+    records.default('anything')
+    records.localizations('anything')
+    const groups = null as unknown as Translator<Record<string, Record<string, string>>>
+    groups.default('group.ping')
   })
 })
 
