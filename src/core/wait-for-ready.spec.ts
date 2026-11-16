@@ -5,7 +5,7 @@ import { bindTheme, Logger, respond, UserError } from '@src/common/index.js'
 import { Autocomplete, Command, Controller, Defer, Guard, MeoCord, MessageHandler, On, Pipe, Service, UseGuard, UsePipe } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
 import { type GuardInterface, type OnReady, type PipeInterface } from '@src/interface/index.js'
-import { READY_WAIT_AUTOCOMPLETE_MS, READY_WAIT_INTERACTION_MS, ReadyGate } from '@src/core/ready-gate.js'
+import { READY_WAIT_AUTOCOMPLETE_MS, READY_WAIT_INTERACTION_MS } from '@src/core/ready-gate.js'
 import { SLOW_READY_HOOK_MS } from '@src/core/lifecycle-hooks.js'
 import { createChatInputOptions, createMockInteraction, createMockMessage, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
@@ -541,6 +541,12 @@ describe('a call with waitForReady and a themeFor class', () => {
       events.push('later runs')
     }
 
+    @Defer({ mode: 'auto', after: 2000 })
+    @Command('even', CommandType.SLASH)
+    even() {
+      events.push('even runs')
+    }
+
     @Defer({ mode: 'auto', after: 2500 })
     @Command('latest', CommandType.SLASH)
     latest() {
@@ -788,7 +794,7 @@ describe('a call with waitForReady and a themeFor class', () => {
     expect(warned).toEqual([])
   })
 
-  it("looks an autocomplete's theme up at its 1 s bound, with a warning, when the resolver's hooks run longer", async () => {
+  it("looks an autocomplete's theme up at its 1 s bound, with its call, whose warning names the hook, when the resolver's hooks run longer", async () => {
     vi.useFakeTimers()
     const module = compile({ waitForReady: true, services: [], controllers: [Notes], extra: { themeFor: PrefsThemes } })
     const ready = module.init({ ready: true })
@@ -801,9 +807,9 @@ describe('a call with waitForReady and a themeFor class', () => {
     await handled
 
     expect(events).toEqual(['Prefs begins', 'themes asked', 'suggest runs'])
-    expect(warned.filter(text => text.includes('looked up a theme'))).toEqual([
-      'PrefsThemes looked up a theme before onReady in Prefs had settled, 1.0 s after the interaction was created, as long as an autocomplete ' +
-        'waits. Make onReady in Prefs faster.',
+    expect(warned.filter(text => text.includes('before onReady'))).toEqual([
+      "Notes.suggest ran before onReady in Prefs had settled, 1.0 s after the interaction was created, as long as an autocomplete waits. An autocomplete can't " +
+        'be deferred: have Notes.suggest suggest choices without what that hook prepares, or make it faster.',
     ])
     hook('Prefs').settle()
     await ready
@@ -887,6 +893,11 @@ describe('a call with waitForReady and a themeFor class', () => {
     const lookupWarning =
       'PrefsThemes looked up a theme before onReady in Prefs had settled, 2.0 s after the interaction was created, as long as an interaction ' +
       'Discord has been told nothing of waits. Make onReady in Prefs faster.'
+    // A call waiting beside an answer from outside names the hook; the answer's lookup goes ahead with it, silent
+    const failedDeferWarning =
+      'Notes.later ran before onReady in Prefs had settled, 2.0 s after the interaction was created: Discord had been told nothing of it, as its ' +
+      '@Defer acknowledgement failed or was cancelled with no answer sent, so it waited as long as one without @Defer. Make onReady in Prefs faster.'
+    const readyWarnings = () => warned.filter(text => text.includes('before onReady'))
     /** An interaction on a client a call has run on, which an answer outside any call finds its app by. */
     async function registered(commandName: string, props: object = {}) {
       const module = compile(notes)
@@ -1200,27 +1211,99 @@ describe('a call with waitForReady and a themeFor class', () => {
       await Promise.all([ready, handled])
     })
 
-    it('hands the call its gate decision to its own theme lookup, which goes ahead the moment the call does', async () => {
+    // The call and every lookup for its interaction waiting at once share one decision on the bound, whichever came
+    // first: all go ahead together, the call first, its warning naming the hook
+    const quickWarning =
+      'Notes.quick ran before onReady in Prefs had settled, 2.0 s after the interaction was created, as long as an interaction without @Defer ' +
+      'waits. Add @Defer to Notes.quick to have it wait for the hook, or make onReady in Prefs faster.'
+    const outsideAnswers = {
+      'a send': (interaction: object) => respond(interaction as never).send(picked),
+      'a send and a followUp': (interaction: object) => Promise.all([respond(interaction as never).send(picked), respond(interaction as never).followUp(picked)]),
+      'a function bindTheme wraps': (interaction: object) => bindTheme((answered: object) => respond(answered as never).send(picked))(interaction),
+    }
+    it.each([
+      ['a send', 'the call', false],
+      ['a send', 'the call', true],
+      ['a send', 'the answer', false],
+      ['a send', 'the answer', true],
+      ['a send and a followUp', 'the call', false],
+      ['a send and a followUp', 'the answer', false],
+      ['a function bindTheme wraps', 'the call', false],
+      ['a function bindTheme wraps', 'the answer', false],
+    ] as const)('/quick answered from outside by %s, %s waiting first, goes ahead with the answer at its 2 s bound (strict mocks: %s)', async (how, first, strict) => {
+      if (strict) useStrictMocks()
       vi.useFakeTimers()
-      const lookups = vi.spyOn(ReadyGate.prototype, 'lookupReady')
       const { module, interaction } = await registered('quick')
       const ready = module.init({ ready: true })
       await vi.advanceTimersByTimeAsync(0)
 
-      const handled = module.dispatch(interaction)
+      let answered: Promise<unknown> | undefined
+      if (first === 'the answer') answered = outsideAnswers[how](interaction)
       await vi.advanceTimersByTimeAsync(0)
-      const ahead = lookups.mock.calls.at(-1)![0]()!.ahead!
-      let wentAhead = false
-      void ahead.then(() => (wentAhead = true))
-      await vi.advanceTimersByTimeAsync(READY_WAIT_INTERACTION_MS - 1)
-      expect(wentAhead).toBe(false)
+      const handled = module.dispatch(interaction)
+      await vi.advanceTimersByTimeAsync(1_400)
+      answered ??= outsideAnswers[how](interaction)
+      await vi.advanceTimersByTimeAsync(READY_WAIT_INTERACTION_MS - 1_400 - 1)
+      expect([events, calls(interaction)]).toEqual([['Prefs begins'], []])
       await vi.advanceTimersByTimeAsync(1)
-      expect([wentAhead, events]).toEqual([true, expect.arrayContaining(['quick runs'])])
+      expect(events).toContain('quick runs')
+      expect(calls(interaction)).toEqual(['reply'])
+      expect(readyWarnings()).toEqual([quickWarning])
+
+      // A followUp looks its theme up once the send is out, Discord told, so it waits for the hooks
+      hook('Prefs').settle()
+      await Promise.all([ready, handled, answered])
+      expect(calls(interaction)).toEqual(how === 'a send and a followUp' ? ['reply', 'followUp'] : ['reply'])
+    })
+
+    it('/quick with no creation time and an answer from outside at 1400 ms both go ahead 2 s after the first wait for it', async () => {
+      vi.useFakeTimers()
+      const { module, interaction } = await registered('quick')
+      Object.defineProperty(interaction, 'createdTimestamp', { value: Number.NaN, configurable: true })
+      const ready = module.init({ ready: true })
+      await vi.advanceTimersByTimeAsync(0)
+
+      const handled = module.dispatch(interaction)
+      await vi.advanceTimersByTimeAsync(1_400)
+      const answered = respond(interaction as never).send(picked)
+      await vi.advanceTimersByTimeAsync(READY_WAIT_INTERACTION_MS - 1_400 - 1)
+      expect(calls(interaction)).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      await answered
+      expect([events, calls(interaction)]).toEqual([['Prefs begins', 'themes asked', 'quick runs'], ['reply']])
+      expect(readyWarnings()).toEqual([quickWarning.replace('2.0 s after the interaction was created', 'after waiting 2.0 s')])
 
       hook('Prefs').settle()
       await Promise.all([ready, handled])
-      lookups.mockRestore()
     })
+
+    // An acknowledgement due at the bound's instant is on its way when the bound comes due, whichever timer fires first
+    it.each(['the call', 'the answer'] as const)(
+      "/even, under @Defer({ mode: 'auto', after: 2000 }) and answered from outside, %s waiting first, is acknowledged at 2 s and both wait for the hooks",
+      async first => {
+        vi.useFakeTimers()
+        const { module, interaction } = await registered('even')
+        const ready = module.init({ ready: true })
+        await vi.advanceTimersByTimeAsync(0)
+
+        const answer = () => respond(interaction as never).send(picked)
+        let answered = first === 'the answer' ? answer() : undefined
+        await vi.advanceTimersByTimeAsync(0)
+        const handled = module.dispatch(interaction)
+        await vi.advanceTimersByTimeAsync(1_400)
+        answered ??= answer()
+        await vi.advanceTimersByTimeAsync(READY_WAIT_INTERACTION_MS - 1_400)
+        expect([events, calls(interaction)]).toEqual([['Prefs begins'], ['deferReply']])
+        await vi.advanceTimersByTimeAsync(2_000)
+        expect([events, calls(interaction), warned]).toEqual([['Prefs begins'], ['deferReply'], []])
+
+        hook('Prefs').settle()
+        await Promise.all([ready, handled, answered])
+        expect(calls(interaction)).toEqual(['deferReply', 'editReply'])
+        expect(events).toEqual(['Prefs begins', 'Prefs ready', 'themes asked', 'even runs'])
+        expect(warned).toEqual([])
+      },
+    )
 
     it("an answer from outside after the call went ahead at its bound follows what Discord was told, not the call's decision", async () => {
       vi.useFakeTimers()
@@ -1317,14 +1400,14 @@ describe('a call with waitForReady and a themeFor class', () => {
         await vi.advanceTimersByTimeAsync(READY_WAIT_INTERACTION_MS - 1_400)
         await answered
         expect(privacy(interaction)).toEqual(['deferReply private', 'reply private'])
-        expect(lookupWarnings()).toEqual([lookupWarning])
+        expect(readyWarnings()).toEqual([failedDeferWarning])
 
         hook('Prefs').settle()
         await Promise.all([ready, handled])
       },
     )
 
-    it("under @Defer({ mode: 'auto' }) whose acknowledgement fails, is sent at the 2 s bound from its creation, with the lookup warning", async () => {
+    it("under @Defer({ mode: 'auto' }) whose acknowledgement fails, is sent at the 2 s bound from its creation, with its call, whose warning names the hook", async () => {
       vi.useFakeTimers()
       const module = compile(notes)
       const ready = module.init({ ready: true })
@@ -1340,7 +1423,7 @@ describe('a call with waitForReady and a themeFor class', () => {
       await vi.advanceTimersByTimeAsync(1)
       await answered
       expect(calls(interaction)).toEqual(['deferReply', 'reply'])
-      expect(lookupWarnings()).toEqual([lookupWarning])
+      expect(readyWarnings()).toEqual([failedDeferWarning])
 
       hook('Prefs').settle()
       await Promise.all([ready, handled])
@@ -1454,7 +1537,7 @@ describe('a call with waitForReady and a themeFor class', () => {
     await vi.advanceTimersByTimeAsync(1)
     await handled
     expect(events).toEqual(['Prefs begins', 'themes asked', `${command} runs`])
-    expect(warned.filter(text => text.includes('Prefs'))).toEqual([expect.stringContaining('PrefsThemes looked up a theme before onReady in Prefs')])
+    expect(warned.filter(text => text.includes('Prefs'))).toEqual([expect.stringContaining(`Notes.${command} ran before onReady in Prefs`)])
     hook('Prefs').settle()
     await ready
   })

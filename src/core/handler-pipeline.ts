@@ -601,14 +601,12 @@ export async function runHandler(
   options: RunOptions = {},
 ): Promise<HandlerOutcome> {
   const prototype = Object.getPrototypeOf(instance) as object
-  // Settled when the gate lets the call go ahead at its bound, which its own theme lookup then follows: one decision
-  const ahead = Promise.withResolvers<void>()
   // The handler's theme, with the call's server's and user's over it, for everything the call runs; with waitForReady,
   // looked up once the theme resolver's hooks have settled, within the call's own bound
-  const theme = beginCallTheme(container, args, prototype, methodName, () => callBound(args, options, ahead.promise))
+  const theme = beginCallTheme(container, args, prototype, methodName, () => callBound(args, options))
   return theme
-    ? runInThemeScope(theme.scope, () => runPipeline(container, instance, methodName, args, options, ahead.resolve, theme.ready))
-    : runPipeline(container, instance, methodName, args, options, ahead.resolve)
+    ? runInThemeScope(theme.scope, () => runPipeline(container, instance, methodName, args, options, theme.ready))
+    : runPipeline(container, instance, methodName, args, options)
 }
 
 /** {@link runHandler}'s pipeline, in the call's theme. */
@@ -618,7 +616,6 @@ async function runPipeline(
   methodName: string,
   args: unknown[],
   options: RunOptions,
-  wentAhead: () => void,
   themeReady?: Promise<void>,
 ): Promise<HandlerOutcome> {
   const controller = instance.constructor as new (...args: any[]) => unknown
@@ -666,7 +663,7 @@ async function runPipeline(
         if (refused !== undefined) throw new Error(refused)
         // Read only for a call that waits: an interaction's bound follows what Discord has been told of it
         call.bound = readyBoundFor(type, first, response !== undefined)
-        if (await gate.wait(call)) wentAhead()
+        await gate.wait(call)
       }
     }
     // After @Defer's acknowledgement, which cannot wait, and before anything reads or renders the theme
@@ -759,12 +756,10 @@ function callClasses(
  * The bound of a call with `args`, which its theme lookup waits within as the call does, counted from
  * the interaction's creation. An interaction's follows what Discord was told: while an acknowledgement or an answer is
  * scheduled or on its way, the lookup waits for it, neither going ahead nor warning; once Discord has one, the lookup
- * has no bound; told nothing, the bound holds. Once the call goes ahead at its own bound, settling `ahead`, so does
- * the lookup, whatever Discord has been told since.
+ * has no bound; told nothing, the bound holds. Waiting at once, the call and the lookup go ahead on one decision.
  */
-function callBound(args: readonly unknown[], options: RunOptions, ahead: Promise<void>): ReadyBound {
-  const bound = readyBoundFor(options.type ?? inferContextType(args[0]), args[0])
-  return bound && { ...bound, ahead }
+function callBound(args: readonly unknown[], options: RunOptions): ReadyBound {
+  return readyBoundFor(options.type ?? inferContextType(args[0]), args[0])
 }
 
 /**
