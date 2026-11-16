@@ -1639,6 +1639,10 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * bot. Without strict mocks they collect nothing, with a warning once: the create methods return `undefined` and the
  * await methods resolve at once to an empty collection.
  *
+ * A test can make thousands of mock interactions in one loop without yielding to the event loop; with
+ * `useMockFn(vi.fn)`, Vitest holds each of its mocks until the test yields, so such a test yields between batches, as
+ * `useMockFn` describes.
+ *
  * Given `guild: null`, `member: null` or a DM channel, it is typed as an interaction that may come from anywhere, so
  * its `guild` and `member` read as possibly `null`; otherwise as one from a server the bot is in.
  *
