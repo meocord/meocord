@@ -140,6 +140,251 @@ describe('apiBreaks', () => {
     })
   })
 
+  describe('overloads: a changed signature is compared with the first new one that answers its calls', () => {
+    // Each case's truth is tsc's: the old version's calls, compiled against the new declarations
+    const CASES: [string, string, string, string, string[]?][] = [
+      ['A1 gaining a required argument, a zero-argument overload ahead', 'export declare function f(a: string): string', 'export declare function f(): void; export declare function f(a: string, b: string): string', "const r: string = f('x')"],
+      ['A2 an overload lost, another inserted ahead', 'export declare function f(a: string): string; export declare function f(a: number): number', 'export declare function f(a: boolean): boolean; export declare function f(a: string): string', 'const r: number = f(1)'],
+      ['A3 a parameter narrowed, a zero-argument overload ahead', 'export declare function f(a: string | number): void', 'export declare function f(): void; export declare function f(a: string): void', 'f(1)'],
+      ['A4 a return widened, an overload for another type ahead', 'export declare function f(a: string): string', 'export declare function f(a: number): number; export declare function f(a: string): string | undefined', "const r: string = f('x')"],
+      ['A5 a method gaining a required argument, a params form ahead', 'export declare class T { l(key: string): string }', 'export declare class T { l<K extends string>(key: K, p: number): string; l(key: string, extra: string): string }', "declare const t: T; const r: string = t.l('k')"],
+      ['A6 a generic gaining a required argument, a zero-argument overload ahead', 'export declare function f<T>(a: T): T', 'export declare function f(): void; export declare function f<T>(a: T, b: T): T', 'const r: number = f(1)'],
+      ['A7 both overloads changed, the second narrowed', 'export declare function f(a: string): string; export declare function f(a: number | boolean): number', 'export declare function f(a: string, b?: 1): string; export declare function f(a: number, b?: 1): number', 'const r: number = f(true)'],
+      ['A8 a parameter narrowed, a generic overload ahead that takes fewer arguments', 'export declare function f(a: string, b: number): string', 'export declare function f<T extends string>(a: T): string; export declare function f(a: string, b: boolean): string', "const r: string = f('x', 1)"],
+      [
+        'A9 a wider overload inserted ahead of a kept one, with another return',
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function f(a: string): Narrow",
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function f(a: string | number): Wide; export declare function f(a: string): Narrow",
+        "const r: Narrow = f('x')",
+      ],
+      [
+        'A10 the same as a method',
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare class T { m(a: string): Narrow }",
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare class T { m(a: string | number): Wide; m(a: string): Narrow }",
+        "declare const t: T; const r: Narrow = t.m('x')",
+      ],
+      [
+        'A11 a generic overload removed, which calls passing a type argument reach',
+        'export declare function A<_R = unknown>(path: string, name?: string): (target: object) => void',
+        'export declare function A(path: string, name?: string): (target: object) => void',
+        "A<void>('x')",
+      ],
+      ['B1 a method made generic behind a params form', 'export declare class T { l(key: string): string }', 'export declare class T { l<K extends string>(key: K, p: number): string; l<K extends string>(key: K): string }', "declare const t: T; const r: string = t.l('k')", ['T.l: (key: string) => string → <T0 extends string>(key: T0) => string']],
+      ['B2 made generic behind a zero-argument overload', 'export declare function f(a: string): string', 'export declare function f(): void; export declare function f<T extends string>(a: T): string', "const r: string = f('x')"],
+      ['B3 both overloads made generic', 'export declare function f(a: string): string; export declare function f(a: number): number', 'export declare function f<T extends string>(a: T): string; export declare function f<T extends number>(a: T): number', "const r: string = f('x'); const n: number = f(1)", ['f (overload 1): (a: string) => string → <T0 extends string>(a: T0) => string', 'f (overload 2): (a: number) => number → <T0 extends number>(a: T0) => number']],
+      ['B4 an optional argument added, an overload for another type ahead', 'export declare function f(a: string): string', 'export declare function f(a: number): number; export declare function f(a: string, b?: string): string', "const r: string = f('x')"],
+      ['B5 a rest parameter ahead that takes the old arguments', 'export declare function f(a: string): string', 'export declare function f(...a: string[]): string; export declare function f(a: string, b: number): number', "const r: string = f('x')"],
+      [
+        'B6 a changed overload whose calls a kept one ahead still takes',
+        "export declare function f(a: string): void; export declare function f(a: 'x'): void",
+        "export declare function f(a: string): void; export declare function f(a: 'x', b: 1): void",
+        "f('x')",
+      ],
+      [
+        'B7 two changed overloads whose calls the first new one takes',
+        "export declare function f(a: 'x'): string; export declare function f(a: string): string",
+        "export declare function f(a: string, b?: 1): string; export declare function f(a: 'x', b?: 1): string",
+        "const r: string = f('x'); const s: string = f('anything')",
+      ],
+      [
+        'B9 a wider overload inserted ahead of one with a literal parameter, which TypeScript tries first',
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function f(a: 'x'): Narrow",
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function f(a: string | number): Wide; export declare function f(a: 'x'): Narrow",
+        "const r: Narrow = f('x')",
+      ],
+      [
+        'B8 an overload the one ahead already answered, unchanged',
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function f(a: string | number): Wide; export declare function f(a: string): Narrow",
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function f(a: string | number): Wide; export declare function f(a: string): Narrow",
+        "const r: Wide = f('x')",
+      ],
+      [
+        'A12 a parameter narrowed where another overload takes a subset of it',
+        'export declare function f(a: string | number): void',
+        'export declare function f(a: string): void; export declare function f(a: number, b: 1): void',
+        'declare const a: string | number; f(a)',
+      ],
+      [
+        'A13 a parameter split across two overloads, each taking one part',
+        'export declare function g(a: string | number): void',
+        'export declare function g(a: string): void; export declare function g(a: number): void',
+        'declare const a: string | number; g(a)',
+      ],
+      [
+        'A14 a type parameter added without a default, another overload inserted ahead',
+        'export declare function f<T>(a: T): T',
+        'export declare function f(a: string): string; export declare function f<T, U>(a: T): T',
+        "f<string>('x')",
+      ],
+      ['A15 null dropped from a parameter', 'export declare function f(a: string | null): void', 'export declare function f(a: string): void', 'f(null)'],
+      ['A16 undefined dropped from a required parameter', 'export declare function f(a: string | undefined): void', 'export declare function f(a: string): void', 'f(undefined)'],
+      ['A17 null dropped from an optional parameter', 'export declare function f(a?: string | null): void', 'export declare function f(a?: string): void', 'f(null)'],
+      ['A18 null dropped, a method', 'export declare class K { m(a: string | null): void }', 'export declare class K { m(a: string): void }', 'declare const k: K; k.m(null)'],
+      ['A19 null dropped, an overload for another type ahead', 'export declare function f(a: string | null): void', 'export declare function f(a: number): void; export declare function f(a: string): void', 'f(null)'],
+      ['A20 undefined dropped, an overload for another type ahead', 'export declare function f(a: string | undefined): void', 'export declare function f(a: number): void; export declare function f(a: string): void', 'f(undefined)'],
+      ['A21 null dropped as the parameter is made generic', 'export declare function f(a: string | null): void', 'export declare function f<T extends string>(a: T): void', 'f(null)'],
+      ['A22 a parameter narrowed to a constraint as it is made generic', 'export declare function f(a: string | number): void', 'export declare function f<T extends string>(a: T): void', 'f(1)'],
+      [
+        'A23 a wider overload inserted ahead of one with a union of literals, which TypeScript does not try first',
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function h(a: 'x' | 'y'): Narrow",
+        "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string } export declare function h(a: string): Wide; export declare function h(a: 'x' | 'y'): Narrow",
+        "const r: Narrow = h('x')",
+      ],
+      [
+        'A24 an argument no longer fitting a type parameter now typing its parameter, the old type spelling a type parameter as a literal',
+        "export declare function f<T>(x: T, mode: 'T' | 'U'): void",
+        "export declare function f<T, M extends 'U' = 'U'>(x: T, mode: M): void",
+        "f(1, 'T')",
+      ],
+      [
+        'A25 the same, the old type spelling a type parameter as a member',
+        'export declare function f<T>(x: T, o: { T: string }): void',
+        'export declare function f<T, O extends { T: number } = { T: number }>(x: T, o: O): void',
+        "f(1, { T: 'a' })",
+      ],
+      [
+        'A26 the same, the old type another type of the name of a type parameter',
+        'export declare namespace Outer { interface U { a: string } } export declare function f<U>(x: U, y: Outer.U): void',
+        'export declare namespace Outer { interface U { a: string } } export declare function f<U, V extends { b: number } = { b: number }>(x: U, y: V): void',
+        "f(1, { a: 'x' })",
+      ],
+      [
+        'A27 the same, the old type naming no type parameter',
+        'export declare function f<T>(x: T, mode: string): void',
+        "export declare function f<T, M extends 'U' = 'U'>(x: T, mode: M): void",
+        "f(1, 'T')",
+      ],
+      [
+        'B10 an optional argument taken by an optional parameter, another overload ahead',
+        'export declare function f(a?: string): void',
+        'export declare function f(a: number): void; export declare function f(a?: string, b?: number): void',
+        "f(); f(undefined); f('x')",
+      ],
+      ['B11 a required argument that takes undefined made optional', 'export declare function f(a: string | undefined): void', 'export declare function f(a?: string): void', "f(undefined); f('x')"],
+    ]
+
+    it.each(CASES)('%s: fails exactly when the old calls stop compiling', (_, before, after, calls, review = []) => {
+      expect(compiles(before, calls)).toBe(true)
+      const result = compare(before, after)
+
+      expect(result.breaks.length > 0).toBe(!compiles(after, calls))
+      expect(result.review).toEqual(expect.arrayContaining(review))
+    })
+
+    it('names type parameters by position in a review line, and leaves a literal or a member spelling one as it is', () => {
+      const before = "export declare function f<T>(x: T, mode: 'T' | 'U', o: { T: T }): T"
+      const after = "export declare function f<U>(x: U, mode: 'T' | 'U', o: { T: U }): U | undefined"
+
+      expect(compare(before, after).review).toEqual(['f: <T0>(x: T0, mode: "T" | "U", o: { T: T0; }) => T0 → <T0>(x: T0, mode: "T" | "U", o: { T: T0; }) => T0 | undefined'])
+    })
+
+    it('lists a generic signature whose literal changed, though the new literal spells the new type parameter as the old one spelled the old', () => {
+      const before = "export declare function f<A>(x: A, m: 'A'): void"
+      const after = "export declare function f<B>(x: B, m: 'B'): void"
+
+      expect(compiles(after, "f(1, 'A')")).toBe(false)
+      expect(compare(before, after).review).toEqual(['f: <T0>(x: T0, m: "A") => void → <T0>(x: T0, m: "B") => void'])
+    })
+
+    it('reports a type parameter added without a default where no signature takes the old calls', () => {
+      const before = 'export declare function f<T>(a: T): T'
+      const after = 'export declare function f<T, U>(a: T, b: U): T'
+
+      expect(compare(before, after).breaks).toEqual(['f requires 2 arguments where it required 1', 'f requires 2 type arguments where it took 1'])
+    })
+
+    it('reports a parameter narrowed to the constraint of the type parameter now typing it', () => {
+      const before = 'export declare function f(a: string | number): void'
+      const after = 'export declare function f<T extends string>(a: T): void'
+
+      expect(compare(before, after).breaks).toEqual(['f narrowed parameter a: string | number → T extends string'])
+    })
+
+    it('reports type arguments no signature takes against the signature the other calls reach', () => {
+      const before = 'export declare function f<T>(a: T): T'
+      const after = 'export declare function f(a: string): string; export declare function f<T, U>(a: T): T'
+
+      expect(compare(before, after).breaks).toEqual(['f requires 2 type arguments where it took 1'])
+    })
+
+    it('lists nothing for a non-generic overload added ahead of a kept generic one, whose type arguments still reach it', () => {
+      const before = 'export declare function A<_R = unknown>(path: string, name?: string): (target: object) => void'
+      const after = `export declare function A(path: string, name?: string): (target: object) => void; ${before}`
+
+      expect(compiles(after, "A('x'); A<void>('x')")).toBe(true)
+      expect(compare(before, after)).toEqual({ breaks: [], review: [] })
+    })
+
+    it('lists nothing for a non-generic overload added ahead of a kept generic one, returning the same type under an alias', () => {
+      const decorator = '<P, R>(target: object, descriptor: TypedPropertyDescriptor<(params: P) => R>) => void'
+      const before = `export declare function A<_R = unknown>(path: string): ${decorator.replace('descriptor', '_descriptor')}`
+      const after = `type Decorator = ${decorator}; export declare function A(path: string): Decorator; ${before}`
+
+      expect(compiles(before, "const d: ReturnType<typeof A<void>> = A('x')")).toBe(true)
+      expect(compiles(after, "const d: ReturnType<typeof A<void>> = A('x'); A<void>('x')")).toBe(true)
+      expect(compare(before, after)).toEqual({ breaks: [], review: [] })
+    })
+
+    it('lists for review a non-generic overload added ahead of a kept generic one whose return no longer fits', () => {
+      const types = "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string }"
+      const before = `${types} export declare function A<_R = unknown>(path: string): Narrow`
+      const after = `${types} export declare function A(path: string): Wide; export declare function A<_R = unknown>(path: string): Narrow`
+
+      expect(compiles(before, "const r: Narrow = A('x')")).toBe(true)
+      expect(compiles(after, "const r: Narrow = A('x')")).toBe(false)
+      expect(compare(before, after).review).toEqual(['A: <T0 = unknown>(path: string) => Narrow → (path: string) => Wide'])
+    })
+
+    it('lists for review a generic overload added ahead whose return names a type parameter of the same name in another place', () => {
+      const before = 'export declare function f<T, U>(a: T, b: U): T'
+      const after = `export declare function f<U, T, V>(a: U, b: T): T; ${before}`
+
+      expect(compiles(before, "const r: string = f('x', 1); const s: string = f<string, number>('x', 1)")).toBe(true)
+      expect(compiles(after, "const s: string = f<string, number>('x', 1)")).toBe(true)
+      expect(compiles(after, "const r: string = f('x', 1)")).toBe(false)
+      expect(compare(before, after).review).toContain('f: <T0, T1>(a: T0, b: T1) => T0 → <T0, T1, T2>(a: T0, b: T1) => T1')
+    })
+
+    it('lists only the generic overload requiring more type arguments added ahead of a kept one, which calls passing one skip', () => {
+      const before = 'export declare function f<T>(a: T): T'
+      const after = `export declare function f<T, U>(a: T): T; ${before}`
+
+      expect(compiles(after, "const r: string = f('x'); const s: string = f<string>('x')")).toBe(true)
+      expect(compare(before, after)).toEqual({ breaks: [], review: ['f (overload 1 of 2): added <T0, T1>(a: T0) => T0'] })
+    })
+
+    it('compares an unconstrained generic signature with itself, not with a concrete overload inserted ahead of it', () => {
+      const before = 'export declare function f<T>(a: T): T'
+      const after = 'export declare function f(a: string): string; export declare function f<T>(a: T): T'
+
+      expect(compiles(after, 'const r: number = f(1)')).toBe(true)
+      expect(compare(before, after)).toEqual({ breaks: [], review: [] })
+    })
+
+    it('reports a break once when two old overloads reach the same pair', () => {
+      const types = "export interface Narrow { kind: 'narrow' } export interface Wide { kind: string }"
+      const before = `${types} export declare function f(a: string): Narrow; export declare function f(a: 'x' | 'y'): Narrow`
+      const after = `${types} export declare function f(a: string | number): Wide; export declare function f(a: string): Narrow; export declare function f(a: 'x' | 'y'): Narrow`
+
+      expect(compiles(after, "const r: Narrow = f('x')")).toBe(false)
+      expect(breaksBetween(before, after)).toEqual(['f (overload 1) widened return: Narrow → Wide'])
+    })
+
+    // Lenient against tsc: the inserted generic answers the old calls, and its return names its own type parameter,
+    // which the checker cannot relate to the old return across two declarations
+    it('lists for review, without failing, a generic inserted ahead of a kept signature, though the old calls stop compiling', () => {
+      const before = 'export declare function g(a: string): string'
+      const after = 'export declare function g<V>(a: V): V | undefined; export declare function g(a: string): string'
+      const result = compare(before, after)
+
+      expect(compiles(after, "const r: string = g('x')")).toBe(false)
+      expect(result).toEqual({
+        breaks: [],
+        review: ['g (overload 1 of 2): added <T0>(a: T0) => T0 | undefined', 'g: (a: string) => string → <T0>(a: T0) => T0 | undefined'],
+      })
+    })
+  })
+
   describe('type parameters', () => {
     // Each case: the declarations before and after, code written against the old ones, and the breaks expected
     const CASES: [string, string, string, string, string[]][] = [
