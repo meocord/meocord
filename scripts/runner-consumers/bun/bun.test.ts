@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test'
 import { createMock, useMockFn } from 'meocord/testing'
-import { clickGreet } from './shared/module.js'
+import { absentKeyWarnings, clickGreet } from './shared/module.js'
 
 // Bun's matchers accept only Bun's own mocks, so meocord makes its mocks with bun's mock
 useMockFn(mock)
@@ -23,5 +23,9 @@ describe('meocord/testing under bun test', () => {
 
     expect(click.update).toHaveBeenCalledWith(expect.objectContaining({ content: 'from bun' }))
     expect(logger.log).toHaveBeenCalledWith('clicked')
+  })
+
+  it("warns only about the key the test reads on purpose that its mock's class lacks", async () => {
+    expect(await absentKeyWarnings()).toEqual(['ButtonInteraction.notAThing'])
   })
 })

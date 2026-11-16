@@ -1,5 +1,6 @@
 import 'reflect-metadata'
 import { type Container } from 'inversify'
+import { Base } from 'discord.js'
 import { type ThemeOverride } from '@src/interface/index.js'
 import { stageClasses, stageOwners } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
@@ -234,9 +235,11 @@ setThemeOutsideCalls(interaction => {
 
 // A function bound outside any call's scope rebuilds each call's theme from the app of its first argument's client
 setRebuildOutsideCalls(args => {
-  const [first] = args as [{ client?: object } | undefined]
+  const [first] = args as [unknown]
   if (!first || typeof first !== 'object') return undefined
-  const container = clientApps.get(first.client ?? first)
+  // A structure's client, or one an object of the app's own holds; a key the object lacks is not read
+  const client = first instanceof Base || 'client' in first ? (first as { client?: object }).client : undefined
+  const container = clientApps.get(client ?? first)
   const themes = container && current(container)
   return themes?.resolvers && rebuildOver(container!, themes.resolvers, themes.app)(args)
 })

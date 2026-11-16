@@ -3,6 +3,7 @@ import { injectedTokens } from '@src/core/guard-runner.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { seconds } from '@src/core/autocomplete-timing.js'
 import { responseOf, type Told } from '@src/common/response/response-state.js'
+import { readQuietly } from '@src/util/quiet-reads.util.js'
 import { shared } from '@src/util/shared-state.util.js'
 
 /** How long an interaction without `@Defer` waits for the `onReady` hooks it depends on, leaving time to answer. */
@@ -84,10 +85,17 @@ export function readyBoundFor(type: string, first: unknown, deferred = false): R
 
 /** The bound of what `args` answers, read from its first argument: an autocomplete, another interaction, or none. */
 export function readyBoundOf(args: readonly unknown[]): ReadyBound {
-  // Any value can be a bound function's first argument, so only an interaction's own methods are called
+  // Any value can be a bound function's first argument, so only an interaction's own methods are called, read quietly:
+  // a default-mode mock answers a method its class lacks with a placeholder
   const [first] = args as [{ isAutocomplete?: unknown; isRepliable?: unknown } | null | undefined]
-  if (typeof first?.isAutocomplete === 'function' && first.isAutocomplete() === true) return readyBoundFor('autocomplete', first)
-  return typeof first?.isRepliable === 'function' && first.isRepliable() === true ? readyBoundFor('interaction', first) : undefined
+  const kind = readQuietly(() =>
+    typeof first?.isAutocomplete === 'function' && first.isAutocomplete() === true
+      ? 'autocomplete'
+      : typeof first?.isRepliable === 'function' && first.isRepliable() === true
+        ? 'interaction'
+        : undefined,
+  )
+  return kind && readyBoundFor(kind, first)
 }
 
 /**

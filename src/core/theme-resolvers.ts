@@ -1,10 +1,11 @@
-import { User } from 'discord.js'
+import { BaseInteraction, Message, MessageReaction, User } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@src/interface/index.js'
 import { themeProblems } from '@src/core/theme-validation.js'
 import { copyLayer, outsideThemeScope } from '@src/core/theme-scope.js'
 import { quoteForLog } from '@src/util/user-text.util.js'
 import { shared, sharedClass } from '@src/util/shared-state.util.js'
+import { readQuietly } from '@src/util/quiet-reads.util.js'
 
 /** How long a resolver's result is kept, in seconds, unless `themeCache.ttlSeconds` says otherwise. */
 export const DEFAULT_THEME_TTL_SECONDS = 300
@@ -302,13 +303,34 @@ const idOf = (value: unknown): string | undefined => (typeof value === 'string' 
 export function themeTargets(args: readonly unknown[]): { guildId?: string; userId?: string } {
   const [first, second] = args as [Record<string, any> | undefined, Record<string, any> | undefined]
   if (!first || typeof first !== 'object') return {}
-  // A reaction has no guildId of its own, so its message's; a call whose guildId is null has no server at all
-  const own: unknown = first.guildId
-  const guildId = idOf(own) ?? idOf(first.guild?.id) ?? (own === null ? undefined : idOf(first.message?.guildId))
-  // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
-  const userId =
-    idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)
-  return { guildId, userId }
+  // An interaction, a message and a reaction by their class, so nothing is read that the class lacks
+  if (first instanceof BaseInteraction) return { guildId: serverOf(first), userId: idOf(first.user?.id) }
+  // A partial message has no author: a call that gives a user second, as a bound function may, is that user's
+  if (first instanceof Message) return { guildId: serverOf(first), userId: idOf(first.author?.id) ?? userOf(second) }
+  if (first instanceof MessageReaction) return { guildId: idOf(first.message.guildId), userId: userOf(second) }
+  // An event argument of any class, read quietly: a default-mode mock answers a key its class lacks with a placeholder
+  return readQuietly(() => {
+    // A call whose guildId is null has no server at all
+    const own: unknown = first.guildId
+    const guildId = idOf(own) ?? idOf(first.guild?.id) ?? (own === null ? undefined : idOf(first.message?.guildId))
+    // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
+    const userId =
+      idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)
+    return { guildId, userId }
+  })
+}
+
+/**
+ * The user a call gives second: a User, or `{ user }` as a reaction handler gets it; read quietly, since an event's
+ * second argument, such as a messageUpdate's new message, has no `user`.
+ */
+function userOf(second: Record<string, any> | undefined): string | undefined {
+  return second instanceof User ? idOf(second.id) : readQuietly(() => idOf(second?.user?.id))
+}
+
+/** A call's server: its `guildId`, or its `guild`'s id; none in a DM, where both are null. */
+function serverOf(target: { guildId?: unknown; guild?: { id?: unknown } | null }): string | undefined {
+  return idOf(target.guildId) ?? idOf(target.guild?.id)
 }
 
 /**

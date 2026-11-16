@@ -13,5 +13,5 @@ export default defineConfig({
       module: { type: 'es6' },
     }),
   ],
-  test: { include: ['vitest.test.ts'] },
+  test: { include: ['vitest.test.ts', 'strict.test.ts'] },
 })

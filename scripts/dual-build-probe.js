@@ -298,6 +298,7 @@ const STORES = {
   mockThemes: 'mock themes',
   mocks: 'mock functions',
   processState: 'process-wide start and shutdown state',
+  quietReads: "a counter of the reads MeoCord and its mocks' own code keep quiet",
   readyGates: 'keyed by an app container, holding its ready gate',
   refusalReporting: 'refusals already reported',
   registryLateSources: 'the event sources each registry lists late',

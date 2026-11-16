@@ -25,11 +25,16 @@ export function warnPlaceholder(logger: Logger, value: string, outcome: string, 
   warnOnce(logger, `${value} reads a placeholder here; in the next major version (5.0) ${outcome}. ${how}`)
 }
 
-/** Logs `text` once per run, however often it is asked for. */
-export function warnOnce(logger: Logger, text: string): void {
-  if (warned.has(text)) return
-  warned.add(text)
+/** Logs `text` once per run, however often it is asked for; with `key`, once for every text under that key. */
+export function warnOnce(logger: Logger, text: string, key = text): void {
+  if (warned.has(key)) return
+  warned.add(key)
   logger.warn(text)
+}
+
+/** Whether the warning under `key` has been logged this run. */
+export function hasWarned(key: string): boolean {
+  return warned.has(key)
 }
 
 /** Forgets which deprecations have warned: for specs. */
