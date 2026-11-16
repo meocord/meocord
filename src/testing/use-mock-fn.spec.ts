@@ -3,7 +3,14 @@ import { types } from 'node:util'
 import { queryObjects } from 'node:v8'
 import { vi, type Mock as VitestMock } from 'vitest'
 import { ButtonInteraction } from 'discord.js'
-import { clearAllMocks, createMockFn, forgetMockFn, resetAllMocks, useMockFn } from '@src/testing/mock-fn.js'
+import {
+  clearAllMocks,
+  createMockFn,
+  forgetMockFn,
+  resetAllMocks,
+  useMockFn,
+  type MockFnFactory,
+} from '@src/testing/mock-fn.js'
 import { createMock, createMockInteraction } from '@src/testing/mock-interaction.js'
 import { createDiscordError, getResponse } from '@src/testing/response.js'
 
@@ -101,30 +108,48 @@ describe('useMockFn', () => {
     expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made.*setup file/)
   })
 
-  it("refuses a function while a mock made before it lives, others made with it collected", async () => {
+  it('refuses a function on every run after a mock made before it, whether or not the mock was collected', async () => {
+    const outcomes: string[] = []
+    for (const collect of [...Array<boolean>(RUNS).fill(true), ...Array<boolean>(RUNS).fill(false)]) {
+      forgetMockFn()
+      makeAndDrop()
+      if (collect) await collectGarbage()
+      outcomes.push(attempt(vi.fn))
+    }
+
+    expect(outcomes).toEqual(Array(RUNS * 2).fill('refuses'))
+  })
+
+  it("refuses another function after the runner's mocks were made, whether or not they were collected", async () => {
+    useMockFn(plainRunnerFn)
     makeAndDrop()
-    const kept = createMockFn()
     await collectGarbage()
 
-    expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made/)
+    expect(attempt(vi.fn)).toBe('refuses')
+  })
+
+  it('refuses after thousands of mocks made in one loop, keeping none of them alive', () => {
+    const before = liveHeld()
+    makeThousands()
+
+    expect(liveHeld() - before).toBe(0)
+    expect(attempt(vi.fn)).toBe('refuses')
+  })
+
+  it('takes a function after forgetMockFn, though a mock made before it is still kept', () => {
+    const kept = createMockFn()
+    forgetMockFn()
+
+    expect(attempt(vi.fn)).toBe('takes')
     void kept
   })
 
-  it('allows a function once the mocks made before it are collected', async () => {
-    makeAndDrop()
-    await collectGarbage()
-
-    expect(() => useMockFn(vi.fn)).not.toThrow()
-  })
-
-  it('counts a mock made before forgetMockFn, collected after it, out of the mocks that refuse', async () => {
+  it('refuses a function after forgetMockFn once a mock is made after it', () => {
     makeAndDrop()
     forgetMockFn()
-    const kept = createMockFn()
-    await collectGarbage()
+    createMockFn()
 
-    expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made/)
-    void kept
+    expect(attempt(vi.fn)).toBe('refuses')
   })
 
   it('keeps every clear and reset made before forgetMockFn on a mock made before it', () => {
@@ -186,6 +211,44 @@ describe('useMockFn', () => {
     expect(store._save('k')).toBe(1)
   })
 })
+
+// Enough runs of each kind that one collection's timing can't decide them all
+const RUNS = 10
+// As many mocks as a test making mock interactions in a loop makes
+const THOUSANDS = 5000
+
+class Held {}
+
+// Counted by v8 after a full garbage collection, so the test reads which objects anything still holds
+const liveHeld = () => queryObjects(Held, { format: 'count' })
+
+/** A runner's factory that no runner holds the mocks of, so they can be collected. */
+const plainRunnerFn = (impl?: (...args: any[]) => any) => {
+  const fn = (...args: any[]) => impl?.(...args)
+  return Object.assign(fn, { _isMockFunction: true, mock: { calls: [] }, mockImplementation: () => fn, mockClear: () => fn, mockReset: () => fn })
+}
+
+/** Whether useMockFn takes `factory` or refuses it as coming after a mock. */
+function attempt(factory: MockFnFactory): 'takes' | 'refuses' {
+  try {
+    useMockFn(factory)
+    return 'takes'
+  } catch (error) {
+    if ((error as Error).message.startsWith('useMockFn() goes before any mock is made')) return 'refuses'
+    throw error
+  }
+}
+
+/**
+ * Makes thousands of mocks, each holding a value, in a frame of its own. None is called: while V8 optimizes a hot call
+ * site it holds the function the site last reached, which would keep that mock.
+ */
+function makeThousands(): void {
+  for (let i = 0; i < THOUSANDS; i++) {
+    const held = new Held()
+    createMockFn(() => held)
+  }
+}
 
 /** Makes mocks of meocord's own in a frame of its own, so nothing holds them once it returns. */
 function makeAndDrop(): void {
