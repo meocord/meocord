@@ -52,6 +52,7 @@ export function errorText(error: unknown, translator: Translator<any> | undefine
  * ```ts
  * @Catch(CooldownError)
  * export class CooldownFilter implements ExceptionFilter<CooldownError> {
+ *   // Passed on only: inject Translator<typeof enUS> to translate with it
  *   constructor(private readonly t: Translator) {}
  *
  *   async catch(error: CooldownError, context: ExecutionContext) {
