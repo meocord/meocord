@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import { ChatInputCommandInteraction, type Guild, Locale } from 'discord.js'
-import { createTranslator, defineCatalog, Logger } from '@src/common/index.js'
+import { createTranslator, defineCatalog, Logger, type Translator } from '@src/common/index.js'
 import { missingTranslatorError } from '@src/common/translator.js'
 import { createMockInteraction } from '@src/testing/index.js'
 
@@ -555,3 +555,19 @@ describe('missingTranslatorError', () => {
   })
 })
 
+
+describe('a translator typed by hand from a JSON file’s shape', () => {
+  it('fills the params of a message typed `string`, and of a plural whose forms are', () => {
+    const catalog = defineCatalog({
+      lookup: { user: 'Show {mode} for {name}' },
+      warn: { one: '{count} warning for {user}', other: '{count} warnings for {user}' },
+    })
+    const fromJson = createTranslator({ default: 'en-US', locales: { 'en-US': catalog } }) as unknown as Translator<{
+      lookup: { user: string }
+      warn: { one: string; other: string }
+    }>
+
+    expect(fromJson.default('lookup.user', { mode: 'Chaos', name: 'Ada' })).toBe('Show Chaos for Ada')
+    expect(fromJson.default('warn', { count: 2, user: 'Ada' })).toBe('2 warnings for Ada')
+  })
+})
