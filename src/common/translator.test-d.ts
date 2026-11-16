@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest'
-import { type ChatInputCommandInteraction, Locale, type Message } from 'discord.js'
+import { type ChatInputCommandInteraction, type Guild, Locale, type Message } from 'discord.js'
 import {
   createTranslator,
   defineCatalog,
@@ -8,12 +8,13 @@ import {
   type LocalizationParam,
   type LocalizationParams,
   type MessageKey,
+  type MessageParams,
   type ParamLocalizationKey,
   type StringMessageKey,
   translateError,
   type Translator,
 } from '@src/common/index.js'
-import { type CatalogIssues, type LocaleIssues, type Placeholders } from '@src/common/translator.js'
+import { type CatalogIssues, type CatalogShape, type LocaleIssues, type Placeholders } from '@src/common/translator.js'
 import { PLACEHOLDER_CASES } from '@src/common/placeholder-cases.js'
 
 const enUS = defineCatalog({
@@ -24,6 +25,7 @@ const enUS = defineCatalog({
 
 const t = createTranslator({ default: 'en-US', locales: { 'en-US': enUS, id: { ban: { done: 'Melarang {user}.' } } } })
 declare const interaction: ChatInputCommandInteraction
+declare const guild: Guild
 
 describe('keys', () => {
   it("takes every message of the default catalog, by its dotted path", () => {
@@ -84,6 +86,115 @@ describe('params', () => {
     t.default('warnings', { count: '1', user: 'Ada' })
     // @ts-expect-error user is required by the variants
     t.default('warnings', { count: 1 })
+  })
+
+  it('still takes no params, an empty object and a count wherever it did', () => {
+    t.default('ping', {})
+    for (const translate of [t.locale(Locale.Japanese), t.for(interaction), t.forGuild(guild)]) {
+      translate('ping')
+      translate('ping', {})
+      translate('warnings', { count: 1, user: 'Ada' })
+    }
+  })
+
+  it('takes any params for a message typed `string`, as a translator typed by hand or Translator<any> has', () => {
+    const json = null as unknown as Translator<{ lookup: { user: string }; warn: { one: string; other: string } }>
+    const loose = null as unknown as Translator<any>
+    for (const translator of [json, loose]) {
+      translator.default('lookup.user', { mode: 'Chaos', level: 3 })
+      translator.locale(Locale.Japanese)('lookup.user', { mode: 'Chaos' })
+      translator.for(interaction)('lookup.user', { mode: 'Chaos' })
+      translator.forGuild(guild)('lookup.user', { mode: 'Chaos' })
+      translator.default('lookup.user')
+      translator.default('lookup.user', {})
+    }
+    // @ts-expect-error a param is a word or a number
+    json.default('lookup.user', { mode: true })
+    json.default('warn', { count: 1, user: 'Ada' })
+    json.default('warn', { count: 1 })
+    // @ts-expect-error a plural still requires its count
+    json.default('warn', { user: 'Ada' })
+    // @ts-expect-error and its params
+    json.default('warn')
+  })
+
+  it('keeps a translator of no catalog type, as `createTranslator(… as never)` gives, assignable to Translator<any>', () => {
+    const untyped = createTranslator({ default: 'en-US', locales: { 'en-US': enUS } } as never)
+    const never = null as unknown as Translator<never>
+    const assigned: Translator<any>[] = [untyped, never]
+    const bare: Translator[] = [untyped, never]
+    void [assigned, bare]
+  })
+
+  it("keeps the published types' verdicts for a plural one assigns to loose catalogs, and a dotted key into a plural", () => {
+    const plurals = null as unknown as Translator<Record<string, { one: string; other: string }>>
+    const toNever: Translator<never> = plurals
+    const toNone: Translator<Record<string, never>> = plurals
+    const toUnion: Translator<{ ping: 'Pong' } | { greet: 'Hi {name}' }> = plurals
+    void [toNever, toNone, toUnion]
+    // @ts-expect-error a dotted key into a plural reaches no message
+    plurals.default('group.sub')
+  })
+
+  describe('a catalog no key of which reaches a message', () => {
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- an empty catalog, as a user may type one
+    const empty = null as unknown as Translator<{}>
+    const noKeys = null as unknown as Translator<Record<never, never>>
+    const nevers = null as unknown as Translator<Record<string, never>>
+    const union = null as unknown as Translator<{ ping: 'Pong' } | { greet: 'Hi {name}' }>
+    const never = null as unknown as Translator<never>
+    interface Extends extends CatalogShape {
+      ping: 'Pong'
+      greet: 'Hi {name}'
+    }
+
+    it('assigns as it did to every catalog, typed or loose, and is passed on as one', () => {
+      // Object types written inline keep the implicit index signature an interface would lose
+      const toLiteral: Translator<typeof enUS>[] = [empty, noKeys, union]
+      const toConst: Translator<{ readonly ping: 'Pong'; readonly greet: 'Hi {name}'; readonly warn: { readonly one: '{count} warn'; readonly other: '{count} warns {user}' } }>[] = [empty, noKeys, union]
+      const toHand: Translator<{ ping: string; greet: string; warn: { one: string; other: string }; group: { sub: string } }>[] = [empty, noKeys]
+      const toMixed: Translator<{ ping: 'Pong'; greet: string; warn: { one: '{count} warn'; other: string }; group: { sub: 'Sub {x}' } }>[] = [empty, noKeys, union]
+      const toOptPlural: Translator<{ ping: string; greet: string; warn: { one?: string; other: string }; group: { sub: string } }>[] = [empty, noKeys]
+      const toNever: Translator<never>[] = [empty, noKeys, nevers, union]
+      const toOptKey: Translator<{ ping?: 'Pong'; greet: 'Hi {name}' }>[] = [empty, noKeys, union]
+      const toIndexKey: Translator<{ [key: string]: string; ping: 'Pong' }>[] = [empty, noKeys, union]
+      const toExtends: Translator<Extends>[] = [empty, noKeys, union]
+      const toBare: Translator[] = [nevers, union]
+      const toRecord: Translator<Record<string, string>>[] = [nevers, union]
+      const toNested: Translator<Record<string, Record<string, string>>>[] = [nevers]
+      const toShape: Translator<CatalogShape>[] = [nevers, union]
+      const toPlurals: Translator<Record<string, { one: string; other: string }>>[] = [nevers]
+      const toEither: Translator<Record<string, string | { one: string; other: string }>>[] = [nevers, union]
+      const passOn = (translator: Translator) => translator
+      void [toLiteral, toConst, toHand, toMixed, toOptPlural, toNever, toOptKey, toIndexKey, toExtends, toBare, toRecord, toNested, toShape, toPlurals, toEither, passOn(nevers), passOn(union)]
+    })
+
+    it('reads its key type as it did', () => {
+      expectTypeOf<MessageKey<never>>().toEqualTypeOf<string>()
+      expectTypeOf<MessageKey<Record<string, never>>>().toEqualTypeOf<string>()
+      const fromNever: Parameters<typeof never.default>[0] = 'ping'
+      const fromNevers: Parameters<typeof nevers.default>[0] = 'ping'
+      void [fromNever, fromNevers]
+    })
+
+    it('takes any params on any key it has, and refuses a key it lacks', () => {
+      never.default('anything', { any: 1 })
+      nevers.default('anything', { any: 1 })
+      nevers.default('anything')
+      // @ts-expect-error an empty catalog has no key
+      empty.default('ping')
+      // @ts-expect-error nor has a union of catalogs that share none
+      union.default('ping')
+    })
+  })
+
+  it('types the params of a message typed `string` as any params', () => {
+    expectTypeOf<MessageParams<string>>().toEqualTypeOf<Record<string, string | number>>()
+    expectTypeOf<MessageParams<any>>().toEqualTypeOf<Record<string, string | number>>()
+    expectTypeOf<keyof MessageParams<string>>().toEqualTypeOf<string>()
+    expectTypeOf<MessageParams<{ one: string; other: string }>>().toEqualTypeOf<{ count: number } & Record<string, string | number>>()
+    expectTypeOf<MessageParams<typeof enUS.ban.done>>().toEqualTypeOf<Record<'user' | 'days', string | number>>()
+    expectTypeOf<keyof MessageParams<typeof enUS.ping>>().toEqualTypeOf<never>()
   })
 })
 

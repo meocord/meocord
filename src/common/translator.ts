@@ -103,10 +103,9 @@ export type LocalizationKey<C> = {
  * @see {@link Translator.localizations}
  * @see {@link LocalizationKey}
  */
-export type ParamLocalizationKey<C> = Exclude<StringMessageKey<C>, LocalizationKey<C>> | WidenedMessageKey<C>
-
-/** The keys whose message is typed `string` rather than its text. */
-type WidenedMessageKey<C> = { [K in StringMessageKey<C>]: string extends MessageAt<C, K> ? K : never }[StringMessageKey<C>]
+export type ParamLocalizationKey<C> = {
+  [K in StringMessageKey<C>]: [ParamNames<MessageAt<C, K>>] extends [never] ? never : K
+}[StringMessageKey<C>]
 
 /**
  * A value {@link Translator.localizations} fills into a `{param}`: a word or a number, the same in every locale, or a
@@ -140,7 +139,7 @@ export type LocalizationParam = string | number | ((locale: Locale) => string | 
  * @see {@link Translator.localizations}
  * @see {@link LocalizationKey}
  */
-export type LocalizationParams<M> = string extends M ? Record<string, LocalizationParam> : Record<Placeholders<M>, LocalizationParam>
+export type LocalizationParams<M> = Record<ParamNames<M>, LocalizationParam>
 
 /** The message at a key. */
 export type MessageAt<C, K extends string> = K extends `${infer Head}.${infer Rest}`
@@ -166,6 +165,9 @@ export type Placeholders<S, Found = never> = S extends `${string}{${infer After}
 /** The param a `{` opens, from the text after it: the name when word characters close there. */
 type ParamAt<After extends string> = After extends `${infer Name}}${string}` ? (IsWord<Name> extends true ? Name : never) : never
 
+/** The `{param}` names a message takes: its placeholders, or any name for one typed `string`, whose text is unknown. */
+type ParamNames<M> = string extends M ? string : Placeholders<M>
+
 /**
  * The params a catalog message takes: one per `{name}` placeholder, whose name is ASCII letters, digits or `_`, and
  * `count` for a plural message.
@@ -174,16 +176,36 @@ type ParamAt<After extends string> = After extends `${infer Name}}${string}` ? (
  * shows `{id}` and takes no param. A translator's `t(key, params)` is checked against it, so a placeholder left out or
  * misspelt fails to compile. Use it to type params you build before translating.
  *
+ * A message typed `string`, as in a translator typed `Translator<any>` or typed by hand from a JSON file's shape, takes
+ * any params; a plural whose forms are typed `string` takes any params beside `count`.
+ *
  * @group Types
  * @see {@link createTranslator}
  */
 export type MessageParams<M> = M extends string
-  ? Record<Placeholders<M>, string | number>
+  ? Record<ParamNames<M>, string | number>
   : IsPlural<M> extends true
-    ? { count: number } & Record<Exclude<Placeholders<M[keyof M & PluralCategory]>, 'count'>, string | number>
+    ? { count: number } & Record<Exclude<ParamNames<M[keyof M & PluralCategory]>, 'count'>, string | number>
     : never
 
-type ParamsArgs<M> = [keyof MessageParams<M>] extends [never] ? [params?: Record<string, never>] : [params: MessageParams<M>]
+/**
+ * A message's params argument: none for a message without params, optional when no param is required, and required
+ * otherwise. A key that reaches no message, as a dotted key into a plural does, takes params typed `never`, so it fails
+ * to compile.
+ */
+type ParamsArgs<M> = [keyof MessageParams<M>] extends [never]
+  ? [params?: Record<string, never>]
+  : Record<never, never> extends MessageParams<M>
+    ? [params?: MessageParams<M>]
+    : [params: MessageParams<M>]
+
+/**
+ * The params argument of a key of catalog `C`: its message's, or any params for a catalog no key of which reaches a
+ * message, such as `Translator<never>`, as `createTranslator(… as never)` gives. Such a catalog has no message to read
+ * params from, so its params decide only what it assigns to and from. Typed `any`, the one type that takes both
+ * `Translator<any>`'s optional params and a plural's required `count`, they keep it assignable both ways.
+ */
+type KeyParamsArgs<C, K extends string> = [MessageAt<C, MessageKey<C>>] extends [never] ? [params?: any] : ParamsArgs<MessageAt<C, K>>
 
 /**
  * Translates a key into one locale's message.
@@ -192,7 +214,7 @@ type ParamsArgs<M> = [keyof MessageParams<M>] extends [never] ? [params?: Record
  *
  * @group Types
  */
-export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>) => string
+export type Translate<C> = <K extends MessageKey<C>>(key: K, ...params: KeyParamsArgs<C, K>) => string
 
 /**
  * What a locale other than the default provides: any part of the default catalog, in its own wording.
@@ -422,7 +444,7 @@ export abstract class Translator<C = CatalogShape> {
    * @param params - The message's params, when it takes any.
    * @returns The message in the default locale.
    */
-  abstract default<K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>): string
+  abstract default<K extends MessageKey<C>>(key: K, ...params: KeyParamsArgs<C, K>): string
 
   /**
    * A message with `{params}` in every locale other than the default whose own catalog has it, each filled with its
@@ -690,7 +712,7 @@ class CatalogTranslator<C extends CatalogShape> extends Translator<C> {
     return ((key: string, params?: Record<string, unknown>) => this.translate(locale, key, params)) as Translate<C>
   }
 
-  default<K extends MessageKey<C>>(key: K, ...params: ParamsArgs<MessageAt<C, K>>): string {
+  default<K extends MessageKey<C>>(key: K, ...params: KeyParamsArgs<C, K>): string {
     return this.translate(this.defaultLocale, key, params[0] as Record<string, unknown> | undefined)
   }
 
