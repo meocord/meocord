@@ -344,8 +344,9 @@ export class Dispatcher {
       const matched = matchComponentRoute(this.getComponentRoutes(), type => matchesCommandType(type, interaction), customId)
       if (matched) {
         const { route, params } = matched
+        // Written for code that reads it; the dispatch passes the params on itself, reading nothing back
         ;(interaction as Interaction & { dynamicParams: Record<string, RouteParamValue> }).dynamicParams = params
-        await this.executeCommand(route.controllerClass, route.meta, interaction, call)
+        await this.executeCommand(route.controllerClass, route.meta, interaction, call, params)
         return
       }
     }
@@ -441,12 +442,15 @@ export class Dispatcher {
   /**
    * Runs a resolved command, shared by both dispatch paths so a pattern-matched
    * component and a named slash command behave identically once the route is chosen.
+   *
+   * @param routeParams - The params a component's customId pattern captured; a command has none.
    */
   private async executeCommand(
     controllerClass: ControllerClass,
     commandMetadata: CommandMeta<string>,
     interaction: Interaction<CacheType>,
     call: Call,
+    routeParams?: Record<string, RouteParamValue>,
   ): Promise<void> {
     const controllerInstance = this.getInstance(controllerClass)
     const { methodName, type } = commandMetadata
@@ -456,7 +460,6 @@ export class Dispatcher {
     // interaction on the way into the handler.
     this.logger.log('[INTERACTION]', `[${type}]`, `[${methodName}]`)
 
-    const routeParams = (interaction as Interaction & { dynamicParams?: Record<string, RouteParamValue> }).dynamicParams
     const { params, collisions } = handlerInput(interaction, routeParams)
     this.warnCollisions(controllerClass, methodName, collisions)
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { useMockFn } from 'meocord/testing'
-import { clickGreet } from './shared/module.js'
+import { absentKeyWarnings, clickGreet } from './shared/module.js'
 
 useMockFn(vi.fn)
 
@@ -15,5 +15,9 @@ describe('meocord/testing under vitest', () => {
     // Made with vi.fn, so Vitest's own mock API reaches it
     vi.mocked(click.update).mockClear()
     expect(click.update.mock.calls).toEqual([])
+  })
+
+  it("warns only about the key the test reads on purpose that its mock's class lacks", async () => {
+    expect(await absentKeyWarnings()).toEqual(['ButtonInteraction.notAThing'])
   })
 })

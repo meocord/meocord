@@ -14,6 +14,7 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { cleanEnv, outputOf, pack, repoRoot } from './lib/packed-app.js'
+import { declaredProperties, discordTypings } from './lib/declared-fields.js'
 
 const consumersDir = path.join(repoRoot, 'scripts', 'runner-consumers')
 const tsc = path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc')
@@ -60,6 +61,9 @@ function consumer(name: string, tarball: string): string {
   run(`${name}: add the packed meocord`, process.execPath, ['add', `meocord@file:${tarball}`], dir)
   // Its own module kind decides the declarations: a CommonJS project reads the .d.cts files, an ES module one the .d.ts
   run(`${name}: typecheck`, 'node', [tsc, '--noEmit', '--project', 'tsconfig.json'], dir)
+  // What its strict test holds a mock to: the properties the typings of the discord.js it installed declare
+  const declared = declaredProperties(discordTypings(path.join(dir, 'package.json')))
+  writeFileSync(path.join(dir, 'declared-fields.json'), `${JSON.stringify(declared)}\n`)
   return dir
 }
 
@@ -74,12 +78,20 @@ const runners: Record<string, (dir: string) => void> = {
       ['jest with VM modules', cleanEnv({ NODE_OPTIONS: '--experimental-vm-modules' })],
     ] as const) {
       const output = run(`${label}: test`, 'node', [node(dir, 'jest/bin/jest.js')], dir, env)
-      expectCounts(label, output, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 2)
+      expectCounts(label, output, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 3)
+      // Strict mocks hold for the process, so the strict test runs on its own
+      const strict = run(`${label}: strict test`, 'node', [node(dir, 'jest/bin/jest.js'), '--testMatch', '**/strict.test.ts'], dir, env)
+      expectCounts(`${label}, strict`, strict, { pass: /^Tests:\s+(\d+) passed.*$/m, fail: /^Tests:.*?(\d+) failed.*$/m }, 1)
     }
   },
   vitest: dir => {
-    const output = run('vitest: test', 'node', [node(dir, 'vitest/vitest.mjs'), 'run'], dir)
-    expectCounts('vitest', output, { pass: /^\s*Tests\s+(\d+) passed.*$/m, fail: /^\s*Tests\s+(\d+) failed.*$/m }, 1)
+    for (const [label, file, count] of [
+      ['vitest', 'vitest.test.ts', 2],
+      ['vitest, strict', 'strict.test.ts', 1],
+    ] as const) {
+      const output = run(`${label}: test`, 'node', [node(dir, 'vitest/vitest.mjs'), 'run', file], dir)
+      expectCounts(label, output, { pass: /^\s*Tests\s+(\d+) passed.*$/m, fail: /^\s*Tests\s+(\d+) failed.*$/m }, count)
+    }
   },
   // Compiled by SWC to CommonJS and to ES modules, each run by Node's own test runner
   'node-test': dir => {
@@ -88,19 +100,27 @@ const runners: Record<string, (dir: string) => void> = {
       ['out-cjs', 'commonjs', 'commonjs'],
       ['out-esm', 'module', 'es6'],
     ] as const) {
-      run(`node:test: compile to ${type}`, 'node', [swc, 'node.test.ts', 'shared', '-d', out, '-C', `module.type=${moduleType}`], dir)
+      run(`node:test: compile to ${type}`, 'node', [swc, 'node.test.ts', 'strict.test.ts', 'shared', '-d', out, '-C', `module.type=${moduleType}`], dir)
       writeFileSync(path.join(dir, out, 'package.json'), `${JSON.stringify({ type })}\n`)
-      const output = run(`node:test: test ${type}`, 'node', ['--test', '--test-reporter=tap', path.join(out, 'node.test.js')], dir)
-      expectCounts(`node:test (${type})`, output, { pass: /^# pass (\d+)$/m, fail: /^# fail (\d+)$/m }, 1)
+      for (const [file, count] of [
+        ['node.test.js', 2],
+        ['strict.test.js', 1],
+      ] as const) {
+        const output = run(`node:test: ${file} as ${type}`, 'node', ['--test', '--test-reporter=tap', path.join(out, file)], dir)
+        expectCounts(`node:test (${type}), ${file}`, output, { pass: /^# pass (\d+)$/m, fail: /^# fail (\d+)$/m }, count)
+      }
     }
   },
   bun: dir => {
     const output = run('bun test: test', process.execPath, ['test', 'bun.test.ts'], dir)
-    expectCounts('bun test', output, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 2)
+    expectCounts('bun test', output, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 3)
     // Bun lists no passing test by name outside a terminal, so the matcher case runs again on its own
     const matchers = "bun's mock matchers read meocord's mocks"
     const alone = run("bun test: bun's matchers", process.execPath, ['test', 'bun.test.ts', '-t', matchers], dir)
     expectCounts(`bun test, "${matchers}"`, alone, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 1)
+    // Bun runs every file in one process, and strict mocks hold for the process, so the strict test runs on its own
+    const strict = run('bun test: strict test', process.execPath, ['test', 'strict.test.ts'], dir)
+    expectCounts('bun test, strict', strict, { pass: /^\s*(\d+) pass$/m, fail: /^\s*(\d+) fail$/m }, 1)
   },
 }
 

@@ -129,12 +129,15 @@ import { stampCall } from '@src/common/response/call-order.js'
 import { type ResponseCall } from '@src/common/response/response-state.js'
 import { discordDefaults, ownersFrom, placeholderValue, REAL_GETTER } from '@src/testing/discord-defaults.js'
 import { Logger } from '@src/common/logger.js'
-import { warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
+import { hasWarned, warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
+import { asMockCode } from '@src/testing/mock-code.js'
 import { asDiscordStores, embedsAsDiscordStores } from '@src/testing/discord-shape.js'
 import { MOCK_BOT_ID, nextSnowflake } from '@src/testing/snowflake.js'
 import { isOwnCall } from '@src/common/response/call-order.js'
 import { noteMockMade, strictMocks } from '@src/testing/strict-mocks.js'
+import { classFields } from '@src/testing/class-fields.js'
 import { RESPONSE_LOG } from '@src/testing/response-log.js'
+import { quietReads } from '@src/util/quiet-reads.util.js'
 
 // ---------------------------------------------------------------------------
 // DeepMocked<T>
@@ -224,8 +227,11 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
   noteMockMade()
   const made = Date.now()
   const stubs = externalStubs ?? new Map<string, StubValue>()
-  // Placeholders read so far, by the value strict mocks give: a read of a kept one still warns, once
-  const placeholders = new Map<string, string>()
+  // What a stub's later reads warn about, once each: a placeholder, a key its class lacks, or both
+  const cachedWarnings = new Map<string, CachedWarning>()
+  // Keys strict mocks found the class lacks, so a repeat read is a lookup while the prototype still lacks it; an own
+  // key, given later, is read first
+  let absentKeys: Set<string> | undefined
 
   const proxy: object = new Proxy(instance, {
     get(target, prop) {
@@ -253,16 +259,21 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
 
       // Return cached stub
       if (stubs.has(key)) {
-        const kept = placeholders.get(key)
-        if (kept !== undefined) warnPlaceholderRead(target, key, kept)
+        const warns = cachedWarnings.get(key)
+        if (warns !== undefined) {
+          if (warns.strictValue !== undefined) warnPlaceholderRead(target, key, warns.strictValue)
+          if (warns.absent) warnAbsentRead(target, key)
+        }
         return stubs.get(key)
       }
+
+      if (absentKeys?.has(key) && strictMocks() && !(key in target)) return undefined
 
       // A value discord.js always gives, in its shape, rather than a stub: kept once read, or its getter run live
       const known = discordDefault(target, key)
       if (known === REAL_GETTER) {
         try {
-          return Reflect.get(target, prop, proxy)
+          return asMockCode(() => Reflect.get(target, prop, proxy))
         } catch {
           // A getter that reads what the mock lacks falls back to a stub
         }
@@ -275,16 +286,18 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
       // A value strict mocks read as discord.js gives it, which is a placeholder otherwise
       const strictValue = strictMocks() ? undefined : placeholderValue(target, key)
       if (strictValue !== undefined) {
-        placeholders.set(key, strictValue)
+        cachedWarnings.set(key, { strictValue })
         warnPlaceholderRead(target, key, strictValue)
       }
 
       // Walk the prototype chain to check if it's a function
       let proto: object | null = Object.getPrototypeOf(target)
       let protoValue: unknown
+      let onPrototype = false
       while (proto !== null) {
         const desc = Object.getOwnPropertyDescriptor(proto, key)
         if (desc !== undefined) {
+          onPrototype = true
           protoValue = desc.value
           if (desc.get && isPlaceholder(proto, key)) {
             // Strict mocks run discord.js's getter, read live; otherwise the placeholder, with a warning once
@@ -298,12 +311,25 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
 
       // A client the mock's structures share: its guild's, or one of its own
       if (key === 'client' && target instanceof Base) return clientOf(target) as StubValue
+      // Strict mocks read a key the class neither declares nor assigns as discord.js does: undefined
+      if (strictMocks() && !onPrototype && lacksField(target, key)) {
+        ;(absentKeys ??= new Set()).add(key)
+        return undefined
+      }
+      if (!onPrototype && lacksField(target, key)) {
+        const warns = cachedWarnings.get(key)
+        if (warns === undefined) cachedWarnings.set(key, { absent: true })
+        else warns.absent = true
+        warnAbsentRead(target, key)
+      }
 
       const stub: StubValue =
         typeof protoValue === 'function'
           ? isRealMethod(target, key)
             ? createMockFn((...args: unknown[]) =>
-                lacksServer(target, key, proxy) ? undefined : quietly(target, key, () => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args)),
+                lacksServer(target, key, proxy)
+                  ? undefined
+                  : quietly(target, key, () => asMockCode(() => (protoValue as (...args: unknown[]) => unknown).apply(proxy, args))),
               )
             : methodStub(target, key, protoValue as (...args: unknown[]) => unknown, () => proxy)
           : autoStub()
@@ -315,6 +341,12 @@ function stubDeep(instance: object, externalStubs?: Map<string, StubValue>, onSe
     // prototype getters with no setter (targetUser, targetMessage, createdAt),
     // and a plain write against one of those throws. Defining an own
     // data property shadows the accessor, which is what test setup means.
+    // Strict mocks answer `in` as the class does: its fields beside the mock's own keys and its prototype's
+    has(target, prop) {
+      if (Reflect.has(target, prop)) return true
+      return typeof prop === 'string' && strictMocks() && classFields(Object.getPrototypeOf(target))?.has(prop) === true
+    },
+
     set(target, prop, value) {
       // An own accessor with a setter, such as a context menu's target, takes the value itself
       const setter = Object.getOwnPropertyDescriptor(target, prop)?.set
@@ -397,6 +429,15 @@ const PLACEHOLDER_BOOLEANS = new Map<object, ReadonlySet<string>>([
   [MessageReaction.prototype, new Set(['partial'])],
 ])
 
+/**
+ * Whether `key` is a field `target`'s class lacks; never for a class whose fields can't be read, such as an app's
+ * subclass.
+ */
+function lacksField(target: object, key: string): boolean {
+  const fields = classFields(Object.getPrototypeOf(target))
+  return fields !== null && !fields.has(key)
+}
+
 /** Whether `proto`'s getter for `key` is one of those, or a subclass's override of one, such as a voice channel's `joinable`. */
 function isPlaceholder(proto: object | null, key: string): boolean {
   for (; proto !== null; proto = Object.getPrototypeOf(proto) as object | null) {
@@ -463,8 +504,8 @@ function testsState(reaction: MessageReaction | PartialMessageReaction, own: obj
  * Applies a dispatched reaction to its mock as the gateway does before it emits the event, under strict mocks, by
  * discord.js's own `_add` and `_remove`. An add caches the reaction on its message and counts the user in, starting it
  * from none, its users and `me` too, where its message doesn't cache it, unless its state is the test's, which the add
- * counts on from; a remove counts them out of a reaction its message caches, uncaching it at none left, and leaves any other as it is. A partial
- * one, its `count` null, is left as it is, as discord.js leaves it.
+ * counts on from; a remove counts them out of a reaction its message caches, uncaching it at none left, and leaves any
+ * other as it is. A partial one, its `count` null, is left as it is, as discord.js leaves it.
  */
 export function applyDispatchedReaction(reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser, added: boolean): void {
   if (reaction.count === null) return
@@ -490,6 +531,35 @@ export function applyDispatchedReaction(reaction: MessageReaction | PartialMessa
   } else _remove.call(reaction, user, false)
   const { burst, normal } = reaction.countDetails
   appliedCounts.set(reaction, { count: reaction.count, burst, normal })
+}
+
+/** The one key a read of any key a mock's class lacks warns under, so it warns once a run whichever key it is. */
+const ABSENT_READ_WARNING = 'mock-absent-key'
+
+/** The issue that makes strict mocks the default in 5.0. */
+const STRICT_DEFAULT_ISSUE = 'https://github.com/meocord/meocord/issues/441'
+
+/**
+ * Warns once a run, in default mode, that the app's or the test's code read a key `target`'s class lacks, which reads a
+ * placeholder here and undefined under strict mocks; never for the mock's own reads, discord.js's on a mock, or
+ * MeoCord's. Once the warning is logged it returns after one check; until then the checks run cheapest first.
+ */
+function warnAbsentRead(target: object, key: string): void {
+  if (hasWarned(ABSENT_READ_WARNING) || strictMocks() || quiet > 0 || readingPlace > 0 || quietReads()) return
+  if (Reflect.has(target, key) || !lacksField(target, key)) return
+  const name = (Object.getPrototypeOf(target) as { constructor: { name: string } }).constructor.name
+  warnOnce(
+    mockLogger,
+    `A mock ${name}'s ${key} reads a placeholder here; discord.js's ${name} has no ${key}, and under useStrictMocks() it ` +
+      `reads undefined, as on discord.js. In the next major version (5.0) it does so without the call (${STRICT_DEFAULT_ISSUE}).`,
+    ABSENT_READ_WARNING,
+  )
+}
+
+/** What a cached read of a key warns about: the placeholder strict mocks replace, a key the class lacks, or both. */
+interface CachedWarning {
+  strictValue?: string
+  absent?: true
 }
 
 function warnPlaceholderRead(target: object, key: string, strictValue: string): void {
@@ -970,7 +1040,8 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
     return createMockFn(async (user: unknown, ...args: unknown[]) => {
       if (!strictMocks()) {
         warnOnce(mockLogger, USER_MANAGER_DM_WARNINGS[key])
-        return key === 'createDM' ? dmChannelOf(receiver()) : createMockMessage()
+        // The manager stands for its user here, so what the channel reads of it is the mock's own read
+        return key === 'createDM' ? asMockCode(() => dmChannelOf(receiver())) : createMockMessage()
       }
       const named = user instanceof GuildMember ? user.user : user
       const id = typeof named === 'string' ? named : (named as { id?: string } | undefined)?.id
@@ -3130,7 +3201,7 @@ export function createMockChannel<T extends BaseChannel>(
   // Type guards run discord.js's own logic, which reads the channel's type and the managers it has
   for (const name of CHANNEL_TYPE_GUARDS) {
     const method = findPrototypeMethod(instance, name)
-    if (method !== null) stubs.set(name, createMockFn(() => method.call(channel)))
+    if (method !== null) stubs.set(name, createMockFn(() => asMockCode(() => method.call(channel))))
   }
   return channel as DeepMocked<ChannelOf<T>>
 }

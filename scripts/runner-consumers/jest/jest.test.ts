@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals'
 import { createMock, isMockFunction, useMockFn } from 'meocord/testing'
-import { clickGreet } from './shared/module.js'
+import { absentKeyWarnings, clickGreet } from './shared/module.js'
 
 useMockFn(jest.fn)
 
@@ -23,5 +23,9 @@ describe('meocord/testing under jest', () => {
     expect(store.cache.flush).toHaveBeenCalled()
     store._save.mockReturnValue(1)
     expect(store._save('k')).toBe(1)
+  })
+
+  it("warns only about the key the test reads on purpose that its mock's class lacks", async () => {
+    expect(await absentKeyWarnings()).toEqual(['ButtonInteraction.notAThing'])
   })
 })

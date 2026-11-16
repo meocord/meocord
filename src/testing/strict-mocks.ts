@@ -35,23 +35,27 @@ export function noteMockMade(): void {
  * message's channel and server, a guild's or a member's server, or, given a `guildId` alone, a server the bot isn't in.
  * A message the bot sends is its `client.user`'s, and one it sends in a DM is in that DM. Give the bot's member a role
  * to let it do more, such as kick a member its role ranks above. A value the test sets on a mock wins over the computed
- * one. An interaction's answer that discord.js would refuse, such as a second `reply()` after one a test set with
- * `mockResolvedValue`, is refused too, where without it the mock runs it and warns. An interaction's `reply()`,
- * `deferReply()`, `update()` and `deferUpdate()` resolve to a mock `InteractionResponse`, or with `withResponse` to an
- * `InteractionCallbackResponse` holding what Discord answers, where without it they resolve to `undefined`, a deferred
- * reply is flagged `Loading` until it is edited, and `respond()`'s `send()` resolves to the message a reply or an
- * update sent. A client from `createMockClient()` has a working emitter, and `dispatch` leaves a component or modal no
- * route takes to its `interactionCreate` listeners, such as a collector's, and delivers a message or a reaction to its
- * message and reaction listeners, routed or not, having applied the reaction to its message as the gateway does. A mock
- * interaction or message shares its client with what it holds, its user, member, channel and server, as discord.js
- * reaches them through its caches, and a mock message's, response's and channel's component collectors, a channel's
- * message collectors and a message's reaction collectors run discord.js's own on that client, so a click built from a
- * reply reaches the reply's collector. A mock reaction is on its message's client. A
- * message an interaction sends names it in `interactionMetadata`, and a command's `message` and a message's raw
- * `channel_id` and `guild_id` read `undefined`, as discord.js's `InteractionCollector` expects. An answer marks the
- * interaction `replied`, `deferred` or `responded` once it resolves, as discord.js does, so code that doesn't await one
- * fails as it would on a bot, within one run of the test's code. The next major version (5.0) computes these values,
- * and refuses those answers, without the call.
+ * one. A property the mock's discord.js class does not have reads `undefined`, as on discord.js, and `in` answers as
+ * the class does, true for the fields discord.js sets on its instances; without strict mocks such a property reads a
+ * placeholder, and the first read of one by the app's or the test's code warns once. A mock of a class discord.js does
+ * not define, such as an app's subclass, or of one that sets fields under computed keys, keeps a placeholder for a key
+ * its class lacks, since its fields can't be read in full from its source. An interaction's answer that discord.js
+ * would refuse, such as a second `reply()` after one a test set with `mockResolvedValue`, is refused too, where without
+ * it the mock runs it and warns. An interaction's `reply()`, `deferReply()`, `update()` and `deferUpdate()` resolve to
+ * a mock `InteractionResponse`, or with `withResponse` to an `InteractionCallbackResponse` holding what Discord
+ * answers, where without it they resolve to `undefined`, a deferred reply is flagged `Loading` until it is edited, and
+ * `respond()`'s `send()` resolves to the message a reply or an update sent. A client from `createMockClient()` has a
+ * working emitter, and `dispatch` leaves a component or modal no route takes to its `interactionCreate` listeners, such
+ * as a collector's, and delivers a message or a reaction to its message and reaction listeners, routed or not, having
+ * applied the reaction to its message as the gateway does. A mock interaction or message shares its client with what it
+ * holds, its user, member, channel and server, as discord.js reaches them through its caches, and a mock message's,
+ * response's and channel's component collectors, a channel's message collectors and a message's reaction collectors run
+ * discord.js's own on that client, so a click built from a reply reaches the reply's collector. A mock reaction is on
+ * its message's client. A message an interaction sends names it in `interactionMetadata`, and a command's `message` and
+ * a message's raw `channel_id` and `guild_id` read `undefined`, as discord.js's `InteractionCollector` expects. An
+ * answer marks the interaction `replied`, `deferred` or `responded` once it resolves, as discord.js does, so code that
+ * doesn't await one fails as it would on a bot, within one run of the test's code. The next major version (5.0)
+ * computes these values, and refuses those answers, without the call.
  * With strict mocks or without, each `fetchReply()`, `editReply()` and `followUp()` resolves to a new message object,
  * never one an earlier call gave, as in discord.js, so a test compares messages by `id`, and two edits by
  * `editedTimestamp`.

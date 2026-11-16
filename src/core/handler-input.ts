@@ -59,18 +59,28 @@ function modalFields(interaction: ModalSubmitInteraction): Record<string, unknow
  * select, and `users`, `members` and `roles` for a mentionable one.
  */
 function selectChoices(interaction: Interaction): Record<string, unknown> {
-  const selected = interaction as Interaction & { values?: unknown; users?: unknown; members?: unknown; roles?: unknown; channels?: unknown }
-  const values = Array.isArray(selected.values) ? [...(selected.values as string[])] : []
-  if (interaction instanceof StringSelectMenuInteraction) return { values }
+  // Each key read once the class is known to have it: a button has no `values`
+  const selected = interaction as Interaction & { users?: unknown; members?: unknown; roles?: unknown; channels?: unknown }
+  if (interaction instanceof StringSelectMenuInteraction) return { values: valuesOf(interaction) }
   if (interaction instanceof UserSelectMenuInteraction) {
-    return { values, users: entriesOf(selected.users), members: entriesOf(selected.members) }
+    return { values: valuesOf(interaction), users: entriesOf(selected.users), members: entriesOf(selected.members) }
   }
-  if (interaction instanceof RoleSelectMenuInteraction) return { values, roles: entriesOf(selected.roles) }
-  if (interaction instanceof ChannelSelectMenuInteraction) return { values, channels: entriesOf(selected.channels) }
+  if (interaction instanceof RoleSelectMenuInteraction) return { values: valuesOf(interaction), roles: entriesOf(selected.roles) }
+  if (interaction instanceof ChannelSelectMenuInteraction) return { values: valuesOf(interaction), channels: entriesOf(selected.channels) }
   if (interaction instanceof MentionableSelectMenuInteraction) {
-    return { values, users: entriesOf(selected.users), members: entriesOf(selected.members), roles: entriesOf(selected.roles) }
+    return {
+      values: valuesOf(interaction),
+      users: entriesOf(selected.users),
+      members: entriesOf(selected.members),
+      roles: entriesOf(selected.roles),
+    }
   }
   return {}
+}
+
+/** A select menu's chosen strings or ids, a copy the handler may change; none where a mock leaves them unset. */
+function valuesOf(menu: { values?: unknown }): string[] {
+  return Array.isArray(menu.values) ? [...(menu.values as string[])] : []
 }
 
 /**

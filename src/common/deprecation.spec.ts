@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { ChatInputCommandInteraction, MessageFlags } from 'discord.js'
 import { SetMetadata } from '@src/common/decorator.js'
-import { forgetDeprecationWarnings, warnDeprecated, warnDeprecatedBehaviour } from '@src/common/deprecation.js'
+import { forgetDeprecationWarnings, hasWarned, warnDeprecated, warnDeprecatedBehaviour, warnOnce } from '@src/common/deprecation.js'
 import { HandlerExecutionContext } from '@src/common/execution-context.js'
 import { Logger } from '@src/common/logger.js'
 import { createMetadata } from '@src/common/metadata.js'
@@ -46,6 +46,19 @@ describe('warnDeprecatedBehaviour', () => {
       'Retrying it is deprecated; in the next major version (5.0) it rejects. Use a new one instead.',
       'Doing it is deprecated; in the next major version (5.0) it is refused. Use the other way instead.',
     ])
+  })
+})
+
+describe('hasWarned', () => {
+  it('tells whether the warning under a key has been logged this run, until the warnings are forgotten', () => {
+    const logger = new Logger('Spec')
+    const seen = [hasWarned('spec-key')]
+    warnOnce(logger, 'A spec warning.', 'spec-key')
+    seen.push(hasWarned('spec-key'), hasWarned('another-key'))
+    forgetDeprecationWarnings()
+    seen.push(hasWarned('spec-key'))
+
+    expect(seen).toEqual([false, true, false, false])
   })
 })
 

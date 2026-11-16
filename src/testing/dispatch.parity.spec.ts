@@ -23,7 +23,7 @@ const shown = (value: unknown): unknown =>
   Array.isArray(value)
     ? value.map(shown)
     : value && typeof value === 'object' && 'id' in value
-      ? `${typeof (value as { resolve?: unknown }).resolve === 'function' ? 'ref' : ''}#${(value as { id: string }).id}`
+      ? `${'resolve' in value && typeof value.resolve === 'function' ? 'ref' : ''}#${(value as { id: string }).id}`
       : value && typeof value === 'object'
         ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shown(item)]))
         : value
