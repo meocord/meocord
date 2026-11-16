@@ -227,8 +227,8 @@ export function isMockFunction(fn: unknown): fn is MockInstance {
  *   give back the implementation it was created with, through the runner's own setter, which a mock's behaviour may wrap;
  * - `clears` and `resets`: how many times clearAllMocks and resetAllMocks ran; each of meocord's own mocks compares
  *   them with what it last saw, and catches up the next time it is used;
- * - `live` and `generation`: how many of meocord's own mocks are alive, counted without holding them, and which
- *   forgetMockFn they were made after;
+ * - `mockMade`: whether createMockFn made a mock since forgetMockFn, kept or not; useMockFn refuses once it has;
+ * - `generation`: which forgetMockFn meocord's own mocks were made after;
  * - `ended`: for each generation forgetMockFn ended, the clears and resets it ended at, which its mocks still catch up to.
  */
 const mocks = shared('mocks', () => ({
@@ -238,15 +238,11 @@ const mocks = shared('mocks', () => ({
   restoreImpl: new WeakMap<object, () => void>(),
   clears: 0,
   resets: 0,
-  live: 0,
+  mockMade: false,
   generation: 0,
   ended: [] as { clears: number; resets: number }[],
 }))
 const collected = new FinalizationRegistry<WeakRef<MockInstance>>(ref => mocks.created.delete(ref))
-// A WeakRef would keep each mock, and what it holds, alive until the job that made it ends, so own mocks are only counted
-const ownCollected = new FinalizationRegistry<number>(generation => {
-  if (generation === mocks.generation) mocks.live--
-})
 
 /**
  * A mock function a test runner makes, as {@link useMockFn} takes it.
@@ -292,7 +288,9 @@ export type MockFnFactory = (impl?: (...args: any[]) => any) => RunnerMock
  * implementation. {@link resetAllMocks} puts that behaviour back where the runner's `mockReset` drops it, as jest's and
  * bun's do; a runner's own reset-all, such as jest's `resetMocks`, can't, so under jest and bun reset with
  * {@link resetAllMocks}. node:test's `mock.fn` records calls in a shape of its own, so under node:test leave meocord's
- * own function in place. Calling it again with the same factory does nothing; another, once a mock exists, throws.
+ * own function in place. Calling it again with the same factory does nothing; another throws once any mock has been
+ * made, kept or not. jest gives each module its own `jest.fn`, so under jest call it in the setup file only: a test
+ * file's `jest.fn` is another function, which throws there once a mock has been made.
  *
  * The runner's mocks stay in memory until the test yields to the event loop: Vitest holds every `vi.fn(impl)` from its
  * creation, and {@link clearAllMocks} reaches them through a weak reference, which holds until then too. A test that
@@ -300,8 +298,8 @@ export type MockFnFactory = (impl?: (...args: any[]) => any) => RunnerMock
  * `await new Promise(resolve => setTimeout(resolve, 0))`, or keeps them all until it does.
  *
  * @param factory - The runner's mock function factory: `vi.fn`, `jest.fn` or bun's `mock`.
- * @throws Error when a mock already exists from another factory, or when `factory` doesn't make a mock with jest's and
- *   Vitest's API.
+ * @throws Error when any mock has been made before it, kept or not, unless `factory` is the one it already set, or when
+ *   `factory` doesn't make a mock with jest's and Vitest's API.
  *
  * @example
  * ```ts
@@ -317,7 +315,7 @@ export type MockFnFactory = (impl?: (...args: any[]) => any) => RunnerMock
  */
 export function useMockFn(factory: MockFnFactory): void {
   if (factory === mocks.runnerFactory) return
-  if (mocks.live > 0 || [...mocks.created].some(ref => ref.deref() !== undefined)) {
+  if (mocks.mockMade) {
     throw new Error(
       "useMockFn() goes before any mock is made: a mock made before it keeps meocord's own function, and the two kinds " +
         "would mix. Call it once, in the test runner's setup file.",
@@ -351,7 +349,7 @@ export const usesRunnerMockFn = (): boolean => mocks.runnerFactory !== undefined
 export function forgetMockFn(): void {
   mocks.runnerFactory = undefined
   mocks.created.clear()
-  mocks.live = 0
+  mocks.mockMade = false
   mocks.ended[mocks.generation] = { clears: mocks.clears, resets: mocks.resets }
   mocks.generation++
 }
@@ -473,6 +471,7 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
       const setImpl = runnerMock.mockImplementation.bind(runnerMock)
       mocks.restoreImpl.set(runnerMock, () => setImpl(impl))
     }
+    mocks.mockMade = true
     return track(runnerMock)
   }
   // One persistent implementation and one queue of single-use ones, as in jest and vitest: the
@@ -651,7 +650,6 @@ export function createMockFn<T extends (...args: any[]) => any = (...args: any[]
     return mockFn
   }) as MockInstance<T>['mockName']
 
-  mocks.live++
-  ownCollected.register(mockFn, generation)
+  mocks.mockMade = true
   return mockFn
 }
