@@ -46,7 +46,13 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
   const breaks: ApiBreak[] = []
   const review: string[] = []
   const seen = new Set<string>()
-  const report = (path: string, problem: string) => breaks.push({ path, problem })
+  // A class's type parameters are reached through its type and its constructor; each break is reported once
+  const reported = new Set<string>()
+  const report = (path: string, problem: string) => {
+    if (reported.has(`${path}\0${problem}`)) return
+    reported.add(`${path}\0${problem}`)
+    breaks.push({ path, problem })
+  }
   const show = (type: ts.Type) => checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation)
 
   /** The name a type is declared under, with its type arguments, such as `Route<T>`; a named type is one declaration. */
@@ -91,11 +97,15 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
     parameters.reduce((out, parameter, index) => out.replace(new RegExp(`\\b${parameter.symbol.name}\\b`, 'g'), `T${index}`), text)
 
   /**
-   * A generic's type parameters, by position: none removed, none whose default is dropped, and each constraint the
-   * same or wider, so every type argument the old version took is still taken.
+   * A generic's type parameters, by position: none removed, none added without a default, none whose default is
+   * dropped, and each constraint the same or wider, so every type argument the old version took is still taken. A
+   * signature (`called`) that had none was called without type arguments, which the compiler infers, so it may gain any.
    */
-  function compareTypeParameters(path: string, olds: readonly ts.TypeParameter[], news: readonly ts.TypeParameter[]) {
+  function compareTypeParameters(path: string, olds: readonly ts.TypeParameter[], news: readonly ts.TypeParameter[], called = false) {
     if (news.length < olds.length) report(path, `has ${news.length} type parameters where it had ${olds.length}`)
+    // A list of as many type arguments as the old version had still fits when each parameter past it has a default
+    const required = news.findLastIndex(parameter => !parameter.getDefault()) + 1
+    if (required > olds.length && !(called && olds.length === 0)) report(path, `requires ${required} type arguments where it took ${olds.length}`)
     olds.forEach((old, index) => {
       const next = news[index]
       if (!next) return
@@ -150,7 +160,7 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
       if (required(newParams) > required(oldParams)) report(at, `requires ${required(newParams)} arguments where it required ${required(oldParams)}`)
       const oldParameters = old.getTypeParameters() ?? []
       if (oldParameters.length > 0 || (next.getTypeParameters() ?? []).length > 0) {
-        compareTypeParameters(at, oldParameters, next.getTypeParameters() ?? [])
+        compareTypeParameters(at, oldParameters, next.getTypeParameters() ?? [], true)
         // Its parameters and return name its own type parameters, which the checker cannot relate across two
         // declarations: compared as text, with each type parameter named by its position, and listed for review
         const text = asText
@@ -237,10 +247,6 @@ export function apiBreaks(checker: ts.TypeChecker, before: ts.SourceFile, after:
       }
       const oldType = checker.getDeclaredTypeOfSymbol(old)
       const newType = checker.getDeclaredTypeOfSymbol(next)
-      const params = (symbol: ts.Symbol) => (checker.getDeclaredTypeOfSymbol(symbol) as ts.InterfaceType).typeParameters?.length ?? 0
-      if (params(next) > params(old) && (next.declarations ?? []).some(declaration => (ts.getEffectiveTypeParameterDeclarations(declaration as ts.DeclarationWithTypeParameterChildren) ?? []).slice(params(old)).some(parameter => !parameter.default))) {
-        report(name, `requires ${params(next)} type arguments where it took ${params(old)}`)
-      }
       compareTypeParameters(name, declaredParameters(old), declaredParameters(next))
       if (oldType.flags & ts.TypeFlags.Object) compareType(name, oldType, newType)
       else if (!assignable(oldType, newType)) report(name, `narrowed: ${show(oldType)} → ${show(newType)}`)
