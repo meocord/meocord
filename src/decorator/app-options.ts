@@ -181,13 +181,14 @@ export interface MeoCordOptions<
    * call. A call or a lookup for an interaction follows what Discord has been told of it: once Discord has an
    * acknowledgement or an answer, it waits as long as the hooks run; while one is on its way, it waits for the outcome
    * without warning; told nothing, as without `@Defer`, it waits until 2 seconds after the interaction was created (or
-   * 2 seconds from the wait, with no creation time or one ahead of the clock), then goes ahead with a warning naming
-   * the hook, at once if those have passed. An autocomplete waits the same way for 1 second. A message, a reaction, an
-   * event and a bound function called with no interaction wait as long as the hooks run. `@Defer({ mode: 'auto' })`'s
-   * acknowledgement counts as on its way from the call's start until it is sent or an answer's Discord call replaces
-   * it; an answer still waiting for its theme doesn't hold it back, and is sent after it, the acknowledgement as
-   * private as that answer. A hook that throws counts as settled. The hooks still run one at a time, so a call also
-   * waits for a slower hook ordered before its own.
+   * 2 seconds from the first wait for it, with no creation time or one ahead of the clock), then goes ahead with a
+   * warning naming the hook, at once if those have passed. A call and the lookups for its interaction waiting at once
+   * go ahead together on one decision, the call's warning naming the hook. An autocomplete waits the same way for 1
+   * second. A message, a reaction, an event and a bound function called with no interaction wait as long as the hooks
+   * run. `@Defer({ mode: 'auto' })`'s acknowledgement counts as on its way from the call's start until it is sent or an
+   * answer's Discord call replaces it; an answer still waiting for its theme doesn't hold it back, and is sent after
+   * it, the acknowledgement as private as that answer. A hook that throws counts as settled. The hooks still run one at
+   * a time, so a call also waits for a slower hook ordered before its own.
    *
    * A `MeoCordTestingModule` takes it from here too: its calls wait only for the hooks `init({ ready: true })` runs,
    * and under strict mocks, which run them in the bot's order, for the same hooks as the bot's calls. A mock

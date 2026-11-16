@@ -19,14 +19,14 @@ export interface ToldState {
 
 /**
  * How long a wait for an interaction or an autocomplete may last; none waits until its hooks settle. `ms` counts from
- * `since`, the interaction's creation, or from the wait's start when that is earlier or unknown. For an interaction,
- * `told` follows what Discord was told: while an acknowledgement or answer is scheduled or on its way, the wait neither
- * ends nor warns; once Discord has one, it has no bound; told nothing, the bound holds. `deferred` marks a call whose
- * handler has `@Defer`, for the warning's advice. `ahead` settles when the call a lookup belongs to has gone ahead at
- * its own bound, which the lookup then follows, without a warning of its own.
+ * `since`, the interaction's creation, or from the first wait's start when that is earlier or unknown. For an
+ * interaction, `told` follows what Discord was told: while an acknowledgement or answer is scheduled or on its way, the
+ * wait neither ends nor warns; once Discord has one, it has no bound; told nothing, the bound holds. `deferred` marks a
+ * call whose handler has `@Defer`, for the warning's advice. `of` is the interaction bounded: its call and every theme
+ * lookup for it waiting at once share one decision on the bound.
  */
 export type ReadyBound =
-  | { kind: 'interaction' | 'autocomplete'; ms: number; since?: number; told?: ToldState; deferred?: boolean; ahead?: Promise<void> }
+  | { kind: 'interaction' | 'autocomplete'; ms: number; since?: number; told?: ToldState; deferred?: boolean; of?: object }
   | undefined
 
 /** One call about to wait: the handler it runs, the classes it runs, and how long it may wait. */
@@ -39,6 +39,32 @@ export interface ReadyWait {
   bound?: ReadyBound
   /** A theme lookup through `controller`, the app's theme resolver, rather than a handler's call. */
   lookup?: boolean
+}
+
+/** A call or a lookup waiting for the last unit it reaches to settle. */
+interface Waiter {
+  place: number
+  resolve: () => void
+  /** Takes it off its interaction's decision once its units settle first. */
+  leave?: () => void
+}
+
+/** A call or a lookup waiting on its interaction's bound. */
+interface Held {
+  call: ReadyWait
+  needed: readonly number[]
+  waiter: Waiter
+  goAhead: () => void
+}
+
+/** One interaction's decision on its bound, which every call and lookup for it waiting at once follows. */
+interface Decision {
+  key: object
+  /** What waits on it, in the order each came. */
+  held: Set<Held>
+  /** Whether the bound counts from the first wait rather than the interaction's creation, for the warning. */
+  fromWait: boolean
+  timer?: ReturnType<typeof setTimeout>
 }
 
 /** Where the gate keeps what a theme lookup through the resolver waits for, beside the resolver's own handlers. */
@@ -76,6 +102,7 @@ export function readyBoundFor(type: string, first: unknown, deferred = false): R
   const repliable = type === 'interaction' && typeof interaction?.isRepliable === 'function' && interaction.isRepliable() === true
   return {
     ...bound,
+    ...(typeof first === 'object' && first !== null && { of: first }),
     ...(typeof created === 'number' && Number.isFinite(created) && { since: created }),
     ...(repliable && { told: responseOf(first as Parameters<typeof responseOf>[0]) }),
     ...(deferred && { deferred }),
@@ -102,11 +129,13 @@ export class ReadyGate {
   private settledCount = 0
   /** Whether the hooks' pass has ended, settled or stopped, after which no call waits. */
   private open = false
-  private readonly waiters = new Set<{ place: number; resolve: () => void }>()
+  private readonly waiters = new Set<Waiter>()
   /** The places of the units each handler reaches, in order, by class and method. */
   private readonly needs = new WeakMap<object, Map<string, readonly number[]>>()
   /** The units a bound has already warned about, each once. */
   private readonly warned = new Set<unknown>()
+  /** The decision pending on each interaction's bound, while a call or a lookup for it waits. */
+  private readonly decisions = new WeakMap<object, Decision>()
 
   constructor(
     private readonly units: readonly LifecycleUnit[],
@@ -141,36 +170,72 @@ export class ReadyGate {
   }
 
   /**
-   * Settles once the units `call` reaches have settled, or its bound has passed, with a warning; `true` when it went
-   * ahead before they had.
+   * Settles once the units `call` reaches have settled, or its bound has passed, with a warning. The call and the theme
+   * lookups for one interaction that wait at once share one decision on its bound, so all of them go ahead together,
+   * the calls first, or none does.
    */
-  async wait(call: ReadyWait): Promise<boolean> {
-    if (!this.holds(call)) return false
+  async wait(call: ReadyWait): Promise<void> {
+    if (!this.holds(call)) return
     const needed = this.neededBy(call)
-    const last = needed.at(-1)!
-    const waiter: { place: number; resolve: () => void } = { place: last, resolve: () => undefined }
+    const waiter: Waiter = { place: needed.at(-1)!, resolve: () => undefined }
     const reached = new Promise<void>(resolve => {
       waiter.resolve = resolve
       this.waiters.add(waiter)
     })
-    if (!call.bound) return reached.then(() => false)
-    const { ms, since, told, ahead } = call.bound
-    // From the interaction's creation, or from now when that is earlier, so a host clock running late can't lengthen it
+    if (!call.bound) return reached
+    const decision = this.decisionFor(call.bound)
+    const goneAhead = Promise.withResolvers<void>()
+    const held: Held = { call, needed, waiter, goAhead: goneAhead.resolve }
+    decision.held.add(held)
+    waiter.leave = () => {
+      decision.held.delete(held)
+      // Its last waiter gone, the bound's timer has no one to decide for
+      if (decision.held.size === 0) this.drop(decision)
+    }
+    await Promise.race([reached, goneAhead.promise])
+  }
+
+  /**
+   * The decision pending on `bound`'s interaction, or a new one: due once the bound has passed, counted from the
+   * interaction's creation, or from now when that is earlier or unknown so a host clock running late can't lengthen
+   * it, and for an interaction, once Discord has been told nothing and nothing is on its way.
+   */
+  private decisionFor(bound: NonNullable<ReadyBound>): Decision {
+    // Every wait for one interaction reads the same bound: its kind, creation time and told state come from the
+    // interaction itself; only `deferred` differs, which each wait's own warning reads
+    const key = bound.of ?? {}
+    const pending = this.decisions.get(key)
+    if (pending) return pending
+    const { ms, since, told } = bound
     const fromWait = since === undefined || since > Date.now()
-    const left = fromWait ? ms : Math.max(0, since + ms - Date.now())
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const passed = new Promise<true>(resolve => {
-      timer = setTimeout(() => resolve(true), left)
+    const decision: Decision = { key, held: new Set(), fromWait }
+    this.decisions.set(key, decision)
+    const passed = new Promise<void>(resolve => {
+      decision.timer = setTimeout(resolve, fromWait ? ms : Math.max(0, since + ms - Date.now()))
     })
-    // For an interaction, due only once the bound has passed with nothing told and nothing on its way
-    const due = told ? passed.then(() => untold(told)) : passed
-    const late = await Promise.race([reached.then(() => false as const), due, ...(ahead ? [ahead.then(() => 'with its call' as const)] : [])])
-    clearTimeout(timer)
-    if (!late) return false
-    this.waiters.delete(waiter)
-    // The call it belongs to has warned, if the hook was not named already
-    if (late !== 'with its call') this.warnLate(call, needed, fromWait)
-    return true
+    void (told ? passed.then(() => untold(told)) : passed).then(() => this.decide(decision))
+    return decision
+  }
+
+  /**
+   * Lets everything `decision` holds go ahead, the calls before the lookups, each warning once per hook, so the hook is
+   * named by the call's warning with its advice. A wait that starts later decides afresh.
+   */
+  private decide(decision: Decision): void {
+    this.drop(decision)
+    // A stable sort keeps each kind in the order it came
+    const held = [...decision.held].sort((a, b) => Number(a.call.lookup === true) - Number(b.call.lookup === true))
+    decision.held.clear()
+    for (const { call, needed, waiter, goAhead } of held) {
+      this.waiters.delete(waiter)
+      this.warnLate(call, needed, decision.fromWait)
+      goAhead()
+    }
+  }
+
+  private drop(decision: Decision): void {
+    clearTimeout(decision.timer)
+    if (this.decisions.get(decision.key) === decision) this.decisions.delete(decision.key)
   }
 
   /**
@@ -183,11 +248,13 @@ export class ReadyGate {
     if (!resolver) return undefined
     const call: ReadyWait = { controller: resolver, methodName: THEME_LOOKUP, classes: () => [resolver], lookup: true }
     // The bound is read only for a lookup that waits
-    return this.holds(call) ? this.wait({ ...call, bound: bound() }).then(() => undefined) : undefined
+    return this.holds(call) ? this.wait({ ...call, bound: bound() }) : undefined
   }
 
-  private release(waiter: { resolve: () => void }): void {
-    this.waiters.delete(waiter as never)
+  private release(waiter: Waiter): void {
+    this.waiters.delete(waiter)
+    // Released by its hooks, it is no longer the bound's to decide
+    waiter.leave?.()
     waiter.resolve()
   }
 
