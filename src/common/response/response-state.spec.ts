@@ -1082,7 +1082,10 @@ describe("respond() under @Defer's timer and locks", () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
       const raw = command()
       const through = command()
-      for (const interaction of [raw, through]) responseOf(interaction).scheduleAcknowledge(1000)
+      for (const interaction of [raw, through]) {
+        responseOf(interaction).configure({})
+        responseOf(interaction).scheduleAcknowledge(1000)
+      }
 
       await raw.reply('raw')
       await respond(through).send('through respond')
@@ -1095,6 +1098,7 @@ describe("respond() under @Defer's timer and locks", () => {
       warn.mockClear()
       vi.stubEnv('NODE_ENV', 'production')
       const quiet = command()
+      responseOf(quiet).configure({})
       responseOf(quiet).scheduleAcknowledge(1000)
       await quiet.reply('raw')
       await vi.advanceTimersByTimeAsync(1000)
@@ -1133,9 +1137,140 @@ describe("respond() under @Defer's timer and locks", () => {
       await respond(through).send('answered')
       const none = command()
 
-      for (const interaction of [raw, through, none]) await responseOf(interaction).release()
+      for (const interaction of [raw, through, none]) {
+        responseOf(interaction).configure({})
+        await responseOf(interaction).release()
+      }
 
       expect(warn).toHaveBeenCalledTimes(1)
+    })
+
+    // Whichever of the timer, an answer and release() learns of a raw first answer, it warns once per interaction
+    describe('the raw-answer warning', () => {
+      const rawWarning =
+        'An interaction under @Defer was answered with a raw discord.js call; answer through respond(interaction) so its state stays in step.'
+      const warnings = () =>
+        (vi.mocked(Logger.prototype.warn).mock.calls as unknown[][]).filter(([text]) => text === rawWarning).length
+      /** A command under `@Defer({ mode: 'auto' })` with its 1 s timer set, as @Defer leaves it. */
+      function underAuto() {
+        const interaction = command()
+        responseOf(interaction).configure({})
+        responseOf(interaction).scheduleAcknowledge(1000)
+        return interaction
+      }
+      beforeEach(() => {
+        vi.useFakeTimers()
+        vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+      })
+
+      it('warns once for a raw reply before the timer and release() after it', async () => {
+        const interaction = underAuto()
+        await interaction.reply('raw')
+        await vi.advanceTimersByTimeAsync(1000)
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(1)
+      })
+
+      it('warns once for a raw reply and release() both before the timer', async () => {
+        const interaction = underAuto()
+        await interaction.reply('raw')
+        await responseOf(interaction).release()
+        await vi.advanceTimersByTimeAsync(1000)
+        expect(warnings()).toBe(1)
+      })
+
+      it.each([
+        ['a reply then an edit, both raw', async (interaction: ReturnType<typeof command>) => void (await interaction.editReply('raw again'))],
+        ['a raw reply then an answer through respond()', async (interaction: ReturnType<typeof command>) => void (await respond(interaction).send('through'))],
+      ] as const)('warns once for %s, with the timer pending and release() after it', async (_how, then) => {
+        const interaction = underAuto()
+        await interaction.reply('raw')
+        await then(interaction)
+        await vi.advanceTimersByTimeAsync(1000)
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(1)
+      })
+
+      it.each([
+        ['a raw deferReply of a command', () => command(), async (interaction: ReturnType<typeof command>) => void (await interaction.deferReply())],
+        ["a raw deferUpdate of a component", () => button(), async (interaction: ReturnType<typeof button>) => void (await interaction.deferUpdate())],
+      ] as const)('warns once for %s as the first answer, with the timer pending and release() after it', async (_how, make, defer) => {
+        const interaction = make()
+        responseOf(interaction).configure({})
+        responseOf(interaction).scheduleAcknowledge(1000)
+        await defer(interaction as never)
+        await vi.advanceTimersByTimeAsync(1000)
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(1)
+      })
+
+      it('warns once for a raw reply its state was read after before @Defer configured it, as in an observer\'s onStart', async () => {
+        const interaction = command()
+        await interaction.reply('raw')
+        expect(responseOf(interaction).state).toBe('replied')
+        expect(warnings()).toBe(0)
+        responseOf(interaction).configure({})
+        responseOf(interaction).scheduleAcknowledge(1000)
+        await vi.advanceTimersByTimeAsync(1000)
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(1)
+      })
+
+      it('warns once for a raw reply when a second call on the interaction configures its state again', async () => {
+        const interaction = underAuto()
+        await interaction.reply('raw')
+        expect(responseOf(interaction).state).toBe('replied')
+        responseOf(interaction).configure({})
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(1)
+      })
+
+      it("warns for a guard's raw answer before a denial once", async () => {
+        const interaction = underAuto()
+        await interaction.reply('raw')
+        await responseOf(interaction).abandon()
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(1)
+      })
+
+      it.each([
+        ['an answer through respond() before the timer', async (interaction: ReturnType<typeof command>) => void (await respond(interaction).send('through'))],
+        ['no answer, the timer deferring', async () => undefined],
+        ["a raw edit of the timer's deferral", async (interaction: ReturnType<typeof command>) => {
+          await vi.advanceTimersByTimeAsync(1000)
+          await interaction.editReply('raw')
+        }],
+      ] as const)('never warns for %s', async (_how, answer) => {
+        const interaction = underAuto()
+        await answer(interaction)
+        await vi.advanceTimersByTimeAsync(1000)
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(0)
+      })
+
+      it('never warns outside @Defer, for an answer through respond() after a raw one', async () => {
+        const interaction = command()
+        await interaction.reply('raw')
+        await respond(interaction).followUp('through')
+        expect(warnings()).toBe(0)
+      })
+
+      it('never warns on release() of a state never configured, after a raw reply, and reads it as replied', async () => {
+        const interaction = command()
+        await interaction.reply('raw')
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(0)
+        expect(responseOf(interaction).state).toBe('replied')
+      })
+
+      it('never warns in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production')
+        const interaction = underAuto()
+        await interaction.reply('raw')
+        await vi.advanceTimersByTimeAsync(1000)
+        await responseOf(interaction).release()
+        expect(warnings()).toBe(0)
+      })
     })
 
     it("never deletes a component's message a raw acknowledgement deferred", async () => {
