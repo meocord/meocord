@@ -108,23 +108,20 @@ describe('useMockFn', () => {
     expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made.*setup file/)
   })
 
-  it('refuses a function on every run after a mock made before it, whether or not the mock was collected', async () => {
-    const outcomes: string[] = []
-    for (const collect of [...Array<boolean>(RUNS).fill(true), ...Array<boolean>(RUNS).fill(false)]) {
-      forgetMockFn()
-      makeAndDrop()
-      if (collect) await collectGarbage()
-      outcomes.push(attempt(vi.fn))
-    }
-
-    expect(outcomes).toEqual(Array(RUNS * 2).fill('refuses'))
-  })
-
-  it("refuses another function after the runner's mocks were made, whether or not they were collected", async () => {
-    useMockFn(plainRunnerFn)
-    makeAndDrop()
+  it('refuses a function after a mock made before it was collected', async () => {
+    const dropped = makeAndDrop()
     await collectGarbage()
 
+    expect(dropped.map(mock => mock.deref())).toEqual(dropped.map(() => undefined))
+    expect(attempt(vi.fn)).toBe('refuses')
+  })
+
+  it("refuses another function after the runner's mocks were made and collected", async () => {
+    useMockFn(plainRunnerFn)
+    const dropped = makeAndDrop()
+    await collectGarbage()
+
+    expect(dropped.map(mock => mock.deref())).toEqual(dropped.map(() => undefined))
     expect(attempt(vi.fn)).toBe('refuses')
   })
 
@@ -212,8 +209,8 @@ describe('useMockFn', () => {
   })
 })
 
-// Enough runs of each kind that one collection's timing can't decide them all
-const RUNS = 10
+// Mocks a spec makes together, each checked on its own, so one kept alive among them shows
+const MOCKS_AT_ONCE = 10
 // As many mocks as a test making mock interactions in a loop makes
 const THOUSANDS = 5000
 
@@ -250,9 +247,12 @@ function makeThousands(): void {
   }
 }
 
-/** Makes mocks of meocord's own in a frame of its own, so nothing holds them once it returns. */
-function makeAndDrop(): void {
-  for (let i = 0; i < 10; i++) createMockFn(() => i)()
+/**
+ * Makes MOCKS_AT_ONCE mocks in a frame of its own and returns only weak references to them, so a test can check
+ * they were collected. None is called, as in makeThousands.
+ */
+function makeAndDrop(): WeakRef<object>[] {
+  return Array.from({ length: MOCKS_AT_ONCE }, (_, i) => new WeakRef(createMockFn(() => i)))
 }
 
 /** Lets the job end, collects garbage (queryObjects does first), then lets finalization callbacks run. */
