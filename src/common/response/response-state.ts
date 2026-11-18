@@ -510,6 +510,8 @@ export class InteractionResponse implements ResponseState {
   private suppressNotifications = false
   // Set by @Defer's first step, so an error can name what acknowledged the interaction
   private underDefer = false
+  /** Whether a raw discord.js call answered first, learned of in `sync()` whether or not `@Defer` configured the state yet. */
+  #answeredRaw = false
   private timer?: ReturnType<typeof setTimeout>
   /** A lock `@Defer({ mode: 'auto' })` asked for before acknowledging, applied once the timer acknowledges. */
   private pendingLock?: ResponseLockOptions
@@ -575,6 +577,11 @@ export class InteractionResponse implements ResponseState {
   }
 
   private sync(): void {
+    // Where the state first learns of a first answer it didn't make; moving the phase on, it learns of it once
+    if (this.phase === 'unanswered' && this.calls.length === 0 && (this.interaction.replied || this.interaction.deferred)) {
+      this.#answeredRaw = true
+      this.warnAnsweredOutside()
+    }
     if (this.interaction.replied) this.phase = 'replied'
     else if (this.interaction.deferred && this.phase === 'unanswered') this.phase = 'deferred'
   }
@@ -668,7 +675,10 @@ export class InteractionResponse implements ResponseState {
   /** Sets what `@Defer` asks of every answer, notifications suppressed on new messages, and marks the state as under `@Defer`. */
   configure({ suppressNotifications = false }: { suppressNotifications?: boolean }): void {
     this.suppressNotifications = suppressNotifications
+    // A raw first answer learned of before, as by a state read in an observer's onStart, is warned of now
+    const learnedBefore = this.#answeredRaw && !this.underDefer
     this.underDefer = true
+    if (learnedBefore) this.warnAnsweredOutside()
   }
 
   /**
@@ -684,7 +694,6 @@ export class InteractionResponse implements ResponseState {
       this.sync()
       if (this.phase !== 'unanswered') {
         this.toldChange()
-        this.warnIfAnsweredOutside()
         return
       }
       const telling = this.telling()
@@ -720,8 +729,9 @@ export class InteractionResponse implements ResponseState {
     if (scheduled) this.toldChange()
   }
 
-  private warnIfAnsweredOutside(): void {
-    if (this.calls.length === 0 && (this.interaction.replied || this.interaction.deferred) && development()) {
+  /** Warns, under `@Defer` and in development, that a raw discord.js call answered the interaction first. */
+  private warnAnsweredOutside(): void {
+    if (this.underDefer && development()) {
       logger.warn(
         'An interaction under @Defer was answered with a raw discord.js call; answer through respond(interaction) ' +
           'so its state stays in step.',
@@ -845,7 +855,8 @@ export class InteractionResponse implements ResponseState {
     return this.queued(async () => {
       // A component's handler that returned before the 'auto' timer, unanswered, gets eager's invisible acknowledgement
       if (waiting && !answersWithOwnMessage(this.interaction)) await this.acknowledgeUnanswered()
-      this.warnIfAnsweredOutside()
+      // A raw answer the handler made with nothing since is learned of here
+      this.sync()
       try {
         await this.restore()
       } catch (error) {
