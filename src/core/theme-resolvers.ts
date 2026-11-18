@@ -64,8 +64,23 @@ type Kind = 'guild' | 'user'
 
 const logger = new Logger('Theme')
 
-/** A resolver that did not answer in time. */
-class ThemeLookupTimeout extends Error {}
+/** What a lookup that did not answer in time rejects with, told apart by identity alone, which no value can intercept. */
+const TIMED_OUT = Symbol('themeFor lookup timed out')
+
+/**
+ * What a resolver threw or rejected with, as a log line names it. Reading it may throw too, as a getter or a Proxy may;
+ * then it is named as such, so describing a failure can never fail.
+ */
+function describeThrown(error: unknown): string {
+  try {
+    return String((error as Error)?.message ?? error)
+  } catch {
+    return 'a value that throws as it is read'
+  }
+}
+
+/** What a resolver gave for one id: its result, or what it threw or rejected with. */
+type Outcome = { result: unknown } | { error: unknown }
 
 /** One resolver's results, by server or user id: each kept until it expires, the oldest dropped past the limit. */
 class ResolverCache {
@@ -92,6 +107,12 @@ class ResolverCache {
     private readonly timeoutMs: number,
   ) {}
 
+  /** Whether `id` has a result cached as of `now`, and that result, without looking it up. */
+  peek(id: string, now: number): { layer: ThemeOverride | undefined } | undefined {
+    const entry = this.entries.get(id)
+    return entry && entry.expiresAt > now ? { layer: entry.layer } : undefined
+  }
+
   /** The layer for `id` as of `now`: at once when it is cached, else a promise of it that never rejects. */
   lookup(id: string, now: number): ThemeOverride | undefined | Promise<ThemeOverride | undefined> {
     const entry = this.entries.get(id)
@@ -101,8 +122,11 @@ class ResolverCache {
     }
     const inFlight = this.pending.get(id)
     if (inFlight) return inFlight.result
+    const attempt = this.attempt(id)
+    // A resolver that answers or throws synchronously gives its layer at once, so a call it serves waits for nothing
+    if (!(attempt instanceof Promise)) return this.settle(id, attempt, true)
     const token = {}
-    const result = this.fetch(id, token)
+    const result = this.fetch(id, token, attempt)
     this.pending.set(id, { token, result })
     return result
   }
@@ -122,15 +146,32 @@ class ResolverCache {
     this.failing.delete(id)
   }
 
-  private async fetch(id: string, token: object): Promise<ThemeOverride | undefined> {
-    let outcome: { result: unknown } | { error: unknown }
+  /** The resolver's outcome for `id`: at once when it answers or throws synchronously, else a promise of its answer. */
+  private attempt(id: string): Outcome | Promise<unknown> {
+    // Never throws: whatever goes wrong, reading the answer included, is the resolver failing
     try {
-      outcome = { result: await this.within(id) }
+      // Outside the call's theme, which the resolver has no use for and whatever it starts would otherwise keep
+      const answer: unknown = outsideThemeScope(() => this.resolve(id))
+      // Any thenable, not only a native promise
+      return typeof (answer as { then?: unknown } | null | undefined)?.then === 'function' ? Promise.resolve(answer) : { result: answer }
+    } catch (error) {
+      return { error }
+    }
+  }
+
+  private async fetch(id: string, token: object, attempt: Promise<unknown>): Promise<ThemeOverride | undefined> {
+    let outcome: Outcome
+    try {
+      outcome = { result: await this.within(attempt) }
     } catch (error) {
       outcome = { error }
     }
     // An invalidation while it was looked up forgot the id: the result still serves the calls that asked, and that is all
-    const current = this.pending.get(id)?.token === token
+    return this.settle(id, outcome, this.pending.get(id)?.token === token)
+  }
+
+  /** The layer `outcome` gives, kept for `id` and counted in its failures and answers when `current`. */
+  private settle(id: string, outcome: Outcome, current: boolean): ThemeOverride | undefined {
     let layer: ThemeOverride | undefined
     let keepMs = this.ttlMs
     if ('error' in outcome) {
@@ -149,15 +190,13 @@ class ResolverCache {
     return layer
   }
 
-  /** The resolver's result, or a rejection when it throws, rejects or passes the timeout. */
-  private within(id: string): Promise<unknown> {
-    // Outside the call's theme, which the resolver has no use for and whatever it starts would otherwise keep
-    const attempt = Promise.resolve().then(() => outsideThemeScope(() => this.resolve(id)))
+  /** The resolver's answer, or a rejection when it rejects or passes the timeout. */
+  private within(attempt: Promise<unknown>): Promise<unknown> {
     // A rejection after the timeout has nobody left to hear it
     attempt.catch(() => undefined)
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new ThemeLookupTimeout()), this.timeoutMs)
+      timer = setTimeout(() => reject(TIMED_OUT), this.timeoutMs)
       timer.unref?.()
     })
     return Promise.race([attempt, timeout]).finally(() => clearTimeout(timer))
@@ -178,7 +217,7 @@ class ResolverCache {
       problems = themeProblems(layer, where, { forLog: true })
     } catch (error) {
       // A cycle overflows the copy, and a getter may throw: the result is left out as one with problems is
-      problems = [`${where}: theme cannot be read: ${quoteForLog(String((error as Error)?.message ?? error))}`]
+      problems = [`${where}: theme cannot be read: ${quoteForLog(describeThrown(error))}`]
     }
     if (problems.length === 0) {
       if (report) this.warned.delete(id)
@@ -200,8 +239,8 @@ class ResolverCache {
   private failed(id: string, error: unknown): void {
     const now = Date.now()
     const failing = this.failing.get(id)
-    const cause = error instanceof ThemeLookupTimeout ? `did not answer within ${this.timeoutMs} ms` : String((error as Error)?.message ?? error)
-    const reason = error instanceof ThemeLookupTimeout ? cause : `failed: ${cause}`
+    const cause = error === TIMED_OUT ? `did not answer within ${this.timeoutMs} ms` : describeThrown(error)
+    const reason = error === TIMED_OUT ? cause : `failed: ${cause}`
     const backoff = `${THEME_FAILURE_BACKOFF_MS / 1000}s`
     let alone: string
     if (failing) {
@@ -295,12 +334,18 @@ export function resolverCaches(
 
 const idOf = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
 
+/** The server and user whose themes a call takes, read once from its arguments as its scope is made. */
+export interface ThemeTargets {
+  guildId?: string
+  userId?: string
+}
+
 /**
  * The server and user a call comes from: an interaction's or a message's server and its user or author; a
  * reaction's message's server and the user who reacted, which a reaction handler gets second as `{ user }` and a
  * reaction event as the `User`; an event argument's server and user, when it has them.
  */
-export function themeTargets(args: readonly unknown[]): { guildId?: string; userId?: string } {
+export function themeTargets(args: readonly unknown[]): ThemeTargets {
   const [first, second] = args as [Record<string, any> | undefined, Record<string, any> | undefined]
   if (!first || typeof first !== 'object') return {}
   // An interaction, a message and a reaction by their class, so nothing is read that the class lacks
@@ -334,26 +379,45 @@ function serverOf(target: { guildId?: unknown; guild?: { id?: unknown } | null }
 }
 
 /**
- * The layers the call's server and user give, in that order: at once when every one is cached, else a promise of
+ * The layers a call's server and user give, in that order: at once when every one is cached, else a promise of
  * them that never rejects. `undefined` when the call has neither a server nor a user a resolver is set for.
  */
 export function lookupLayers(
   caches: ThemeResolverCaches,
-  args: readonly unknown[],
+  targets: ThemeTargets,
   after?: Promise<void>,
 ): [ThemeOverride | undefined, ThemeOverride | undefined] | Promise<[ThemeOverride | undefined, ThemeOverride | undefined]> | undefined {
-  const { guildId, userId } = themeTargets(args)
+  const { guildId, userId } = targets
   const byGuild = caches.guild && guildId !== undefined ? caches.guild : undefined
   const byUser = caches.user && userId !== undefined ? caches.user : undefined
   if (!byGuild && !byUser) return undefined
   // Once `after` settles, as a call under waitForReady starts its lookup only when its wait for the hooks is over
-  if (after) return after.then(() => lookupLayers(caches, args)!)
+  if (after) return after.then(() => lookupLayers(caches, targets)!)
   const now = performance.now()
   const guild = byGuild?.lookup(guildId!, now)
   const user = byUser?.lookup(userId!, now)
   // Two misses are looked up together, so the call waits for the slower, not both in turn
   if (guild instanceof Promise || user instanceof Promise) return Promise.all([guild, user])
   return [guild, user]
+}
+
+/**
+ * What a call's server and user give from the cache alone, without looking anything up: their layers when every one
+ * is cached, `uncached` when one has to be looked up, `undefined` when the call has neither a server nor a user a
+ * resolver is set for.
+ */
+export function cachedLayers(
+  caches: ThemeResolverCaches,
+  targets: ThemeTargets,
+): { layers: [ThemeOverride | undefined, ThemeOverride | undefined] } | 'uncached' | undefined {
+  const { guildId, userId } = targets
+  const byGuild = caches.guild && guildId !== undefined ? caches.guild : undefined
+  const byUser = caches.user && userId !== undefined ? caches.user : undefined
+  if (!byGuild && !byUser) return undefined
+  const now = performance.now()
+  const guild = byGuild ? byGuild.peek(guildId!, now) : { layer: undefined }
+  const user = byUser ? byUser.peek(userId!, now) : { layer: undefined }
+  return guild && user ? { layers: [guild.layer, user.layer] } : 'uncached'
 }
 
 // One per process for this meocord version, as the rest of an app's theme state is

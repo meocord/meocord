@@ -34,6 +34,16 @@ function press(customId: string, { guildId = GUILD, userId = ADA, client }: { gu
   return interaction
 }
 
+/** Counts each read of a click's server and user id, the two values a theme lookup takes from it. */
+function counted(click: ButtonInteraction) {
+  const reads = { guildId: 0, userId: 0 }
+  const { guildId, user } = click
+  const { id } = user
+  Object.defineProperty(click, 'guildId', { get: () => (reads.guildId++, guildId) })
+  Object.defineProperty(user, 'id', { get: () => (reads.userId++, id) })
+  return reads
+}
+
 /** What the first reply method a click answered with sent. */
 const sentColour = (click: ButtonInteraction) => {
   const [call] = [click.update, click.reply].flatMap(method => (method as unknown as { mock: { calls: unknown[][] } }).mock.calls)
@@ -54,6 +64,7 @@ class Poll {
       await respond(click).send({ embeds: [{ description: 'Picked' }] })
       seen.push(['answered', click.user.id, ...theme()])
     }))
+    collector.on('press', bindTheme((_click: ButtonInteraction) => void seen.push(['press', ...theme()])))
     collector.on('end', bindTheme((_collected: Map<string, unknown>, reason: string) => void seen.push(['end', reason, ...theme()])))
     collector.on('nest', bindTheme(() => {
       collector.on('nested', bindTheme((click: ButtonInteraction) => void seen.push(['nested', click.user.id, ...theme()])))
@@ -120,6 +131,41 @@ describe('a listener bindTheme wraps, with themeFor', () => {
       ['collect', BEN, DEFAULT_THEME.colors.primary, '#0000A1'],
       ['collect', BEN, '#00000B', '#0000A1'],
     ])
+  })
+
+  it('answers each member who clicks in their own theme the same from a resolver answering through a promise', async () => {
+    const module = moduleWith({ user: async ({ user }) => colour(user.id === ADA ? '#00000A' : '#00000B') })
+    await module.invoke(Poll, 'poll', press('poll'))
+    collector.emit('collect', press('pick'))
+    collector.emit('collect', press('pick', { userId: BEN }))
+    await pause()
+    collector.emit('collect', press('pick', { userId: BEN }))
+
+    expect(seen).toEqual([
+      ['collect', ADA, '#00000A', '#0000A1'],
+      ['collect', BEN, DEFAULT_THEME.colors.primary, '#0000A1'],
+      ['collect', BEN, '#00000B', '#0000A1'],
+    ])
+  })
+
+  it.each([
+    ['looked up', false],
+    ['cached', true],
+  ] as const)("reads a click's server and user once, with their themes %s", async (_how, cached) => {
+    const module = moduleWith({ guild: () => colour('#00000D'), user: () => colour('#00000E') })
+    await module.invoke(Poll, 'poll', press('poll'))
+    if (cached) {
+      collector.emit('press', press('pick', { userId: BEN }))
+      await pause()
+    }
+    const click = press('pick', { userId: BEN })
+    const reads = counted(click)
+    collector.emit('press', click)
+    await pause()
+
+    // A listener's synchronous part runs before a lookup it has to wait for
+    expect(seen.at(-1)).toEqual(['press', cached ? '#00000E' : DEFAULT_THEME.colors.primary, '#0000A1'])
+    expect(reads).toEqual({ guildId: 1, userId: 1 })
   })
 
   it('answers another server, from a listener bound in one server\'s call, in that server\'s theme', async () => {

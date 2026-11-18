@@ -471,6 +471,18 @@ const tellings = new WeakMap<
   { inFlight: number; answered: boolean; preparing?: { ephemeral: boolean }; changed: PromiseWithResolvers<void> }
 >()
 
+/**
+ * An acknowledgement asked for and still queued: its options, whether it still applies when a step would let it go
+ * first, and the attempt it made first, if one did.
+ */
+interface AskedAcknowledgement {
+  options: { ephemeral?: boolean }
+  applies: () => boolean
+  ahead?: Promise<void>
+  /** Called with that attempt as it goes first, for whoever asked to settle with it rather than with the queue. */
+  wentAhead?: (attempt: Promise<void>) => void
+}
+
 /** The response state behind `respond()`, with what `@Defer` and the testing helpers use besides. */
 export class InteractionResponse implements ResponseState {
   // An own key, where it has always been, made a getter by the constructor: it reads the interaction's guildId, which
@@ -515,6 +527,8 @@ export class InteractionResponse implements ResponseState {
   private timer?: ReturnType<typeof setTimeout>
   /** A lock `@Defer({ mode: 'auto' })` asked for before acknowledging, applied once the timer acknowledges. */
   private pendingLock?: ResponseLockOptions
+  /** An acknowledgement asked for and still queued, which a step waiting only for its theme lets go first. */
+  readonly #askedAcknowledgements = new Set<AskedAcknowledgement>()
 
   constructor(readonly interaction: RepliableInteraction) {
     Object.defineProperty(this, 'location', {
@@ -632,7 +646,62 @@ export class InteractionResponse implements ResponseState {
   }
 
   acknowledge(options: { ephemeral?: boolean } = {}): Promise<void> {
-    return this.queued(() => this.acknowledgeNow(options))
+    return this.acknowledgeInTime(options)
+  }
+
+  /**
+   * Acknowledges once the steps asked for before have settled, then runs `then` in the queue; unless one of them only
+   * waits for its theme, as an answer outside a call or before the pipeline's own wait may.
+   */
+  private acknowledgeInTime(options: { ephemeral?: boolean }, then?: () => Promise<void>): Promise<void> {
+    // Only a step already queued can let it go first
+    const behind = this.pending > 0
+    const ahead = Promise.withResolvers<void>()
+    const queued = this.askAcknowledgement(
+      options,
+      wentAhead => {
+        // Gone first, it is that attempt that settles this one, failure included
+        if (wentAhead) return wentAhead
+        const acknowledged = this.acknowledgeNow(options)
+        return then ? acknowledged.then(then) : acknowledged
+      },
+      undefined,
+      attempt => ahead.resolve(attempt),
+    )
+    // Gone ahead of a step waiting for its theme, whoever asked waits only for the acknowledgement, not for that step
+    return behind ? Promise.race([queued, ahead.promise]) : queued
+  }
+
+  /**
+   * Queues `step`, which acknowledges, unless a step ahead of it only waits for its theme: that would hold the
+   * acknowledgement past its time, so it goes first, now or once that step starts waiting, if `applies` still says so
+   * then, and the step answers once its theme is found. Standing in for that answer's own first reply, it is as private
+   * as that answer. `step` gets the attempt that went first, if one did.
+   */
+  private askAcknowledgement(
+    options: { ephemeral?: boolean },
+    step: (ahead: Promise<void> | undefined) => Promise<void>,
+    applies: () => boolean = () => true,
+    wentAhead?: (attempt: Promise<void>) => void,
+  ): Promise<void> {
+    const asked: AskedAcknowledgement = { options, applies, wentAhead }
+    const { preparing } = this.telling()
+    if (preparing) this.goAhead(asked, preparing.ephemeral)
+    else this.#askedAcknowledgements.add(asked)
+    return this.queued(() => {
+      this.#askedAcknowledgements.delete(asked)
+      return step(asked.ahead)
+    })
+  }
+
+  /** Lets an acknowledgement asked for go ahead of a step waiting for its theme, as private as that step's answer. */
+  private goAhead(asked: AskedAcknowledgement, ephemeral: boolean): void {
+    if (asked.ahead || !asked.applies()) return
+    this.#askedAcknowledgements.delete(asked)
+    asked.ahead = this.acknowledgeNow({ ...asked.options, ephemeral })
+    // Its failure reaches whoever asked, once; until then it is not unhandled
+    asked.ahead.catch(() => undefined)
+    asked.wentAhead?.(asked.ahead)
   }
 
   private acknowledgeNow(options: { ephemeral?: boolean } = {}): Promise<void> {
@@ -664,12 +733,9 @@ export class InteractionResponse implements ResponseState {
     }
   }
 
-  private async acknowledgeUnanswered(options: { ephemeral?: boolean } = {}): Promise<void> {
-    try {
-      await this.acknowledgeNow(options)
-    } catch (error) {
-      logFailedSend(logger, 'acknowledge', error)
-    }
+  /** Acknowledges an interaction a call leaves unanswered, in time as {@link acknowledgeInTime} does; a failure is logged. */
+  private acknowledgeUnanswered(options: { ephemeral?: boolean } = {}): Promise<void> {
+    return this.acknowledgeInTime(options).catch(error => logFailedSend(logger, 'acknowledge', error))
   }
 
   /** Sets what `@Defer` asks of every answer, notifications suppressed on new messages, and marks the state as under `@Defer`. */
@@ -697,19 +763,13 @@ export class InteractionResponse implements ResponseState {
         return
       }
       const telling = this.telling()
-      // A step that only waits for its theme, as an answer outside a call may, would hold the acknowledgement past its
-      // time: it goes first, without the lock asked for, which would wait for the same theme, and the step answers once
-      // it settles. Standing in for that answer's own first reply, it is as private as that answer: steps run one at a
-      // time, so only the one preparing counts
-      const { preparing } = telling
-      // On its way from here, though queued behind earlier steps, so no wait reads `nothing` before it is sent
+      // On its way from here until it settles, though queued behind earlier steps, so no wait reads `nothing` before it
+      // is sent. Gone ahead of a step waiting for its theme, it leaves out the lock asked for, which would wait for the
+      // same theme
       telling.inFlight++
-      const acknowledging = preparing
-        ? this.acknowledgeNow({ ...options, ephemeral: preparing.ephemeral })
-        : this.queued(async () => {
-            await this.acknowledgeNow(options)
-            if (this.pendingLock) await this.lockNow(this.pendingLock)
-          })
+      const acknowledging = this.acknowledgeInTime(options, async () => {
+        if (this.pendingLock) await this.lockNow(this.pendingLock)
+      })
       acknowledging
         .catch(error => logFailedSend(logger, 'acknowledge in time', error))
         .finally(() => {
@@ -740,14 +800,32 @@ export class InteractionResponse implements ResponseState {
   }
 
   lock(options: ResponseLockOptions = {}): Promise<void> {
-    return this.queued(() => this.lockNow(options))
+    // A lock acknowledges for itself, unless a step waiting for its theme lets that go first while it still applies:
+    // a lock that holds a message and isn't left to @Defer's timer; a failure reaches the lock
+    return this.askAcknowledgement(
+      {},
+      ahead => (ahead ? ahead.then(() => this.lockNow(options)) : this.lockNow(options)),
+      () => this.lockTarget(options.disable) !== undefined && !this.timer,
+    )
   }
 
-  private async lockNow({ disable = 'all' }: ResponseLockOptions): Promise<void> {
+  /**
+   * The message a lock would hold and the controls it disables: none for a call already holding it or answered over
+   * it, for one that answers with its own message, or for `disable: 'none'`.
+   */
+  private lockTarget(
+    disable: ResponseLockOptions['disable'] = 'all',
+  ): { message: Message; disable: Exclude<ResponseLockOptions['disable'], 'none' | undefined> } | undefined {
     // An answer already sent to the message leaves nothing to hold, nor to put back over it
-    if (this.snapshot || this.settled || disable === 'none' || answersWithOwnMessage(this.interaction)) return
+    if (this.snapshot || this.settled || disable === 'none' || answersWithOwnMessage(this.interaction)) return undefined
     const message = 'message' in this.interaction ? this.interaction.message : undefined
-    if (!message) return
+    return message ? { message, disable } : undefined
+  }
+
+  private async lockNow(options: ResponseLockOptions): Promise<void> {
+    const target = this.lockTarget(options.disable)
+    if (!target) return
+    const { message, disable } = target
     if (this.timer) {
       // Not acknowledged yet under 'auto': lock only if the timer fires before an answer.
       this.pendingLock = { disable }
@@ -852,9 +930,10 @@ export class InteractionResponse implements ResponseState {
   release(): Promise<void> {
     const waiting = this.timer !== undefined
     this.cancelScheduled()
+    // A component's handler that returned before the 'auto' timer, unanswered, gets eager's invisible acknowledgement
+    const acknowledging = waiting && !answersWithOwnMessage(this.interaction) ? this.acknowledgeUnanswered() : undefined
     return this.queued(async () => {
-      // A component's handler that returned before the 'auto' timer, unanswered, gets eager's invisible acknowledgement
-      if (waiting && !answersWithOwnMessage(this.interaction)) await this.acknowledgeUnanswered()
+      await acknowledging
       // A raw answer the handler made with nothing since is learned of here
       this.sync()
       try {
@@ -893,9 +972,10 @@ export class InteractionResponse implements ResponseState {
   abandon(): Promise<void> {
     const waiting = this.timer !== undefined
     this.cancelScheduled()
+    // A command's acknowledgement shows "thinking…", so one is made only for the timer that would have made it
+    const acknowledging = waiting || !answersWithOwnMessage(this.interaction) ? this.acknowledgeUnanswered({ ephemeral: true }) : undefined
     return this.queued(async () => {
-      // A command's acknowledgement shows "thinking…", so one is made only for the timer that would have made it
-      if (waiting || !answersWithOwnMessage(this.interaction)) await this.acknowledgeUnanswered({ ephemeral: true })
+      await acknowledging
       this.sync()
       const onlyDeferred = this.calls.every(call => call.method === 'deferReply')
       if (this.phase !== 'deferred' || !answersWithOwnMessage(this.interaction) || !onlyDeferred) return
@@ -1034,17 +1114,25 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
-   * The theme an answer is drawn in, which outside a call may wait for the theme resolver's hooks. Meanwhile the step
-   * counts as preparing, so a scheduled acknowledgement that comes due goes ahead of it, as private as `ephemeral`
-   * says the answer is; the step goes on once that settles, from where it leaves the interaction.
+   * The theme an answer is drawn in, which may wait for the call's server and user themes, or outside a call for the
+   * theme resolver's hooks. While it waits, the step counts as preparing, so an acknowledgement asked for meanwhile or
+   * behind it goes ahead of it, as private as `ephemeral` says the answer is; the step goes on once that settles, from
+   * where it leaves the interaction.
    */
   private async answerTheme(ephemeral: boolean): Promise<ResolvedTheme> {
+    const theme = themeForInteraction(this.interaction)
+    // A theme found at once holds nothing back, so nothing goes ahead of the answer
+    const waits = theme instanceof Promise
     const telling = this.telling()
-    telling.preparing = { ephemeral }
+    if (waits) {
+      telling.preparing = { ephemeral }
+      // An acknowledgement asked for behind this step goes first, rather than wait for the theme with it
+      for (const asked of [...this.#askedAcknowledgements]) this.goAhead(asked, ephemeral)
+    }
     try {
-      return await themeForInteraction(this.interaction)
+      return await theme
     } finally {
-      telling.preparing = undefined
+      if (waits) telling.preparing = undefined
       await this.acknowledging?.catch(() => undefined)
     }
   }

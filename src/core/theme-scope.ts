@@ -9,10 +9,7 @@ export type ResolvedTheme = DeepReadonly<MeoCordTheme>
 /** The theme of the call in progress. A per-server or per-user theme still being looked up replaces it once found. */
 export interface ThemeScope {
   theme: ResolvedTheme
-  /**
-   * For a bound function's call, which no pipeline waits for: settles once a per-server or per-user theme still being
-   * looked up is in `theme`, so an answer can wait for it.
-   */
+  /** Settles once a per-server or per-user theme still being looked up is in `theme`, so an answer waits for it. */
   ready?: Promise<void>
   /**
    * The scope a function bound in this call runs a later call in: the handler's theme with the server's and user's

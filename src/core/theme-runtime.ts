@@ -6,11 +6,13 @@ import { stageClasses, stageOwners } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import {
   attachThemeCache,
+  cachedLayers,
   lookupLayers,
   resolverCaches,
   ThemeCache,
   themeTargets,
   type ThemeResolverCaches,
+  type ThemeTargets,
   type ThemeResolverOptions,
 } from '@src/core/theme-resolvers.js'
 import {
@@ -152,15 +154,15 @@ type Layers = ReturnType<typeof lookupLayers>
 
 /**
  * A scope of `base` with a call's server's and user's `layers` over it. Layers still being looked up replace its theme
- * once found, and `ready` settles then.
+ * once found, and the scope's `ready` settles then, so an answer made in it before waits for them.
  */
-function layeredScope(base: ResolvedTheme, layers: Layers, rebuild: RebuildTheme | undefined): { scope: ThemeScope; ready?: Promise<void> } {
-  if (!(layers instanceof Promise)) return { scope: { theme: mergeTheme(mergeTheme(base, layers?.[0]), layers?.[1]), rebuild } }
+function layeredScope(base: ResolvedTheme, layers: Layers, rebuild: RebuildTheme | undefined): ThemeScope {
+  if (!(layers instanceof Promise)) return { theme: mergeTheme(mergeTheme(base, layers?.[0]), layers?.[1]), rebuild }
   const scope: ThemeScope = { theme: base, rebuild }
-  const ready = layers.then(([guild, user]) => {
+  scope.ready = layers.then(([guild, user]) => {
     scope.theme = mergeTheme(mergeTheme(base, guild), user)
   })
-  return { scope, ready }
+  return scope
 }
 
 /**
@@ -175,14 +177,50 @@ const lookupReady = (container: Container, bound: () => ReadyBound) => readyGate
  */
 function rebuildOver(container: Container, resolvers: ThemeResolverCaches, base: ResolvedTheme): RebuildTheme {
   const rebuild: RebuildTheme = args => {
-    const { guildId, userId } = themeTargets(args)
-    if (guildId === undefined && userId === undefined) return undefined
-    const { scope, ready } = layeredScope(base, lookupLayers(resolvers, args, lookupReady(container, () => readyBoundOf(args))), rebuild)
-    // No pipeline waits for the layers here, so an answer does
-    scope.ready = ready
-    return scope
+    const targets = themeTargets(args)
+    if (targets.guildId === undefined && targets.userId === undefined) return undefined
+    return scopeOver(resolvers, base, targets, lookupReady(container, () => readyBoundOf(args)), rebuild)
   }
   return rebuild
+}
+
+/**
+ * A scope of `base` whose server's and user's layers are looked up in a microtask, so whatever runs in the scope
+ * synchronously, such as a call's observers' onStart or a bound function, runs before the resolver is asked. Layers
+ * the resolver answers with a value are in the scope as that microtask ends; others replace its theme once found.
+ */
+function lookedUpScope(base: ResolvedTheme, lookup: () => Layers, rebuild: RebuildTheme | undefined): ThemeScope {
+  const looked = Promise.withResolvers<void>()
+  const scope: ThemeScope = { theme: base, rebuild, ready: looked.promise }
+  queueMicrotask(() => {
+    // Nothing here throws: the call's targets were read as the scope was made, and the cache settles all the resolver does
+    const layers = lookup()
+    if (layers instanceof Promise) {
+      looked.resolve(layers.then(([guild, user]) => void (scope.theme = mergeTheme(mergeTheme(base, guild), user))))
+      return
+    }
+    scope.theme = mergeTheme(mergeTheme(base, layers?.[0]), layers?.[1])
+    scope.ready = undefined
+    looked.resolve()
+  })
+  return scope
+}
+
+/**
+ * The scope of a call from `targets`: `base` with their server's and user's layers over it, looked up after `after`
+ * when set. Layers all `cached` are in the scope at once; a lookup that has to ask the resolver asks it in a microtask.
+ */
+function scopeOver(
+  resolvers: ThemeResolverCaches,
+  base: ResolvedTheme,
+  targets: ThemeTargets,
+  after: Promise<void> | undefined,
+  rebuild: RebuildTheme | undefined,
+  cached = cachedLayers(resolvers, targets),
+): ThemeScope {
+  if (after) return layeredScope(base, lookupLayers(resolvers, targets, after), rebuild)
+  if (cached === 'uncached') return lookedUpScope(base, () => lookupLayers(resolvers, targets), rebuild)
+  return layeredScope(base, cached?.layers, rebuild)
 }
 
 /**
@@ -199,14 +237,19 @@ export function beginCallTheme(
 ): { scope: ThemeScope; ready?: Promise<void> } | undefined {
   const themes = current(container)
   if (!themes) return undefined
-  const layers = themes.resolvers && lookupLayers(themes.resolvers, args, lookupReady(container, bound))
-  if (!layers && !themes.scoped) return undefined
+  const after = themes.resolvers && lookupReady(container, bound)
+  // The call's server and user, read once: every lookup of its themes, now or once the hooks settle, takes them from here
+  const targets = themes.resolvers && themeTargets(args)
+  const cached = targets && cachedLayers(themes.resolvers!, targets)
+  const looksUp = cached !== undefined
+  if (!looksUp && !themes.scoped) return undefined
   const base = themes.varies && prototype && methodName ? handlerTheme(themes, prototype, methodName) : themes.app
   const rebuild = themes.resolvers && rebuildOver(container, themes.resolvers, base)
-  // Until the server's and user's themes are found, the call has the handler's; the pipeline waits for them
-  const { scope, ready } = layeredScope(base, layers, rebuild)
+  // Until the server's and user's themes are found, the call has the handler's; the pipeline waits for them, and an
+  // answer made before that wait, as in an observer's onStart, waits itself
+  const scope = looksUp ? scopeOver(themes.resolvers!, base, targets!, after, rebuild, cached) : { theme: base, rebuild }
   // With the theme the app owns outside calls, a function it binds rebuilds from the app's theme without this scope
-  return scope.theme === base && !ready && !themes.scoped ? undefined : { scope, ready }
+  return scope.theme === base && !scope.ready && !themes.scoped ? undefined : { scope, ready: scope.ready }
 }
 
 const clientApps = shared('clientThemes', () => new WeakMap<object, Container>())
@@ -227,7 +270,9 @@ setThemeOutsideCalls(interaction => {
   const container = clientApps.get((interaction as { client?: object }).client ?? interaction)
   const themes = container && current(container)
   if (!themes) return useTheme()
-  const layers = themes.resolvers && lookupLayers(themes.resolvers, [interaction], lookupReady(container, () => readyBoundOf([interaction])))
+  if (!themes.resolvers) return themes.app
+  const after = lookupReady(container!, () => readyBoundOf([interaction]))
+  const layers = lookupLayers(themes.resolvers, themeTargets([interaction]), after)
   if (!layers) return themes.app
   if (layers instanceof Promise) return layers.then(([guild, user]) => mergeTheme(mergeTheme(themes.app, guild), user))
   return mergeTheme(mergeTheme(themes.app, layers[0]), layers[1])
