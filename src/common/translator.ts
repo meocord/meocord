@@ -28,6 +28,11 @@ export type PluralMessage = { readonly other: string } & Readonly<Partial<Record
 /**
  * A message catalog: messages, plurals, and nested groups of them, keyed by name.
  *
+ * A catalog type written by hand, such as `Record<string, string | PluralMessage>` for JSON files or an interface that
+ * extends `CatalogShape` and names its messages, gives a translator its keys. A message written as literal text has its
+ * params checked; one typed `string` takes any params, which only `expectCompleteCatalog` checks; and a key whose value
+ * may be text or a plural takes any params, `count` among them, as optional.
+ *
  * @group Types
  */
 export interface CatalogShape {
@@ -56,15 +61,23 @@ type IsPlural<T> = T extends object
 export type MessageKey<C> = IsUntypedCatalog<C> extends true ? UntypedCatalogKey : CatalogKeys<C>
 
 /** The dotted path to each message or plural of a catalog. */
-type CatalogKeys<C> = {
-  [K in keyof C & string]: K extends `${string}.${string}`
+type CatalogKeys<C> = CatalogKeysOver<C, NamedKeys<C>> | (string extends keyof C ? CatalogKeysOver<C, string> : never)
+
+/** {@link CatalogKeys} over `Keys`: a value that is a message or a plural, not known which, is a key too. */
+type CatalogKeysOver<C, Keys extends string> = {
+  [K in Keys]: K extends `${string}.${string}`
     ? never
-    : C[K] extends string
+    : C[K & keyof C] extends string
     ? K
-    : IsPlural<C[K]> extends true
+    : IsPlural<C[K & keyof C]> extends true
       ? K
-      : `${K}.${CatalogKeys<C[K]>}`
-}[keyof C & string]
+      : [C[K & keyof C]] extends [string | PluralMessage]
+        ? K
+        : `${K}.${CatalogKeys<C[K & keyof C]>}`
+}[Keys]
+
+/** A catalog's named keys, which `keyof` alone absorbs into an index signature's `string`. */
+type NamedKeys<C> = keyof { [K in keyof C as string extends K ? never : K]: 0 } & string
 
 /** What a key is checked against for a translator typed without its catalog, so the compiler's error says what to write. */
 type UntypedCatalogKey =
@@ -89,15 +102,18 @@ type IsUntypedCatalog<C> = [CatalogKeys<C>] extends [never]
  * @group Types
  * @see {@link LocalizationKey}
  */
-export type StringMessageKey<C> = {
-  [K in keyof C & string]: K extends `${string}.${string}`
+export type StringMessageKey<C> = StringKeysOver<C, NamedKeys<C>> | (string extends keyof C ? StringKeysOver<C, string> : never)
+
+/** {@link StringMessageKey} over `Keys`: a value that may be a plural is left out, as a localization is one string. */
+type StringKeysOver<C, Keys extends string> = {
+  [K in Keys]: K extends `${string}.${string}`
     ? never
-    : C[K] extends string
+    : C[K & keyof C] extends string
       ? K
-      : IsPlural<C[K]> extends true
+      : IsPlural<C[K & keyof C]> extends true
         ? never
-        : `${K}.${StringMessageKey<C[K]>}`
-}[keyof C & string]
+        : `${K}.${StringMessageKey<C[K & keyof C]>}`
+}[Keys]
 
 /**
  * The keys {@link Translator.localizations} takes: a single string with no `{params}`, since Discord shows a command's

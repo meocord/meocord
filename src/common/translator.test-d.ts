@@ -335,15 +335,6 @@ describe('a Translator without its catalog type', () => {
 
   it('leaves Translator<any>, a catalog typed by hand as an index signature and an empty one as they were', () => {
     expectTypeOf<MessageKey<Record<never, never>>>().toEqualTypeOf<never>()
-    // Typed by hand, narrower than any catalog: no keys found, as before, and no sentence telling them to type it
-    interface Extended extends CatalogShape {
-      ping: 'Pong'
-      greet: 'Hi {name}'
-    }
-    expectTypeOf<MessageKey<Record<string, string | { one: string; other: string }>>>().toEqualTypeOf<never>()
-    expectTypeOf<MessageKey<Extended>>().toEqualTypeOf<never>()
-    expectTypeOf<LocalizationKey<Extended>>().toEqualTypeOf<never>()
-    expectTypeOf<ParamLocalizationKey<Extended>>().toEqualTypeOf<never>()
     expectTypeOf<MessageKey<Record<string, string>>>().toEqualTypeOf<string>()
     expectTypeOf<MessageKey<Record<string, Record<string, string>>>>().toEqualTypeOf<`${string}.${string}`>()
     const loose = null as unknown as Translator<any>
@@ -355,6 +346,82 @@ describe('a Translator without its catalog type', () => {
     records.localizations('anything')
     const groups = null as unknown as Translator<Record<string, Record<string, string>>>
     groups.default('group.ping')
+  })
+})
+
+describe('a catalog typed by hand', () => {
+  interface Plural { one: string; other: string }
+  type Records = Record<string, string | Plural>
+  interface Named extends CatalogShape {
+    ping: 'Pong'
+    greet: 'Hi {name}'
+  }
+  const records = null as unknown as Translator<Records>
+  const named = null as unknown as Translator<Named>
+
+  it('translates any key of a record of messages and plurals, its params optional', () => {
+    expectTypeOf<MessageKey<Records>>().toEqualTypeOf<string>()
+    expectTypeOf<MessageKey<Record<string, string | { one: string; other: string }>>>().toEqualTypeOf<string>()
+    records.default('ping')
+    records.default('greet', { name: 'Ada' })
+    records.default('bans', { count: 2 })
+    for (const translate of [records.locale(Locale.Japanese), records.for(interaction), records.forGuild(guild)]) {
+      translate('ping')
+      translate('greet', { name: 'Ada' })
+      translate('bans', { count: 2 })
+    }
+  })
+
+  it("leaves a record's keys out of localizations, as any of them may be a plural", () => {
+    expectTypeOf<StringMessageKey<Records>>().toEqualTypeOf<never>()
+    expectTypeOf<LocalizationKey<Records>>().toEqualTypeOf<never>()
+    expectTypeOf<ParamLocalizationKey<Records>>().toEqualTypeOf<never>()
+    // @ts-expect-error a name or description
+    records.localizations('ping')
+    // @ts-expect-error one with params
+    records.localizations('greet', { name: 'Ada' })
+  })
+
+  it("translates an interface's named messages, with params checked from their text", () => {
+    expectTypeOf<MessageKey<Named>>().toEqualTypeOf<'ping' | 'greet'>()
+    expectTypeOf<LocalizationKey<Named>>().toEqualTypeOf<'ping'>()
+    expectTypeOf<ParamLocalizationKey<Named>>().toEqualTypeOf<'greet'>()
+    named.default('ping')
+    named.default('greet', { name: 'Ada' })
+    for (const translate of [named.locale(Locale.Japanese), named.for(interaction), named.forGuild(guild)]) {
+      translate('ping')
+      translate('greet', { name: 'Ada' })
+    }
+    named.localizations('ping')
+    named.localizations('greet', { name: 'Ada' })
+    // @ts-expect-error a missing param
+    named.default('greet')
+    // @ts-expect-error a misspelt one
+    named.default('greet', { nmae: 'Ada' })
+    // @ts-expect-error in localizations too
+    named.localizations('greet', { nmae: 'Ada' })
+    // @ts-expect-error a key it doesn't name
+    named.default('nope')
+  })
+
+  it('keeps the assignments that compiled', () => {
+    const literal = null as unknown as Translator<{ ping: 'Pong'; greet: 'Hi {name}' }>
+    const loose: Translator<any>[] = [records, named]
+    const bare: Translator[] = [records, named]
+    const toNamed: Translator<Named> = literal
+    const toRecords: Translator<Records> = literal
+    const toNever: Translator<never> = records
+    void [loose, bare, toNamed, toRecords, toNever]
+  })
+
+  it('leaves named keys beside an index signature of messages as they were', () => {
+    interface Mixed { [key: string]: string; ping: 'Pong' }
+    expectTypeOf<MessageKey<Mixed>>().toEqualTypeOf<string>()
+    const mixed = null as unknown as Translator<Mixed>
+    mixed.default('ping')
+    mixed.default('anything', { any: 1 })
+    // @ts-expect-error its literal message takes no params
+    mixed.default('ping', { any: 1 })
   })
 })
 
