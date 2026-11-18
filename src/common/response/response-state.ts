@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks'
 import {
   type APIEmbed,
   type APIMessageTopLevelComponent,
@@ -755,7 +756,9 @@ export class InteractionResponse implements ResponseState {
    */
   scheduleAcknowledge(delayMs: number, options: { ephemeral?: boolean } = {}): void {
     this.cancelScheduled()
-    this.timer = setTimeout(() => {
+    // Bound to the call it is armed in, so the loading view a pending lock draws reads the call's theme under any
+    // scheduler, such as a test's fake timers, which run a callback outside the context it was armed in
+    this.timer = setTimeout(AsyncResource.bind(() => {
       this.timer = undefined
       this.sync()
       if (this.phase !== 'unanswered') {
@@ -776,7 +779,7 @@ export class InteractionResponse implements ResponseState {
           telling.inFlight--
           this.toldChange()
         })
-    }, delayMs)
+    }), delayMs)
     this.timer.unref?.()
     this.toldChange()
   }

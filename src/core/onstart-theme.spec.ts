@@ -176,12 +176,14 @@ describe("an answer an observer's onStart makes", () => {
     expect(answers(interaction)).toEqual([['reply', resolveColor(SERVER.colors.danger)]])
   })
 
-  // Real timers: a fake timer's callback runs outside the scope it was set in, so the draw would read no call's theme
   it("draws a component's loading view at @Defer's timer in the server's theme, from a resolver slower than the timer", async () => {
+    vi.useFakeTimers()
     early = interaction => void respond(interaction).lock()
     const message = Object.assign(createMockMessage(), { components: [{ toJSON: () => ({ type: 1, components: [{ type: 2, style: 1, custom_id: 'press', label: 'Press' }] }) }] })
     const interaction = createMockInteraction(ButtonInteraction, { customId: 'press', guildId: GUILD, message } as never)
-    await compile({ guild: async () => (await sleep(300), SERVER) }).dispatch(interaction)
+    const handled = compile({ guild: async () => (await sleep(300), SERVER) }).dispatch(interaction)
+    await vi.advanceTimersByTimeAsync(500)
+    await handled
 
     const [, loading] = answers(interaction)
     expect(loading).toEqual(['editReply', resolveColor(SERVER.colors.primary)])
