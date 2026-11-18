@@ -20,6 +20,7 @@ import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { Theme } from '@src/common/theme.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
+import { runInThemeScope } from '@src/core/theme-scope.js'
 import { GuardDeniedError } from '@src/common/errors.js'
 import { LOCK_MEMORY_MS, lockedMessageCount, respond, responseOf } from '@src/common/response/response-state.js'
 import { RENDERED_CONTAINER_ID, setPresenter } from '@src/common/response/presenter.js'
@@ -1646,5 +1647,63 @@ describe('respond(), answers asked for together', () => {
 
     expect(getResponse(interaction).calls.map(call => call.method)).toEqual(['showModal', 'followUp'])
     expect(sent(interaction.followUp).flags).toBe(Ephemeral)
+  })
+})
+
+// One rule for every acknowledgement: never held behind an answer that only waits for its theme
+describe('an acknowledgement asked for while an answer waits for its theme', () => {
+  const card = () => button(messageWith({ components: [{ type: ComponentType.ActionRow, components: [{ type: ComponentType.Button, style: 1, custom_id: 'refresh', label: 'Refresh' }] }] }))
+  let found: () => void
+  /** Starts an answer in a call whose theme is still being looked up, and returns what it settles to. */
+  function waitingAnswer(interaction: ButtonInteraction | ChatInputCommandInteraction, ephemeral = false) {
+    const theme = Promise.withResolvers<void>()
+    found = theme.resolve
+    return runInThemeScope({ theme: DEFAULT_THEME, ready: theme.promise }, () =>
+      respond(interaction).send({ content: 'waiting', ...(ephemeral && { flags: MessageFlags.Ephemeral }) }),
+    )
+  }
+  const methods = (interaction: object) => getResponse(interaction as never).calls.map(call => call.method)
+
+  beforeEach(() => vi.useFakeTimers())
+
+  it.each([
+    ['acknowledge(), asked for after the answer', (interaction: ButtonInteraction) => responseOf(interaction).acknowledge()],
+    ['lock()', (interaction: ButtonInteraction) => respond(interaction).lock()],
+    [
+      "release() of a call @Defer({ mode: 'auto' })'s timer waits on",
+      (interaction: ButtonInteraction) => {
+        responseOf(interaction).scheduleAcknowledge(1000)
+        return responseOf(interaction).release()
+      },
+    ],
+    [
+      'abandon() of a silently denied call',
+      (interaction: ButtonInteraction) => responseOf(interaction).abandon(),
+    ],
+  ] as const)('lets %s acknowledge a component first', async (_how, ask) => {
+    const interaction = card()
+    const answered = waitingAnswer(interaction)
+    const asked = ask(interaction)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(methods(interaction)).toEqual(['deferUpdate'])
+    found()
+    await Promise.all([answered, asked])
+    expect(methods(interaction)[0]).toBe('deferUpdate')
+  })
+
+  it.each([
+    ['public', false, 0],
+    ['private', true, MessageFlags.Ephemeral],
+  ] as const)("acknowledges a command first as privately as the %s answer it goes ahead of, whatever acknowledge() asked", async (_how, ephemeral, flags) => {
+    const interaction = command()
+    const answered = waitingAnswer(interaction, ephemeral)
+    const asked = responseOf(interaction).acknowledge({ ephemeral: !ephemeral })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(getResponse(interaction).calls.map(call => [call.method, call.payload])).toEqual([['deferReply', { flags }]])
+    found()
+    await Promise.all([answered, asked])
+    expect(methods(interaction)).toEqual(['deferReply', 'editReply'])
   })
 })

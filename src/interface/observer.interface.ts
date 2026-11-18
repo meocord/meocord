@@ -80,7 +80,8 @@ export interface DispatchObserver {
    * Receives a call as it begins, before `@Defer` and the guards, for a call that reached a handler; an
    * interaction no handler matches gets only `onSettled`. It is not waited for, and one that throws is
    * logged. `onSettled` for the same call receives the same context object, so a `WeakMap` keyed by it
-   * pairs the two.
+   * pairs the two. It runs before the call's server's and user's themes from `themeFor` are found, so
+   * `respond()` waits for them and `useTheme()` reads the handler's theme until then.
    *
    * For spans around work inside the handler, such as a database query under the command's span, use an
    * interceptor: an observer sees the call from outside, and nothing that runs within it.

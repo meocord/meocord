@@ -38,6 +38,19 @@ function press(customId: string, { guildId, userId = USER }: { guildId?: string 
 
 const colour = (primary: `#${string}`): ThemeOverride => ({ colors: { primary } })
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+/** A value that throws as anything about it is read, even what it is. */
+const hostile = () =>
+  new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error('read')
+      },
+      getPrototypeOf: () => {
+        throw new Error('read')
+      },
+    },
+  )
 
 @Guard()
 class RecordsTheme {
@@ -811,6 +824,142 @@ describe('a resolver', () => {
       ['resolver', DEFAULT_THEME.colors.primary],
       ['resolver after await', DEFAULT_THEME.colors.primary],
     ])
+  })
+
+  it('may answer with a thenable that is not a promise, taken as what it settles to', async () => {
+    const guild = () => ({ then: (resolve: (layer: ThemeOverride) => void) => resolve(colour('#000092')) }) as unknown as Promise<ThemeOverride>
+    const warnings = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+
+    await moduleWith({ guild }).invoke(Panel, 'panel', press('panel'))
+
+    expect(seen.filter(entry => (entry as string[])[0] === 'handler')).toEqual([['handler', '#000092', DEFAULT_THEME.colors.info, DEFAULT_THEME.colors.success]])
+    expect(warnings).not.toHaveBeenCalled()
+  })
+})
+
+// A resolver that answers with a value is taken at once, one that answers through a promise once it settles; past
+// that, the two behave alike
+describe.each([
+  ['with a value', <A extends unknown[], R>(answer: (...args: A) => R) => answer],
+  ['through a promise', <A extends unknown[], R>(answer: (...args: A) => R) => async (...args: A) => answer(...args)],
+] as const)('a resolver that answers %s', (_how, answering) => {
+  const handlerColours = () => seen.filter(entry => (entry as string[])[0] === 'handler').map(entry => (entry as string[])[1])
+
+  it('fails as the other does when it throws: the same logs, backoff and next call', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    const logs = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {})
+    let failing = true
+    const guild = vi.fn(
+      answering((): ThemeOverride => {
+        if (failing) throw new Error('database down')
+        return colour('#000031')
+      }),
+    )
+    const module = moduleWith({ guild })
+
+    await module.invoke(Panel, 'panel', press('panel'))
+    // Within the backoff the failure is kept, and the resolver is not asked
+    failing = false
+    await module.invoke(Panel, 'panel', press('panel'))
+    vi.advanceTimersByTime(10_001)
+    await module.invoke(Panel, 'panel', press('panel'))
+
+    expect(guild).toHaveBeenCalledTimes(2)
+    expect(handlerColours()).toEqual([DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.primary, '#000031'])
+    expect(errors.mock.calls.map(([text]) => String(text))).toEqual([
+      expect.stringContaining(`themeFor.guild for guild ${GUILD} failed: database down. Its calls use the theme without it`),
+    ])
+    expect(logs.mock.calls.filter(([text]) => String(text).includes('answers again'))).toEqual([
+      [expect.stringContaining(`themeFor.guild for guild ${GUILD} answers again, after 1 failed lookup(s) over 10s`)],
+    ])
+  })
+
+  it('is kept for the cache time, then asked again, with the oldest dropped past the limit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
+    const guild = vi.fn(answering(({ guild: { id } }: GuildThemeTarget) => colour(id === GUILD ? '#000032' : '#000033')))
+    const module = moduleWith({ guild }, { themeCache: { ttlSeconds: 60, maxGuilds: 1 } })
+
+    await module.invoke(Panel, 'panel', press('panel'))
+    vi.advanceTimersByTime(59_000)
+    await module.invoke(Panel, 'panel', press('panel'))
+    vi.advanceTimersByTime(2_000)
+    await module.invoke(Panel, 'panel', press('panel'))
+    await module.invoke(Panel, 'panel', press('panel', { guildId: OTHER_GUILD }))
+    await module.invoke(Panel, 'panel', press('panel'))
+
+    expect(guild.mock.calls.map(([target]) => target.guild.id)).toEqual([GUILD, GUILD, OTHER_GUILD, GUILD])
+    expect(handlerColours()).toEqual(['#000032', '#000032', '#000032', '#000033', '#000032'])
+  })
+
+  it('is asked once for calls from one server that start together', async () => {
+    const guild = vi.fn(answering(() => colour('#000034')))
+    const module = moduleWith({ guild })
+
+    await Promise.all([module.invoke(Panel, 'panel', press('panel')), module.invoke(Panel, 'panel', press('panel'))])
+
+    expect(guild).toHaveBeenCalledTimes(1)
+    expect(handlerColours()).toEqual(['#000034', '#000034'])
+  })
+
+  it.each([undefined, null])('means no theme when it answers %s, kept like any answer, with no warning', async nothing => {
+    const warnings = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const guild = vi.fn(answering(() => nothing as ThemeOverride | undefined))
+    const module = moduleWith({ guild })
+
+    await module.invoke(Panel, 'panel', press('panel'))
+    await module.invoke(Panel, 'panel', press('panel'))
+
+    expect(guild).toHaveBeenCalledTimes(1)
+    expect(handlerColours()).toEqual([DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.primary])
+    expect(warnings).not.toHaveBeenCalled()
+  })
+})
+
+describe('a resolver answering with a thenable', () => {
+  it('is taken as the result when its `then` is not a function', async () => {
+    const warnings = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {})
+    const guild = () => ({ ...colour('#000035'), then: 'later' }) as unknown as ThemeOverride
+
+    await moduleWith({ guild }).invoke(Panel, 'panel', press('panel'))
+
+    expect(seen.filter(entry => (entry as string[])[0] === 'handler')).toEqual([['handler', '#000035', DEFAULT_THEME.colors.info, DEFAULT_THEME.colors.success]])
+    expect(warnings).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['answers with a value whose `then` throws as it is read', () => ({ get then(): never { throw new Error('then getter') } }), 'error', 'failed: then getter'],
+    ['answers with a value that throws as anything is read', () => hostile(), 'error', 'failed: read'],
+    ['answers with a value whose `colors` throws as it is read', () => ({ get colors(): never { throw new Error('colors getter') } }), 'warn', 'theme cannot be read'],
+    ['throws a value whose `toString` throws', () => { throw { toString: (): never => { throw new Error('toString') } } }, 'error', 'failed: a value that throws as it is read'],
+    ['throws a value whose `message` throws', () => { throw { get message(): never { throw new Error('message getter') } } }, 'error', 'failed: a value that throws as it is read'],
+    ['throws a value that throws as anything is read', () => { throw hostile() }, 'error', 'failed: a value that throws as it is read'],
+    ['rejects with a value whose `toString` throws', () => Promise.reject({ toString: (): never => { throw new Error('toString') } }), 'error', 'failed: a value that throws as it is read'],
+    ['rejects with a value that throws as anything is read', () => Promise.reject(hostile()), 'error', 'failed: a value that throws as it is read'],
+  ] as const)('fails once and the call goes on in its handler\'s theme when it %s', async (_how, answer, level, logged) => {
+    const lines: [string, string][] = []
+    for (const kind of ['warn', 'error'] as const) vi.spyOn(Logger.prototype, kind).mockImplementation((text: unknown) => void lines.push([kind, String(text)]))
+    const guild = answer as unknown as () => ThemeOverride
+
+    await moduleWith({ guild }).invoke(Panel, 'panel', press('panel'))
+
+    expect(seen.filter(entry => (entry as string[])[0] === 'handler')).toEqual([['handler', DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info, DEFAULT_THEME.colors.success]])
+    expect(lines).toEqual([[level, expect.stringContaining(logged)]])
+  })
+
+  it('times out at themeForTimeoutMs when it never settles, as a promise does', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {})
+    const guild = () => ({ then: () => undefined }) as unknown as Promise<ThemeOverride>
+
+    const handled = moduleWith({ guild }, { themeForTimeoutMs: 300 }).invoke(Panel, 'panel', press('panel'))
+    await vi.advanceTimersByTimeAsync(299)
+    expect(seen).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    await handled
+
+    expect(seen.filter(entry => (entry as string[])[0] === 'handler')).toEqual([['handler', DEFAULT_THEME.colors.primary, DEFAULT_THEME.colors.info, DEFAULT_THEME.colors.success]])
+    expect(errors.mock.calls.map(([text]) => String(text))).toEqual([expect.stringContaining(`themeFor.guild for guild ${GUILD}`)])
   })
 })
 
