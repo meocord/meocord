@@ -90,6 +90,7 @@ import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.j
 import {
   type LifecycleEntry,
   lifecycleEntry,
+  readyForShutdown,
   inShutdownHookOf,
   ReadyPass,
   runReadyHooks,
@@ -478,6 +479,8 @@ export class TestingModule {
   /** The instances whose `@On` and `@Once` handlers `emit` runs, read at `init()`. */
   private sources?: readonly EventSource[]
   private readying?: Promise<void>
+  /** Whether `init({ ready: true })` was asked, after which `close()` shuts down by the bot's rule for `onReady`. */
+  private readyAsked = false
   private closing?: Promise<void>
   /** The `onReady` hooks' pass, which `close()` waits for, less one whose `onReady` called `close()`. */
   private readonly readyPass = new ReadyPass()
@@ -535,6 +538,7 @@ export class TestingModule {
    * ```
    */
   async init(options: TestingModuleInitOptions = {}): Promise<this> {
+    if (options.ready) this.readyAsked = true
     this.resolving ??= resolveProviders(this.container, this.providers, this.order, {
       stopped: () => this.closedDuringInit,
       pending: token => (this.pendingFactory = token),
@@ -568,6 +572,11 @@ export class TestingModule {
    * everything that injects it, whether or not `init({ ready: true })` ran. Nothing is constructed
    * just to be shut down. Every hook runs even when one fails. Calling it again does nothing more.
    *
+   * Once `init({ ready: true })` is asked, it follows the bot's rules for the `onReady` hooks: no `onReady` starts after
+   * `close()` is called, and a unit whose `onReady` hasn't settled, such as one still running, or never started because
+   * `close()` came first, gets no `onShutdown`, nor does anything that depends on it. An `onReady` that failed has
+   * settled. Without `init({ ready: true })`, it shuts down every unit the module made.
+   *
    * It first gives up the theme read outside calls, if `init({ ready: true })` made it this module's;
    * reads outside calls then return MeoCord's defaults until another module or app is ready.
    *
@@ -590,15 +599,16 @@ export class TestingModule {
    * A `close()` while `init()` makes the providers waits for the factory under way at most `shutdownTimeout`; past it,
    * it warns, naming the factory, and shuts down without it. `init()` makes nothing after that factory. A value the
    * factory returns later is shut down once it arrives and `close()` is done, by its own `onShutdown`, within
-   * `shutdownTimeout`, and a failure of it is logged. What it injects is shut down already, so its `onShutdown` may find
-   * that closed.
+   * `shutdownTimeout`, and a failure of it is logged; after `init({ ready: true })`, only if neither it nor what it
+   * injects has an `onReady`, which never ran. What it injects is shut down already, so its `onShutdown` may find that
+   * closed.
    *
    * A `close()` while `init({ ready: true })` runs the `onReady` hooks waits for them first, within the same
    * `shutdownTimeout`. An `onReady` still running once only the hooks' share of it is left is named in a warning, and
-   * its class is shut down all the same, as everything the module constructed is. One that calls `close()` itself isn't
-   * waited for. A `close()` called while an `onShutdown` hook of this close runs, by the hook or by work it started,
-   * awaited or not, gets a promise that resolves at once: the close it asks for is the one running the hook. One called
-   * after the hook has returned waits for the whole close.
+   * its class gets no `onShutdown`, as above. One that calls `close()` itself isn't waited for. A `close()` called while
+   * an `onShutdown` hook of this close runs, by the hook or by work it started, awaited or not, gets a promise that
+   * resolves at once: the close it asks for is the one running the hook. One called after the hook has returned waits
+   * for the whole close.
    *
    * @returns Once every hook has run. Rejects with the error of a hook that failed, or an
    *   `AggregateError` naming each when several did.
@@ -647,8 +657,9 @@ export class TestingModule {
       const entries = (): LifecycleEntry[] => {
         // From here a unit made is in no list close() shuts down
         this.shutdownListed = true
+        const ready = this.readyToShutDown()
         return this.hookOrder(unit => this.constructed.has(unit.token) && this.hasHook(unit, 'onShutdown'))
-          .filter(unit => this.constructed.has(unit.token))
+          .filter(unit => this.constructed.has(unit.token) && (!ready || ready.has(unit.token)))
           // Already made, so this returns the instance; a provided value may be anything, null included
           .map(unit => {
             this.shutDown.add(unit.token)
@@ -683,7 +694,7 @@ export class TestingModule {
     const token = this.outlastedFactory
     if (token === undefined || !this.constructed.has(token) || this.shutDown.has(token)) return
     const unit = this.lifecycle.find(candidate => candidate.token === token)
-    if (!unit) return
+    if (!unit || this.readyToShutDown()?.has(token) === false) return
     this.shutDown.add(token)
     // After close()'s own hooks, as the bot shuts it down after the stop's; its failure is close()'s to report
     await this.closing?.catch(() => undefined)
@@ -709,6 +720,20 @@ export class TestingModule {
 
   /** The token a `get()` under way resolves, whose warning names the `get()`. */
   private getting?: unknown
+  /** The units whose `onReady` has settled in the ready pass, which `close()` shuts down as the bot does. */
+  private readonly readySettled = new Set<unknown>()
+  /**
+   * The units `close()` may shut down once `init({ ready: true })` was asked, by the bot's rule: each made one whose
+   * `onReady`, and that of every unit it depends on, has settled or doesn't exist. Without it, `undefined`: every one.
+   */
+  private readyToShutDown(): ReadonlySet<unknown> | undefined {
+    if (!this.readyAsked) return undefined
+    // Already made, so this returns the instance; a provided value may be anything, null included
+    const made = (unit: LifecycleUnit) =>
+      this.constructed.has(unit.token) ? ((this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}) : undefined
+    return new Set(readyForShutdown(this.lifecycle, made, this.readySettled).map(({ token }) => token))
+  }
+
   /** Whether `close()` has listed the units it shuts down; one made after that is shut down by nothing. */
   private shutdownListed = false
 
@@ -781,11 +806,16 @@ export class TestingModule {
         { resolveFailed: failed, hookFailed: failed, slow: (unit, waiting) => warn(slowReadyWarning(unit, SLOW_READY_HOOK_MS, waiting, gate !== undefined)) },
         // A test's fake clock can pass the time inside a hook, so the warning waits to be asked for
         {
+          // As the bot's: once close() has begun, no further onReady starts
+          stopped: () => this.closing !== undefined,
           runOnReady: this.readyPass.runOnReady,
           trackSlow: this.readyPass.trackSlow,
           made: unit => (this.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
           slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
-          ...(gate && { settled: (unit: LifecycleUnit) => gate.settled(unit) }),
+          settled: (unit: LifecycleUnit) => {
+            this.readySettled.add(unit.token)
+            gate?.settled(unit)
+          },
         },
       )
     } finally {

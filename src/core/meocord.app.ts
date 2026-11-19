@@ -41,9 +41,9 @@ import { closeReadyGate, type ReadyGate } from '@src/core/ready-gate.js'
 import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import {
   type LifecycleEntry,
-  lifecycleEntry,
   inShutdownHookOf,
   ReadyPass,
+  readyForShutdown,
   runReadyHooks,
   runShutdownSequence,
   shutDownLateValue,
@@ -851,19 +851,12 @@ export class MeoCordApp implements MeoCordApplication {
    * hook that undoes `onReady` never runs without it, and neither does anything that depends on it.
    */
   private shutdownEntries(): LifecycleEntry[] {
-    const units = new Set(this.lifecycleUnits.map(({ token }) => token))
-    const closes = new Set<unknown>()
-    const entries: LifecycleEntry[] = []
-    for (const unit of this.lifecycleUnits) {
-      if (!this.attempt?.constructed.has(unit.token)) continue
+    return readyForShutdown(
+      this.lifecycleUnits,
       // Already made, so this returns the instance; a provided value may be anything, null included
-      const instance = (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}
-      const ready = typeof instance.onReady !== 'function' || this.readySettled.has(unit.token)
-      if (!ready || unit.dependencies.some(dependency => units.has(dependency) && !closes.has(dependency))) continue
-      closes.add(unit.token)
-      entries.push(lifecycleEntry(unit, instance))
-    }
-    return entries
+      unit => (this.attempt?.constructed.has(unit.token) ? ((this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}) : undefined),
+      this.readySettled,
+    )
   }
 
   /** Runs the `onShutdown` hooks through the shutdown sequence, within `timeoutMs`: the stop's share of `shutdownTimeout`. */

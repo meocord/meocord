@@ -81,6 +81,15 @@ class UsesLater {
   constructor(readonly later: Later) {}
 }
 
+/** Uses Pool, with no onReady of its own, so it is ready as soon as it is made. */
+@Service()
+class PoolUser {
+  constructor(readonly pool: Pool) {}
+  onShutdown() {
+    order.push('PoolUser.onShutdown')
+  }
+}
+
 /** Starts an app logged in without a network, and fires its ready event without waiting, as discord.js emits it. */
 async function startApp(): Promise<{ client: Client; ready: Promise<void> }> {
   const clients: Client[] = []
@@ -105,6 +114,24 @@ async function startApp(): Promise<{ client: Client; ready: Promise<void> }> {
 }
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
+
+/** close()'s wait for the factory under way, short enough that it stops waiting before SLOW settles. */
+const SLOW_FACTORY_TIMEOUT_MS = 50
+
+/** A testing module with PLAIN, a value with no onReady, then SLOW, one with both hooks whose factory settles when told. */
+function slowFactory(shutdownTimeout: number) {
+  const slow = Promise.withResolvers<void>()
+  const started = Promise.withResolvers<void>()
+  const hook = (name: string) => () => void order.push(name)
+  const module = MeoCordTestingModule.create({
+    providers: [
+      { provide: 'PLAIN', useFactory: () => ({ onShutdown: hook('PLAIN.onShutdown') }) },
+      { provide: 'SLOW', useFactory: () => (started.resolve(), slow.promise.then(() => ({ onReady: hook('SLOW.onReady'), onShutdown: hook('SLOW.onShutdown') }))) },
+    ],
+    shutdownTimeout,
+  } as never).compile()
+  return { module, settle: () => slow.resolve(), started: started.promise }
+}
 
 beforeEach(() => {
   order.length = 0
@@ -214,7 +241,8 @@ describe('a bot stopped while an onReady runs', () => {
 describe("a testing module's close() during init({ ready: true })", () => {
   const compile = () => MeoCordTestingModule.create({ controllers: [UsesLater], shutdownTimeout: 4_000 }).compile()
 
-  it('waits for the onReady hooks, then shuts each down once', async () => {
+  // As the bot's: a close stops the pass, so the hooks after the one running don't start
+  it('waits for the onReady running, then shuts down, and starts no onReady after it', async () => {
     const module = compile()
     const initialised = module.init({ ready: true })
     await tick()
@@ -224,19 +252,11 @@ describe("a testing module's close() during init({ ready: true })", () => {
     gate.resolve()
     await Promise.all([initialised, closed])
 
-    expect(order).toEqual([
-      'Early.onReady',
-      'Pool.onReady start',
-      'Pool.onReady done',
-      'Later.onReady',
-      'Later.onShutdown',
-      'Pool.onShutdown',
-      'Early.onShutdown',
-    ])
+    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Pool.onReady done', 'Pool.onShutdown', 'Early.onShutdown'])
   })
 
-  // A test module shuts down what it constructed, so the unit still in onReady is shut down too
-  it('stops waiting for an onReady that never settles, naming it, and shuts down what it constructed', async () => {
+  // As the bot's: a unit whose onReady never settled gets no onShutdown
+  it('stops waiting for an onReady that never settles, naming it, and gives it no onShutdown', async () => {
     vi.useFakeTimers()
     const module = compile()
     void module.init({ ready: true })
@@ -246,8 +266,73 @@ describe("a testing module's close() during init({ ready: true })", () => {
     await vi.advanceTimersByTimeAsync(3_000)
     await closed
 
-    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Pool.onShutdown', 'Early.onShutdown'])
+    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Early.onShutdown'])
     expect(logged.warn).toEqual(['onReady in Pool is still running after 3000 ms; shutting down without waiting for it.'])
+  })
+
+  it('gives no onShutdown to a unit that depends on one whose onReady never settled', async () => {
+    vi.useFakeTimers()
+    const module = MeoCordTestingModule.create({ controllers: [UsesLater], providers: [{ provide: PoolUser, useClass: PoolUser }], shutdownTimeout: 4_000 }).compile()
+    void module.init({ ready: true })
+    await vi.advanceTimersByTimeAsync(0)
+    module.get(PoolUser)
+
+    const closed = module.close()
+    await vi.advanceTimersByTimeAsync(3_000)
+    await closed
+
+    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Early.onShutdown'])
+  })
+
+  it('shuts down a unit whose onReady failed, as that onReady has settled', async () => {
+    const module = compile()
+    inReady = () => {
+      throw new Error('pool down')
+    }
+    gate.resolve()
+    await expect(module.init({ ready: true })).rejects.toThrow('pool down')
+
+    await module.close()
+
+    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Later.onReady', 'Later.onShutdown', 'Pool.onShutdown', 'Early.onShutdown'])
+  })
+
+  // As a bot stopped before its ready hooks: with init({ ready: true }) asked, a unit whose onReady never ran is not undone
+  for (const ready of [true, false]) {
+    it(`${ready ? 'with' : 'without'} init({ ready: true }), a close() while a factory resolves shuts down ${ready ? 'only what has no onReady' : 'every value made'}`, async () => {
+      const { module, settle, started } = slowFactory(4_000)
+      const initialised = module.init({ ready })
+      await started
+
+      const closed = module.close()
+      settle()
+      await Promise.all([initialised, closed])
+
+      expect(order).toEqual(ready ? ['PLAIN.onShutdown'] : ['SLOW.onShutdown', 'PLAIN.onShutdown'])
+    })
+
+    it(`${ready ? 'with' : 'without'} init({ ready: true }), the value close() stopped waiting for ${ready ? 'gets no onShutdown, its onReady never having run' : 'is shut down as it arrives'}`, async () => {
+      const { module, settle, started } = slowFactory(SLOW_FACTORY_TIMEOUT_MS)
+      const initialised = module.init({ ready })
+      await started
+
+      await module.close()
+      settle()
+      await initialised
+
+      expect(order).toEqual(ready ? ['PLAIN.onShutdown'] : ['PLAIN.onShutdown', 'SLOW.onShutdown'])
+    })
+  }
+
+  // With no ready pass, no onReady ran to be undone: what the module made shuts down, as close() documents
+  it('without init({ ready: true }), shuts down every unit it made', async () => {
+    const module = compile()
+    await module.init()
+    module.get(Later)
+
+    await module.close()
+
+    expect(order).toEqual(['Later.onShutdown', 'Pool.onShutdown', 'Early.onShutdown'])
   })
 
   it('waits for the onReady hooks when a timer an earlier onReady left closes the module', async () => {
@@ -261,15 +346,7 @@ describe("a testing module's close() during init({ ready: true })", () => {
     gate.resolve()
     await Promise.all([initialised, closed])
 
-    expect(order).toEqual([
-      'Early.onReady',
-      'Pool.onReady start',
-      'Pool.onReady done',
-      'Later.onReady',
-      'Later.onShutdown',
-      'Pool.onShutdown',
-      'Early.onShutdown',
-    ])
+    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Pool.onReady done', 'Pool.onShutdown', 'Early.onShutdown'])
     expect(logged.warn).toEqual([])
   })
 
@@ -283,18 +360,8 @@ describe("a testing module's close() during init({ ready: true })", () => {
 
     await module.init({ ready: true })
 
-    expect(order).toEqual([
-      'Early.onReady',
-      'Pool.onReady start',
-      'Pool.onShutdown',
-      'Early.onShutdown',
-      'closed from onReady',
-      'Pool.onReady done',
-      'Later.onReady',
-    ])
-    // The pass goes on after the close, and makes Later only then, so nothing shuts it down
-    expect(logged.warn).toEqual([
-      'Later is made after close(); the testing module is closed, so nothing shuts it down. Close it after the last call, in afterEach.',
-    ])
+    // As the bot's: the pass ends at the close, and Pool, still in its onReady, gets no onShutdown
+    expect(order).toEqual(['Early.onReady', 'Pool.onReady start', 'Early.onShutdown', 'closed from onReady', 'Pool.onReady done'])
+    expect(logged.warn).toEqual([])
   })
 })

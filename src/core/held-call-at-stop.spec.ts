@@ -49,7 +49,7 @@ const warned: string[] = []
 let warm: PromiseWithResolvers<void>
 let warming: PromiseWithResolvers<void>
 let running: PromiseWithResolvers<void>
-/** How many warnings were logged when Cache's onShutdown ran, so a row can tell which came before the hooks. */
+/** How many warnings were logged when Ledger's onShutdown ran, so a row can tell which came before the hooks. */
 let warnedAtShutdown = 0
 /** How long Slow's onSettled takes, or never. */
 let settleTakes: number | 'never' = 'never'
@@ -93,6 +93,14 @@ class Cache implements OnReady, OnShutdown {
   }
   onShutdown() {
     events.push('Cache.onShutdown')
+  }
+}
+
+/** Ready as soon as it is made, so close()'s hooks always shut it down: the rows' mark of when they ran. */
+@Service()
+class Ledger implements OnShutdown {
+  onShutdown() {
+    events.push('Ledger.onShutdown')
     warnedAtShutdown = warned.length
   }
 }
@@ -303,7 +311,7 @@ function moduleOf(
     cooldownStore?: unknown
   } = {},
 ) {
-  const { themeFor, warnSlow, observers = [Watch], shutdownTimeout = TIMEOUT, services = [Early, Cache, Welcome], controllers = [Quotes, Free], cooldownStore } = options
+  const { themeFor, warnSlow, observers = [Watch], shutdownTimeout = TIMEOUT, services = [Ledger, Early, Cache, Welcome], controllers = [Quotes, Free], cooldownStore } = options
   @MeoCord({
     controllers: controllers as never,
     services: services as never,
@@ -372,7 +380,7 @@ describe('a call the ready gate holds when a testing module closes', () => {
     warm.resolve()
     await sleep(50)
     // Its observers hear of it before the onShutdown hooks run, as of a call the drain waited for
-    expect(events).toEqual(['Cache.onReady', 'onStart', `onSettled error handled=false response=unanswered ${STOP_MESSAGE}`, 'Cache.onShutdown', 'Cache ready'])
+    expect(events).toEqual(['Cache.onReady', 'onStart', `onSettled error handled=false response=unanswered ${STOP_MESSAGE}`, 'Ledger.onShutdown', 'Cache ready'])
     expect(sent(quote)).toEqual([])
     // The module names no dropped call, and the gate warns of no call it let through
     expect(warned).toEqual(['onReady in Cache is still running after 200 ms; shutting down without waiting for it.'])
@@ -390,7 +398,7 @@ describe('a call the ready gate holds when a testing module closes', () => {
     expect(timers).toEqual([])
     warm.resolve()
     await sleep(50)
-    expect(events).toEqual(['Cache.onReady', 'onStart', `onSettled error handled=false response=undefined ${STOP_MESSAGE}`, 'Cache.onShutdown', 'Cache ready'])
+    expect(events).toEqual(['Cache.onReady', 'onStart', `onSettled error handled=false response=undefined ${STOP_MESSAGE}`, 'Ledger.onShutdown', 'Cache ready'])
   })
 
   it('resolves invoke() of a held call with ran false and the stop error', async () => {
@@ -454,7 +462,7 @@ describe('a call the ready gate holds when a testing module closes', () => {
     warm.resolve()
     await sleep(700)
     expect(sent(quote)).toEqual(['reply'])
-    expect(events).toEqual(['Cache.onReady', `onSettled error response=replied ${STOP_MESSAGE}`, 'Cache.onShutdown', 'Cache ready'])
+    expect(events).toEqual(['Cache.onReady', `onSettled error response=replied ${STOP_MESSAGE}`, 'Ledger.onShutdown', 'Cache ready'])
   })
 
   /**
@@ -495,13 +503,13 @@ describe('a call the ready gate holds when a testing module closes', () => {
     expect(warnedAtShutdown).toBe(warned.length)
     expect(closed - CLOSE_AT).toBeLessThan(TIMEOUT)
     const toldBy = (event: string) => event.startsWith(told)
-    if (when === 'by the drain') expect(events.findIndex(toldBy)).toBeLessThan(events.indexOf('Cache.onShutdown'))
+    if (when === 'by the drain') expect(events.findIndex(toldBy)).toBeLessThan(events.indexOf('Ledger.onShutdown'))
     else expect(events.filter(toldBy)).toEqual([])
     if (when === 'after') starts.resolve()
     // Once the close has resolved, only what was under way settles: the observers told once at most, the hooks not again, nothing logged
     await sleep(1_100)
     expect(events.filter(toldBy)).toHaveLength(when === 'never' ? 0 : 1)
-    expect(events.filter(event => event === 'Cache.onShutdown')).toHaveLength(1)
+    expect(events.filter(event => event === 'Ledger.onShutdown')).toHaveLength(1)
     expect(warned).toHaveLength(logged)
   })
 
@@ -588,7 +596,7 @@ describe('a call the ready gate holds when a testing module closes', () => {
       expect(await handled).toEqual({ ran: runs ? 1 : 0 })
       expect(events.includes('greet runs')).toBe(runs)
       // A call let through runs before the onShutdown hooks; one dropped starts nothing after them
-      expect(events.indexOf('greet runs')).toBeLessThan(runs ? events.indexOf('Cache.onShutdown') : 0)
+      expect(events.indexOf('greet runs')).toBeLessThan(runs ? events.indexOf('Ledger.onShutdown') : 0)
     },
   )
 
