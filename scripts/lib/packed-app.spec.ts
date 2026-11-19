@@ -45,7 +45,7 @@ describe('a setup step', () => {
   // A terminal's Ctrl+C signals its foreground group, which the step, in a group of its own, is not in
   it.skipIf(process.platform === 'win32')("stops every process the step started when its caller's group is stopped", async () => {
     const pidFile = path.join(root, 'grandchild.pid')
-    const runner = spawn(process.execPath, [boundedStep, '60000', 'direct', process.execPath, '-e', startsOne(pidFile)], { detached: true, stdio: 'ignore' })
+    const runner = spawn(process.execPath, [boundedStep, path.join(root, 'stopped'), '60000', 'direct', process.execPath, '-e', startsOne(pidFile)], { detached: true, stdio: 'ignore' })
     for (let waited = 0; !existsSync(pidFile) && waited < 10_000; waited += 50) await new Promise(resolve => setTimeout(resolve, 50))
     const exited = new Promise<number | null>(resolve => runner.once('exit', code => resolve(code)))
 
