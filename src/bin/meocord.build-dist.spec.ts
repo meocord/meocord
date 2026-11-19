@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { vi } from 'vitest'
+import { runtimeBinary } from '@src/spec-runtimes.js'
 
 vi.mock('@src/common/index.js', () => ({
   Logger: class {
@@ -71,18 +72,18 @@ async function build(dir: string, config?: string): Promise<void> {
   }
 }
 
-function run(dir: string, runtime = 'node') {
+function run(dir: string, runtime: 'node' | 'bun' = 'node') {
   const env = { ...process.env }
   delete env.AT_LOAD
   const args = runtime === 'bun' ? ['--no-env-file', 'dist/main.js'] : ['dist/main.js']
-  return spawnSync(runtime, args, { cwd: dir, env, encoding: 'utf8' })
+  return spawnSync(runtimeBinary(runtime), args, { cwd: dir, env, encoding: 'utf8' })
 }
 
 beforeAll(() => rmSync(root, { recursive: true, force: true }))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 describe('a built application', () => {
-  it.each(['node', 'bun'])('gives a package it imports the values .env sets as the package loads, under %s', async runtime => {
+  it.each(['node', 'bun'] as const)('gives a package it imports the values .env sets as the package loads, under %s', async runtime => {
     const dir = path.join(root, 'load-order')
     if (!existsSync(path.join(dir, 'dist', 'main.js'))) {
       app('load-order', "{ discordToken: 'token' }", { 'at-load': AT_LOAD }, "import { atLoad } from 'at-load'\nconsole.log(`at load: ${atLoad}`)")
@@ -167,7 +168,7 @@ console.log(esm)
 console.log(cjs)`
 
 /** Runs dist with the application's node_modules moved away, so every package comes from dist. */
-function runFromDist(dir: string, runtime: string) {
+function runFromDist(dir: string, runtime: 'node' | 'bun') {
   renameSync(path.join(dir, 'node_modules'), path.join(dir, 'node_modules.away'))
   try {
     return run(dir, runtime)
@@ -196,7 +197,7 @@ const otherCopies = (dir: string) => {
 }
 
 describe('a self-contained build of a native addon installed more than once', () => {
-  it.each(['node', 'bun'])(
+  it.each(['node', 'bun'] as const)(
     'gives each importer its own copy from dist, for an import, a require and a subpath, under %s',
     async runtime => {
       const dir = path.join(root, 'two-versions')

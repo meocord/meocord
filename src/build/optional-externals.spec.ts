@@ -6,6 +6,7 @@ import { stripVTControlCharacters } from 'util'
 import { createRsbuild } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
+import { node } from '@src/spec-runtimes.js'
 
 /**
  * Bundles an application whose dependency, debug, probes for supports-color inside a try, as most
@@ -51,7 +52,7 @@ function runAlone(): ReturnType<typeof spawnSync> {
   try {
     cpSync(path.join(fixture, 'dist'), alone, { recursive: true })
     writeFileSync(path.join(alone, 'package.json'), JSON.stringify({ type: 'module' }))
-    return spawnSync('node', [path.join(alone, 'main.js')], { cwd: alone, encoding: 'utf8' })
+    return spawnSync(node, [path.join(alone, 'main.js')], { cwd: alone, encoding: 'utf8' })
   } finally {
     rmSync(alone, { recursive: true, force: true })
   }
@@ -68,7 +69,7 @@ beforeAll(() => {
   writeFileSync(path.join(fixture, 'src', 'main.ts'), MAIN)
   writeFileSync(path.join(fixture, 'src', 'esm-main.ts'), "import 'supports-color'\nconsole.log('started')\n")
   // The spec relies on it: a bundle that imported supports-color would find it here otherwise
-  expect(() => execFileSync('node', ['-e', "require.resolve('supports-color')"], { cwd: fixture, stdio: 'pipe' })).toThrow()
+  expect(() => execFileSync(node, ['-e', "require.resolve('supports-color')"], { cwd: fixture, stdio: 'pipe' })).toThrow()
 })
 
 afterAll(() => {

@@ -4,6 +4,7 @@ import path from 'path'
 import { createRsbuild } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
+import { node } from '@src/spec-runtimes.js'
 
 /**
  * Builds a decorated application with the real pipeline and runs the output, since lost decorator
@@ -70,7 +71,7 @@ async function buildAndRun(mode: 'production' | 'development'): Promise<RunResul
     cwd.mockRestore()
   }
 
-  const output = execFileSync('node', [path.join(fixture, 'dist', 'main.js')], { cwd: fixture, encoding: 'utf8' })
+  const output = execFileSync(node, [path.join(fixture, 'dist', 'main.js')], { cwd: fixture, encoding: 'utf8' })
   return JSON.parse(output.trim().split('\n').at(-1)!) as RunResult
 }
 

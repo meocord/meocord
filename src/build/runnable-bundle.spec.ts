@@ -6,6 +6,7 @@ import { createRsbuild, rspack } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
 import { freeCommonJsGlobals, nonEvalDevtool } from '@src/build/runnable-bundle.js'
+import { bun, node } from '@src/spec-runtimes.js'
 
 describe('nonEvalDevtool', () => {
   it.each([
@@ -84,7 +85,6 @@ export { load, freeModule, modules }
  */
 describe('a bundled build with an ES module that probes for CommonJS', () => {
   const fixture = mkdtempSync(path.join(tmpdir(), 'meocord-runnable-'))
-  const bun = process.versions.bun ? process.execPath : 'bun'
 
   beforeAll(() => {
     const write = (file: string, content: string) => {
@@ -141,7 +141,7 @@ describe('a bundled build with an ES module that probes for CommonJS', () => {
   it.each(['production', 'development'] as const)('starts on Node and on Bun from a %s build', async mode => {
     await build(mode)
 
-    expect(run('node', [])).toEqual(expected)
+    expect(run(node, [])).toEqual(expected)
     expect(run(bun, ['--no-install'])).toEqual(expected)
   })
 
@@ -149,7 +149,7 @@ describe('a bundled build with an ES module that probes for CommonJS', () => {
     const warnings = await build(mode, 'eval-source-map')
 
     expect(warnings.join('\n')).toContain('"eval-source-map" devtool')
-    expect(run('node', [])).toEqual(expected)
+    expect(run(node, [])).toEqual(expected)
     expect(run(bun, ['--no-install'])).toEqual(expected)
   })
 }, 120_000)

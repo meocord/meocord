@@ -5,6 +5,7 @@ import path from 'path'
 import { createRsbuild } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
+import { node } from '@src/spec-runtimes.js'
 
 // A 1x1 PNG, and a second one with other bytes under the same name
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -49,7 +50,7 @@ describe('asset imports in a build', () => {
     const root = await build(files, importsOf(['icon.png', 'guide.pdf', 'notes.txt', 'clip.mp3']))
 
     const written = readdirSync(path.join(root, 'dist', 'assets')).sort()
-    const imported = JSON.parse(execFileSync('node', [path.join(root, 'dist', 'main.js')], { encoding: 'utf8' }).trim()) as string[]
+    const imported = JSON.parse(execFileSync(node, [path.join(root, 'dist', 'main.js')], { encoding: 'utf8' }).trim()) as string[]
 
     expect(written).toEqual(['clip.mp3', 'guide.pdf', 'icon.png', 'notes.txt'])
     expect(imported.map(file => path.relative(path.join(root, 'dist'), file).replace(/\\/g, '/'))).toEqual([
@@ -78,7 +79,7 @@ describe('asset imports in a build', () => {
     ].join('\n')
     const root = await build(files, main)
 
-    const [math, text, table] = JSON.parse(execFileSync('node', [path.join(root, 'dist', 'main.js')], { encoding: 'utf8' }).trim()) as [
+    const [math, text, table] = JSON.parse(execFileSync(node, [path.join(root, 'dist', 'main.js')], { encoding: 'utf8' }).trim()) as [
       string[],
       string[],
       string,

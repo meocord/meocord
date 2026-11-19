@@ -5,6 +5,7 @@ import { pathToFileURL } from 'url'
 import { createRsbuild, type RsbuildConfig } from '@rsbuild/core'
 import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
+import { node } from '@src/spec-runtimes.js'
 
 /**
  * Builds an application whose decorator options read `.env`, and runs it with plain node. The fixture
@@ -101,7 +102,7 @@ async function buildAndRun(mode: 'production' | 'development', adjust = (config:
   const env = { ...process.env }
   delete env.GREETING
   const run = (dist: string, script = path.join(dist, 'main.js')) => {
-    const output = execFileSync('node', [script], { cwd: fixture, env, encoding: 'utf8' })
+    const output = execFileSync(node, [script], { cwd: fixture, env, encoding: 'utf8' })
     return JSON.parse(output.trim().split('\n').at(-1)!) as RunResult
   }
   const wrapper = path.join(wrapperDir, `${mode}.mjs`)
