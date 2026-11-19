@@ -254,8 +254,13 @@ interface MessageLock {
   attachments: unknown[]
   /** Whether a loading view put files of its own on it, which putting it back has to leave out. */
   drawn?: boolean
-  /** The calls holding it, with the control each disabled. */
+  /** The calls holding it, with the control each disabled, in the order they locked it. */
   holders: Map<InteractionResponse, LockOptions>
+  /**
+   * The edits made to it, one after another whichever call makes them, each drawn when its turn comes: Discord shows
+   * the edit that lands last, so that one always draws the holders as they are.
+   */
+  edits: Promise<void>
   /**
    * When MeoCord last edited it, as Discord stamped the edit: a later stamp means something else edited it since.
    * Discord rewrites the components it returns, with ids and resolved media, so comparing them tells nothing.
@@ -513,8 +518,9 @@ export class InteractionResponse implements ResponseState {
   private snapshot?: Snapshot
   /** The message this call locked, shared with other calls holding it, while this one holds it. */
   private held?: { key: unknown; entry: MessageLock }
-  /** The message this call locked, kept after it settles so its edits are still recorded there. */
+  /** The message this call locked, kept after it settles so its edits are still recorded there, and made in its order. */
   private lockEntry?: MessageLock
+  /** The loading view this call drew on the message it locked, once Discord took its lock: until then, edits there leave it out. */
   private loadingView?: ResponseView
   /** Whether the interaction was acknowledged with a private deferred reply for a drawn error view, which that view replaces. */
   private privateDeferral = false
@@ -858,6 +864,7 @@ export class InteractionResponse implements ResponseState {
         },
         attachments: attachmentList(message),
         holders: new Map(),
+        edits: Promise.resolve(),
       }
       messageLocks.set(key, entry)
     }
@@ -867,25 +874,31 @@ export class InteractionResponse implements ResponseState {
     this.snapshot = entry.original
     this.held = { key, entry }
     this.lockEntry = entry
-    this.loadingView = view
-    try {
-      await this.editMessage(this.heldBody(entry, entry.original, view), { restoring: true })
-    } catch (error) {
-      if (!view.files?.length || !isTooLarge(error)) throw error
-      this.warnFilesDropped(REFUSED_AS_TOO_LARGE)
-      this.loadingView = withoutFiles(view)
-      await this.editMessage(this.heldBody(entry, entry.original, this.loadingView), { restoring: true })
-    }
+    // One turn for the lock and its retry without files, so no other edit there draws the refused view in between
+    await this.takeTurn(() =>
+      this.withFilesFallback(view, async shown => {
+        // Set for the lock's own edit, and kept only once Discord takes it
+        this.loadingView = shown
+        try {
+          await this.editMessageNow(this.heldBody(entry, entry.original), { restoring: true })
+        } catch (error) {
+          this.loadingView = undefined
+          throw error
+        }
+      }),
+    )
     this.settled = false
   }
 
-  /** A message as `base` shows it, with every control a call still holding it disabled, and the loading view. */
-  private heldBody(entry: MessageLock, base: Snapshot, view: ResponseView | undefined): Body {
-    const locked = [...entry.holders.values()].reduce<Record<string, unknown>[]>(
-      (components, options) => lockComponents(components, options),
-      base.components,
-    )
-    if (!view || entry.holders.size === 0) return this.leavingDrawn(entry, this.v2 ? { components: locked } : { components: locked, embeds: base.embeds })
+  /**
+   * A message as `base` shows it, with the control of each call holding it disabled and the loading view of the call
+   * that locked it last, unless `withView` is false. A call counts once its lock has had its turn there.
+   */
+  private heldBody(entry: MessageLock, base: Snapshot, { withView = true } = {}): Body {
+    const holding = [...entry.holders].filter(([holder]) => holder.loadingView)
+    const locked = holding.reduce<Record<string, unknown>[]>((components, [, options]) => lockComponents(components, options), base.components)
+    const view = withView ? holding.at(-1)?.[0].loadingView : undefined
+    if (!view) return this.leavingDrawn(entry, this.v2 ? { components: locked } : { components: locked, embeds: base.embeds })
     let body: Body
     let shown: boolean
     if (this.v2) {
@@ -976,8 +989,8 @@ export class InteractionResponse implements ResponseState {
       // The message cannot be read here, as in a direct message the bot is not in: restore anyway.
     }
     this.leave()
-    // Calls still holding the message keep their controls disabled
-    await this.editMessage(this.heldBody(entry, entry.original, this.loadingView), { restoring: true })
+    // Calls still holding the message when the edit's turn comes keep their controls disabled
+    await this.editMessage(() => this.heldBody(entry, entry.original), { restoring: true })
   }
 
   /**
@@ -1007,9 +1020,9 @@ export class InteractionResponse implements ResponseState {
     return this.queued(async () => {
       this.sync()
       this.refuseAfterModal()
-      const body = this.withRestore(await this.themed(payload, options))
-      if (this.phase !== 'unanswered') return this.editMessage(this.keptPrivate(body))
-      return answersWithOwnMessage(this.interaction) ? this.reply(body) : this.update(body)
+      const draw = this.withRestore(await this.themed(payload, options))
+      if (this.phase !== 'unanswered') return this.editMessage(() => this.keptPrivate(draw()))
+      return answersWithOwnMessage(this.interaction) ? this.reply(draw()) : this.update(draw())
     })
   }
 
@@ -1153,9 +1166,12 @@ export class InteractionResponse implements ResponseState {
     }
   }
 
-  /** Omitted components and embeds put back the message as it was before the lock. */
-  private withRestore(body: Body): Body {
-    if (!this.snapshot || this.settled) return body
+  /**
+   * Leaves the lock with the message as `body` leaves it, and draws `body` with omitted components and embeds put back
+   * as the message was before the lock, once the edit's turn comes.
+   */
+  private withRestore(body: Body): () => Body {
+    if (!this.snapshot || this.settled) return () => body
     const entry = this.held?.entry
     const base = entry?.original ?? this.snapshot
     const left: Snapshot = {
@@ -1163,12 +1179,14 @@ export class InteractionResponse implements ResponseState {
       embeds: body.embeds === undefined ? base.embeds : (body.embeds.map(toJson) as APIEmbed[]),
     }
     this.leave({ left })
-    // Calls still holding the message keep their controls disabled
-    const components = entry && entry.holders.size > 0 ? this.heldBody(entry, left, undefined).components : body.components
-    return {
-      ...body,
-      components: components ?? base.components,
-      ...(body.embeds === undefined && !this.v2 ? { embeds: base.embeds } : {}),
+    return () => {
+      // Calls still holding the message when the edit's turn comes keep their controls disabled
+      const components = entry && entry.holders.size > 0 ? this.heldBody(entry, left, { withView: false }).components : body.components
+      return {
+        ...body,
+        components: components ?? base.components,
+        ...(body.embeds === undefined && !this.v2 ? { embeds: base.embeds } : {}),
+      }
     }
   }
 
@@ -1236,11 +1254,36 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
+   * Edits the answer with `body`, or what `body` draws. On a message this call locked, it is drawn and sent at its
+   * turn there, so the edit that lands last shows the lock as it is then.
+   */
+  private editMessage(body: Body | (() => Body), options: { restoring?: boolean } = {}): Promise<Message | undefined> {
+    const draw = typeof body === 'function' ? body : () => body
+    return this.takeTurn(() => this.editMessageNow(draw(), options))
+  }
+
+  /**
+   * Runs `step`, which edits the message this call locked, once every step asked for before it there has finished,
+   * whichever call asked for it; on any other message at once. A step there that hangs holds the others' until
+   * discord.js's REST timeout (15 s by default) rejects its edit.
+   */
+  private takeTurn<T>(step: () => Promise<T>): Promise<T> {
+    const entry = this.lockEntry
+    if (!entry) return step()
+    const turn = entry.edits.then(step)
+    entry.edits = turn.then(
+      () => undefined,
+      () => undefined,
+    )
+    return turn
+  }
+
+  /**
    * Edits the answer through the interaction, and through the channel only once its token has expired. Once the answer
    * is deleted, the edit is sent as a follow-up that becomes the answer, as private as the deleted one unless it sets
    * flags of its own.
    */
-  private async editMessage(body: Body, { restoring = false } = {}): Promise<Message | undefined> {
+  private async editMessageNow(body: Body, { restoring = false } = {}): Promise<Message | undefined> {
     const { answer } = this
     if (answer.kind === 'deleted') {
       if (restoring) return undefined
