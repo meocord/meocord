@@ -44,16 +44,51 @@ export interface ReadyWait {
 
 /** A call or a lookup waiting for the last unit it reaches to settle. */
 interface Waiter {
+  call: ReadyWait
+  needed: readonly number[]
   place: number
+  /** The call the wait belongs to, as the app tracks its running calls, for the line naming it if a stop drops it. */
+  of?: object
   resolve: () => void
+  /** Ends the wait with the stop's error: the call never starts. */
+  reject: (error: Error) => void
   /** Takes it off its interaction's decision once its units settle first. */
   leave?: () => void
 }
 
+/**
+ * A call a stop dropped before it started: the call as the app tracks it, the hook it waited for, and when it has
+ * ended, its observers told and an answer it made sent.
+ */
+export interface DroppedCall {
+  of?: object
+  hook: string
+  ended: Promise<void>
+}
+
+/** The errors {@link stoppedBeforeStart} made, told apart by identity alone, each with the end of the call it dropped. */
+const stops = new WeakMap<Error, PromiseWithResolvers<void>>()
+
+/** What a call the ready gate held when the app stopped ends with, as it never started, and when that call has ended. */
+function stoppedBeforeStart(): { error: Error; ended: Promise<void> } {
+  const error = new Error('The bot stopped before this call started.')
+  const ended = Promise.withResolvers<void>()
+  stops.set(error, ended)
+  return { error, ended: ended.promise }
+}
+
+/** Whether `error` ended a call the ready gate held when the app stopped, so it never started. */
+export function isStoppedBeforeStart(error: unknown): boolean {
+  return error instanceof Error && stops.has(error)
+}
+
+/** Marks the call `error` dropped as ended, which the stop waits for, within the drain's time, before its hooks. */
+export function droppedCallEnded(error: unknown): void {
+  if (error instanceof Error) stops.get(error)?.resolve()
+}
+
 /** A call or a lookup waiting on its interaction's bound. */
 interface Held {
-  call: ReadyWait
-  needed: readonly number[]
   waiter: Waiter
   goAhead: () => void
 }
@@ -221,19 +256,27 @@ export class ReadyGate {
   private settledCount = 0
   /** Whether the hooks' pass has ended, settled or stopped, after which no call waits. */
   private open = false
+  /** Whether every hook has run, so a close has nothing left to decide. */
+  private ran = false
   private readonly waiters = new Set<Waiter>()
   /** The places of the units each handler reaches, in order, by class and method. */
   private readonly needs = new WeakMap<object, Map<string, readonly number[]>>()
   /** The units a bound has already warned about, each once. */
   private readonly warned = new Set<unknown>()
   /** The decision pending on each interaction's bound, while a call or a lookup for it waits. */
-  private readonly decisions = new WeakMap<object, Decision>()
+  private readonly decisions = new Map<object, Decision>()
+  /** The calls a stop dropped, at the hooks' pass's end or at the close, which the close reports. */
+  private readonly dropped: DroppedCall[] = []
+  /** The close under way or done, which settles with the calls the stop dropped. */
+  private closing?: Promise<readonly DroppedCall[]>
 
   constructor(
     private readonly units: readonly LifecycleUnit[],
     private readonly warn: (message: string) => void,
     /** The app's `themeFor` class, whose hooks every theme lookup waits for. */
     private readonly themeResolver?: object,
+    /** The call a wait belongs to, as the app tracks its running calls. */
+    private readonly callOf?: () => object | undefined,
   ) {
     this.places = new Map(units.map((unit, place) => [unit.token, place]))
   }
@@ -248,10 +291,43 @@ export class ReadyGate {
     }
   }
 
-  /** Ends the wait for every call, now and later: the hooks' pass has run, or a stop ended it. */
-  finish(): void {
+  /**
+   * Ends the wait for every call, now and later: the hooks' pass has run, or, when `stopped`, a stop ended it, and a
+   * call still waiting needs a hook that will never run, so it is dropped at once.
+   */
+  finish(stopped = false): void {
     this.open = true
-    for (const waiter of this.waiters) this.release(waiter)
+    this.ran = !stopped
+    for (const waiter of [...this.waiters]) {
+      if (stopped && this.hookAhead(waiter.needed)) this.dropWaiter(waiter)
+      else this.release(waiter)
+    }
+  }
+
+  /**
+   * Closes the gate as a stop stops waiting for the calls: no call waits from now on, and those still held are
+   * decided by the end of the event loop iteration's timers and I/O, before its immediates. Hooks that settle by then,
+   * by another timer due in the same timers phase included, let their calls go ahead, and a held interaction whose
+   * first-answer deadline is due goes ahead as its bound would; every other is dropped. Settles with every call the
+   * stop dropped, at the pass's end or here, once they have been. A later close, such as a late value's shutdown,
+   * settles with none: those calls are the first close's to wait for and report.
+   */
+  close(): Promise<readonly DroppedCall[]> {
+    if (this.closing) return this.closing.then(() => [])
+    this.open = true
+    // Decided once the turn has run even with nothing held, so a call its hook released in it starts first
+    this.closing =
+      this.ran && this.waiters.size === 0
+        ? Promise.resolve(this.dropped)
+        : new Promise(resolve =>
+            setImmediate(() => {
+              // A bound that has passed with Discord told nothing is over, whichever timer the turn ran first
+              for (const decision of [...this.decisions.values()]) if (decision.deadline.due()) this.decide(decision)
+              this.dropAll()
+              resolve(this.dropped)
+            }),
+          )
+    return this.closing
   }
 
   /** Whether `call` would wait now: the hooks' pass is still running and a unit it reaches hasn't settled. */
@@ -269,22 +345,21 @@ export class ReadyGate {
   async wait(call: ReadyWait): Promise<void> {
     if (!this.holds(call)) return
     const needed = this.neededBy(call)
-    const waiter: Waiter = { place: needed.at(-1)!, resolve: () => undefined }
-    const reached = new Promise<void>(resolve => {
-      waiter.resolve = resolve
-      this.waiters.add(waiter)
-    })
-    if (!call.bound) return reached
+    const reached = Promise.withResolvers<void>()
+    const of = this.callOf?.()
+    const waiter: Waiter = { call, needed, place: needed.at(-1)!, ...(of && { of }), resolve: reached.resolve, reject: reached.reject }
+    this.waiters.add(waiter)
+    if (!call.bound) return reached.promise
     const decision = this.decisionFor(call.bound)
     const goneAhead = Promise.withResolvers<void>()
-    const held: Held = { call, needed, waiter, goAhead: goneAhead.resolve }
+    const held: Held = { waiter, goAhead: goneAhead.resolve }
     decision.held.add(held)
     waiter.leave = () => {
       decision.held.delete(held)
       // Its last waiter gone, the bound's timer has no one to decide for
       if (decision.held.size === 0) this.drop(decision)
     }
-    await Promise.race([reached, goneAhead.promise])
+    await Promise.race([reached.promise, goneAhead.promise])
   }
 
   /** The decision pending on `bound`'s interaction, or a new one, due once its first-answer deadline expires. */
@@ -307,13 +382,39 @@ export class ReadyGate {
   private decide(decision: Decision): void {
     this.drop(decision)
     // A stable sort keeps each kind in the order it came
-    const held = [...decision.held].sort((a, b) => Number(a.call.lookup === true) - Number(b.call.lookup === true))
+    const held = [...decision.held].sort((a, b) => Number(a.waiter.call.lookup === true) - Number(b.waiter.call.lookup === true))
     decision.held.clear()
-    for (const { call, needed, waiter, goAhead } of held) {
+    for (const { waiter, goAhead } of held) {
       this.waiters.delete(waiter)
-      if (this.warnLate(call, needed, decision.deadline.fromWait)) decision.deadline.warned = true
+      if (this.warnLate(waiter.call, waiter.needed, decision.deadline.fromWait)) decision.deadline.warned = true
       goAhead()
     }
+  }
+
+  /** Drops every call and lookup still waiting: each ends with the stop's error, and lets go of its deadline. */
+  private dropAll(): void {
+    for (const waiter of [...this.waiters]) this.dropWaiter(waiter)
+  }
+
+  /** Ends `waiter` with the stop's error, noting a call for the line naming it. */
+  private dropWaiter(waiter: Waiter): void {
+    this.waiters.delete(waiter)
+    // Off its decision first, so the deadline is let go of only once nothing waits on it
+    waiter.leave?.()
+    const { error, ended } = stoppedBeforeStart()
+    // A lookup is no call: its answer goes on in the handler's theme, and nothing names it
+    if (!waiter.call.lookup) this.dropped.push({ ...(waiter.of && { of: waiter.of }), hook: this.pendingHook(waiter.needed)?.name ?? 'a unit', ended })
+    waiter.reject(error)
+  }
+
+  /**
+   * Whether a hook not yet run lies before or among the units `needed` reaches: an `onReady` on a class, or a unit
+   * whose hooks its token can't tell, such as a provided value.
+   */
+  private hookAhead(needed: readonly number[]): boolean {
+    return this.units
+      .slice(this.settledCount, needed.at(-1)! + 1)
+      .some(({ token }) => typeof token !== 'function' || typeof (token as { prototype?: { onReady?: unknown } }).prototype?.onReady === 'function')
   }
 
   private drop(decision: Decision): void {
@@ -367,12 +468,18 @@ export class ReadyGate {
     return needed
   }
 
+  /**
+   * The hook that holds a call needing `needed`: the first unit not settled yet that has one, as far as its class tells,
+   * whether the call uses it or it only runs before one the call uses.
+   */
+  private pendingHook(needed: readonly number[]): LifecycleUnit | undefined {
+    const pending = this.units.slice(this.settledCount, needed.at(-1)! + 1)
+    return pending.find(({ token }) => typeof (token as { prototype?: { onReady?: unknown } }).prototype?.onReady === 'function') ?? pending[0]
+  }
+
   /** Warns, once per hook, that a call ran before the hook it waited for had settled; whether it warned. */
   private warnLate({ controller, methodName, bound, lookup }: ReadyWait, needed: readonly number[], fromWait: boolean): boolean {
-    // The hook that holds the call: the first unit not settled yet that has one, as far as its class tells, whether the
-    // call uses it or it only runs before one the call uses
-    const pending = this.units.slice(this.settledCount, needed.at(-1)! + 1)
-    const unit = pending.find(({ token }) => typeof (token as { prototype?: { onReady?: unknown } }).prototype?.onReady === 'function') ?? pending[0]
+    const unit = this.pendingHook(needed)
     if (!unit || this.warned.has(unit.token)) return false
     this.warned.add(unit.token)
     const name = (controller as { name?: string }).name
@@ -416,8 +523,9 @@ export function closeReadyGate(
   units: readonly LifecycleUnit[],
   warn: (message: string) => void,
   themeResolver?: object,
+  callOf?: () => object | undefined,
 ): ReadyGate {
-  const gate = new ReadyGate(units, warn, themeResolver)
+  const gate = new ReadyGate(units, warn, themeResolver, callOf)
   gates.set(container, gate)
   return gate
 }

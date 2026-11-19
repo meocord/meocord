@@ -1001,7 +1001,7 @@ describe('a lookup in flight as the testing module closes', () => {
   it.each([
     ['answering', 'answers'],
     ['rejecting', 'rejects'],
-  ] as const)('ignores a resolver %s after the close: nothing logged, counted or kept', async (_how, outcome) => {
+  ] as const)('ignores a resolver %s after the close: nothing logged or counted', async (_how, outcome) => {
     const module = await started({ waitForReady: false, hook: false, themeForTimeoutMs: 5000 })
     const first = slash('plain')
     answer = () => at(first.created, 3000).then(() => (outcome === 'answers' ? themed : Promise.reject(new Error('themes down'))))
@@ -1009,8 +1009,10 @@ describe('a lookup in flight as the testing module closes', () => {
 
     // The one timer left is the resolver's own, which answers at 3 s
     expect(await closed(module)).toEqual({ armed: 1, warned: [], failed: [] })
-    // Neither kept nor backed off: the next call asks again
-    await run(module, slash('plain').interaction)
-    expect(asked).toBe(2)
+    // A closed module asks the resolver nothing more: the next call goes on in its handler's theme at once
+    const next = slash('plain')
+    await run(module, next.interaction)
+    expect(asked).toBe(1)
+    expect(next.sent).toEqual([{ method: 'reply', at: 0, colour: HANDLER }])
   })
 })

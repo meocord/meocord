@@ -5,7 +5,7 @@ import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from 
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
 import { deferMisuseError, handlerDefer, nonInteractionHandler, startDefer } from '@src/core/defer.js'
-import { type ReadyBound, readyBoundFor, type ReadyWait, readyGateOf } from '@src/core/ready-gate.js'
+import { droppedCallEnded, isStoppedBeforeStart, type ReadyBound, readyBoundFor, type ReadyWait, readyGateOf } from '@src/core/ready-gate.js'
 import {
   callGuardedHandler,
   classLevelGuards,
@@ -644,6 +644,8 @@ async function runPipeline(
   let ran = false
   // Once the handler has settled: before then, a call that ends is one an interceptor ended
   let finished = false
+  // A stop dropped the call while the ready gate held it, so it never started
+  let dropped = false
   // The outermost interceptor that returned before the handler finished, or without starting it
   let returnedEarly: InterceptorClass | undefined
   try {
@@ -708,6 +710,15 @@ async function runPipeline(
     else await runInterceptors(running, container, contextOf(), handler, cls => (returnedEarly = cls))
     return { ran }
   } catch (error) {
+    if (isStoppedBeforeStart(error)) {
+      // Ends quietly, as one arriving once shutdown has begun: no filter, fallback or answer. Its observers hear why once
+      // an answer already asked for, as onStart's waiting for the theme, has gone out
+      await (response ?? (type === 'interaction' && first?.isRepliable?.() ? responseOf(first as Parameters<typeof responseOf>[0]) : undefined))?.idle()
+      dropped = true
+      outcome = 'error'
+      failure = { error }
+      return { ran, error }
+    }
     // The answer to an error is in the call's theme, which a call that failed before reading it waits for here
     if (themeReady) await themeReady.catch(() => undefined)
     outcome = outcomeOf(error)
@@ -718,16 +729,23 @@ async function runPipeline(
     else [outcome, failure] = ['error', { error: unanswered }]
     return { ran, error }
   } finally {
-    await response?.release()
+    // A dropped call's 'auto' timer goes without the acknowledgement a handler that returned early gets
+    if (dropped) response?.cancel()
+    else await response?.release()
     if (options.onUnanswered && (ran || returnedEarly) && outcome === 'ran' && (type === 'interaction' || type === 'autocomplete')) {
       const phase = responsePhaseOf(contextOf())
       // The handler is to blame only once it has finished; until then, the interceptor that ended the call is
       const returnedBy = !finished && returnedEarly ? { interceptor: returnedEarly, handlerStarted: ran } : undefined
       if (phase === 'unanswered' || phase === 'deferred') options.onUnanswered({ type, phase, returnedBy })
     }
-    if (options.awaitObservers) await starting
-    // After the answer and the release, so the duration covers the whole call
-    await observe(container, contextOf, { outcome, startedAt, handled, failure, deniedBy: denial.by }, options)
+    try {
+      if (options.awaitObservers) await starting
+      // After the answer and the release, so the duration covers the whole call
+      await observe(container, contextOf, { outcome, startedAt, handled, failure, deniedBy: denial.by }, options)
+    } finally {
+      // Its observers told, which the stop's onShutdown hooks wait for within the drain's time
+      if (dropped) droppedCallEnded(failure?.error)
+    }
   }
 }
 

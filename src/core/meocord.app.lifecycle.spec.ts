@@ -1246,32 +1246,152 @@ describe('lifecycle hooks', () => {
       await ready
     })
 
-    // A waiting call is a running call: the drain waits for it within its share of shutdownTimeout, as for any call
-    it('ends a stop while a call waits as the drain does', async () => {
+    /** A cache whose onReady records `events`, resolves `began`, then waits for `warm`. */
+    function heldCache(loaded: Loaded, events: string[], warm: Promise<void>, began: PromiseWithResolvers<void>) {
+      @loaded.Service()
+      class Cache implements OnReady {
+        async onReady() {
+          events.push('cache warming')
+          began.resolve()
+          await warm
+          events.push('cache warm')
+        }
+      }
+      return Cache
+    }
+    /** A slash interaction whose bound, 2 s from its creation, passes `dueMs` from now. */
+    function quote(loaded: Loaded, dueMs: number) {
+      const interaction = loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'quote' })
+      Object.defineProperty(interaction, 'createdTimestamp', { value: Date.now() - (2_000 - dueMs), configurable: true })
+      return interaction
+    }
+    const stopWarnings = () => logged.warn.flat().filter(text => !/^(registerCommands\(\)|The Guilds intent)/.test(String(text)))
+    const DROPPED = 'Calls dropped before they started, as the stop came while they waited: '
+
+    // An interaction without @Defer waits up to its bound: a stop whose drain ends first drops it
+    it('drops an interaction the gate still holds when the drain ends, so its bound starts nothing later', async () => {
       const loaded = await load()
       config.shutdownTimeout = 400
       const events: string[] = []
       const warm = Promise.withResolvers<void>()
       const began = Promise.withResolvers<void>()
-      const { Cache, Prices } = cacheApp(loaded, events, warm.promise, began)
+      const Cache = heldCache(loaded, events, warm.promise, began)
+      @loaded.Controller()
+      class Quotes {
+        constructor(@loaded.inject(Cache) readonly cache: InstanceType<typeof Cache>) {}
+        @loaded.Command('quote', loaded.CommandType.SLASH)
+        quote() {
+          events.push('quote runs')
+        }
+      }
 
-      const { client } = await startApp(loaded, { controllers: [Prices], services: [Cache], waitForReady: true })
+      const { app, client } = await startApp(loaded, { controllers: [Quotes], services: [Cache], waitForReady: true })
       const ready = becomeReady(client)
       await began.promise
-      const handled = call(client, price(loaded))
-      await loaded.shutdownAndExit(false)
-
-      expect(events).toEqual(['cache warming'])
-      // Registration's own warning aside: this client has no application
-      expect(logged.warn.flat().filter(text => !String(text).startsWith('registerCommands()'))).toEqual([
+      const held = quote(loaded, 500)
+      const handled = call(client, held)
+      await app.stop()
+      expect(stopWarnings()).toEqual([
         'onReady in Cache is still running after 200 ms; shutting down without waiting for it.',
-        'Calls still running after 200 ms: interaction "/price"; running the onShutdown hooks in the 200 ms left.',
+        `${DROPPED}interaction "/quote" for onReady in Cache.`,
       ])
-      // Once the hook settles, the pass starts no more, and the call it held runs, as a call the drain outlasted does
+
+      // Past the call's bound, then the hook settles
+      await new Promise(resolve => setTimeout(resolve, 600))
       warm.resolve()
       await Promise.all([ready, handled])
-      expect(events).toEqual(['cache warming', 'cache warm', 'price runs'])
+      expect(events).toEqual(['cache warming', 'cache warm'])
+      expect(loaded.getResponse(held).calls).toEqual([])
+      expect(stopWarnings()).toHaveLength(2)
     })
+
+    // An event waits as long as its hooks run: a stop whose drain ends first drops it
+    it('drops an event the gate still holds when the drain ends, so its hook settling starts nothing', async () => {
+      const loaded = await load()
+      config.shutdownTimeout = 400
+      const events: string[] = []
+      const warm = Promise.withResolvers<void>()
+      const began = Promise.withResolvers<void>()
+      const Cache = heldCache(loaded, events, warm.promise, began)
+      @loaded.Service()
+      class Welcome {
+        constructor(@loaded.inject(Cache) readonly cache: InstanceType<typeof Cache>) {}
+        @loaded.On('guildCreate')
+        greet() {
+          events.push('greet runs')
+        }
+      }
+
+      const { app, client } = await startApp(loaded, { controllers: [], services: [Cache, Welcome], waitForReady: true })
+      const ready = becomeReady(client)
+      await began.promise
+      const handled = Promise.all(client.listeners('guildCreate').map(listener => listener({ id: '900000000000000001' })))
+      await app.stop()
+      expect(stopWarnings()).toEqual([
+        'onReady in Cache is still running after 200 ms; shutting down without waiting for it.',
+        `${DROPPED}@On('guildCreate') in Welcome.greet for onReady in Cache.`,
+      ])
+
+      warm.resolve()
+      await Promise.all([ready, handled])
+      expect(events).toEqual(['cache warming', 'cache warm'])
+    })
+
+    // A signal's shutdown closes the gate where app.stop() does: before the onShutdown hooks, which run until the exit
+    it.each(['its bound passes', 'its hook settles'] as const)(
+      "starts nothing for a held call when %s while a signal's shutdown runs the onShutdown hooks",
+      async shape => {
+        const loaded = await load()
+        // The drain ends 500 ms after the shutdown begins; Pool's onShutdown then runs until the row releases it, before
+        // the forced exit at 1000 ms
+        config.shutdownTimeout = 1_000
+        const events: string[] = []
+        const warm = Promise.withResolvers<void>()
+        const began = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        const Cache = heldCache(loaded, events, warm.promise, began)
+        @loaded.Service()
+        class Pool implements OnShutdown {
+          async onShutdown() {
+            events.push('pool closing')
+            // The hook settles while Pool's onShutdown runs, which ends once Cache has heard
+            if (shape === 'its hook settles') warm.resolve()
+            await release.promise
+            events.push('pool closed')
+          }
+        }
+        @loaded.Controller()
+        class Quotes {
+          constructor(@loaded.inject(Cache) readonly cache: InstanceType<typeof Cache>) {}
+          @loaded.Command('quote', loaded.CommandType.SLASH)
+          quote() {
+            events.push('quote runs')
+          }
+        }
+        // Only the first exit is an event, so a second one fails the count below on its own
+        let exits = 0
+        exit.mockImplementation((() => void (exits++ === 0 && events.push('exit'))) as never)
+
+        const { client } = await startApp(loaded, { controllers: [Quotes], services: [Pool, Cache], waitForReady: true })
+        const ready = becomeReady(client)
+        await began.promise
+        // The bound passes 900 ms in, while Pool's onShutdown runs, and the row releases it at 950 ms: both timers are due
+        // before the forced exit's, so they fire first whatever the load
+        const handled = call(client, quote(loaded, shape === 'its bound passes' ? 900 : 2_000))
+        if (shape === 'its bound passes') setTimeout(() => release.resolve(), 950)
+        // Cache's onReady reads warm first, so 'cache warm' comes before Pool's release
+        else void warm.promise.then(() => release.resolve())
+        await new Promise(resolve => setTimeout(resolve, 50))
+        await loaded.shutdownAndExit(false)
+        await new Promise(resolve => setTimeout(resolve, 300))
+        warm.resolve()
+        await Promise.all([ready, handled])
+
+        expect(exit).toHaveBeenCalledTimes(1)
+        expect(events).toEqual(['cache warming', 'pool closing', ...(shape === 'its hook settles' ? ['cache warm'] : []), 'pool closed', 'exit', ...(shape === 'its bound passes' ? ['cache warm'] : [])])
+      },
+    )
+
     it("looks a theme up only once the hooks of the themeFor class's dependency have settled", async () => {
       const loaded = await load()
       const events: string[] = []

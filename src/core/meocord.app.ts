@@ -61,7 +61,7 @@ import { warnDeprecatedBehaviour, warnOnce } from '@src/common/deprecation.js'
 import { managerGone } from '@src/util/sharding-mode.util.js'
 import { endFailedShard, tellManager } from '@src/core/shard-exit.js'
 import { isShardMessage } from '@src/core/shard-messages.js'
-import { claimAmbientAppTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import { claimAmbientAppTheme, releaseAmbientAppTheme, stopThemeLookups } from '@src/core/theme-runtime.js'
 import { planTargets, registerCommands, registrationRest } from '@src/core/command-registration.js'
 import { pruneAfterRegistration } from '@src/core/command-prune.js'
 import { collectCommands, SILENT_LOGGER } from '@src/core/command-identity.js'
@@ -411,9 +411,12 @@ export class MeoCordApp implements MeoCordApplication {
     this.readySettled.clear()
     this.attempt.drop()
     this.made = false
-    // Nothing came online, so no call runs and no listener needs removing
+    // Nothing came online, so no listener needs removing; a call the gate held as the login failed is dropped there,
+    // off the calls running, as a stop drops it
     await runShutdownSequence(this.container, () => entries, {
       drainCalls: () => this.calls.settled(),
+      droppedCall: call => this.calls.drop(call),
+      droppedBy: 'failed login',
       timeoutMs: this.shutdownTimeout,
       hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
       warn: message => this.logger.warn(message),
@@ -521,7 +524,9 @@ export class MeoCordApp implements MeoCordApplication {
     // From here, with waitForReady, calls wait for the onReady hooks of the classes they use
     if (globalStagesOf(this.container).waitForReady) {
       const themeResolver = themeResolverClass(globalStagesOf(this.container).themeFor?.resolvers)
-      this.readyGate = closeReadyGate(this.container, this.lifecycleUnits, message => this.logger.warn(message), themeResolver)
+      this.readyGate = closeReadyGate(this.container, this.lifecycleUnits, message => this.logger.warn(message), themeResolver, () =>
+        this.calls.current(),
+      )
     }
   }
 
@@ -830,12 +835,14 @@ export class MeoCordApp implements MeoCordApplication {
           this.readyGate?.settled(unit)
         },
         runOnReady: this.readyPass.runOnReady,
+        trackSlow: this.readyPass.trackSlow,
         made: unit => (this.attempt?.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
       },
     ))
-    // Also when shutdown stopped the hooks before the store's or a call's, so no call waits on them
+    // Also when shutdown stopped the hooks before the store's or a call's, so no call waits on them; a call still held
+    // then needs a hook that will never run, so it never starts
     this.storeReady?.resolve()
-    this.readyGate?.finish()
+    this.readyGate?.finish(this.closing)
   }
 
   /**
@@ -877,10 +884,11 @@ export class MeoCordApp implements MeoCordApplication {
       drainAlways: true,
       runningCalls: () => this.calls.running(),
       readyPass: this.readyPass,
+      droppedCall: call => this.calls.drop(call),
       timeoutMs,
       hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
       warn: message => this.logger.warn(message),
-    })
+    }).finally(() => stopThemeLookups(this.container))
     this.shutdownHooksRan.resolve()
   }
 

@@ -55,7 +55,14 @@ import {
   type ThemeResolvers,
 } from '@src/interface/index.js'
 import { ThemeCache, type ThemeResolverClass, themeResolverClass } from '@src/core/theme-resolvers.js'
-import { appTheme, claimAmbientAppTheme, prepareLateThemes, registerClientTheme, releaseAmbientAppTheme } from '@src/core/theme-runtime.js'
+import {
+  appTheme,
+  claimAmbientAppTheme,
+  prepareLateThemes,
+  registerClientTheme,
+  releaseAmbientAppTheme,
+  stopThemeLookups,
+} from '@src/core/theme-runtime.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
 import { provideCommandIds } from '@src/core/command-ids.js'
 import { SNOWFLAKE, testingCommandIds } from '@src/testing/testing-command-ids.js'
@@ -81,7 +88,6 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import { shardCallHandler, ShardContext } from '@src/core/shard-context.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import {
-  callsSettled,
   type LifecycleEntry,
   lifecycleEntry,
   inShutdownHookOf,
@@ -94,6 +100,7 @@ import {
   within,
 } from '@src/core/lifecycle-hooks.js'
 import { closeReadyGate } from '@src/core/ready-gate.js'
+import { RunningCalls } from '@src/core/running-calls.js'
 import { applyDispatchedReaction, createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
 
 // Taken as the module loads, before a test fakes the timers, so the wait after a client's listeners holds
@@ -616,12 +623,14 @@ export class TestingModule {
           })
       const failures: { name: string; error: unknown }[] = []
       await runShutdownSequence(this.container, entries, {
-        drainCalls: () => callsSettled(this.calls),
+        drainCalls: () => this.calls.settled(),
         readyPass: this.readyPass,
+        // Off the calls the drain waits for; the module names none, so no line lists them
+        droppedCall: call => void this.calls.drop(call),
         timeoutMs: this.shutdownTimeout,
         hookFailed: (name, error) => failures.push({ name, error }),
         warn: message => new Logger('TestingModule').warn(message),
-      })
+      }).finally(() => stopThemeLookups(this.container))
       // After the hooks, as a bot shutting down does; a module that never had it leaves another's alone
       releaseAmbientAppTheme(this.container)
       throwFailures('onShutdown', failures)
@@ -674,7 +683,7 @@ export class TestingModule {
     const units = this.hookOrder(unit => this.hasHook(unit, 'onReady'))
     // With waitForReady, a call made while these hooks run waits for those of the classes it uses, as the bot's does
     const stages = globalStagesOf(this.container)
-    const gate = stages.waitForReady === true ? closeReadyGate(this.container, units, warn, themeResolverClass(stages.themeFor?.resolvers)) : undefined
+    const gate = stages.waitForReady === true ? closeReadyGate(this.container, units, warn, themeResolverClass(stages.themeFor?.resolvers), () => this.calls.current()) : undefined
     try {
       // No warning for a hook whose dependency failed: the test sees the dependency's own error
       await runReadyHooks(
@@ -686,6 +695,7 @@ export class TestingModule {
         // A test's fake clock can pass the time inside a hook, so the warning waits to be asked for
         {
           runOnReady: this.readyPass.runOnReady,
+          trackSlow: this.readyPass.trackSlow,
           made: unit => (this.constructed.has(unit.token) ? (this.container.get(unit.token as ServiceIdentifier) as object) : undefined),
           slowAfterMs: globalStagesOf(this.container).warnSlow === true ? SLOW_READY_HOOK_MS : undefined,
           ...(gate && { settled: (unit: LifecycleUnit) => gate.settled(unit) }),
@@ -881,7 +891,7 @@ export class TestingModule {
     if (event && strictMocks()) {
       this.checkArgumentCount(controller, methodName, instance[methodName], first, args.length)
       this.registerEventClients(args as unknown[])
-      const { ran, error } = await this.track(this.runEventHandler(instance, methodName, args as unknown[]))
+      const { ran, error } = await this.track(() => this.runEventHandler(instance, methodName, args as unknown[]))
       return error === undefined ? { ran } : { ran, error }
     }
     const interaction = first instanceof BaseInteraction ? (first as Interaction) : undefined
@@ -907,7 +917,7 @@ export class TestingModule {
     this.checkArgumentCount(controller, methodName, instance[methodName], first, callArgs.length)
     if (event) this.warnEventRun(controller, methodName, event, first, callArgs.length !== args.length)
     this.registerClient(first)
-    const { ran, error } = await this.track(runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
+    const { ran, error } = await this.track(() => runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
   }
 
@@ -984,17 +994,15 @@ export class TestingModule {
     new Logger('TestingModule').warn(problem)
   }
 
-  /** The calls under way, each removed once it settles: what `close()` lets finish before the cooldown store stops. */
-  private readonly calls = new Set<Promise<unknown>>()
+  /**
+   * The calls under way, each until it settles: what `close()` lets finish before the cooldown store stops, a call the
+   * ready gate dropped at the close left out, as the bot's are.
+   */
+  private readonly calls = new RunningCalls()
 
-  /** Counts `call` as under way until it settles. */
-  private track<T>(call: Promise<T>): Promise<T> {
-    this.calls.add(call)
-    void call.then(
-      () => this.calls.delete(call),
-      () => this.calls.delete(call),
-    )
-    return call
+  /** Runs `start` as a call under way until it settles. */
+  private track<T>(start: () => Promise<T>): Promise<T> {
+    return this.calls.run('', start)
   }
 
   /**
@@ -1224,16 +1232,16 @@ export class TestingModule {
       const added = action === ReactionHandlerAction.ADD
       const delivery = gatewayDelivery(() => reaction.client, added ? Events.MessageReactionAdd : Events.MessageReactionRemove)
       if (delivery) applyDispatchedReaction(reaction, options.user, added)
-      const routing = this.track(dispatcher.reaction(input as MessageReaction, { user: options.user, action }, record))
+      const routing = this.track(() => dispatcher.reaction(input as MessageReaction, { user: options.user, action }, record))
       if (delivery) thrownByListeners = await delivery([reaction, options.user, { type: ReactionType.Normal, burst: false }])
       await routing
     } else if (input instanceof BaseInteraction) {
-      await this.track(dispatcher.interaction(input as Interaction, record))
+      await this.track(() => dispatcher.interaction(input as Interaction, record))
       thrownByListeners = this.listenerFailures.get(input) ?? []
       this.listenerFailures.delete(input)
     } else if (input instanceof Message) {
       const delivery = gatewayDelivery(() => input.client, Events.MessageCreate)
-      const routing = this.track(dispatcher.message(input, record))
+      const routing = this.track(() => dispatcher.message(input, record))
       if (delivery) thrownByListeners = await delivery([input])
       await routing
     } else {
@@ -1313,7 +1321,7 @@ export class TestingModule {
           const { ran } = await this.runEventHandler(instance, handler.method, args, fallback)
           return ran
         }
-        calls.push(this.track(run()))
+        calls.push(this.track(run))
       }
     }
 

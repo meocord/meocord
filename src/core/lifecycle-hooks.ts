@@ -8,6 +8,7 @@ import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/in
 import { RunningCalls } from '@src/core/running-calls.js'
 import { seconds } from '@src/core/autocomplete-timing.js'
 import { abandonThemeLookups } from '@src/core/theme-runtime.js'
+import { type DroppedCall, readyGateOf } from '@src/core/ready-gate.js'
 
 /** A unit a shutdown closes, with the instance whose `onShutdown` runs. */
 export interface LifecycleEntry {
@@ -61,6 +62,8 @@ export interface ReadyHooksOptions {
   runOnReady?: (unit: LifecycleUnit, run: () => unknown) => Promise<void>
   /** A unit's instance once the container has made it, which counting the hooks after a slow one reads, never makes. */
   made?: (unit: LifecycleUnit) => object | undefined
+  /** Hears of each hook's slow-warning timer as it is set, with how to end it, so a stop that gives up on the hook can. */
+  trackSlow?: (end: () => void) => void
 }
 
 /**
@@ -76,6 +79,10 @@ export class ReadyPass {
   private current?: object
   /** The unit whose `onReady` started last, which a warning names. */
   private unit?: string
+  /** Ends the slow-warning timer of the `onReady` in progress, if one is set. */
+  private endSlow?: () => void
+  /** Whether a stop gave up on the pass, after which no slow-warning timer stays set. */
+  private givenUp = false
 
   /** Runs `pass`, the ready hooks, as the pass shutdown waits for. */
   run<T>(pass: () => Promise<T>): Promise<T> {
@@ -97,6 +104,19 @@ export class ReadyPass {
   /** Excuses the pass when this runs within the `onReady` in progress, as one that stops the app does. */
   excuseCurrent(): void {
     if (this.current && this.hooks.getStore() === this.current) this.passes.excuseCurrent()
+  }
+
+  /** Takes the slow-warning timer of the `onReady` starting now, ended at once when a stop has given up on the pass. */
+  readonly trackSlow = (end: () => void): void => {
+    if (this.givenUp) end()
+    else this.endSlow = end
+  }
+
+  /** Ends the slow-warning timer of the `onReady` in progress, and of any after it: a stop no longer waits for them. */
+  giveUp(): void {
+    this.givenUp = true
+    this.endSlow?.()
+    this.endSlow = undefined
   }
 
   /** Settles once the pass has, unless excused. */
@@ -139,7 +159,7 @@ export async function runReadyHooks(
   client: Client<true>,
   info: ReadyInfo,
   report: ReadyHooksReport,
-  { stopped = () => false, slowAfterMs, settled, runOnReady, made }: ReadyHooksOptions = {},
+  { stopped = () => false, slowAfterMs, settled, runOnReady, made, trackSlow }: ReadyHooksOptions = {},
 ): Promise<void> {
   const failed = new Set<unknown>()
   // For each unit, the failed units it depends on, directly or through another dependency
@@ -206,6 +226,7 @@ export async function runReadyHooks(
     if (upstream.size > 0) report.dependsOnFailed?.(unit, [...upstream])
 
     const slow = slowAfterMs !== undefined && report.slow ? setTimeout(() => report.slow!(unit, hooksAfter(index)), slowAfterMs) : undefined
+    if (slow) trackSlow?.(() => clearTimeout(slow))
     try {
       const onReady = () => instance.onReady!(client, info)
       await (runOnReady ? runOnReady(unit, onReady) : onReady())
@@ -266,7 +287,14 @@ export interface ShutdownSequence {
   /** The calls still running, which the warning names when the drain stops before they settle. */
   runningCalls?(): readonly string[]
   /** The ready hooks' pass, waited for, within the drain's time, before the entries are read. */
-  readyPass?: Pick<ReadyPass, 'settled' | 'running'>
+  readyPass?: Pick<ReadyPass, 'settled' | 'running' | 'giveUp'>
+  /**
+   * A call the ready gate dropped as the stop closed it: takes it off the calls still running and gives the name a log
+   * gives it, for a line of its own. Without it, a dropped call is named nowhere.
+   */
+  droppedCall?(call: object): string | undefined
+  /** What dropped the calls the gate held, as their lines name it: the stop, unless a failed start is undone. */
+  droppedBy?: DropCause
   /** How long the whole sequence is waited for, the drain included. */
   timeoutMs: number
   /** A unit's `onShutdown` threw or rejected. */
@@ -275,16 +303,31 @@ export interface ShutdownSequence {
   warn(message: string): void
 }
 
+/** What a sequence's gate drops its held calls for. */
+export type DropCause = keyof typeof DROPPED_BY
+
+/** How the dropped-call lines name each cause: what came while the calls waited, and where they were dropped. */
+const DROPPED_BY = {
+  stop: { came: 'the stop came', at: 'the stop' },
+  'failed login': { came: 'the login failed', at: 'the failed login' },
+} as const
+
 /** The part of `timeoutMs` the drain leaves for the hooks: a quarter, at least 1 s, and never more than half. */
 export function hooksReserveMs(timeoutMs: number): number {
   return Math.min(Math.max(timeoutMs / 4, 1_000), timeoutMs / 2)
 }
 
-/** A timer whose promise resolves with `value` after `ms`, and `cancel` to clear it. */
-function after<T>(ms: number, value: T): { promise: Promise<T>; cancel(): void } {
+/** Resolves in the event loop's next turn, once every microtask queued before it has run. */
+const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve))
+
+/** A timer whose promise resolves with `value` after `ms`, running `fired` first, and `cancel` to clear it. */
+function after<T>(ms: number, value: T, fired?: () => unknown): { promise: Promise<T>; cancel(): void } {
   let timer: ReturnType<typeof setTimeout> | undefined
   const promise = new Promise<T>(resolve => {
-    timer = setTimeout(() => resolve(value), ms)
+    timer = setTimeout(() => {
+      fired?.()
+      resolve(value)
+    }, ms)
   })
   return { promise, cancel: () => clearTimeout(timer) }
 }
@@ -302,16 +345,24 @@ function after<T>(ms: number, value: T): { promise: Promise<T>; cancel(): void }
 export async function runShutdownSequence(
   container: Container,
   readEntries: () => readonly LifecycleEntry[],
-  { drainCalls, drainAlways = false, runningCalls, readyPass, timeoutMs, hookFailed, warn }: ShutdownSequence,
+  { drainCalls, drainAlways = false, runningCalls, readyPass, droppedCall, droppedBy = 'stop', timeoutMs, hookFailed, warn }: ShutdownSequence,
 ): Promise<void> {
   const whole = after(timeoutMs, 'timeout' as const)
   const reserve = hooksReserveMs(timeoutMs)
-  const drainEnds = after(timeoutMs - reserve, false)
+  // The ready gate closes as the stop stops waiting: in the drain-end timer's own callback, so the hooks that settle in
+  // its turn still count, or once the wait for the onReady and the drain end sooner
+  const gate = readyGateOf(container)
+  let closing: Promise<readonly DroppedCall[]> | undefined
+  const closeGate = () => (closing ??= gate?.close() ?? Promise.resolve([]))
+  const drainEnds = after(timeoutMs - reserve, false, closeGate)
+  // When the drain's time is up: the bound of every wait for calls, so the hooks always have their reserve
+  const drainDeadline = performance.now() + timeoutMs - reserve
   // At once on a shutdown that always drains, so no call starts while an onReady finishes
   let draining = drainAlways ? drainCalls().then(() => true) : undefined
   try {
     const readying = readyPass?.running() ?? []
     if (readying.length > 0 && !(await Promise.race([readyPass!.settled().then(() => true), drainEnds.promise]))) {
+      readyPass!.giveUp()
       warn(`onReady in ${readying.join(', ')} is still running after ${timeoutMs - reserve} ms; shutting down without waiting for it.`)
     }
 
@@ -330,17 +381,42 @@ export async function runShutdownSequence(
 
     let drained = true
     if (needsStore) draining ??= drainCalls().then(() => true)
-    if (draining) {
-      drained = await Promise.race([draining, drainEnds.promise])
-      if (!drained) {
-        const running = runningCalls?.() ?? []
-        warn(
-          `Calls still running after ${timeoutMs - reserve} ms${running.length > 0 ? `: ${running.join(', ')}` : ''}; ` +
-            `running the onShutdown hooks in the ${reserve} ms left.`,
-        )
-      }
-    }
+    if (draining) drained = await Promise.race([draining, drainEnds.promise])
     drainEnds.cancel()
+    // Decided before the hooks run and the warning is composed: a call the gate drops never starts, and is named apart
+    // Without a gate nothing is held, so there is nothing to decide
+    const dropped = gate ? await closeGate() : []
+    const named = dropped.flatMap(({ of, hook }) => {
+      const label = of && droppedCall?.(of)
+      return label ? [`${label} for onReady in ${hook}`] : []
+    })
+    let unfinished = false
+    if (dropped.length > 0) {
+      // A dropped call ends, its observers told and an answer it made sent, within the drain's time, as a running call
+      // drains, or at least the decision's turn, so its observers hear of it before the hooks when nothing they do waits
+      // The turn wait only runs that turn to its end, and never awaits an observer's or a reply's promise
+      const remaining = drainDeadline - performance.now()
+      const bound = remaining > 0 ? after(remaining, false) : undefined
+      unfinished = !(await Promise.race([Promise.all(dropped.map(({ ended }) => ended)).then(() => true), bound?.promise ?? nextTurn().then(() => false)]))
+      bound?.cancel()
+      // A dropped call is not running, so a drain that waited only on calls the gate dropped ends with them
+      if (!drained && draining) drained = await Promise.race([draining, nextTurn().then(() => false)])
+    }
+    if (!drained) {
+      const running = runningCalls?.() ?? []
+      warn(
+        `Calls still running after ${timeoutMs - reserve} ms${running.length > 0 ? `: ${running.join(', ')}` : ''}; ` +
+          `running the onShutdown hooks in the ${reserve} ms left.`,
+      )
+    }
+    const cause = DROPPED_BY[droppedBy]
+    if (named.length > 0) warn(`Calls dropped before they started, as ${cause.came} while they waited: ${named.join(', ')}.`)
+    if (unfinished) {
+      warn(
+        `Calls dropped at ${cause.at} still had an answer to Discord or an observer under way after ${timeoutMs - reserve} ms; ` +
+          `running the onShutdown hooks in the ${reserve} ms left.`,
+      )
+    }
 
     const sequence = (async () => {
       // Only after the calls settled: a call still running may never let its store operations settle
@@ -366,6 +442,8 @@ export async function runShutdownSequence(
   } finally {
     drainEnds.cancel()
     whole.cancel()
+    // Closed however the sequence ended, so no call the gate holds starts once it has
+    void closeGate()
     // A call the drain outlasted has had its lookups until now; one still in flight serves nothing once the app is down
     abandonThemeLookups(container)
   }
@@ -396,9 +474,4 @@ export async function shutDownLateValue(
   report: Pick<ShutdownSequence, 'timeoutMs' | 'hookFailed' | 'warn'>,
 ): Promise<void> {
   await runShutdownSequence(container, () => [entry], { ...report, drainCalls: () => Promise.resolve() })
-}
-
-/** Settles once every promise in `calls` has, those added while waiting included. */
-export async function callsSettled(calls: ReadonlySet<Promise<unknown>>): Promise<void> {
-  while (calls.size > 0) await Promise.allSettled([...calls])
 }
