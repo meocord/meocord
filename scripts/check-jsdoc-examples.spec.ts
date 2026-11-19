@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { checkDocs, type DocsReport } from './check-jsdoc-examples.js'
+import { checkDocs, type DocsReport, docsLine, staleDocsLinks } from './check-jsdoc-examples.js'
 
 /** Compiling against @types/node takes a few seconds per program */
 const COMPILE_TIMEOUT_MS = 120_000
@@ -484,3 +484,79 @@ it('leaves out the members another package declares on an interface the package 
   expect(report.problems).toEqual([])
   expect(report.memberExamples).toBe(1)
 }, COMPILE_TIMEOUT_MS)
+
+describe('staleDocsLinks', () => {
+  const GUIDES = 'https://meocord.dev/docs'
+  /** A JSDoc source: two stale links on one line, one with an anchor, a link already on the line, and another site's. */
+  const source = (line: string) =>
+    [
+      '/**',
+      ` * See {@link ${GUIDES}/${line}/guards#denying-with-a-reason | Guards} and ${GUIDES}/${line}/recipes/cooldown-stores.`,
+      ` * @see {@link ${GUIDES}/4.3/formatting | Formatting}`,
+      ' * @see {@link https://discord.js.org/docs/4.2/packages/discord.js | discord.js}',
+      ' */',
+      'export const guarded = true',
+      '',
+    ].join('\n')
+  /** An app template's Markdown, in a folder of its own. */
+  const template = (line: string) => `# App\n\nRead [Guards](${GUIDES}/${line}/guards#writing-your-own) first.\n`
+  /** A file holding only links already on the line. */
+  const current = `/** @see {@link ${GUIDES}/4.3/lifecycle-hooks#on-shutdown | Lifecycle hooks} */\nexport const current = true\n`
+  /** A spec, whose links no reader follows. */
+  const spec = `// ${GUIDES}/4.2/testing\nexport {}\n`
+
+  /** A package at 4.3.0-beta.2 whose `src` holds those files, its links naming the 4.2 line. */
+  function fixture(name: string): string {
+    const dir = path.join(root, name)
+    const write = (file: string, text: string) => {
+      mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+      writeFileSync(path.join(dir, file), text)
+    }
+    write('package.json', JSON.stringify({ version: '4.3.0-beta.2' }))
+    write('src/common/guarded.ts', source('4.2'))
+    write('src/bin/app-template/README.md.template', template('4.2'))
+    write('src/core/current.ts', current)
+    write('src/common/guarded.spec.ts', spec)
+    write('src/common/guarded.test-d.ts', spec)
+    return dir
+  }
+  const read = (dir: string, file: string) => readFileSync(path.join(dir, file), 'utf8')
+
+  it("names the package's line from its version", () => {
+    expect(docsLine(fixture('line'))).toBe('4.3')
+  })
+
+  it('refuses each link to another line, in sources and templates, with its file and line', () => {
+    const dir = fixture('check')
+
+    expect(staleDocsLinks(docsLine(dir), false, dir).sort()).toEqual([
+      "src/bin/app-template/README.md.template:3: links docs/4.2; link docs/4.3, the package's line, or run with --fix.",
+      "src/common/guarded.ts:2: links docs/4.2; link docs/4.3, the package's line, or run with --fix.",
+      "src/common/guarded.ts:2: links docs/4.2; link docs/4.3, the package's line, or run with --fix.",
+    ])
+  })
+
+  it("moves each link to the package's line, keeping its page and anchor, and leaves the rest as it was", () => {
+    const dir = fixture('fix')
+
+    const moved = staleDocsLinks(docsLine(dir), true, dir)
+
+    expect(moved.sort()).toEqual(['src/bin/app-template/README.md.template', 'src/common/guarded.ts'])
+    expect(read(dir, 'src/common/guarded.ts')).toBe(source('4.3'))
+    expect(read(dir, 'src/bin/app-template/README.md.template')).toBe(template('4.3'))
+    expect(read(dir, 'src/core/current.ts')).toBe(current)
+    expect(read(dir, 'src/common/guarded.spec.ts')).toBe(spec)
+    expect(read(dir, 'src/common/guarded.test-d.ts')).toBe(spec)
+    expect(staleDocsLinks(docsLine(dir), false, dir)).toEqual([])
+  })
+
+  it('reports and moves nothing once every link is on the line', () => {
+    const dir = fixture('current')
+    writeFileSync(path.join(dir, 'src/common/guarded.ts'), source('4.3'))
+    writeFileSync(path.join(dir, 'src/bin/app-template/README.md.template'), template('4.3'))
+
+    expect(staleDocsLinks('4.3', false, dir)).toEqual([])
+    expect(staleDocsLinks('4.3', true, dir)).toEqual([])
+    expect(read(dir, 'src/common/guarded.ts')).toBe(source('4.3'))
+  })
+})

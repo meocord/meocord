@@ -285,14 +285,17 @@ function unreachedExamples(walk: MemberWalk, item: PublicSymbol): string[] {
   return found
 }
 
-/** The documentation line the package's links name: its major and minor version, such as `4.1` for 4.1.0-beta.6. */
-function docsLine(): string {
-  const { version } = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string }
+/**
+ * The documentation line the links of the package at `root` name: its major and minor version, such as `4.1` for
+ * 4.1.0-beta.6.
+ */
+export function docsLine(root = repoRoot): string {
+  const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string }
   return version.split('.').slice(0, 2).join('.')
 }
 
 /** The files whose documentation links a reader follows: the package's JSDoc, and the templates a new app is made from. */
-function sourceFiles(dir = path.join(repoRoot, 'src')): string[] {
+function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const file = path.join(dir, entry.name)
     if (entry.isDirectory()) return sourceFiles(file)
@@ -304,25 +307,25 @@ function sourceFiles(dir = path.join(repoRoot, 'src')): string[] {
 const DOCS_LINK = /https:\/\/meocord\.dev\/docs\/([^/\s|}]+)\//g
 
 /**
- * The links to another line of the documentation than the package's, which would send a reader to pages for another
- * version; `fix` rewrites them to the package's line instead, and returns the files it rewrote.
+ * The links under `root`'s `src` to another line of the documentation than `line`, which would send a reader to pages
+ * for another version; `fix` rewrites them to `line` instead, and returns the files it rewrote.
  */
-function staleDocsLinks(line: string, fix: boolean): string[] {
+export function staleDocsLinks(line: string, fix: boolean, root = repoRoot): string[] {
   const stale: string[] = []
-  for (const file of sourceFiles()) {
+  for (const file of sourceFiles(path.join(root, 'src'))) {
     const text = readFileSync(file, 'utf8')
     if (fix) {
       const fixed = text.replace(DOCS_LINK, (link, linked: string) => (linked === line ? link : `https://meocord.dev/docs/${line}/`))
       if (fixed !== text) {
         writeFileSync(file, fixed)
-        stale.push(path.relative(repoRoot, file))
+        stale.push(path.relative(root, file))
       }
       continue
     }
     text.split('\n').forEach((content, index) => {
       for (const [, linked] of content.matchAll(DOCS_LINK)) {
         if (linked !== line) {
-          stale.push(`${path.relative(repoRoot, file)}:${index + 1}: links docs/${linked}; link docs/${line}, the package's line, or run with --fix.`)
+          stale.push(`${path.relative(root, file)}:${index + 1}: links docs/${linked}; link docs/${line}, the package's line, or run with --fix.`)
         }
       }
     })
