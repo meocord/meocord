@@ -12,6 +12,18 @@ import { type CollectedCommand, collectCommands } from '@src/core/command-identi
 import { planTargets, registerCommands, type RegistrationTarget } from '@src/core/command-registration.js'
 import { keepRestLocal } from '@src/spec-local-rest.js'
 
+/** Whether `readdirSync` lists a directory in reverse, as a file system may, rather than in this platform's order. */
+const listing = vi.hoisted(() => ({ reversed: false }))
+
+vi.mock('fs', async importOriginal => {
+  const fs = await importOriginal<typeof import('fs')>()
+  const readdirSync = ((...args: Parameters<typeof fs.readdirSync>) => {
+    const entries = fs.readdirSync(...args)
+    return listing.reversed ? [...entries].reverse() : entries
+  }) as typeof fs.readdirSync
+  return { ...fs, default: { ...fs, readdirSync }, readdirSync }
+})
+
 const createLogger = () => ({ log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })
 
 /** A controller with one slash command per name; a builder's `guilds` restricts that command. */
@@ -593,6 +605,29 @@ describe('registerCommands', () => {
 
         expect(logger.warn.mock.calls.filter(([text]) => String(text).startsWith('Commands may be left'))).toEqual([[hint('111')], [hint('222')]])
         expect(existsSync(path.join(records(), 'commands-app-guild-111.json'))).toBe(true)
+      })
+
+      it('warns in ID order whatever order the file system lists the records in', async () => {
+        leave('commands-app-guild-111.json')
+        leave('commands-app-guild-222.json')
+        listing.reversed = true
+        try {
+          const { logger, run } = register({ development: true })
+          await run
+
+          expect(logger.warn.mock.calls.filter(([text]) => String(text).startsWith('Commands may be left'))).toEqual([[hint('111')], [hint('222')]])
+        } finally {
+          listing.reversed = false
+        }
+      })
+
+      it('puts a shorter ID first, as the smaller one', async () => {
+        leave('commands-app-guild-111.json')
+        leave('commands-app-guild-99.json')
+        const { logger, run } = register({ development: true })
+        await run
+
+        expect(logger.warn.mock.calls.filter(([text]) => String(text).startsWith('Commands may be left'))).toEqual([[hint('99')], [hint('111')]])
       })
 
       it("is quiet about a guild it sends to or names, another application's records, and outside development", async () => {
