@@ -9,6 +9,7 @@ import { vi } from 'vitest'
 import { createRsbuildConfig } from '@src/build/rsbuild-config.js'
 import { installStackRemapper, rejectionMode, reportRejection, reportUncaught } from '@src/build/stack-remap.js'
 import { meocordListener } from '@src/util/process-listener.util.js'
+import { bun, node } from '@src/spec-runtimes.js'
 
 describe('installStackRemapper', () => {
   // The long form: os.tmpdir() can be a Windows 8.3 short path, such as RUNNER~1, where Bun names the long one
@@ -213,7 +214,6 @@ const BEFORE = `Error.prepareStackTrace = (error, sites) =>
   'before ' + sites.slice(0, 2).map(site => site.getFileName() + ':' + site.getLineNumber()).join(' ')
 `
 
-const bun = process.versions.bun ? process.execPath : 'bun'
 
 interface Run {
   stack: string
@@ -280,7 +280,7 @@ describe.each([
   })
 
   it('names the source on Node without --enable-source-maps, in the frame format Node writes', () => {
-    const { stack, hooked } = run(root, 'node')
+    const { stack, hooked } = run(root, node)
     const { thrower, caller, lines } = frames(stack)
 
     expect(hooked).toBe(true)
@@ -291,7 +291,7 @@ describe.each([
   })
 
   it('leaves Node to map the stack itself with --enable-source-maps, as meocord start runs it', () => {
-    const { stack, hooked } = run(root, 'node', ['--enable-source-maps'])
+    const { stack, hooked } = run(root, node, ['--enable-source-maps'])
     const { thrower, caller } = frames(stack)
 
     expect(hooked).toBe(false)
@@ -324,7 +324,7 @@ describe('the stack hook alongside others', () => {
 
   it.each([
     // A URL, which --import takes where a Windows path would read as one with a scheme
-    ['Node', 'node', ['--import', pathToFileURL(path.join(root, 'before.mjs')).href]],
+    ['Node', node, ['--import', pathToFileURL(path.join(root, 'before.mjs')).href]],
     ['Bun', bun, ['--no-install', '--preload', path.join(root, 'before.mjs')]],
   ])('hands a hook set before it the mapped call sites, on %s', (_name, runtime, flags) => {
     const { stack } = run(root, runtime, flags)
@@ -334,7 +334,7 @@ describe('the stack hook alongside others', () => {
 
   // As follow-redirects, which axios loads, does at import: Bun's own hook throws on such a target
   it.each([
-    ['Node', 'node', [] as string[], 'Plainish: plain'],
+    ['Node', node, [] as string[], 'Plainish: plain'],
     ['Bun', bun, ['--no-install'], 'Error'],
   ])('writes the stack Error.captureStackTrace gives a plain object, as the runtime does, on %s', (_name, runtime, flags, header) => {
     const { stack } = run(root, runtime, flags, { STACK_CASE: 'plain' })
@@ -344,7 +344,7 @@ describe('the stack hook alongside others', () => {
   })
 
   it.each([
-    ['Node', 'node', [] as string[], 'Error [ERR_REDIRECT]: redirected'],
+    ['Node', node, [] as string[], 'Error [ERR_REDIRECT]: redirected'],
     ['Bun', bun, ['--no-install'], 'Error'],
   ])('writes the stack of an error type made from a function, as follow-redirects makes one, on %s', (_name, runtime, flags, header) => {
     const { stack } = run(root, runtime, flags, { STACK_CASE: 'custom' })
@@ -354,7 +354,7 @@ describe('the stack hook alongside others', () => {
   })
 
   it.each([
-    ['Node', 'node', [] as string[]],
+    ['Node', node, [] as string[]],
     ['Bun', bun, ['--no-install']],
   ])('gives the same stack each time it is read, on %s', (_name, runtime, flags) => {
     const { stack } = run(root, runtime, flags, { STACK_CASE: 'twice' })
@@ -364,7 +364,7 @@ describe('the stack hook alongside others', () => {
   })
 
   it.each([
-    ['Node', 'node', ['--import', pathToFileURL(path.join(root, 'throwing.mjs')).href]],
+    ['Node', node, ['--import', pathToFileURL(path.join(root, 'throwing.mjs')).href]],
     ['Bun', bun, ['--no-install', '--preload', path.join(root, 'throwing.mjs')]],
   ])('writes the stack itself when a hook set before it throws, on %s', (_name, runtime, flags) => {
     const { stack } = run(root, runtime, flags)
@@ -374,14 +374,14 @@ describe('the stack hook alongside others', () => {
   })
 
   it('stays in the chain under a hook set after it that calls the one it found', () => {
-    const { stack } = run(root, 'node', [], { STACK_HOOK: 'after' })
+    const { stack } = run(root, node, [], { STACK_HOOK: 'after' })
 
     expect(stack.startsWith('after Error: boom\n')).toBe(true)
     expect(frames(stack).thrower?.slice(0, 2)).toEqual([source('boom.ts'), '2'])
   })
 
   it('gives way to a hook set after it that replaces it', () => {
-    const { stack } = run(root, 'node', [], { STACK_HOOK: 'replace' })
+    const { stack } = run(root, node, [], { STACK_HOOK: 'replace' })
 
     expect(stack).toMatch(/^replaced .*dist[\\/]main\.js/)
   })
@@ -401,7 +401,7 @@ describe('the stack hook alongside others', () => {
   it('installs nothing when the build wrote no source map', () => {
     rmSync(path.join(root, 'dist', 'main.js.map'))
 
-    const { stack, hooked } = run(root, 'node')
+    const { stack, hooked } = run(root, node)
 
     expect(hooked).toBe(false)
     expect(frames(stack).thrower?.[0]).toBe(pathToFileURL(path.join(root, 'dist', 'main.js')).href)
@@ -727,7 +727,7 @@ describe('what Bun prints itself', () => {
   })
 
   it('installs nothing under Node, which maps what it prints itself', () => {
-    const { status, counts, stderr } = crash(root, 'node', [], { CRASH_CASE: 'uncaught' })
+    const { status, counts, stderr } = crash(root, node, [], { CRASH_CASE: 'uncaught' })
 
     expect(counts).toEqual({ uncaught: 0, rejection: 0, inspectHook: false })
     expect(status).toBe(1)
