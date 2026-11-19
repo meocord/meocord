@@ -118,7 +118,9 @@ export interface MeoCordApplication {
    * `shutdownTimeout` and closes the client, or with process sharding, asks every shard to shut down and waits for it.
    * It ends no process of its own accord, except that called in a shard, it asks the manager to stop every shard, which
    * then shuts that shard's process down too. A call that awaits `stop()`, as an owner-only shutdown command does, is
-   * not waited for.
+   * not waited for. A `stop()` called while an `onShutdown` hook of the stop under way runs, by the hook or by work it
+   * started, awaited or not, gets a promise that resolves at once: the stop it asks for is the one running the hook,
+   * which goes on once the hook returns. One called after the hook has returned waits for the whole stop.
    *
    * A stop while the bot starts ends that start: it waits for the providers being made, at most `shutdownTimeout`, and
    * nothing more is made after it. What the start made is shut down by the rule {@link OnShutdown} gives; for a bot in
@@ -228,6 +230,11 @@ export interface OnReady {
  * the rest again, and once the bot stops, by `app.stop()`, a Ctrl+C or a SIGTERM, the value is shut down by the same
  * rule, which leaves out one with an `onReady` a failed start never ran. A stop while a failed start shuts down waits
  * for that shutdown, all within one `shutdownTimeout`.
+ *
+ * A hook that stops the app, as shared cleanup code may, goes on at once: `app.stop()`, or a testing module's
+ * `close()`, called while an `onShutdown` of that shutdown runs, by the hook or by work it started, awaited or not,
+ * resolves for it without waiting, and the hooks after it run in order. One called after the hook has returned, by work
+ * it left running, waits for the whole shutdown, as any caller does.
  *
  * @example
  * ```ts

@@ -379,7 +379,7 @@ describe('a start a stop ends', () => {
       ['the login', 'The bot was stopped before it came online.'],
       ['a factory that fails', "The factory providing 'SLOW' failed: connection refused"],
       ['a failed start', "The factory providing 'SLOW' failed: connection refused"],
-    ])('rejects the start %s leaves before the stop settles, when the stop fails as it runs the onShutdown hooks', async (what, message) => {
+    ])('rejects the start %s leaves, and settles the stop, when the stop fails as it runs the onShutdown hooks', async (what, message) => {
       const loaded = await load()
       const reachedLogin = Promise.withResolvers<void>()
       gateway(loaded, [
@@ -430,7 +430,8 @@ describe('a start a stop ends', () => {
       await started.starting
       await stopping
 
-      expect(log).toEqual([`start rejected: ${message}`, 'stop settled'])
+      // A failed start's stop comes from its own onShutdown hook, for which stop() goes on at once
+      expect(log).toEqual(what === 'a failed start' ? ['stop settled', `start rejected: ${message}`] : [`start rejected: ${message}`, 'stop settled'])
     })
 
     /** Settles after `count` microtasks. */
@@ -510,11 +511,11 @@ describe('a start a stop ends', () => {
       await started.starting
       await stopping
 
-      expect(log.filter(line => line.endsWith('closed'))).toEqual(['CACHE closed', 'POOL closed'])
-      expect(log.at(-1)).toBe('stop resolved')
+      // The hook's stop() goes on at once; the close it began joins the failed start's shutdown
+      expect(log).toEqual(['stop resolved', 'CACHE closed', 'POOL closed', "start rejected: The factory providing 'SLOW' failed: connection refused"])
     })
 
-    it('rejects a failed start before the stop that joins its shutdown resolves', async () => {
+    it('rejects a failed start once its shutdown is done, when a hook of it stops the app as it begins', async () => {
       const loaded = await load()
       gateway(loaded)
       let stopping: Promise<unknown> | undefined
@@ -535,7 +536,8 @@ describe('a start a stop ends', () => {
       await starting
       await stopping
 
-      expect(log).toEqual(["start rejected: The factory providing 'SLOW' failed: connection refused", 'stop resolved'])
+      // The hook's stop() goes on at once, as the shutdown it asks for is the one running the hook
+      expect(log).toEqual(['stop resolved', "start rejected: The factory providing 'SLOW' failed: connection refused"])
     })
   })
 })

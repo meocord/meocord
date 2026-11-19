@@ -1,0 +1,5 @@
+---
+'meocord': patch
+---
+
+An `onShutdown` hook that awaits `app.stop()`, or a testing module's `close()`, no longer waits for itself. Before, the shutdown under way waited for the hook, the hook waited for the shutdown, and nothing moved until `shutdownTimeout` gave up on the hooks with a warning: the hooks after it then ran after `stop()` had resolved, against a destroyed client, and after a Ctrl+C or a SIGTERM they never ran, as the process exited 0. Now the stop the hook awaits resolves for it at once, the hooks after it run in order, and the shutdown ends with no wait and no warning. This holds whether the hook calls `stop()` before or after its first `await`, or through code it calls, and whether or not it awaits it. The stop it asks for still runs as any stop does: in a shard, it asks the manager to stop every shard. A `stop()` called by work the hook started counts as the hook's while the hook runs; once the hook has returned, a `stop()` from work it left running waits for the whole shutdown, as does a hook awaiting another app's `stop()`. See https://meocord.dev/docs/4.3/lifecycle-hooks.

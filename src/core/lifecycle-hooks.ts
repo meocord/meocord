@@ -225,6 +225,7 @@ export async function runReadyHooks(
  * so one that two entries reach stops once.
  */
 export async function runShutdownHooks(
+  owner: object,
   entries: readonly LifecycleEntry[],
   hookFailed: (name: string, error: unknown) => void,
   ran = new Set<object>(),
@@ -232,12 +233,28 @@ export async function runShutdownHooks(
   for (const { name, instance } of [...entries].reverse()) {
     if (typeof instance.onShutdown !== 'function' || ran.has(instance)) continue
     ran.add(instance)
+    const hook = { owner, running: true }
     try {
-      await instance.onShutdown()
+      await shutdownHooks.run(hook, () => instance.onShutdown!())
     } catch (error) {
       hookFailed(name, error)
+    } finally {
+      hook.running = false
     }
   }
+}
+
+/** The `onShutdown` each async context runs in: the shutdown of the app on `owner`, and whether the hook still runs. */
+const shutdownHooks = new AsyncLocalStorage<{ owner: object; running: boolean }>()
+
+/**
+ * Whether this runs within an `onShutdown` of the shutdown of the app on `owner`, while that hook runs: the hook, or work
+ * it started, whose stop or close is the shutdown it is part of. The hook has returned once runShutdownHooks resumes
+ * after it settles, so a callback queued in the hook's last turn still counts as the hook.
+ */
+export function inShutdownHookOf(owner: object): boolean {
+  const hook = shutdownHooks.getStore()
+  return hook !== undefined && hook.running && hook.owner === owner
 }
 
 /** How a shutdown sequence reaches the calls it outlasts and reports what happened; the bot and a testing module each give theirs. */
@@ -339,8 +356,8 @@ export async function runShutdownSequence(
       }
       // Nothing on the store's side injects anything outside it, so running it last keeps the reverse dependency order
       const ran = new Set<object>()
-      await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), report, ran)
-      await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), report, ran)
+      await runShutdownHooks(container, entries.filter(entry => !storeSide.has(entry)), report, ran)
+      await runShutdownHooks(container, entries.filter(entry => storeSide.has(entry)), report, ran)
       if (unreported.length > 0) throw new AggregateError(unreported, 'Reporting a failed onShutdown hook threw.')
     })()
     if ((await Promise.race([sequence, whole.promise])) === 'timeout') {
