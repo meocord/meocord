@@ -5,6 +5,7 @@ import type * as FactoryModule from '@src/core/meocord-factory.js'
 import type * as DecoratorModule from '@src/decorator/index.js'
 import type * as TestingModule from '@src/testing/index.js'
 import { forgetProcessState } from '@src/core/process-state.js'
+import { CommandType } from '@src/enum/index.js'
 
 const { log, config, logging } = vi.hoisted(() => ({
   log: [] as string[],
@@ -368,5 +369,50 @@ describe("an onShutdown hook that closes the testing module it shuts down", () =
     await left
 
     expect(log).toEqual(['SelfWait closed', 'First closed', 'close resolved', 'its close() resolved'])
+  })
+})
+
+describe('a call that closes the testing module it runs in', () => {
+  beforeEach(() => {
+    log.length = 0
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // With a cooldown store to close, the close drains the calls; the call awaiting it is left out, as stop() leaves it
+  it('goes on at once, the store closing after it, with no wait for itself', async () => {
+    const loaded = await load()
+    const { MemoryCooldownStore } = await import('@src/common/index.js')
+    // The testing module logs through the logger itself, which this file's mock of @src/common leaves as it is
+    const { Logger } = await import('@src/common/logger.js')
+    vi.spyOn(Logger.prototype, 'warn').mockImplementation((...args: unknown[]) => void log.push(`warn: ${String(args[0])}`))
+    const box: { module?: { close(): Promise<void> } } = {}
+    class Store extends MemoryCooldownStore {
+      onShutdown() {
+        log.push('store closed')
+      }
+    }
+    @loaded.Controller()
+    class Admin {
+      @loaded.Cooldown({ seconds: 5 })
+      @loaded.Command('shutdown', CommandType.SLASH)
+      async shutdown() {
+        log.push('handler closes')
+        await box.module!.close()
+        log.push("handler's close resolved")
+      }
+    }
+    @loaded.MeoCord({ controllers: [Admin], cooldownStore: Store, clientOptions: { intents: [] } } as never)
+    class App {}
+    const module = await loaded.MeoCordTestingModule.fromApp(App, { shutdownTimeout: 400 }).compile().init()
+    box.module = module
+
+    const { ran } = await module.dispatch(loaded.createMockInteraction(loaded.discord.ChatInputCommandInteraction, { commandName: 'shutdown' }))
+
+    expect(ran).toBe(true)
+    // A close that waited for its own caller would log the drain's warning before the store closes
+    expect(log).toEqual(['handler closes', 'store closed', "handler's close resolved"])
   })
 })
