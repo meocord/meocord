@@ -185,7 +185,8 @@ describe('close() during init()', () => {
     const { inited } = await closeWhileMaking(slowValue(IN_TIME_MS, () => note('SLOW closed')), true)
     await inited
 
-    expect(events).toEqual(['200 SLOW made', '200 init resolved', '200 SLOW closed', '200 POOL closed', '200 close resolved'])
+    // As a bot stopped before its ready hooks: POOL's onReady never ran, so neither it nor SLOW, which injects it, is shut down
+    expect(events).toEqual(['200 SLOW made', '200 init resolved', '200 close resolved'])
   })
 
   it('warns once, naming it, when a get() after it makes a listed service init() did not make', async () => {

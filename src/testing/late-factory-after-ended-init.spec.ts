@@ -201,8 +201,8 @@ describe('a unit with an onShutdown made after close()', () => {
     expect(warnings().filter(event => !event.includes('still waits for'))).toEqual([])
   })
 
-  // close() waits for the ready pass before it lists its units, so one the pass makes is on the list, fake timers or not
-  it('a unit the ready pass makes after an onReady timer closed the module warns nothing, under fake timers', async () => {
+  // As the bot's: the pass stops at the close, so it makes nothing after it, fake timers or not
+  it("a ready pass stopped by a timer's close() makes nothing after it, and warns nothing, under fake timers", async () => {
     vi.useFakeTimers()
     const gate = Promise.withResolvers<void>()
     const box: { module?: TestingModule; closed?: Promise<void> } = {}
@@ -242,7 +242,7 @@ describe('a unit with an onShutdown made after close()', () => {
     gate.resolve()
     await Promise.all([initialised, box.closed])
 
-    expect(events).toEqual(['Later made', 'Later closed'])
+    expect(events).toEqual([])
     expect(warnings()).toEqual([])
   })
 
@@ -270,8 +270,8 @@ describe('a unit with an onShutdown made after close()', () => {
     })
   }
 
-  // Nothing shuts down what an init() after close() makes, so it warns as a call's unit does
-  it('an init({ ready: true }) after close() warns for each unit with an onShutdown it makes', async () => {
+  // Nothing shuts down what an init() after close() makes, so it warns as a call's unit does; its ready pass makes nothing
+  it('an init({ ready: true }) after close() warns for the factory value it makes', async () => {
     const module = MeoCordTestingModule.create({
       controllers: [Desk],
       providers: [{ provide: 'SLOW', useFactory: async () => ({ onShutdown: () => void events.push('SLOW closed') }) }],
@@ -280,9 +280,9 @@ describe('a unit with an onShutdown made after close()', () => {
 
     await module.init({ ready: true })
 
-    expect(warnings()).toEqual([`warn: 'SLOW' is made after close()${NOTHING_SHUTS}`, `warn: Desk is made after close()${NOTHING_SHUTS}`])
+    expect(warnings()).toEqual([`warn: 'SLOW' is made after close()${NOTHING_SHUTS}`])
     expect(events).not.toContain('SLOW closed')
-    expect(events).not.toContain('Desk closed')
+    expect(events).not.toContain('Desk made')
   })
 
   it('a get() that makes it keeps its own wording', async () => {

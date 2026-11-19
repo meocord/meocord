@@ -21,6 +21,31 @@ export interface LifecycleEntry {
   cooldownStore?: boolean
 }
 
+/**
+ * The units a shutdown closes, of `units` in dependency order: each one `made` gives an instance of, whose `onReady`
+ * has settled, as `readySettled` holds, or doesn't exist, and every unit it depends on closes too. A unit whose
+ * `onReady` never ran or hasn't settled gets no `onShutdown`, so a hook that undoes `onReady` never runs without it,
+ * and neither does anything that depends on it.
+ */
+export function readyForShutdown(
+  units: readonly LifecycleUnit[],
+  made: (unit: LifecycleUnit) => Partial<OnReady & OnShutdown> | undefined,
+  readySettled: ReadonlySet<unknown>,
+): LifecycleEntry[] {
+  const tokens = new Set(units.map(({ token }) => token))
+  const closes = new Set<unknown>()
+  const entries: LifecycleEntry[] = []
+  for (const unit of units) {
+    const instance = made(unit)
+    if (!instance) continue
+    const ready = typeof instance.onReady !== 'function' || readySettled.has(unit.token)
+    if (!ready || unit.dependencies.some(dependency => tokens.has(dependency) && !closes.has(dependency))) continue
+    closes.add(unit.token)
+    entries.push(lifecycleEntry(unit, instance))
+  }
+  return entries
+}
+
 /** The entry of a unit whose instance is `instance`. */
 export function lifecycleEntry(unit: LifecycleUnit, instance: Partial<OnReady & OnShutdown>): LifecycleEntry {
   return {
