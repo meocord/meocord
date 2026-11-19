@@ -131,3 +131,16 @@ describe('the ready gate, for one interaction', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 })
+
+describe('the ready gate, closed', () => {
+  it('reports the calls it dropped to its first close only, so a later shutdown has none of them to wait for', async () => {
+    const gate = new ReadyGate(units, vi.fn(), PrefsThemes)
+    const bound = { kind: 'interaction' as const, ms: READY_WAIT_INTERACTION_MS, since: Date.now(), told: toldState('told'), of: {} }
+    const waiting = gate.wait({ controller: Notes, methodName: 'note', classes: () => [Notes], bound })
+
+    const first = await gate.close()
+    await expect(waiting).rejects.toThrow('The bot stopped before this call started.')
+    expect(first.map(({ hook }) => hook)).toEqual(['Prefs'])
+    expect(await gate.close()).toEqual([])
+  })
+})

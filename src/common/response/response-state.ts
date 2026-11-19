@@ -646,6 +646,11 @@ export class InteractionResponse implements ResponseState {
     return run
   }
 
+  /** Settles once every answer step asked for so far has settled, whatever its outcome. */
+  idle(): Promise<void> {
+    return this.queue.then(() => undefined)
+  }
+
   acknowledge(options: { ephemeral?: boolean } = {}): Promise<void> {
     return this.acknowledgeInTime(options)
   }
@@ -924,6 +929,14 @@ export class InteractionResponse implements ResponseState {
       if (messageLocks.get(key) === entry && entry.holders.size === 0) messageLocks.delete(key)
     }, LOCK_MEMORY_MS)
     entry.forget.unref?.()
+  }
+
+  /**
+   * Cancels an acknowledgement scheduled and not yet made, without making one: for a call a stop dropped before it
+   * started, which never reached `@Defer`'s lock. Never throws.
+   */
+  cancel(): void {
+    this.cancelScheduled()
   }
 
   /**

@@ -7,6 +7,7 @@ import { makeInjectable } from '@src/util/injectable.util.js'
 import {
   abandonLookups,
   attachThemeCache,
+  stopLookups,
   cachedLayers,
   lookupsInFlight,
   lookupLayers,
@@ -34,7 +35,7 @@ import {
 } from '@src/core/theme-scope.js'
 import { META } from '@src/util/metadata-keys.js'
 import { shared } from '@src/util/shared-state.util.js'
-import { answerDeadline, type ReadyBound, readyBoundOf, readyGateOf } from '@src/core/ready-gate.js'
+import { answerDeadline, isStoppedBeforeStart, type ReadyBound, readyBoundOf, readyGateOf } from '@src/core/ready-gate.js'
 import { seconds } from '@src/core/autocomplete-timing.js'
 import { Logger } from '@src/common/logger.js'
 
@@ -96,6 +97,14 @@ export function configureThemes(
 /** Ends the theme lookups in flight for the app on `container`, as it shuts down: nothing they give later is logged or kept. */
 export function abandonThemeLookups(container: Container): void {
   abandonLookups(apps.get(container)?.resolvers)
+}
+
+/**
+ * Stops the app on `container` looking up themes, once its stop's shutdown has ended: a call then gets no server's or
+ * user's theme, and the resolver is not asked. A failed start's undo is not a stop, so a retried start looks up as before.
+ */
+export function stopThemeLookups(container: Container): void {
+  stopLookups(apps.get(container)?.resolvers)
 }
 
 /** Counts `classes`, whose handlers are prepared once the app's providers are made, among those a theme can vary by. */
@@ -236,7 +245,11 @@ type BoundedLayers = FoundLayers | undefined | Promise<FoundLayers | typeof CUT 
  * the hooks is over. The gate bounds that wait itself, so the deadline bounds only the lookup's.
  */
 const lookedUpAfter = (resolvers: ThemeResolverCaches, targets: ThemeTargets, after: Promise<void>, of: WaitFor | undefined) =>
-  after.then(() => boundedLookup(resolvers, targets, of))
+  after.then(
+    () => boundedLookup(resolvers, targets, of),
+    // A stop dropped the wait for the resolver's hooks: the resolver is never asked, and the theme is the handler's
+    (error: unknown) => (isStoppedBeforeStart(error) ? CUT : Promise.reject(error)),
+  )
 
 /**
  * A scope of `base` with a call's server's and user's `layers` over it. Layers still being looked up replace its theme
@@ -268,7 +281,8 @@ function rebuildOver(container: Container, resolvers: ThemeResolverCaches, base:
     if (targets.guildId === undefined && targets.userId === undefined) return undefined
     const bound = once(() => readyBoundOf(args))
     const of: WaitFor = { bound, resolvers, targets, who: 'a function bindTheme wraps' }
-    return scopeOver(resolvers, base, targets, lookupReady(container, bound), rebuild, undefined, of)
+    const cached = cachedLayers(resolvers, targets)
+    return scopeOver(resolvers, base, targets, cached === undefined ? undefined : lookupReady(container, bound), rebuild, cached, of)
   }
   return rebuild
 }
@@ -331,11 +345,12 @@ export function beginCallTheme(
   if (!themes) return undefined
   // Read once, for the gate and the deadline alike, and only by a call that waits
   if (themes.resolvers) bound = once(bound)
-  const after = themes.resolvers && lookupReady(container, bound)
   // The call's server and user, read once: every lookup of its themes, now or once the hooks settle, takes them from here
   const targets = themes.resolvers && themeTargets(args)
   const cached = targets && cachedLayers(themes.resolvers!, targets)
   const looksUp = cached !== undefined
+  // Only a call that looks something up waits at the gate, so no wait is left that nothing reads
+  const after = looksUp ? lookupReady(container, bound) : undefined
   if (!looksUp && !themes.scoped) return undefined
   const base = themes.varies && prototype && methodName ? handlerTheme(themes, prototype, methodName) : themes.app
   const rebuild = themes.resolvers && rebuildOver(container, themes.resolvers, base)
@@ -374,9 +389,9 @@ setThemeOutsideCalls(interaction => {
   if (!themes) return useTheme()
   if (!themes.resolvers) return themes.app
   const bound = once(() => readyBoundOf([interaction]))
-  const after = lookupReady(container!, bound)
   const targets = themeTargets([interaction])
   if (cachedLayers(themes.resolvers, targets) === undefined) return themes.app
+  const after = lookupReady(container!, bound)
   const of: WaitFor = { bound, resolvers: themes.resolvers, targets, who: 'an answer outside any call' }
   const layers = after ? lookedUpAfter(themes.resolvers, targets, after, of) : boundedLookup(themes.resolvers, targets, of)
   const over = (found: FoundLayers | typeof CUT | undefined) => (found === CUT ? themes.app : mergeTheme(mergeTheme(themes.app, found?.[0]), found?.[1]))

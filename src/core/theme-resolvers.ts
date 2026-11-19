@@ -91,6 +91,8 @@ class ResolverCache {
   private readonly pending = new Map<string, { token: object; result: Promise<ThemeOverride | undefined>; cut?: boolean }>()
   /** How to end each lookup in flight, those an invalidation forgot included, until it settles. */
   private readonly live = new Set<() => void>()
+  /** Whether the app has stopped, after which nothing is looked up or read from the cache. */
+  private stopped = false
   /** The ids already warned about for an invalid result, until one gives a valid result again. */
   private readonly warned = new Set<string>()
   /**
@@ -113,12 +115,14 @@ class ResolverCache {
 
   /** Whether `id` has a result cached as of `now`, and that result, without looking it up. */
   peek(id: string, now: number): { layer: ThemeOverride | undefined } | undefined {
+    if (this.stopped) return { layer: undefined }
     const entry = this.entries.get(id)
     return entry && entry.expiresAt > now ? { layer: entry.layer } : undefined
   }
 
   /** The layer for `id` as of `now`: at once when it is cached, else a promise of it that never rejects. */
   lookup(id: string, now: number): ThemeOverride | undefined | Promise<ThemeOverride | undefined> {
+    if (this.stopped) return undefined
     const entry = this.entries.get(id)
     if (entry) {
       if (entry.expiresAt > now) return entry.layer
@@ -159,6 +163,14 @@ class ResolverCache {
     // Dropped first, so each settles as a lookup no longer current
     this.pending.clear()
     for (const end of [...this.live]) end()
+  }
+
+  /**
+   * Stops looking anything up, as the app's stop ends: from now on every call gets no layer, the resolver is not
+   * asked, and nothing is logged, counted or kept.
+   */
+  stop(): void {
+    this.stopped = true
   }
 
   /** Forgets `id`'s result, or every result, so the next call looks it up again; a lookup in flight is not kept. */
@@ -522,6 +534,12 @@ export class ThemeCache {
 export function abandonLookups(caches: ThemeResolverCaches | undefined): void {
   caches?.guild?.abandon()
   caches?.user?.abandon()
+}
+
+/** Stops `caches` looking anything up, as the app's stop ends; see {@link ResolverCache.stop}. */
+export function stopLookups(caches: ThemeResolverCaches | undefined): void {
+  caches?.guild?.stop()
+  caches?.user?.stop()
 }
 
 /** Gives the `ThemeCache` an app's code injects the caches it clears. */

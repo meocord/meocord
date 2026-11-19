@@ -191,6 +191,21 @@ export interface MeoCordOptions<
    * it, the acknowledgement as private as that answer. A hook that throws counts as settled. The hooks still run one at
    * a time, so a call also waits for a slower hook ordered before its own.
    *
+   * A stop (`app.stop()`, a signal's shutdown, or a testing module's `close()`) ends the waits where it stops waiting
+   * for the calls under way, before the `onShutdown` hooks run, and decides each held call by the end of the event
+   * loop iteration's timers and I/O, before its immediates. A call whose hooks have settled by then, by another timer
+   * due in the same timers phase included, or whose bound is due, goes ahead and runs first; any other never starts,
+   * nor does one held for a hook the stop keeps from running, which ends as soon as that is known. Such a call's
+   * observers get `onSettled` with the outcome `'error'` and an error saying the bot stopped before it started. The
+   * `onShutdown` hooks wait for that, and for an answer the call made, no longer than the calls' share of
+   * `shutdownTimeout`, so they always have their own, and the stop resolves after them. A call whose answer to Discord,
+   * or in a testing module an observer's `onStart`, is still running then tells its observers when that settles, which
+   * can be after the stop. Nothing is sent to Discord for such a call beyond an acknowledgement `@Defer` already made
+   * and an answer an observer began in `onStart`, which goes out in the handler's theme. The bot names each such call
+   * in a warning of its own. A testing module's `dispatch()` and `invoke()` resolve with `ran: false` and that error,
+   * and `emit()` doesn't count it. A theme lookup still waiting then goes on in the handler's theme, without asking the
+   * resolver.
+   *
    * A `MeoCordTestingModule` takes it from here too: its calls wait only for the hooks `init({ ready: true })` runs,
    * and under strict mocks, which run them in the bot's order, for the same hooks as the bot's calls. A mock
    * interaction was created when it was made, or at its id's time when the test gives one, so a bound counts from
@@ -268,7 +283,9 @@ export interface MeoCordOptions<
    * Under `waitForReady`, a lookup the hooks held until the deadline starts then, so the call it was for goes on
    * without it, however fast the resolver answers. When a bot's stop or a testing module's close ends its shutdown,
    * the lookups still in flight end with it: a call still waiting on one goes on in its handler's theme, and whatever
-   * the lookup gives later is not logged, counted or kept.
+   * the lookup gives later is not logged, counted or kept. After that, no resolver is asked: a function `bindTheme`
+   * wraps, an answer outside any call and a testing module's `dispatch()` after `close()` answer in the handler's
+   * theme, or the app's outside a call. A start that fails and is retried looks themes up as before.
    *
    * @defaultValue `1000`
    */
