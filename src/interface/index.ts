@@ -106,8 +106,10 @@ export interface MeoCordApplication {
    * @returns A promise that resolves once the bot is logged in, or every shard has been spawned. With process
    *   sharding, it also resolves when `stop()` ends the start, which then spawns no more shards.
    * @throws For a bot in one process, the error of a provider's factory that failed, or the login error, such as an
-   *   invalid token; it also rejects when `stop()` ends the start. In either mode, a start of an app already stopped
-   *   rejects.
+   *   invalid token; it also rejects when `stop()` ends the start, once the stop is done with the `onShutdown` hooks of
+   *   what the start made: they have finished, or `shutdownTimeout` has ended the wait for them. A start still awaiting
+   *   a provider's factory when the stop stops waiting for it rejects once that factory settles, after the stop has
+   *   resolved. In either mode, a start of an app already stopped rejects.
    */
   start(): Promise<void>
 
@@ -119,7 +121,9 @@ export interface MeoCordApplication {
    * not waited for.
    *
    * A stop while the bot starts ends that start: it waits for the providers being made, at most `shutdownTimeout`, and
-   * nothing more is made after it. What the start made is shut down by the rule {@link OnShutdown} gives. A call after
+   * nothing more is made after it. What the start made is shut down by the rule {@link OnShutdown} gives; for a bot in
+   * one process, the start then rejects, and the stop resolves after it. A start whose provider's factory outlasts that
+   * wait is the exception: the stop resolves without it, and the start rejects once the factory settles. A call after
    * the first waits for it, and a stopped app does not start again.
    *
    * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged, and sets
