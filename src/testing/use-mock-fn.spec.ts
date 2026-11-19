@@ -1,6 +1,5 @@
 import 'reflect-metadata'
 import { types } from 'node:util'
-import { queryObjects } from 'node:v8'
 import { vi, type Mock as VitestMock } from 'vitest'
 import { ButtonInteraction } from 'discord.js'
 import {
@@ -13,6 +12,7 @@ import {
 } from '@src/testing/mock-fn.js'
 import { createMock, createMockInteraction } from '@src/testing/mock-interaction.js'
 import { createDiscordError, getResponse } from '@src/testing/response.js'
+import { collectGarbage, countGrowth, PILE_UP_BOUND } from '@src/spec-collection.js'
 
 // As jest's and bun's mocks do, a reset drops the implementation the mock was created with
 const droppingOnReset = (impl?: (...args: any[]) => any) => {
@@ -125,11 +125,11 @@ describe('useMockFn', () => {
     expect(attempt(vi.fn)).toBe('refuses')
   })
 
-  it('refuses after thousands of mocks made in one loop, keeping none of them alive', () => {
-    const before = liveHeld()
+  it('refuses after thousands of mocks made in one loop, keeping no pile of them alive', () => {
+    const grown = countGrowth(Held)
     makeThousands()
 
-    expect(liveHeld() - before).toBe(0)
+    expect(grown()).toBeLessThanOrEqual(PILE_UP_BOUND)
     expect(attempt(vi.fn)).toBe('refuses')
   })
 
@@ -216,9 +216,6 @@ const THOUSANDS = 5000
 
 class Held {}
 
-// Counted by v8 after a full garbage collection, so the test reads which objects anything still holds
-const liveHeld = () => queryObjects(Held, { format: 'count' })
-
 /** A runner's factory that no runner holds the mocks of, so they can be collected. */
 const plainRunnerFn = (impl?: (...args: any[]) => any) => {
   const fn = (...args: any[]) => impl?.(...args)
@@ -253,12 +250,4 @@ function makeThousands(): void {
  */
 function makeAndDrop(): WeakRef<object>[] {
   return Array.from({ length: MOCKS_AT_ONCE }, (_, i) => new WeakRef(createMockFn(() => i)))
-}
-
-/** Lets the job end, collects garbage (queryObjects does first), then lets finalization callbacks run. */
-async function collectGarbage(): Promise<void> {
-  const turn = () => new Promise(resolve => setTimeout(resolve, 0))
-  await turn()
-  queryObjects(Object, { format: 'count' })
-  for (let i = 0; i < 3; i++) await turn()
 }

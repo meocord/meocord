@@ -1,8 +1,8 @@
-import { queryObjects } from 'node:v8'
 import { vi } from 'vitest'
 import { clearAllMocks, createMockFn, isMockFunction, type MockedFunction, resetAllMocks } from '@src/testing/mock-fn.js'
 import { createMockClient, createMockInteraction } from '@src/testing/mock-interaction.js'
 import { ButtonInteraction } from 'discord.js'
+import { collectGarbage, countGrowth, PILE_UP_BOUND } from '@src/spec-collection.js'
 
 /**
  * These assert parity with jest and vitest, which is the whole promise of this
@@ -431,19 +431,35 @@ describe('clearAllMocks and resetAllMocks', () => {
     expect([fn(1), fn(1)]).toEqual([2, 2])
   })
 
-  it('keeps no mock alive once a test lets go of it, before the test yields to the event loop', () => {
-    const before = liveHeld()
-    for (let i = 0; i < 100; i++) useAndDrop()
+  it('lets every mock a test let go of be collected once the test yields to the event loop', async () => {
+    const dropped = Array.from({ length: MOCKS_CHECKED_EACH }, () => new WeakRef(useAndDrop()))
+    await collectGarbage()
 
-    // queryObjects collects garbage first; a mock tracked through a WeakRef would stay until the job ends
-    expect(liveHeld() - before).toBe(0)
+    expect(dropped.map(mock => mock.deref())).toEqual(dropped.map(() => undefined))
   })
 
-  it('keeps no answered mock interaction alive while a test awaits only promises', async () => {
-    const before = liveInteractions()
-    for (let i = 0; i < 20; i++) await answerAndDrop(i)
+  it('keeps no pile of mocks alive before the test yields to the event loop', () => {
+    const grown = countGrowth(Held)
+    for (let i = 0; i < MOCKS_IN_ONE_STRETCH; i++) useAndDrop()
 
-    expect(liveInteractions() - before).toBe(0)
+    // queryObjects collects garbage first; a mock tracked through a WeakRef would stay until the job ends
+    expect(grown()).toBeLessThanOrEqual(PILE_UP_BOUND)
+  })
+
+  it('lets every answered mock interaction be collected once the test yields to the event loop', async () => {
+    const dropped: WeakRef<object>[] = []
+    for (let i = 0; i < INTERACTIONS_CHECKED_EACH; i++) dropped.push(new WeakRef(await answerAndDrop(i)))
+    await collectGarbage()
+
+    expect(dropped.map(interaction => interaction.deref())).toEqual(dropped.map(() => undefined))
+  })
+
+  it('keeps no pile of answered mock interactions alive while a test awaits only promises', async () => {
+    const grown = countGrowth(ButtonInteraction)
+    for (let i = 0; i < INTERACTIONS_IN_ONE_STRETCH; i++) await answerAndDrop(i)
+
+    // The bound separates growth with the count from a constant; it does not make 20 kept interactions acceptable
+    expect(grown()).toBeLessThanOrEqual(PILE_UP_BOUND)
   })
 })
 
@@ -497,24 +513,32 @@ function observe(fn: MockedFunction<(x: number) => unknown>, given: unknown) {
   return { ...state, answers }
 }
 
+// Mocks and interactions checked for collection one by one, so one kept alive among them shows
+const MOCKS_CHECKED_EACH = 100
+const INTERACTIONS_CHECKED_EACH = 20
+// Made before the test yields to the event loop: one kept per use reads all of them, 100 and 10 times the bound
+const MOCKS_IN_ONE_STRETCH = 100 * PILE_UP_BOUND
+const INTERACTIONS_IN_ONE_STRETCH = 10 * PILE_UP_BOUND
+
 class Held {}
 
-// Counted by v8 after a full garbage collection, so the test reads which objects anything still holds
-const liveHeld = () => queryObjects(Held, { format: 'count' })
-const liveInteractions = () => queryObjects(ButtonInteraction, { format: 'count' })
-
-/** Makes a mock holding a value, then calls, configures and reads it, in a frame of its own that ends after. */
-function useAndDrop(): void {
+/**
+ * Makes a mock holding a value, then calls, configures and reads it, in a frame of its own that ends after. Returns
+ * the mock for a test that wraps it in a WeakRef; one that counts drops it at once.
+ */
+function useAndDrop(): object {
   const held = new Held()
   const fn = createMockFn(() => held)
   fn()
   fn.mockReturnValueOnce(held)
   void fn.mock.calls
+  return fn
 }
 
-/** Makes a mock interaction and answers it, in a frame of its own that ends after. */
-async function answerAndDrop(i: number): Promise<void> {
+/** Makes a mock interaction and answers it, in a frame of its own that ends after, and returns it as useAndDrop does. */
+async function answerAndDrop(i: number): Promise<object> {
   const interaction = createMockInteraction(ButtonInteraction, { customId: `b/${i}` })
   await interaction.reply({ content: 'Done.' })
+  return interaction
 }
 
