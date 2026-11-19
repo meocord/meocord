@@ -46,12 +46,28 @@ describe('installStackRemapper', () => {
     throw new Error('explode() returned')
   }
 
+  // Node has process.sourceMapsEnabled and Bun has none, so the spec defines it as each row needs, and puts back
+  // what the runtime had
+  const sourceMaps = Object.getOwnPropertyDescriptor(process, 'sourceMapsEnabled')
+  const setSourceMaps = (enabled: boolean) => Object.defineProperty(process, 'sourceMapsEnabled', { get: () => enabled, configurable: true })
+  // On Bun the remapper also hooks inspection and reports uncaught errors itself; each row's install is undone
+  const INSPECT = Symbol.for('nodejs.util.inspect.custom')
+  const inspect = Object.getOwnPropertyDescriptor(Error.prototype, INSPECT)
+  const listeners = { uncaughtException: process.listeners('uncaughtException'), unhandledRejection: process.listeners('unhandledRejection') }
+
   beforeEach(() => {
-    vi.spyOn(process, 'sourceMapsEnabled', 'get').mockReturnValue(false)
+    setSourceMaps(false)
   })
 
   afterEach(() => {
     Error.prepareStackTrace = runtimeHook
+    if (sourceMaps) Object.defineProperty(process, 'sourceMapsEnabled', sourceMaps)
+    else Reflect.deleteProperty(process, 'sourceMapsEnabled')
+    if (inspect) Object.defineProperty(Error.prototype, INSPECT, inspect)
+    else Reflect.deleteProperty(Error.prototype, INSPECT)
+    for (const [event, kept] of Object.entries(listeners) as ['uncaughtException' | 'unhandledRejection', NodeJS.UncaughtExceptionListener[]][]) {
+      for (const listener of process.listeners(event)) if (!kept.includes(listener as NodeJS.UncaughtExceptionListener)) process.off(event, listener)
+    }
     vi.restoreAllMocks()
   })
 
@@ -73,7 +89,8 @@ describe('installStackRemapper', () => {
   // Node and Bun define a hook of their own; a runtime without one gets the same text from this one
   it('writes the stack itself where the runtime has no hook', async () => {
     compile()
-    Reflect.deleteProperty(Error, 'prepareStackTrace')
+    // Left undefined, not deleted: once deleted, JavaScriptCore ignores every later hook for the rest of the process
+    Reflect.set(Error, 'prepareStackTrace', undefined)
 
     installStackRemapper(bundle)
     const [header, top] = (await explode()).stack!.split('\n')
@@ -137,7 +154,7 @@ describe('installStackRemapper', () => {
     expect(installStackRemapper(bundle)).toBe(false)
 
     compile()
-    vi.spyOn(process, 'sourceMapsEnabled', 'get').mockReturnValue(true)
+    setSourceMaps(true)
     expect(installStackRemapper(bundle)).toBe(false)
     expect(Error.prepareStackTrace).toBe(runtimeHook)
   })
