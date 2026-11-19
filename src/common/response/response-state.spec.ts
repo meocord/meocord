@@ -1,6 +1,7 @@
 import {
   ActionRowBuilder,
   type APIEmbed,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ApplicationIntegrationType,
@@ -26,6 +27,8 @@ import { LOCK_MEMORY_MS, lockedMessageCount, respond, responseOf } from '@src/co
 import { RENDERED_CONTAINER_ID, setPresenter } from '@src/common/response/presenter.js'
 import { UnroutedExecutionContext } from '@src/common/execution-context.js'
 import { createDiscordError, createMockInteraction, createMockMessage, getResponse } from '@src/testing/index.js'
+import { collectGarbage, keepsDroppedObjects } from '@src/spec-collection.js'
+import { type ResponsePresenter } from '@src/interface/index.js'
 
 const { Ephemeral, SuppressEmbeds, SuppressNotifications, IsComponentsV2 } = MessageFlags
 
@@ -957,6 +960,10 @@ describe("respond() under @Defer's timer and locks", () => {
     components: ids.map(id => ({ type: ComponentType.Button, style: 1, custom_id: id, label: id })),
   })
   const pending = () => new Promise<never>(() => {})
+  /** Discord's error for an edit the bot may no longer make. */
+  const MISSING_ACCESS = 50001
+  /** Discord's error for a request whose files are too large. */
+  const ENTITY_TOO_LARGE = 40005
 
   describe('the timer', () => {
     it('acknowledges nothing while an update, a reply or a modal of its own is in flight', async () => {
@@ -1327,6 +1334,299 @@ describe("respond() under @Defer's timer and locks", () => {
 
       await responseOf(second).release()
       expect(message.current()[0].components.map(({ label, disabled }) => [label, disabled])).toEqual([['A done', undefined], ['b', undefined]])
+    })
+
+    /**
+     * One message on Discord, as it shows the edit that lands last: each call's edit can be held until the row lets it
+     * land, and tells the row once it has been sent.
+     */
+    function landing() {
+      let current: { components: unknown[]; embeds: unknown[] } = { components: [row('a', 'b', 'c')], embeds: [] }
+      const message = Object.assign(messageWith(current as never), { id: `landing-${Math.random()}` })
+      const read = () => Object.assign(messageWith(current as never), { id: message.id }) as never
+      const held = new Map<string, PromiseWithResolvers<void>>()
+      const sent = new Map<string, PromiseWithResolvers<void>>()
+      /** The controls each edit a call sent disabled, in order. */
+      const drawn: Record<string, string[][]> = { a: [], b: [], c: [] }
+      /** Every edit sent, in order: the call that sent it and the names of its files. */
+      const edits: { by: string; files: string[] }[] = []
+      let returned: WeakRef<object> | undefined
+      const clickOn = (customId: 'a' | 'b' | 'c') => {
+        const interaction = createMockInteraction(ButtonInteraction, { customId, message })
+        interaction.editReply.mockImplementation(async payload => {
+          const body = payload as { components?: unknown[]; embeds?: unknown[]; files?: { name?: string | null }[] }
+          const controls = (body.components as { components: { custom_id: string; disabled?: boolean }[] }[] | undefined)?.[0]?.components
+          drawn[customId].push((controls ?? []).filter(control => control.disabled).map(control => control.custom_id))
+          edits.push({ by: customId, files: (body.files ?? []).map(file => file.name ?? '') })
+          sent.get(customId)?.resolve()
+          await held.get(customId)?.promise
+          current = { components: body.components ?? current.components, embeds: body.embeds ?? current.embeds }
+          const landed = read() as object
+          returned = new WeakRef(landed)
+          return landed as never
+        })
+        interaction.fetchReply.mockImplementation(async () => read())
+        return interaction
+      }
+      /** Holds `customId`'s next edits until `land` lets them or `refuse` fails the one held; `sent` settles once one is sent. */
+      const hold = (customId: 'a' | 'b' | 'c') => {
+        const edit = Promise.withResolvers<void>()
+        held.set(customId, edit)
+        sent.set(customId, Promise.withResolvers())
+        const refuse = (error: unknown) => {
+          held.delete(customId)
+          edit.reject(error)
+        }
+        return { sent: sent.get(customId)!.promise, land: () => edit.resolve(), refuse }
+      }
+      const shows = () => {
+        const [{ components }] = current.components as { components: { disabled?: boolean }[] }[]
+        return { a: !!components[0].disabled, b: !!components[1].disabled, loading: current.embeds.length > 0 }
+      }
+      return { clickOn, hold, shows, embeds: () => current.embeds, drawn, edits, returned: () => returned! }
+    }
+
+    it('shows the loading view of the call still holding a message once the other call releases it', async () => {
+      const message = landing()
+      const a = message.clickOn('a')
+      const b = message.clickOn('b')
+      await respond(b).acknowledge()
+      await respond(b).lock({ disable: 'clicked' })
+      const bView = message.embeds()
+      await respond(a).acknowledge()
+      const theme = { ...DEFAULT_THEME, colors: { ...DEFAULT_THEME.colors, primary: '#123456', neutral: '#123456' } }
+      await runInThemeScope({ theme: theme as never }, () => respond(a).lock({ disable: 'clicked' }))
+      const aView = message.embeds()
+      expect(aView).not.toEqual(bView)
+
+      await responseOf(b).release()
+
+      expect(message.embeds()).toEqual(aView)
+      expect(message.shows()).toEqual({ a: true, b: false, loading: true })
+    })
+
+    /** Lets every step a call has started run until it waits on something the row holds. */
+    const settle = () => new Promise(resolve => setImmediate(resolve))
+    /** A presenter whose loading view carries a file. */
+    const withFile = { loading: () => ({ text: 'Drawing…', files: [new AttachmentBuilder(Buffer.from('png'), { name: 'card.png' })] }) } as unknown as ResponsePresenter
+
+    // A's edit waits behind C's, which is still on its way, and B leaves the message in that time
+    it.each(['lock', 'answer'] as const)("draws a call's %s when its turn comes, so it shows no call that has left the message", async kind => {
+      const message = landing()
+      const [a, b, c] = (['a', 'b', 'c'] as const).map(id => message.clickOn(id))
+      for (const call of kind === 'answer' ? [c, b, a] : [c, b]) {
+        await respond(call).acknowledge()
+        await respond(call).lock({ disable: 'clicked' })
+      }
+      if (kind === 'lock') await respond(a).acknowledge()
+
+      const cEdit = message.hold('c')
+      const released = responseOf(c).release()
+      await cEdit.sent
+      const aEdit = kind === 'lock' ? respond(a).lock({ disable: 'clicked' }) : respond(a).send({ content: 'done' })
+      await settle()
+      const bReleased = responseOf(b).release()
+      await settle()
+      cEdit.land()
+      await Promise.all([released, aEdit, bReleased])
+
+      // Drawn after B left: only A's own control, while it still holds the message
+      expect(message.drawn.a.at(-1)).toEqual(kind === 'lock' ? ['a'] : [])
+    })
+
+    // Each a race Discord settles by which edit lands last: the edits go out in turn, each drawn when its turn comes
+    it.each([
+      ["the other call's release, drawn before this call held it, lands after this call's lock", 'release first'],
+      ["this call's lock, drawn while the other call held it, lands after the other call's release", 'lock first'],
+    ] as const)('keeps a message locked for the call still holding it, and only it, when %s', async (_name, first) => {
+      const message = landing()
+      const a = message.clickOn('a')
+      const b = message.clickOn('b')
+      await respond(b).acknowledge()
+      await respond(b).lock({ disable: 'clicked' })
+      await respond(a).acknowledge()
+
+      let racing: Promise<unknown>[]
+      if (first === 'release first') {
+        // B's restore is sent before A holds the message
+        const bEdit = message.hold('b')
+        const released = responseOf(b).release()
+        await bEdit.sent
+        const locked = respond(a).lock({ disable: 'clicked' })
+        await settle()
+        bEdit.land()
+        racing = [released, locked]
+      } else {
+        // A's lock is sent while B holds the message
+        const aEdit = message.hold('a')
+        const locked = respond(a).lock({ disable: 'clicked' })
+        await aEdit.sent
+        const released = responseOf(b).release()
+        await settle()
+        aEdit.land()
+        racing = [locked, released]
+      }
+      await Promise.all(racing)
+
+      // A still holds it: its control disabled with the loading view, B's control back
+      expect(message.shows()).toEqual({ a: true, b: false, loading: true })
+      await responseOf(a).release()
+      expect(message.shows()).toEqual({ a: false, b: false, loading: false })
+    })
+
+    it("still sends the next edit to a locked message, drawn at its turn, after Discord refuses one", async () => {
+      vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+      const message = landing()
+      const [a, b] = (['a', 'b'] as const).map(id => message.clickOn(id))
+      for (const call of [a, b]) {
+        await respond(call).acknowledge()
+        await respond(call).lock({ disable: 'clicked' })
+      }
+
+      // A's restore is refused while B's is waiting behind it
+      const aEdit = message.hold('a')
+      const aReleased = responseOf(a).release()
+      await aEdit.sent
+      const bReleased = responseOf(b).release()
+      await settle()
+      aEdit.refuse(createDiscordError(MISSING_ACCESS))
+      await Promise.all([aReleased, bReleased])
+
+      expect(message.edits.map(edit => edit.by)).toEqual(['a', 'b', 'a', 'b'])
+      expect(message.shows()).toEqual({ a: false, b: false, loading: false })
+    })
+
+    it("retries a lock Discord refused as too large in the same turn, so an edit another call asked for meanwhile never draws the file", async () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+      const message = landing()
+      const [a, b] = (['a', 'b'] as const).map(id => message.clickOn(id))
+      await respond(b).acknowledge()
+      await respond(b).lock({ disable: 'clicked' })
+      setPresenter(a.client, withFile)
+      await respond(a).acknowledge()
+
+      // A's lock is refused while B's restore is waiting behind it
+      const aEdit = message.hold('a')
+      const locked = respond(a).lock({ disable: 'clicked' })
+      await aEdit.sent
+      const released = responseOf(b).release()
+      await settle()
+      aEdit.refuse(createDiscordError(ENTITY_TOO_LARGE))
+      await Promise.all([locked, released])
+
+      // B's lock, then A's refused lock and its retry, then B's restore: the file sent once, and refused once
+      expect(message.edits).toEqual([
+        { by: 'b', files: [] },
+        { by: 'a', files: ['card.png'] },
+        { by: 'a', files: [] },
+        { by: 'b', files: [] },
+      ])
+      expect(message.shows()).toEqual({ a: true, b: false, loading: true })
+    })
+
+    it("leaves a call out of the edits drawn before its lock has had its turn, so none draws its control or loading view", async () => {
+      const message = landing()
+      const [a, b, c] = (['a', 'b', 'c'] as const).map(id => message.clickOn(id))
+      await respond(b).acknowledge()
+      await respond(b).lock({ disable: 'clicked' })
+      setPresenter(a.client, withFile)
+      for (const call of [c, a]) await respond(call).acknowledge()
+
+      // C's lock on its way and B's restore waiting behind it when A locks
+      const cEdit = message.hold('c')
+      const cLocked = respond(c).lock({ disable: 'clicked' })
+      await cEdit.sent
+      const bEdit = message.hold('b')
+      const bReleased = responseOf(b).release()
+      await settle()
+      const aEdit = message.hold('a')
+      const aLocked = respond(a).lock({ disable: 'clicked' })
+      await settle()
+      await settle()
+      cEdit.land()
+      await bEdit.sent
+      const cView = message.embeds()
+      bEdit.land()
+      await aEdit.sent
+
+      // B's restore, drawn while C held the message and before A's lock had its turn: C's control and view, no file
+      expect(message.shows()).toEqual({ a: false, b: false, loading: true })
+      expect(message.embeds()).toEqual(cView)
+      expect(message.drawn.b.at(-1)).toEqual(['c'])
+      aEdit.land()
+      await Promise.all([cLocked, bReleased, aLocked])
+      expect(message.edits.slice(1)).toEqual([{ by: 'c', files: [] }, { by: 'b', files: [] }, { by: 'a', files: ['card.png'] }])
+    })
+
+    it.each([
+      ['with a file', true],
+      ['without files', false],
+    ] as const)("draws nothing of a call whose lock Discord refused for another reason than size, its view %s", async (_name, file) => {
+      vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined)
+      const message = landing()
+      const [a, b] = (['a', 'b'] as const).map(id => message.clickOn(id))
+      await respond(b).acknowledge()
+      await respond(b).lock({ disable: 'clicked' })
+      if (file) setPresenter(a.client, withFile)
+      await respond(a).acknowledge()
+      const aEdit = message.hold('a')
+      const locked = respond(a).lock({ disable: 'clicked' })
+      await aEdit.sent
+      aEdit.refuse(createDiscordError(MISSING_ACCESS))
+      await expect(locked).rejects.toMatchObject({ code: MISSING_ACCESS })
+
+      await responseOf(b).release()
+
+      // B's restore: A's control enabled, no loading view, no file
+      expect(message.edits.at(-1)).toEqual({ by: 'b', files: [] })
+      expect(message.shows()).toEqual({ a: false, b: false, loading: false })
+    })
+
+    it('draws nothing of a call whose lock Discord refused as too large with its files and without them', async () => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+      const message = landing()
+      const [a, b] = (['a', 'b'] as const).map(id => message.clickOn(id))
+      await respond(b).acknowledge()
+      await respond(b).lock({ disable: 'clicked' })
+      setPresenter(a.client, withFile)
+      await respond(a).acknowledge()
+      const aEdit = message.hold('a')
+      const locked = respond(a).lock({ disable: 'clicked' })
+      await aEdit.sent
+      aEdit.refuse(createDiscordError(ENTITY_TOO_LARGE))
+      const retry = message.hold('a')
+      await retry.sent
+      retry.refuse(createDiscordError(ENTITY_TOO_LARGE))
+      await expect(locked).rejects.toMatchObject({ code: ENTITY_TOO_LARGE })
+
+      await responseOf(b).release()
+
+      // B's restore: A's control enabled, no loading view, no file
+      expect(message.edits).toEqual([
+        { by: 'b', files: [] },
+        { by: 'a', files: ['card.png'] },
+        { by: 'a', files: [] },
+        { by: 'b', files: [] },
+      ])
+      expect(message.shows()).toEqual({ a: false, b: false, loading: false })
+    })
+
+    it.skipIf(keepsDroppedObjects)('keeps neither the calls nor the message an edit returned once the last call releases it', async () => {
+      const message = landing()
+      const refs = await (async () => {
+        const [a, b] = (['a', 'b'] as const).map(id => message.clickOn(id))
+        for (const call of [a, b]) {
+          await respond(call).acknowledge()
+          await respond(call).lock({ disable: 'clicked' })
+        }
+        await responseOf(a).release()
+        await responseOf(b).release()
+        return [new WeakRef(a), new WeakRef(b), new WeakRef(responseOf(a) as object), message.returned()]
+      })()
+
+      await collectGarbage()
+
+      expect(refs.map(ref => ref.deref() === undefined)).toEqual([true, true, true, true])
     })
   })
 
