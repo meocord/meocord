@@ -96,9 +96,17 @@ describe('import-x/no-cycle', () => {
         { files: ['**/*.ts'], languageOptions: { parserOptions: { tsconfigRootDir: root } } },
       ],
     })
-    // The resolver reads the config's tsconfigs from the working directory, as an app's lint runs from its root
-    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root)
-    const [result] = await eslint.lintFiles([path.join(root, 'src', file)]).finally(() => cwd.mockRestore())
+    // The resolver reads the config's tsconfigs from the working directory, as an app's lint runs from its root. A real
+    // change of directory, put back after: Bun's path.resolve reads the process's directory, not a replaced
+    // process.cwd. The suite runs in forked processes, where chdir is allowed
+    const before = process.cwd()
+    process.chdir(root)
+    let result: ESLint.LintResult
+    try {
+      ;[result] = await eslint.lintFiles([path.join(root, 'src', file)])
+    } finally {
+      process.chdir(before)
+    }
     return result.messages
       .filter(message => message.ruleId === 'import-x/no-cycle')
       .map(message => [message.severity, message.message])
