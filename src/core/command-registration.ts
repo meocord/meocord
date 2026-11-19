@@ -284,14 +284,22 @@ function warnAboutUnnamedGuilds(
     [...targets.map(({ scope }) => scope), ...otherScopes(commands, targets, config)].map(scope => scopeKey(scope)),
   )
   const prefix = `commands-${applicationId}-guild-`
-  for (const file of readdirSync(directory)) {
-    if (!file.startsWith(prefix) || !file.endsWith('.json')) continue
-    const guild = file.slice(prefix.length, -'.json'.length)
+  const guilds = readdirSync(directory)
+    .filter(file => file.startsWith(prefix) && file.endsWith('.json'))
+    .map(file => file.slice(prefix.length, -'.json'.length))
+    // By ID: the file system lists a directory in an order of its own
+    .sort(byId)
+  for (const guild of guilds) {
     if (owned.has(scopeKey({ guild }))) continue
     logger.warn(
       `Commands may be left in server ${guild}, which this configuration no longer registers to; run \`meocord register --prune\` to find and remove them.`,
     )
   }
+}
+
+/** Orders snowflake IDs by value: a shorter ID is a smaller one, and IDs of one length compare digit by digit. */
+function byId(a: string, b: string): number {
+  return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)
 }
 
 /** Everything one registration needs. */
