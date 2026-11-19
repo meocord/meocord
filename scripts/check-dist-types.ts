@@ -40,6 +40,21 @@ const KNOWN_DIFFERENCES: Record<string, Record<string, Kind>> = {
   interface: { PIPED_BRAND: 'value' },
 }
 
+// Classes only MeoCord makes, which a test gets from `compile()`, `create()` or `fromApp()`: their public constructors
+// take only `unknown`, so the declarations show none of what they are made from
+const UNKNOWN_CONSTRUCTORS: Record<string, readonly string[]> = { testing: ['TestingModule', 'TestingModuleBuilder'] }
+
+// Public constructors known to name a type no entry exports, and why. Each is a defect to fix, not a rule: the check
+// fails once the constructor names none, so the entry is removed with the fix
+const KNOWN_CONSTRUCTOR_LEAKS: Record<string, Record<string, string>> = {
+  // Not given the `unknown` form: ShardContext's constructor is documented and would lose its argument checks, so both
+  // get a typed form of their own in 5.0 (#1072)
+  core: {
+    HandlerRegistry: 'names HandlerClass',
+    ShardContext: 'names ShardCallHandler',
+  },
+}
+
 /** Whether an import or export along an alias chain is written type-only, so only the type gets through. */
 function typeOnlyAlias(checker: ts.TypeChecker, symbol: ts.Symbol): boolean {
   for (let at: ts.Symbol | undefined = symbol; at && at.flags & ts.SymbolFlags.Alias; at = checker.getImmediateAliasedSymbol(at)) {
@@ -137,6 +152,48 @@ for (const [index, entry] of ENTRIES.entries()) {
     }
     for (const name of built.keys()) {
       if (!declared.has(name)) problems.push(`${where} exports ${name}, which src/${entry}/index.ts does not declare`)
+    }
+  }
+}
+
+// Every exported class's public constructor names only types some entry exports
+const resolveAlias = (symbol: ts.Symbol) => (symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol)
+const exported = new Set(shipped.flatMap(({ file }) => checker.getExportsOfModule(checker.getSymbolAtLocation(program.getSourceFile(file)!)!).map(resolveAlias)))
+const isPrivate = (node: ts.Node) => ts.getCombinedModifierFlags(node as ts.Declaration) & ts.ModifierFlags.Private
+for (const { entry, condition, file } of shipped.filter(item => item.entry !== 'eslint')) {
+  const where = `meocord/${entry} (${condition}, ${relative(file)})`
+  for (const symbol of checker.getExportsOfModule(checker.getSymbolAtLocation(program.getSourceFile(file)!)!)) {
+    const declaration = resolveAlias(symbol).declarations?.find(ts.isClassDeclaration)
+    if (!declaration) continue
+    const named = new Set<string>()
+    const visit = (node: ts.Node): void => {
+      const name = ts.isTypeReferenceNode(node) ? node.typeName : ts.isTypeQueryNode(node) ? node.exprName : undefined
+      if (name) {
+        const target = checker.getSymbolAtLocation(ts.isQualifiedName(name) ? name.left : name)
+        const resolved = target && resolveAlias(target)
+        const at = resolved?.declarations?.[0]?.getSourceFile()
+        if (resolved && at && isOwn(program, at) && !exported.has(resolved) && !(resolved.flags & ts.SymbolFlags.TypeParameter)) named.add(resolved.name)
+      }
+      ts.forEachChild(node, visit)
+    }
+    // The class's construct signatures, so a constructor it inherits from a base no entry exports counts too
+    const signatures = checker.getSignaturesOfType(checker.getTypeOfSymbol(resolveAlias(symbol)), ts.SignatureKind.Construct)
+    const publicSignatures = signatures.flatMap(({ declaration }) =>
+      declaration && !ts.isJSDocSignature(declaration) && !isPrivate(declaration) ? [declaration] : [],
+    )
+    for (const signature of publicSignatures) signature.parameters.forEach(visit)
+    if (UNKNOWN_CONSTRUCTORS[entry]?.includes(symbol.name)) {
+      const typed = publicSignatures.flatMap(signature => signature.parameters).filter(parameter => parameter.type?.kind !== ts.SyntaxKind.UnknownKeyword)
+      if (publicSignatures.length === 0 || typed.length > 0) {
+        problems.push(`${where}: ${symbol.name} is made only by MeoCord, so its public constructor takes only \`unknown\`${typed.length > 0 ? `, not ${typed.map(parameter => parameter.getText()).join(', ')}` : ''}`)
+      }
+    }
+    const known = KNOWN_CONSTRUCTOR_LEAKS[entry]?.[symbol.name]
+    const found = [...named].sort().join(', ')
+    if (known !== undefined) {
+      if (`names ${found}` !== known) problems.push(`${where}: ${symbol.name}'s constructor ${found ? `names ${found}` : 'names no internal type'}, not what KNOWN_CONSTRUCTOR_LEAKS records: update the entry`)
+    } else if (found) {
+      problems.push(`${where}: ${symbol.name}'s public constructor names ${found}, which no entry exports`)
     }
   }
 }
