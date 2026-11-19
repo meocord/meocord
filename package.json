@@ -17,6 +17,7 @@
     "verify:generated": "bun scripts/verify-generated.ts",
     "verify:runners": "bun scripts/verify-runners.ts",
     "cli:scenarios": "bun scripts/cli-scenarios.ts",
+    "test:bun": "bunx --bun vitest run",
     "test:e2e": "bun scripts/e2e.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
