@@ -182,8 +182,9 @@ export interface MeoCordOptions<
    * acknowledgement or an answer, it waits as long as the hooks run; while one is on its way, it waits for the outcome
    * without warning; told nothing, as without `@Defer`, it waits until 2 seconds after the interaction was created (or
    * 2 seconds from the first wait for it, with no creation time or one ahead of the clock), then goes ahead with a
-   * warning naming the hook, at once if those have passed. A call and the lookups for its interaction waiting at once
-   * go ahead together on one decision, the call's warning naming the hook. An autocomplete waits the same way for 1
+   * warning naming the hook, at once if those have passed. That moment is the interaction's first-answer deadline,
+   * which bounds its wait for its themes too (see `themeForTimeoutMs`). A call and the lookups for its interaction
+   * waiting at once go ahead together on one decision, the call's warning naming the hook. An autocomplete waits the same way for 1
    * second. A message, a reaction, an event and a bound function called with no interaction wait as long as the hooks
    * run. `@Defer({ mode: 'auto' })`'s acknowledgement counts as on its way from the call's start until it is sent or an
    * answer's Discord call replaces it; an answer still waiting for its theme doesn't hold it back, and is sent after
@@ -237,6 +238,8 @@ export interface MeoCordOptions<
    * read, such as an object with a cycle or a getter that throws, is left out, with a warning once per server or user;
    * a resolver that fails or passes its timeout leaves its theme out of the call, logged once until it answers again.
    * A class implementing {@link ThemeResolver} does the same with the app's services, resolved from its container.
+   * A call from an interaction Discord has been told nothing of waits for them only until its first-answer deadline,
+   * as `themeForTimeoutMs` says.
    */
   themeFor?: ThemeResolvers | (new (...args: any[]) => ThemeResolver)
 
@@ -247,7 +250,25 @@ export interface MeoCordOptions<
   themeCache?: { ttlSeconds?: number; maxGuilds?: number; maxUsers?: number }
 
   /**
-   * How long a call waits for a `themeFor` resolver, in milliseconds.
+   * How long a lookup through a `themeFor` resolver may take, in milliseconds. Past it, the resolver counts as failing:
+   * its theme is left out, logged once, and asked for again after a backoff.
+   *
+   * A call from an interaction Discord has been told nothing of also has a first-answer deadline: 2 seconds after the
+   * interaction was created, 1 second for an autocomplete, or after the call came when the creation time is missing or
+   * ahead of the clock. It covers the wait for the `onReady` hooks under `waitForReady` and the wait for the themes
+   * together, so the first answer can reach Discord within its 3 seconds. Once the deadline has passed, the call goes
+   * on in its handler's theme and keeps it to its end, with one warning per lookup in flight. The lookup itself goes on
+   * within this timeout and its result is kept for later calls; the cut is not a failure and starts no backoff.
+   *
+   * The deadline doesn't hold while Discord is being told: a call with `@Defer` waits for the whole lookup once its
+   * acknowledgement has gone through. If the acknowledgement fails after the deadline, the call goes on at once, so a
+   * `@Defer({ mode: 'auto' })` acknowledgement failing at its latest, 2.5 seconds after creation, leaves the first
+   * answer that much later. A message, a reaction and an event have no deadline and wait for the whole lookup.
+   *
+   * Under `waitForReady`, a lookup the hooks held until the deadline starts then, so the call it was for goes on
+   * without it, however fast the resolver answers. When a bot's stop or a testing module's close ends its shutdown,
+   * the lookups still in flight end with it: a call still waiting on one goes on in its handler's theme, and whatever
+   * the lookup gives later is not logged, counted or kept.
    *
    * @defaultValue `1000`
    */

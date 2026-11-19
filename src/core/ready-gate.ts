@@ -63,9 +63,8 @@ interface Decision {
   key: object
   /** What waits on it, in the order each came. */
   held: Set<Held>
-  /** Whether the bound counts from the first wait rather than the interaction's creation, for the warning. */
-  fromWait: boolean
-  timer?: ReturnType<typeof setTimeout>
+  /** The interaction's first-answer deadline, held while something waits on the decision. */
+  deadline: AnswerDeadline
 }
 
 /** Where the gate keeps what a theme lookup through the resolver waits for, beside the resolver's own handlers. */
@@ -107,6 +106,91 @@ export function readyBoundFor(type: string, first: unknown, deferred = false): R
     ...(typeof created === 'number' && Number.isFinite(created) && { since: created }),
     ...(repliable && { told: responseOf(first as Parameters<typeof responseOf>[0]) }),
     ...(deferred && { deferred }),
+  }
+}
+
+/**
+ * An interaction's first-answer deadline: `bound` from its creation, which every wait before its first answer shares,
+ * the hooks' and the theme's alike. Its timer runs while something holds it.
+ */
+export interface AnswerDeadline {
+  /** Whether the bound counts from the first wait rather than the interaction's creation. */
+  readonly fromWait: boolean
+  /** Settles once the deadline has passed and Discord has been told nothing, and nothing is on its way. */
+  readonly expired: Promise<unknown>
+  /** Whether the deadline is past with Discord told nothing now: what a wait ending at this moment reads. */
+  due(): boolean
+  /** Whether a warning already named this interaction's wait, so another for it would repeat it. */
+  warned: boolean
+  /** Lets go of the deadline; once nothing holds it, its timer stops. */
+  release(): void
+}
+
+/** When an interaction's deadline passes, set by its first wait and kept for every later one. */
+interface DeadlineMoment {
+  fromWait: boolean
+  /** On the monotonic clock, so a host clock that jumps during a wait can't move it. */
+  passesAt: number
+}
+
+/** The timer each interaction's waits share, while one holds it. */
+interface SharedDeadline {
+  key: object
+  holders: number
+  moment: DeadlineMoment
+  told?: ToldState
+  timer: ReturnType<typeof setTimeout>
+  expired: Promise<unknown>
+}
+
+const moments = new WeakMap<object, DeadlineMoment>()
+const deadlines = new WeakMap<object, SharedDeadline>()
+/** The interactions a warning already named the wait of, kept past their deadlines' leases. */
+const warnedWaits = new WeakSet<object>()
+
+/**
+ * The first-answer deadline of the interaction `bound` is for, held until released: the one its other waits hold, or a
+ * new one. It passes `bound.ms` after the interaction's creation, or after now when that is later or unknown, so a host
+ * clock running late can't lengthen it; for an interaction that can be answered, it expires once Discord has been told
+ * nothing and nothing is on its way.
+ */
+export function answerDeadline(bound: NonNullable<ReadyBound>): AnswerDeadline {
+  const key = bound.of ?? {}
+  let shared = deadlines.get(key)
+  if (!shared) {
+    const { ms, since, told } = bound
+    // Read from the wall clock once, at the interaction's first wait; a later wait counts to the same moment
+    let moment = moments.get(key)
+    if (!moment) {
+      const fromWait = since === undefined || since > Date.now()
+      moment = { fromWait, passesAt: performance.now() + (fromWait ? ms : Math.max(0, since + ms - Date.now())) }
+      moments.set(key, moment)
+    }
+    const passed = Promise.withResolvers<void>()
+    const timer = setTimeout(passed.resolve, Math.max(0, moment.passesAt - performance.now()))
+    shared = { key, holders: 0, moment, ...(told && { told }), timer, expired: told ? passed.promise.then(() => untold(told)) : passed.promise }
+    deadlines.set(key, shared)
+  }
+  const held = shared
+  held.holders++
+  let released = false
+  return {
+    fromWait: held.moment.fromWait,
+    expired: held.expired,
+    due: () => performance.now() >= held.moment.passesAt && (held.told === undefined || held.told.told === 'nothing'),
+    get warned() {
+      return warnedWaits.has(key)
+    },
+    set warned(value) {
+      if (value) warnedWaits.add(key)
+    },
+    release() {
+      if (released) return
+      released = true
+      if (--held.holders > 0) return
+      clearTimeout(held.timer)
+      if (deadlines.get(held.key) === held) deadlines.delete(held.key)
+    },
   }
 }
 
@@ -203,25 +287,16 @@ export class ReadyGate {
     await Promise.race([reached, goneAhead.promise])
   }
 
-  /**
-   * The decision pending on `bound`'s interaction, or a new one: due once the bound has passed, counted from the
-   * interaction's creation, or from now when that is earlier or unknown so a host clock running late can't lengthen
-   * it, and for an interaction, once Discord has been told nothing and nothing is on its way.
-   */
+  /** The decision pending on `bound`'s interaction, or a new one, due once its first-answer deadline expires. */
   private decisionFor(bound: NonNullable<ReadyBound>): Decision {
     // Every wait for one interaction reads the same bound: its kind, creation time and told state come from the
     // interaction itself; only `deferred` differs, which each wait's own warning reads
     const key = bound.of ?? {}
     const pending = this.decisions.get(key)
     if (pending) return pending
-    const { ms, since, told } = bound
-    const fromWait = since === undefined || since > Date.now()
-    const decision: Decision = { key, held: new Set(), fromWait }
+    const decision: Decision = { key, held: new Set(), deadline: answerDeadline(bound) }
     this.decisions.set(key, decision)
-    const passed = new Promise<void>(resolve => {
-      decision.timer = setTimeout(resolve, fromWait ? ms : Math.max(0, since + ms - Date.now()))
-    })
-    void (told ? passed.then(() => untold(told)) : passed).then(() => this.decide(decision))
+    void decision.deadline.expired.then(() => this.decide(decision))
     return decision
   }
 
@@ -236,13 +311,13 @@ export class ReadyGate {
     decision.held.clear()
     for (const { call, needed, waiter, goAhead } of held) {
       this.waiters.delete(waiter)
-      this.warnLate(call, needed, decision.fromWait)
+      if (this.warnLate(call, needed, decision.deadline.fromWait)) decision.deadline.warned = true
       goAhead()
     }
   }
 
   private drop(decision: Decision): void {
-    clearTimeout(decision.timer)
+    decision.deadline.release()
     if (this.decisions.get(decision.key) === decision) this.decisions.delete(decision.key)
   }
 
@@ -292,13 +367,13 @@ export class ReadyGate {
     return needed
   }
 
-  /** Warns, once per hook, that a call ran before the hook it waited for had settled. */
-  private warnLate({ controller, methodName, bound, lookup }: ReadyWait, needed: readonly number[], fromWait: boolean): void {
+  /** Warns, once per hook, that a call ran before the hook it waited for had settled; whether it warned. */
+  private warnLate({ controller, methodName, bound, lookup }: ReadyWait, needed: readonly number[], fromWait: boolean): boolean {
     // The hook that holds the call: the first unit not settled yet that has one, as far as its class tells, whether the
     // call uses it or it only runs before one the call uses
     const pending = this.units.slice(this.settledCount, needed.at(-1)! + 1)
     const unit = pending.find(({ token }) => typeof (token as { prototype?: { onReady?: unknown } }).prototype?.onReady === 'function') ?? pending[0]
-    if (!unit || this.warned.has(unit.token)) return
+    if (!unit || this.warned.has(unit.token)) return false
     this.warned.add(unit.token)
     const name = (controller as { name?: string }).name
     const { kind, ms, deferred } = bound!
@@ -306,7 +381,7 @@ export class ReadyGate {
     if (lookup) {
       const waits = kind === 'interaction' ? 'an interaction Discord has been told nothing of' : 'an autocomplete'
       this.warn(`${name} looked up a theme before onReady in ${unit.name} had settled, ${span}, as long as ${waits} waits. Make onReady in ${unit.name} faster.`)
-      return
+      return true
     }
     const handler = `${name}.${methodName}`
     if (kind === 'autocomplete') {
@@ -327,6 +402,7 @@ export class ReadyGate {
           `waits. Add @Defer to ${handler} to have it wait for the hook, or make onReady in ${unit.name} faster.`,
       )
     }
+    return true
   }
 }
 
