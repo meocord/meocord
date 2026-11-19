@@ -328,10 +328,20 @@ export async function runShutdownSequence(
     const sequence = (async () => {
       // Only after the calls settled: a call still running may never let its store operations settle
       if (needsStore && drained) await storeOperationsSettled(container)
+      // Every hook runs, whatever reporting another's failure does; a report that threw fails the sequence afterwards
+      const unreported: unknown[] = []
+      const report = (name: string, error: unknown) => {
+        try {
+          hookFailed(name, error)
+        } catch (reportError) {
+          unreported.push(reportError)
+        }
+      }
       // Nothing on the store's side injects anything outside it, so running it last keeps the reverse dependency order
       const ran = new Set<object>()
-      await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), hookFailed, ran)
-      await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), hookFailed, ran)
+      await runShutdownHooks(entries.filter(entry => !storeSide.has(entry)), report, ran)
+      await runShutdownHooks(entries.filter(entry => storeSide.has(entry)), report, ran)
+      if (unreported.length > 0) throw new AggregateError(unreported, 'Reporting a failed onShutdown hook threw.')
     })()
     if ((await Promise.race([sequence, whole.promise])) === 'timeout') {
       warn(`onShutdown hooks did not finish within ${timeoutMs} ms; shutting down anyway.`)

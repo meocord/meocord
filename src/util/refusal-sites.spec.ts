@@ -171,6 +171,7 @@ const NOT_REFUSALS: Record<string, { count: number; why: string }> = {
   },
   'core/input-runner.ts': { count: 1, why: 'a pipe, resolved as it runs' },
   'core/interceptor-runner.ts': { count: 1, why: 'an interceptor, resolved as it runs' },
+  'core/lifecycle-hooks.ts': { count: 1, why: 'a shutdown whose report of a failed onShutdown hook threw' },
   'core/meocord.app.ts': { count: 1, why: 'start() of an app that was stopped' },
   'core/message-params.ts': { count: 4, why: 'a message whose params do not fit its command, answered with its usage' },
   'core/shard-context.ts': { count: 2, why: 'ShardContext.call, from a handler' },

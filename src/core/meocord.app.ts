@@ -112,8 +112,13 @@ function shutDown(): Promise<void> {
     // A clean stop keeps a code already set, such as the 1 a failed login set, so a supervisor still sees it. Read as
     // the shutdown begins: a code main.ts sets as it hears of the stop is the stop's, not a failure.
     const exitCode = Number(process.exitCode ?? 0) || 0
-    const closed = await Promise.all([...runningApps].map(close => close()))
-    process.exit(closed.every(Boolean) ? exitCode : 1)
+    // Each close reports its own failure; the process exits whatever any of them does
+    let clean = false
+    try {
+      clean = (await Promise.all([...runningApps].map(close => close()))).every(Boolean)
+    } finally {
+      process.exit(clean ? exitCode : 1)
+    }
   })()
   return processState.shuttingDown
 }
@@ -262,7 +267,12 @@ export class MeoCordApp implements MeoCordApplication {
    * among the running ones until the close settles, so a signal or a manager's request meanwhile waits for it.
    */
   private readonly close = (): Promise<boolean> =>
-    (this.stopped ??= this.closeClient().finally(() => runningApps.delete(this.close)))
+    (this.stopped ??= this.closeClient()
+      .catch((error: unknown) => {
+        this.logger.error('Error during shutdown:', error)
+        return false
+      })
+      .finally(() => runningApps.delete(this.close)))
 
   /** The stop under way or done, which a later stop waits for. */
   private stopped?: Promise<boolean>
@@ -889,17 +899,19 @@ export class MeoCordApp implements MeoCordApplication {
 
     if (this.activityInterval) clearInterval(this.activityInterval)
 
-    // The calls drain on every shutdown, and the onReady in progress settles first
-    await this.runShutdownHooks(timeoutMs)
-
+    // The calls drain on every shutdown, and the onReady in progress settles first. The client is destroyed whatever
+    // the hooks' sequence does; each failure fails the stop, and is reported once the client is closed
+    const failures: unknown[] = []
+    await this.runShutdownHooks(timeoutMs).catch((error: unknown) => void failures.push(error))
     try {
       this.bot.removeAllListeners()
       await this.bot.destroy()
-      this.logger.log('Bot has shut down')
-      return !startupFailed
     } catch (error) {
-      this.logger.error('Error during shutdown:', error)
-      return false
+      failures.push(error)
     }
+    for (const error of failures) this.logger.error('Error during shutdown:', error)
+    if (failures.length > 0) return false
+    this.logger.log('Bot has shut down')
+    return !startupFailed
   }
 }

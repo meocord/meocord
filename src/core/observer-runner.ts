@@ -59,6 +59,18 @@ function observersFor(container: Container, context: ExecutionContext): readonly
   return observersOf(container).filter(observer => appliesTo(observer, type))
 }
 
+/**
+ * Logs an observer's failure. Should the report itself throw, as a class whose `name` getter throws makes it, that is
+ * logged in its place, so a failure never leaves the notification that reports it.
+ */
+function reportFailure(report: () => void): void {
+  try {
+    report()
+  } catch (reportError) {
+    logger.error('An observer failed, and reporting it threw:', reportError)
+  }
+}
+
 /** Names a call in a log line: its handler, or that none was reached. */
 function describeCall(context: ExecutionContext): string {
   const controller = context.getController()
@@ -74,7 +86,7 @@ export function notifyStart(container: Container, context: ExecutionContext): Pr
   const pending: Promise<unknown>[] = []
   for (const observer of observersFor(container, context)) {
     const report = (error: unknown) =>
-      logger.error(`Observer ${observer.name} threw while starting ${describeCall(context)}:`, error)
+      reportFailure(() => logger.error(`Observer ${observer.name} threw while starting ${describeCall(context)}:`, error))
     try {
       const instance = container.get<DispatchObserver>(observer)
       if (typeof instance.onStart !== 'function') continue
@@ -118,7 +130,7 @@ export async function notifyObservers(container: Container, context: ExecutionCo
     try {
       await container.get<DispatchObserver>(observer).onSettled(context, result)
     } catch (error) {
-      logger.error(`Observer ${observer.name} threw while observing ${describeCall(context)}:`, error)
+      reportFailure(() => logger.error(`Observer ${observer.name} threw while observing ${describeCall(context)}:`, error))
     }
   }
 }

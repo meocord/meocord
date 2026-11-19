@@ -180,6 +180,15 @@ const OUTAGE_QUIET_MS = 30_000
 /** Each store's open outage: its failed calls, when the first and the latest failed, and whom it has told. */
 const outages = new WeakMap<CooldownStore, { failures: number; since: number; last: number; told: Set<string> }>()
 
+/** What a store failed with, as its error's message or the value itself; a value that throws as it is read says nothing more. */
+function failedWith(cause: unknown): string {
+  try {
+    return `failed: ${String((cause as Error | undefined)?.message ?? cause)}`
+  } catch {
+    return 'failed'
+  }
+}
+
 /** Logs a store's failure once per outage: the first, with its cause and what calls get until it answers. */
 function reportFailure(store: CooldownStore, error: CooldownStoreError, { failure, timeoutMs }: CooldownPolicy): void {
   const outage = outages.get(store)
@@ -190,7 +199,7 @@ function reportFailure(store: CooldownStore, error: CooldownStoreError, { failur
   }
   outages.set(store, { failures: 1, since: Date.now(), last: Date.now(), told: new Set() })
   const name = store.constructor.name
-  const reason = error.timedOut ? `did not answer within ${timeoutMs} ms` : `failed: ${String((error.cause as Error | undefined)?.message ?? error.cause)}`
+  const reason = error.timedOut ? `did not answer within ${timeoutMs} ms` : failedWith(error.cause)
   if (failure === 'allow') logger.warn(`The cooldown store ${name} ${reason}. Calls run uncounted until it answers again.`)
   else logger.error(`The cooldown store ${name} ${reason}. Calls with a cooldown are refused until it answers again.`, error.cause ?? '')
 }

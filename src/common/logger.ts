@@ -1,4 +1,4 @@
-import { inspect } from 'node:util'
+import { inspect, types } from 'node:util'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc.js'
 import timezone from 'dayjs/plugin/timezone.js'
@@ -33,6 +33,20 @@ const tagColours: Partial<Record<string, (typeof TAG_COLOURS)[keyof typeof TAG_C
  * `console.error` write to stderr, the others to stdout, and either may be a terminal while the other is a file.
  */
 const chalkFor = (logLevel: string): ChalkInstance => (logLevel === 'warn' || logLevel === 'error' ? chalkStderr : chalk)
+
+/** What an argument prints as when inspecting it throws, followed by what was thrown where that can be read safely. */
+const UNINSPECTABLE = '[value could not be inspected'
+
+/**
+ * What a thrown value says, read without running its code: a primitive as text, or the string an object holds as its
+ * own `message`. A Proxy's traps would run, so it says nothing.
+ */
+function plainReason(thrown: unknown): string | undefined {
+  if (thrown === null || (typeof thrown !== 'object' && typeof thrown !== 'function')) return String(thrown)
+  if (types.isProxy(thrown)) return undefined
+  const message = Object.getOwnPropertyDescriptor(thrown, 'message')?.value
+  return typeof message === 'string' ? message : undefined
+}
 
 /** What a value registered with {@link hideInLogs} prints as. */
 export const REDACTED = '[redacted]'
@@ -78,11 +92,12 @@ const redact = (text: string): string => {
  * @remarks
  * A string prints in its tag's colour. Any other argument, a Symbol or a BigInt included, is printed as `console.log`
  * prints it, an object four levels deep: its non-enumerable properties stay unprinted, and an error prints its stack,
- * its own properties and its `cause`. The bot's credentials print as `[redacted]` wherever they appear in a line. A
- * line prints when its level is at or above the threshold: `debug`, then `log` (with `info` and `verbose`, tagged
- * `[INFO]` and `[VERBOSE]`), `warn`, `error`. Warnings and errors print to stderr and the rest to stdout, each in
- * colour only where its stream is a terminal, so no colour code goes to a file or a log collector, unless `FORCE_COLOR`
- * asks for it.
+ * its own properties and its `cause`. A value whose inspection throws, as its own `[util.inspect.custom]` may, prints
+ * as `[value could not be inspected: ...]` with what it threw, and the rest of the line still prints. The bot's
+ * credentials print as `[redacted]` wherever they appear in a line. A line prints when its level is at or above the
+ * threshold: `debug`, then `log` (with `info` and `verbose`, tagged `[INFO]` and `[VERBOSE]`), `warn`, `error`.
+ * Warnings and errors print to stderr and the rest to stdout, each in colour only where its stream is a terminal, so no
+ * colour code goes to a file or a log collector, unless `FORCE_COLOR` asks for it.
  *
  * @example
  * ```ts
@@ -174,10 +189,16 @@ export class Logger {
 
   private formatMessage(message: unknown, paint: ChalkInstance, colour: (text: string) => string): string {
     if (typeof message === 'string') return colour(message)
-    // Anything else as console.log inspects it, so no value, a Symbol included, makes the log call throw. Without
-    // non-enumerable properties, which discord.js uses to keep its internals out of logs.
-    // In colour only where the line's stream shows it, or FORCE_COLOR asks for it, as the text around it is
-    return inspect(message, { depth: OBJECT_DEPTH, colors: paint.level > 0 })
+    // Anything else as console.log inspects it. Without non-enumerable properties, which discord.js uses to keep its
+    // internals out of logs. In colour only where the line's stream shows it, or FORCE_COLOR asks for it, as the text
+    // around it is. Inspecting runs the value's own code, such as its [util.inspect.custom], which may throw: the value
+    // then prints as a placeholder, so no argument makes the log call throw or drops the line.
+    try {
+      return inspect(message, { depth: OBJECT_DEPTH, colors: paint.level > 0 })
+    } catch (thrown) {
+      const reason = plainReason(thrown)
+      return reason === undefined ? `${UNINSPECTABLE}]` : `${UNINSPECTABLE}: ${reason}]`
+    }
   }
 
   private logWithContext(logLevel: string, messages: any[], tag = logLevel.toUpperCase()): void {
