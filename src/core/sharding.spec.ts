@@ -673,6 +673,22 @@ describe('sharding', () => {
       expect(login).not.toHaveBeenCalled()
     })
 
+    it('rejects the start before the shutdown its gone manager began inside start() exits', async () => {
+      const loaded = await load()
+      vi.spyOn(loaded.discord.Client.prototype, 'login').mockResolvedValue('token')
+      vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockResolvedValue(undefined)
+      const order: string[] = []
+      exit.mockImplementation(((code?: number) => void order.push(`exit ${code}`)) as never)
+      channel.closed = true
+
+      await loaded.MeoCordFactory.create(appClass(loaded))
+        .start()
+        .catch((error: Error) => order.push(`start rejected: ${error.message}`))
+      await vi.waitFor(() => expect(order).toContain('exit 0'))
+
+      expect(order).toEqual(['start rejected: The bot was stopped before it came online.', 'exit 0'])
+    })
+
     it('ignores IPC messages that are not its own', async () => {
       const loaded = await load()
       await startApp(loaded)

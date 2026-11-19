@@ -156,6 +156,390 @@ describe('a stop while the bot starts', () => {
   })
 })
 
+// The order is the code's, not the runtime's promise timing: each onShutdown takes a timer's turn to close
+describe('a start a stop ends', () => {
+  const exitCode = process.exitCode
+  const log: string[] = []
+
+  beforeEach(() => {
+    log.length = 0
+    vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+  })
+  afterEach(() => {
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.removeAllListeners(signal)
+    process.exitCode = exitCode
+    vi.restoreAllMocks()
+  })
+
+  /** A provided value that says when it is made and when its onShutdown begins and ends, a timer's turn apart. */
+  const pool = (name: string, made: () => Promise<void> = async () => {}, closing = 0) => ({
+    provide: name,
+    useFactory: async () => {
+      await made()
+      log.push(`${name} opened`)
+      return {
+        onShutdown: async () => {
+          log.push(`${name} closing`)
+          await delay(closing)
+          log.push(`${name} closed`)
+        },
+      }
+    },
+  })
+
+  /** Starts an app of `providers`, stops it once `stopWhen` settles, and logs when the start and the stop settle. */
+  async function startThenStop(loaded: Loaded, providers: object[], stopWhen: Promise<void>) {
+    @loaded.MeoCord({ controllers: [], providers, clientOptions: { intents: [] } } as never)
+    class App {}
+    const app = loaded.MeoCordFactory.create(App)
+    const starting = app.start().then(
+      () => log.push('start resolved'),
+      (error: Error) => log.push(`start rejected: ${error.message}`),
+    )
+    await stopWhen
+    const stopping = app.stop().then(() => log.push('stop resolved'))
+    await Promise.all([starting, stopping])
+  }
+
+  it('rejects the start once the onShutdown hooks of what it made have run, without waiting for the client, and the stop resolves after it, when the stop comes during a factory', async () => {
+    const loaded = await load()
+    gateway(loaded)
+    vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockImplementation(async () => {
+      await delay(20)
+      log.push('client destroyed')
+    })
+
+    await startThenStop(loaded, [pool('POOL'), pool('SLOW', () => delay(100))], delay(30))
+
+    expect(log).toEqual([
+      'POOL opened',
+      'SLOW opened',
+      'SLOW closing',
+      'SLOW closed',
+      'POOL closing',
+      'POOL closed',
+      'start rejected: The bot was stopped before it came online.',
+      'client destroyed',
+      'stop resolved',
+    ])
+  })
+
+  it('rejects the start once the onShutdown hooks of what it made have run, and the stop resolves after it, when the stop comes during the login', async () => {
+    const loaded = await load()
+    const reachedLogin = Promise.withResolvers<void>()
+    gateway(loaded, [
+      () => {
+        reachedLogin.resolve()
+        return new Promise<string>(() => {})
+      },
+    ])
+
+    await startThenStop(loaded, [pool('POOL')], reachedLogin.promise)
+
+    expect(log).toEqual(['POOL opened', 'POOL closing', 'POOL closed', 'start rejected: The bot was stopped before it came online.', 'stop resolved'])
+  })
+
+  it('rejects with the factory error once the onShutdown hooks have run, and the stop resolves after it, when the factory the stop waits for fails', async () => {
+    const loaded = await load()
+    gateway(loaded)
+    const failing = async () => {
+      await delay(100)
+      throw new Error('connection refused')
+    }
+
+    await startThenStop(loaded, [pool('POOL'), pool('SLOW', failing)], delay(30))
+
+    expect(log).toEqual([
+      'POOL opened',
+      'POOL closing',
+      'POOL closed',
+      "start rejected: The factory providing 'SLOW' failed: connection refused",
+      'stop resolved',
+    ])
+  })
+
+  it('rejects the start before the stop settles, when the stop fails before the onShutdown hooks run', async () => {
+    const loaded = await load()
+    gateway(loaded)
+    vi.spyOn(loaded.discord.Client.prototype, 'removeAllListeners').mockImplementation(() => {
+      throw new Error('stuck')
+    })
+    @loaded.MeoCord({ controllers: [], providers: [pool('POOL'), pool('SLOW', () => delay(100))], clientOptions: { intents: [] } })
+    class App {}
+    const app = loaded.MeoCordFactory.create(App)
+    const starting = app.start().catch((error: Error) => log.push(`start rejected: ${error.message}`))
+    await delay(30)
+    // Whether the stop then resolves or rejects is the stop's own matter
+    const settled = () => void log.push('stop settled')
+    const stopping = app.stop().then(settled, settled)
+    await Promise.all([starting, stopping])
+
+    expect(log).toEqual(['POOL opened', 'SLOW opened', 'start rejected: The bot was stopped before it came online.', 'stop settled'])
+  })
+
+  it('rejects a failed start once its own shutdown is done, and the stop that joins it resolves after it', async () => {
+    const loaded = await load()
+    gateway(loaded)
+    const failing = async () => {
+      await delay(50)
+      throw new Error('connection refused')
+    }
+
+    // The stop comes while the failed start is still closing POOL
+    await startThenStop(loaded, [pool('POOL', undefined, 100), pool('SLOW', failing)], delay(90))
+
+    expect(log).toEqual([
+      'POOL opened',
+      'POOL closing',
+      'POOL closed',
+      "start rejected: The factory providing 'SLOW' failed: connection refused",
+      'stop resolved',
+    ])
+  })
+  describe('with nothing between the stop and what ends the start', () => {
+    /** Starts an app of `providers`, logging when the start settles, and the app to stop. */
+    function startApp(loaded: Loaded, providers: object[]) {
+      @loaded.MeoCord({ controllers: [], providers, clientOptions: { intents: [] } } as never)
+      class App {}
+      const app = loaded.MeoCordFactory.create(App)
+      const starting = app.start().then(
+        () => log.push('start resolved'),
+        (error: Error) => log.push(`start rejected: ${error.message}`),
+      )
+      return { app, starting }
+    }
+
+    /** A provided value whose factory waits for `made`, which says when the factory is reached. */
+    const held = (made: PromiseWithResolvers<void>, reached: PromiseWithResolvers<void>) => ({
+      provide: 'SLOW',
+      useFactory: async () => {
+        reached.resolve()
+        await made.promise
+        return {}
+      },
+    })
+
+    it.each([
+      ['finishes', 'The bot was stopped before it came online.'],
+      ['fails', "The factory providing 'SLOW' failed: connection refused"],
+    ])('rejects the start before the stop resolves, when the factory the stop waits for %s as the stop begins', async (how, message) => {
+      const loaded = await load()
+      gateway(loaded)
+      const made = Promise.withResolvers<void>()
+      const reached = Promise.withResolvers<void>()
+      const { app, starting } = startApp(loaded, [held(made, reached)])
+      await reached.promise
+
+      const stopping = app.stop().then(() => log.push('stop resolved'))
+      if (how === 'finishes') made.resolve()
+      else made.reject(new Error('connection refused'))
+      await Promise.all([starting, stopping])
+
+      expect(log).toEqual([`start rejected: ${message}`, 'stop resolved'])
+    })
+
+    it('rejects the start before the stop resolves, when the stop ends the login', async () => {
+      const loaded = await load()
+      const reachedLogin = Promise.withResolvers<void>()
+      gateway(loaded, [
+        () => {
+          reachedLogin.resolve()
+          return new Promise<string>(() => {})
+        },
+      ])
+      const { app, starting } = startApp(loaded, [])
+      await reachedLogin.promise
+
+      const stopping = app.stop().then(() => log.push('stop resolved'))
+      await Promise.all([starting, stopping])
+
+      expect(log).toEqual(['start rejected: The bot was stopped before it came online.', 'stop resolved'])
+    })
+
+    it('rejects the start before the stop settles, when the stop fails before the onShutdown hooks run', async () => {
+      const loaded = await load()
+      gateway(loaded)
+      vi.spyOn(loaded.discord.Client.prototype, 'removeAllListeners').mockImplementation(() => {
+        throw new Error('stuck')
+      })
+      const made = Promise.withResolvers<void>()
+      const reached = Promise.withResolvers<void>()
+      const { app, starting } = startApp(loaded, [held(made, reached)])
+      await reached.promise
+
+      const settled = () => void log.push('stop settled')
+      const stopping = app.stop().then(settled, settled)
+      made.resolve()
+      await Promise.all([starting, stopping])
+
+      expect(log).toEqual(['start rejected: The bot was stopped before it came online.', 'stop settled'])
+    })
+
+    it.each([
+      ['the login', 'The bot was stopped before it came online.'],
+      ['a factory that fails', "The factory providing 'SLOW' failed: connection refused"],
+      ['a failed start', "The factory providing 'SLOW' failed: connection refused"],
+    ])('rejects the start %s leaves before the stop settles, when the stop fails as it runs the onShutdown hooks', async (what, message) => {
+      const loaded = await load()
+      const reachedLogin = Promise.withResolvers<void>()
+      gateway(loaded, [
+        () => {
+          reachedLogin.resolve()
+          return what === 'the login' ? new Promise<string>(() => {}) : Promise.resolve('token')
+        },
+      ])
+      // The stop's drain removes the listeners as the hooks begin, and fails there; a login the stop ends first lets
+      // the stop remove them once on its own
+      const removed = vi.spyOn(loaded.discord.Client.prototype, 'removeAllListeners')
+      const removals = what === 'the login' ? 1 : 0
+      removed.mockImplementation(function (this: Client) {
+        if (removed.mock.calls.length > removals) throw new Error('stuck')
+        return this
+      })
+      const settled = () => void log.push('stop settled')
+      let stopping: Promise<unknown> | undefined
+      /** The app an onShutdown hook stops, once it is made. */
+      const target: { app?: { stop(): Promise<void> } } = {}
+      const made = Promise.withResolvers<void>()
+      const reached = Promise.withResolvers<void>()
+      const providers =
+        what === 'the login'
+          ? []
+          : what === 'a factory that fails'
+            ? [held(made, reached)]
+            : [
+                { provide: 'POOL', useFactory: async () => ({ onShutdown: () => void (stopping = target.app!.stop().then(settled, settled)) }) },
+                {
+                  provide: 'SLOW',
+                  inject: ['POOL'],
+                  useFactory: async () => {
+                    throw new Error('connection refused')
+                  },
+                },
+              ]
+      const started = startApp(loaded, providers)
+      target.app = started.app
+      if (what === 'the login') {
+        await reachedLogin.promise
+        stopping = started.app.stop().then(settled, settled)
+      } else if (what === 'a factory that fails') {
+        await reached.promise
+        stopping = started.app.stop().then(settled, settled)
+        made.reject(new Error('connection refused'))
+      }
+      await started.starting
+      await stopping
+
+      expect(log).toEqual([`start rejected: ${message}`, 'stop settled'])
+    })
+
+    /** Settles after `count` microtasks. */
+    const ticks = async (count: number) => {
+      for (let i = 0; i < count; i++) await undefined
+    }
+    /** Microtask counts that span the turns between a failure and the failed start's catch. */
+    const GAP_TICKS = [0, 1, 2, 3, 4, 5, 6, 8]
+
+    it.each(GAP_TICKS)('rejects a start that fails in a factory before a stop that comes %i microtasks after the failure resolves', async count => {
+      const loaded = await load()
+      gateway(loaded)
+      const target: { app?: { stop(): Promise<void> } } = {}
+      let stopping: Promise<unknown> | undefined
+      const started = startApp(loaded, [
+        {
+          provide: 'SLOW',
+          useFactory: async () => {
+            void ticks(count).then(() => (stopping = target.app!.stop().then(() => log.push('stop resolved'))))
+            throw new Error('connection refused')
+          },
+        },
+      ])
+      target.app = started.app
+      await started.starting
+      await stopping
+
+      expect(log).toEqual(["start rejected: The factory providing 'SLOW' failed: connection refused", 'stop resolved'])
+    })
+
+    it.each(GAP_TICKS)('rejects a start whose login fails before a stop that comes %i microtasks after the failure resolves', async count => {
+      const loaded = await load()
+      const target: { app?: { stop(): Promise<void> } } = {}
+      let stopping: Promise<unknown> | undefined
+      gateway(loaded, [
+        () => {
+          void ticks(count).then(() => (stopping = target.app!.stop().then(() => log.push('stop resolved'))))
+          return Promise.reject(new Error('gateway unreachable (stand-in)'))
+        },
+      ])
+      const started = startApp(loaded, [])
+      target.app = started.app
+      await started.starting
+      await stopping
+
+      expect(log).toEqual(['start rejected: gateway unreachable (stand-in)', 'stop resolved'])
+    })
+
+    it("closes a failed start's values before what the app gave them, when a stop its shutdown calls joins it", async () => {
+      const loaded = await load()
+      gateway(loaded)
+      const target: { app?: { stop(): Promise<void> } } = {}
+      let stopping: Promise<unknown> | undefined
+      const started = startApp(loaded, [
+        { provide: 'POOL', useValue: { onShutdown: () => void log.push('POOL closed') } },
+        {
+          provide: 'CACHE',
+          inject: ['POOL'],
+          useFactory: async () => ({
+            // Stops the app as the failed start's shutdown begins, then closes a timer's turn later
+            onShutdown: async () => {
+              stopping = target.app!.stop().then(() => log.push('stop resolved'))
+              await delay(0)
+              log.push('CACHE closed')
+            },
+          }),
+        },
+        {
+          provide: 'SLOW',
+          inject: ['CACHE'],
+          useFactory: async () => {
+            throw new Error('connection refused')
+          },
+        },
+      ])
+      target.app = started.app
+      await started.starting
+      await stopping
+
+      expect(log.filter(line => line.endsWith('closed'))).toEqual(['CACHE closed', 'POOL closed'])
+      expect(log.at(-1)).toBe('stop resolved')
+    })
+
+    it('rejects a failed start before the stop that joins its shutdown resolves', async () => {
+      const loaded = await load()
+      gateway(loaded)
+      let stopping: Promise<unknown> | undefined
+      /** The app an onShutdown hook stops, once it is made. */
+      const target: { app?: { stop(): Promise<void> } } = {}
+      const { app: made, starting } = startApp(loaded, [
+        // Stops the app from inside the failed start's shutdown, so the stop joins it with nothing between
+        { provide: 'POOL', useFactory: async () => ({ onShutdown: () => void (stopping = target.app!.stop().then(() => log.push('stop resolved'))) }) },
+        {
+          provide: 'SLOW',
+          inject: ['POOL'],
+          useFactory: async () => {
+            throw new Error('connection refused')
+          },
+        },
+      ])
+      target.app = made
+      await starting
+      await stopping
+
+      expect(log).toEqual(["start rejected: The factory providing 'SLOW' failed: connection refused", 'stop resolved'])
+    })
+  })
+})
+
 describe('a start that fails', () => {
   const exitCode = process.exitCode
   const log: string[] = []

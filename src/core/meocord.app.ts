@@ -267,6 +267,18 @@ export class MeoCordApp implements MeoCordApplication {
   /** The stop under way or done, which a later stop waits for. */
   private stopped?: Promise<boolean>
 
+  /**
+   * Settles once the stop is done with its `onShutdown` hooks, finished or past `shutdownTimeout`, which a start the stop
+   * ended waits for before it rejects.
+   */
+  private readonly shutdownHooksRan = Promise.withResolvers<void>()
+
+  /**
+   * Whether the stop gave up on the startup in flight, past `shutdownTimeout`. Any other start in flight settles on its
+   * own, so the stop resolves after it; that one rejects once its factory settles.
+   */
+  private gaveUpOnStart = false
+
   /** Ends a `start()` whose login is still in flight when shutdown begins; unset outside the login. */
   private abortLogin?: () => void
 
@@ -321,11 +333,19 @@ export class MeoCordApp implements MeoCordApplication {
     if (this.online) return
     this.starting ??= this.startOnce()
       .catch(async error => {
-        // A failed start stays among the running apps while it shuts down what it made, which a stop meanwhile waits
-        // for, and then while it holds a value it was given open, which a signal closes as stop() does. One that holds
-        // nothing leaves, so a signal later stops only the apps that run; a stopped start stays until its close settles
-        if (!this.closing) {
-          this.undoing = this.undoStart().finally(() => (this.undoing = undefined))
+        if (this.closing) {
+          // A start a stop ended leaves what it made to the stop, and rejects once the stop is done with its onShutdown
+          // hooks, so code that awaits it finds that shut down, whatever the runtime's promise timing
+          await this.shutdownHooksRan.promise
+        } else {
+          // A failed start stays among the running apps while it shuts down what it made, which a stop meanwhile waits
+          // for, and then while it holds a value it was given open, which a signal closes as stop() does. One that
+          // holds nothing leaves, so a signal later stops only the apps that run; a stopped start stays until its close
+          // settles
+          const undone = Promise.withResolvers<void>()
+          // Set before the undo runs a hook, so a stop an onShutdown hook calls joins it
+          this.undoing = undone.promise.finally(() => (this.undoing = undefined))
+          undone.resolve(this.undoStart())
           await this.undoing
           if (!this.closing && !this.holdsOpen()) runningApps.delete(this.close)
         }
@@ -821,6 +841,7 @@ export class MeoCordApp implements MeoCordApplication {
       hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
       warn: message => this.logger.warn(message),
     })
+    this.shutdownHooksRan.resolve()
   }
 
   /**
@@ -834,8 +855,18 @@ export class MeoCordApp implements MeoCordApplication {
     try {
       return await this.shutDownClient()
     } finally {
+      // A close that failed before its hooks ran still lets a start it ended reject
+      this.shutdownHooksRan.resolve()
       // Given up last, so the calls under way and the onShutdown hooks still read the app's theme
       releaseAmbientAppTheme(this.container)
+      // The start in flight settles before the stop resolves. Read here, not as the close begins: a shard whose manager
+      // is gone begins its close inside start(), before `starting` is set
+      if (!this.gaveUpOnStart) {
+        await this.starting?.then(
+          () => undefined,
+          () => undefined,
+        )
+      }
     }
   }
 
@@ -843,9 +874,9 @@ export class MeoCordApp implements MeoCordApplication {
    * Waits for the startup under way to stop making providers and services, at most `shutdownTimeout`; past it, warns
    * with the factory it still awaits, which then makes nothing more.
    *
-   * @returns Whether the startup failed meanwhile, as a provider's factory that rejects does, rather than stopping.
+   * @returns How the startup ended: `stopped`, `failed` as a provider's factory that rejects does, or `outlasted`.
    */
-  private async waitForStartup(preparing: Promise<void>): Promise<boolean> {
+  private async waitForStartup(preparing: Promise<void>): Promise<'stopped' | 'failed' | 'outlasted'> {
     let timer: ReturnType<typeof setTimeout> | undefined
     const outlasted = new Promise<'outlasted'>(resolve => {
       timer = setTimeout(() => resolve('outlasted'), this.shutdownTimeout)
@@ -860,7 +891,7 @@ export class MeoCordApp implements MeoCordApplication {
       const what = this.pendingProvider ? `the factory providing ${this.pendingProvider}` : 'its providers'
       this.logger.warn(`The startup still waits for ${what} after ${this.shutdownTimeout} ms; shutting down without it.`)
     }
-    return outcome === 'failed'
+    return outcome
   }
 
   private async shutDownClient(): Promise<boolean> {
@@ -874,7 +905,9 @@ export class MeoCordApp implements MeoCordApplication {
       timeoutMs = Math.max(0, timeoutMs - (Date.now() - waitedFrom))
     }
     // So nothing is made after the bot has shut down; a factory that fails meanwhile is a failure of the stop too
-    const startupFailed = this.preparing !== undefined && (await this.waitForStartup(this.preparing))
+    const startup = this.preparing && (await this.waitForStartup(this.preparing))
+    if (startup === 'outlasted') this.gaveUpOnStart = true
+    const startupFailed = startup === 'failed'
 
     // Nothing came online, so no onReady ran; the listeners go first, so none of them runs, then what the start made
     // without an onReady to wait for shuts down

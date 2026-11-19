@@ -283,6 +283,52 @@ describe('a stop during startup', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(order).toEqual(['client.destroy'])
   })
+
+  it('rejects a start the stop ended once the stop gives up on an onShutdown hook at shutdownTimeout, before the stop resolves', async () => {
+    @MeoCord({
+      controllers: [],
+      providers: [
+        { provide: 'HANGS', useFactory: async () => ({ onShutdown: () => new Promise(() => {}) }) },
+        { provide: SLOW, inject: ['HANGS'], useFactory: () => factory.promise },
+      ],
+      clientOptions: { allowedMentions: { parse: [] }, intents: [] },
+    })
+    class HangingApp {}
+    vi.useFakeTimers()
+    const app = MeoCordFactory.create(HangingApp)
+    const starting = app.start().then(
+      () => void order.push('start resolved'),
+      (error: Error) => void order.push(`start rejected: ${error.message}`),
+    )
+    await vi.advanceTimersByTimeAsync(0)
+
+    const stopped = app.stop().then(() => void order.push('stop() resolved'))
+    factory.resolve({})
+    await vi.advanceTimersByTimeAsync(1_000)
+    await Promise.all([starting, stopped])
+
+    expect(logged.warn).toEqual(['onShutdown hooks did not finish within 1000 ms; shutting down anyway.'])
+    expect(order).toEqual(['client.destroy', 'start rejected: The bot was stopped before it came online.', 'stop() resolved'])
+  })
+
+  it('resolves the stop before a start whose factory it outlasted, which rejects once that factory settles', async () => {
+    vi.useFakeTimers()
+    const slow = MeoCordFactory.create(SlowApp)
+    const starting = slow.start().then(
+      () => void order.push('start resolved'),
+      (error: Error) => void order.push(`start rejected: ${error.message}`),
+    )
+    await vi.advanceTimersByTimeAsync(0)
+
+    const stopped = slow.stop().then(() => void order.push('stop() resolved'))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await stopped
+    order.push('factory settles')
+    factory.resolve({})
+    await starting
+
+    expect(order).toEqual(['client.destroy', 'stop() resolved', 'factory settles', 'start rejected: The bot was stopped before it came online.'])
+  })
 })
 
 describe('hooksReserveMs', () => {
