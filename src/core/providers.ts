@@ -408,8 +408,8 @@ export function providerFailure(token: unknown, error: unknown): Error {
 export interface StartupControl {
   /** Whether the app is stopping, after which nothing more is made. */
   stopped(): boolean
-  /** The factory now awaited, by its token's name, or `undefined` once none is. */
-  pending(name: string | undefined): void
+  /** The factory now awaited, by its token, or `undefined` once none is. */
+  pending(token: unknown): void
 }
 
 /**
@@ -429,7 +429,7 @@ export async function resolveProviders(
     const provider = providers.get(token)
     if (!provider || !isFactoryProvider(provider)) continue
     if (control?.stopped()) return false
-    control?.pending(tokenName(token))
+    control?.pending(token)
     try {
       await container.getAsync(token as ServiceIdentifier)
     } catch (error) {

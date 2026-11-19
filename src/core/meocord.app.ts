@@ -46,11 +46,12 @@ import {
   ReadyPass,
   runReadyHooks,
   runShutdownSequence,
+  shutDownLateValue,
   SLOW_READY_HOOK_MS,
   slowReadyWarning,
 } from '@src/core/lifecycle-hooks.js'
 import { RunningCalls } from '@src/core/running-calls.js'
-import { type StartupControl } from '@src/core/providers.js'
+import { type StartupControl, tokenName } from '@src/core/providers.js'
 import { type MeoCordApplication } from '@src/interface/index.js'
 import { processState } from '@src/core/process-state.js'
 import { onDevRunnerStop, tellDevRunner } from '@src/util/dev-runner.util.js'
@@ -348,6 +349,8 @@ export class MeoCordApp implements MeoCordApplication {
           // A start a stop ended leaves what it made to the stop, and rejects once the stop is done with its onShutdown
           // hooks, so code that awaits it finds that shut down, whatever the runtime's promise timing
           await this.shutdownHooksRan.promise
+          // A factory the stop stopped waiting for has settled: its value is shut down before the start rejects
+          if (this.gaveUpOnStart) await this.shutDownLate()
         } else {
           // A failed start stays among the running apps while it shuts down what it made, which a stop meanwhile waits
           // for, and then while it holds a value it was given open, which a signal closes as stop() does. One that
@@ -479,15 +482,24 @@ export class MeoCordApp implements MeoCordApplication {
   /** The providers and services being made, which a stop waits for; unset outside it. */
   private preparing?: Promise<void>
 
-  /** The provider factory the startup awaits, by its token's name, for a stop that outlasts it to name. */
-  private pendingProvider?: string
+  /** The provider factory the startup awaits, by its token, for a stop that outlasts it to name and shut down. */
+  private pendingFactory?: unknown
+
+  /** The factory the stop stopped waiting for, whose value is shut down as it arrives. */
+  private outlastedFactory?: unknown
+
+  /** The units the stop's shutdown read, so a value it shut down is not shut down again as it arrives. */
+  private readonly shutDown = new Set<unknown>()
 
   /** Makes the provided values and listed services. */
   private async prepare(): Promise<void> {
     // Every provided value is made before anything that injects it is resolved, and before login
     if (this.startup) {
       try {
-        await this.startup({ stopped: () => this.closing, pending: name => (this.pendingProvider = name) })
+        await this.startup({
+          stopped: () => this.closing,
+          pending: token => (this.pendingFactory = token),
+        })
       } catch (error) {
         releaseAmbientAppTheme(this.container)
         if (process.exitCode === undefined || process.exitCode === 0) {
@@ -850,7 +862,12 @@ export class MeoCordApp implements MeoCordApplication {
   /** Runs the `onShutdown` hooks through the shutdown sequence, within `timeoutMs`: the stop's share of `shutdownTimeout`. */
   private async runShutdownHooks(timeoutMs: number): Promise<void> {
     // Read once the onReady in progress settled
-    await runShutdownSequence(this.container, () => this.shutdownEntries(), {
+    const readEntries = () => {
+      const entries = this.shutdownEntries()
+      for (const { token } of entries) this.shutDown.add(token)
+      return entries
+    }
+    await runShutdownSequence(this.container, readEntries, {
       // No new call starts once the listeners are gone; an error the client emits meanwhile still has its listeners
       drainCalls: () => {
         const emitter: EventEmitter = this.bot
@@ -865,6 +882,23 @@ export class MeoCordApp implements MeoCordApplication {
       warn: message => this.logger.warn(message),
     })
     this.shutdownHooksRan.resolve()
+  }
+
+  /**
+   * Shuts down the value of the factory the stop stopped waiting for, once it arrives, by the rule the stop follows: its
+   * `onShutdown` only, unless the stop shut it down, within `shutdownTimeout`, a failure of it logged.
+   */
+  private async shutDownLate(): Promise<void> {
+    const token = this.outlastedFactory
+    if (token === undefined || this.shutDown.has(token)) return
+    const entry = this.shutdownEntries().find(candidate => candidate.token === token)
+    if (!entry) return
+    this.shutDown.add(token)
+    await shutDownLateValue(this.container, entry, {
+      timeoutMs: this.shutdownTimeout,
+      hookFailed: (name, error) => this.logger.error(`onShutdown failed in ${name}:`, error),
+      warn: message => this.logger.warn(message),
+    })
   }
 
   /**
@@ -911,7 +945,8 @@ export class MeoCordApp implements MeoCordApplication {
     const outcome = await Promise.race([settled, outlasted])
     clearTimeout(timer)
     if (outcome === 'outlasted') {
-      const what = this.pendingProvider ? `the factory providing ${this.pendingProvider}` : 'its providers'
+      this.outlastedFactory = this.pendingFactory
+      const what = this.pendingFactory === undefined ? 'its providers' : `the factory providing ${tokenName(this.pendingFactory)}`
       this.logger.warn(`The startup still waits for ${what} after ${this.shutdownTimeout} ms; shutting down without it.`)
     }
     return outcome
