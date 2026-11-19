@@ -77,6 +77,11 @@ function stoppedBeforeStart(): { error: Error; ended: Promise<void> } {
   return { error, ended: ended.promise }
 }
 
+/** The error a call ends with when the app stopped before it started, which {@link isStoppedBeforeStart} recognises. */
+export function stoppedBeforeStartError(): Error {
+  return stoppedBeforeStart().error
+}
+
 /** Whether `error` ended a call the ready gate held when the app stopped, so it never started. */
 export function isStoppedBeforeStart(error: unknown): boolean {
   return error instanceof Error && stops.has(error)
