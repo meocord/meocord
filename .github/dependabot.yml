@@ -28,11 +28,6 @@ updates:
       # Pinned exactly on purpose — @swc/core is the transform behind emitDecoratorMetadata,
       # and a floating patch there changes what every generated app compiles to.
       - dependency-name: '@swc/core'
-      # package.json holds @rsbuild/core below 2.3: that line installs @rspack/core 2.3.2, whose minifier breaks a
-      # class that names itself in a static field (web-infra-dev/rspack#16586). Dependabot rewrites a range rather
-      # than respect its cap, so the held line is skipped here. Remove this entry together with the cap.
-      - dependency-name: '@rsbuild/core'
-        versions: ['2.3.x']
 
   # The test runners scripts/verify-runners.ts installs, one project each. group-by: dependency-name opens one pull
   # request per dependency, moving it in all four projects at once. The nightly workflow tests the runners' newest
