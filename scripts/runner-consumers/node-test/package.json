@@ -7,7 +7,7 @@
     "discord.js": "^14.28.1",
     "dotenv": "^18.0.10",
     "reflect-metadata": "^0.2.2",
-    "@swc/cli": "^0.8.1",
-    "@swc/core": "^1.16.13"
+    "@swc/cli": "^0.8.2",
+    "@swc/core": "^1.16.22"
   }
 }
