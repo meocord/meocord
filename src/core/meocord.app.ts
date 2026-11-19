@@ -42,6 +42,7 @@ import { themeResolverClass } from '@src/core/theme-resolvers.js'
 import {
   type LifecycleEntry,
   lifecycleEntry,
+  inShutdownHookOf,
   ReadyPass,
   runReadyHooks,
   runShutdownSequence,
@@ -376,6 +377,18 @@ export class MeoCordApp implements MeoCordApplication {
     // A handler or an onReady awaiting stop() would otherwise hold up the shutdown that waits for it
     this.calls.excuseCurrent()
     this.readyPass.excuseCurrent()
+    const stopping = this.stopOnce()
+    // An onShutdown of this app's own shutdown would wait for itself: that shutdown goes on once the hook returns. Its
+    // failures reach the stop awaited from outside; in a failed start's shutdown, the failure has set the exit code
+    if (inShutdownHookOf(this.container)) {
+      stopping.catch(() => undefined)
+      return
+    }
+    await stopping
+  }
+
+  /** Asks the manager to stop every shard, in a shard, then closes the app, setting the exit code if it fails to. */
+  private async stopOnce(): Promise<void> {
     if (this.shard) await tellManager({ meocord: 'stop' })
     // As a signal's shutdown exits 1 for a client that failed to close, a code another failure set aside
     if (!(await this.close()) && !process.exitCode) process.exitCode = 1

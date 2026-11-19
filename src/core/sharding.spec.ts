@@ -527,6 +527,87 @@ describe('sharding', () => {
       expect(client.destroy).toHaveBeenCalledTimes(1)
     })
 
+    // A shard's stop() from its own onShutdown asks the manager and begins the close as any stop does; only the promise
+    // the hook gets resolves at once, as the close it asks for is the one running the hook
+    it('asks the manager to stop every shard when an onShutdown hook stops its app, and the hook goes on at once', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+        events.push(`sent ${(message as { meocord: string }).meocord}`)
+        callback()
+        return true
+      })
+      const target: { app?: { stop(): Promise<void> } } = {}
+      @loaded.Service()
+      class First {
+        async onShutdown() {
+          await new Promise(resolve => setTimeout(resolve, 0))
+          events.push('First closed')
+        }
+      }
+      @loaded.Service()
+      class SelfWait {
+        constructor(readonly first: First) {}
+        async onShutdown() {
+          await target.app!.stop()
+          events.push('SelfWait closed')
+        }
+      }
+      Reflect.defineMetadata('design:paramtypes', [First], SelfWait)
+      const { app, client } = await startApp(loaded, { services: [First, SelfWait] })
+      target.app = app
+      for (const listener of client.listeners('clientReady')) await (listener as (c: unknown) => Promise<void>)(client)
+      vi.mocked(client.destroy).mockImplementation(async () => void events.push('client destroyed'))
+
+      process.emit('message', { meocord: 'shutdown' }, undefined)
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+
+      expect(events).toEqual(['sent stop', 'SelfWait closed', 'First closed', 'client destroyed'])
+    })
+
+    it('asks the manager to stop every shard when an onShutdown hook of a failed start stops its app', async () => {
+      const loaded = await load()
+      const events: string[] = []
+      Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {
+        events.push(`sent ${(message as { meocord: string }).meocord}`)
+        callback()
+        return true
+      })
+      vi.spyOn(loaded.discord.Client.prototype, 'destroy').mockImplementation(async () => void events.push('client destroyed'))
+      exit.mockImplementation(((code?: number) => void events.push(`exit ${code}`)) as never)
+      const target: { app?: { stop(): Promise<void> } } = {}
+      @loaded.MeoCord({
+        controllers: [],
+        providers: [
+          {
+            provide: 'POOL',
+            useFactory: async () => ({
+              onShutdown: async () => {
+                await target.app!.stop()
+                events.push('POOL closed')
+              },
+            }),
+          },
+          { provide: 'SLOW', inject: ['POOL'], useFactory: () => Promise.reject(new Error('connection refused')) },
+        ],
+        clientOptions: { intents: [] },
+      })
+      class App {}
+      const app = loaded.MeoCordFactory.create(App)
+      target.app = app
+      const exitCode = process.exitCode
+
+      try {
+        await expect(app.start()).rejects.toThrow('connection refused')
+        // The manager answers by asking every shard, this one included, to shut down
+        process.emit('message', { meocord: 'shutdown' }, undefined)
+        await vi.waitFor(() => expect(exit).toHaveBeenCalled())
+      } finally {
+        process.exitCode = exitCode
+      }
+      expect(events).toEqual(['sent stop', 'POOL closed', 'client destroyed', 'exit 1'])
+    })
+
     // The manager answers a shard's stop() by asking every shard, this one included, to shut down
     it('finishes its own stop() when the manager asks it to shut down meanwhile', async () => {
       const loaded = await load()

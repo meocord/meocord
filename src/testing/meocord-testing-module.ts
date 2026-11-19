@@ -84,6 +84,7 @@ import {
   callsSettled,
   type LifecycleEntry,
   lifecycleEntry,
+  inShutdownHookOf,
   ReadyPass,
   runReadyHooks,
   runShutdownSequence,
@@ -529,7 +530,9 @@ export class TestingModule {
    * A `close()` while `init({ ready: true })` runs the `onReady` hooks waits for them first, within the same
    * `shutdownTimeout`. An `onReady` still running once only the hooks' share of it is left is named in a warning, and
    * its class is shut down all the same, as everything the module constructed is. One that calls `close()` itself isn't
-   * waited for.
+   * waited for. A `close()` called while an `onShutdown` hook of this close runs, by the hook or by work it started,
+   * awaited or not, gets a promise that resolves at once: the close it asks for is the one running the hook. One called
+   * after the hook has returned waits for the whole close.
    *
    * @returns Once every hook has run. Rejects with the error of a hook that failed, or an
    *   `AggregateError` naming each when several did.
@@ -583,6 +586,9 @@ export class TestingModule {
       releaseAmbientAppTheme(this.container)
       throwFailures('onShutdown', failures)
     })()
+    // An onShutdown of this module's own close would wait for itself: the close goes on once the hook returns, and
+    // reports its failures to the close() awaited from outside
+    if (inShutdownHookOf(this.container)) return
     await this.closing
   }
 
