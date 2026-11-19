@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, type GuildMember } from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/index.js'
+import { HandlerRegistry } from '@src/core/handler-registry.js'
 import { isStoppedBeforeStart } from '@src/core/ready-gate.js'
 import { Command, Controller, Inject, On, Service } from '@src/decorator/index.js'
 import { CommandType } from '@src/enum/index.js'
@@ -174,5 +175,79 @@ describe('calls close() leaves alone', () => {
     await module.init({ ready: true })
 
     expect(events).toEqual(['LATE made'])
+  })
+})
+
+/** A class only a factory value has, so the registry lists its handler only through the late event sources. */
+class Hooks {
+  @On('guildMemberAdd')
+  greet() {
+    events.push('Hooks.greet runs')
+  }
+}
+
+/** The class of a value made only from LATE, which an init() close() ended never makes. */
+class After {
+  @On('guildMemberAdd')
+  greet() {
+    events.push('After.greet runs')
+  }
+}
+
+/** A module whose EARLY value is made before LATE, and whose AFTER value, made from LATE, has an @On of its own. */
+function moduleWithValues() {
+  const late = Promise.withResolvers<void>()
+  const lateStarted = Promise.withResolvers<void>()
+  const module = MeoCordTestingModule.create({
+    controllers: [Greeter],
+    services: [Cache],
+    providers: [
+      { provide: 'EARLY', useFactory: async () => (events.push('EARLY made'), new Hooks()) },
+      { provide: 'LATE', inject: ['EARLY'], useFactory: () => (lateStarted.resolve(), late.promise.then(() => (events.push('LATE made'), {}))) },
+      { provide: 'AFTER', inject: ['LATE'], useFactory: () => (events.push('AFTER made'), new After()) },
+    ],
+    shutdownTimeout: SHUTDOWN_TIMEOUT_MS,
+  } as never).compile()
+  return { module, lateStarted: lateStarted.promise, settleFactory: () => late.resolve() }
+}
+
+describe('an emit after a close() that ended init()', () => {
+  for (const factory of ['outlasts', 'settles inside'] as const) {
+    it(`warns and runs its handlers, with a factory that ${factory} close()'s wait`, async () => {
+      const { module, settleFactory } = moduleWithLateFactory()
+      void module.init()
+      const closing = module.close()
+      if (factory === 'settles inside') settleFactory()
+      await closing
+      const result = module.emit('guildMemberAdd', createMock<GuildMember>())
+      if (factory === 'outlasts') settleFactory()
+
+      const emitted = await result
+
+      expect(emitted).toStrictEqual({ ran: 1 })
+      expect(events.filter(event => CLOSED_WARNING.test(event))).toHaveLength(1)
+      expect(events.indexOf('welcome runs')).toBeGreaterThan(events.findIndex(event => CLOSED_WARNING.test(event)))
+    })
+  }
+
+  // The listing reads only classes and the values init() made; a value it never reached stays unmade
+  it('lists the values init() made, and makes none it did not', async () => {
+    const { module, lateStarted, settleFactory } = moduleWithValues()
+    void module.init()
+    // EARLY is made, and init() waits for LATE when close() ends it
+    await lateStarted
+    await module.close()
+    const result = module.emit('guildMemberAdd', createMock<GuildMember>())
+    settleFactory()
+
+    const { ran } = await result
+
+    expect(ran).toBe(2)
+    expect(events).toContain('Hooks.greet runs')
+    expect(events).toContain('welcome runs')
+    expect(events).not.toContain('AFTER made')
+    const listed = module.get(HandlerRegistry).list({ kind: 'event' }).map(entry => entry.controller)
+    expect(listed).toContain(Hooks)
+    expect(listed).not.toContain(After)
   })
 })

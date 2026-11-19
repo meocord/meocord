@@ -120,6 +120,7 @@ import {
   bindProvider,
   bindsOwnToken,
   isClassProvider,
+  isFactoryProvider,
   providerMap,
   type ProviderMap,
   resolutionOrder,
@@ -534,11 +535,7 @@ export class TestingModule {
       // A close() meanwhile: nothing more is made, and a value it stopped waiting for is shut down once close() is done
       if (this.closedDuringInit) return this.shutDownLate()
       // As the bot reads them, once every provided value is made and before the services that could list them
-      this.sources ??= eventSources(this.container, this.providers, this.lifecycle, this.eventClasses, text =>
-        new Logger('TestingModule').warn(text),
-      )
-      listEventSources(this.container.get(HandlerRegistry), this.sources)
-      prepareLateThemes(this.container, this.sources.map(({ cls }) => cls))
+      this.listSources()
       for (const service of this.services) {
         if (this.closedDuringInit) return
         this.container.get(service)
@@ -689,6 +686,25 @@ export class TestingModule {
   }
 
   private warnedClosed = false
+
+  /**
+   * Lists the instances whose `@On` and `@Once` handlers `emit` runs, for the handler registry and the themes too,
+   * once: at `init()`, or at the first `emit` after a `close()` that ended `init()` first. It reads the classes and only
+   * the factory values already made, so the listing runs no factory; a handler that runs resolves its class as
+   * `dispatch` resolves a controller.
+   */
+  private listSources(): readonly EventSource[] {
+    if (this.sources) return this.sources
+    const units = this.lifecycle.filter(unit => {
+      const provider = this.providers.get(unit.token)
+      return !provider || !isFactoryProvider(provider) || this.constructed.has(unit.token)
+    })
+    const sources = eventSources(this.container, this.providers, units, this.eventClasses, text => new Logger('TestingModule').warn(text))
+    this.sources = sources
+    listEventSources(this.container.get(HandlerRegistry), sources)
+    prepareLateThemes(this.container, sources.map(({ cls }) => cls))
+    return sources
+  }
 
   /**
    * The error a call ends with, without starting, when it was made before `close()` and waited for the `init()` that
@@ -1348,7 +1364,7 @@ export class TestingModule {
     if (dropped) return { ran: 0, error: dropped }
     this.registerEventClients(args)
     const calls: Promise<boolean>[] = []
-    for (const [index, source] of (this.sources ?? []).entries()) {
+    for (const [index, source] of this.listSources().entries()) {
       for (const handler of source.handlers) {
         if (handler.event !== event) continue
         if (handler.once) {
