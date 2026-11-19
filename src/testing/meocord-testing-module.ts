@@ -554,9 +554,11 @@ export class TestingModule {
    *
    * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
    * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
-   * they started, so the store's last writes still reach it. The module stops waiting for the whole sequence after
-   * its `shutdownTimeout`, 10 seconds unless set, and logs that it did. Give a test whose fake store never answers, or
-   * whose `onShutdown` never settles, a short `shutdownTimeout`.
+   * they started, so the store's last writes still reach it. A call that calls `close()` itself, such as a command
+   * handler for an owner-only shutdown, isn't waited for, as the bot's `stop()` doesn't wait for a handler that awaits
+   * it. The module stops waiting for the whole sequence after its `shutdownTimeout`, 10 seconds unless set, and logs
+   * that it did. Give a test whose fake store never answers, or whose `onShutdown` never settles, a short
+   * `shutdownTimeout`.
    *
    * A `close()` while `init()` makes the providers waits for the factory under way at most `shutdownTimeout`; past it,
    * it warns, naming the factory, and shuts down without it. `init()` makes nothing after that factory. A value the
@@ -600,7 +602,8 @@ export class TestingModule {
    * ```
    */
   async close(): Promise<void> {
-    // An onReady awaiting close() would otherwise hold up the close that waits for it
+    // A call or an onReady awaiting close() would otherwise hold up the close that waits for it
+    this.calls.excuseCurrent()
     this.readyPass.excuseCurrent()
     this.closing ??= (async () => {
       // A close during init waits for the factory under way, at most shutdownTimeout, and the sequence for its onReady
