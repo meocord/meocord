@@ -5,7 +5,8 @@
  */
 
 import { spawnSync, type SpawnSyncReturns } from 'child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { AppGeneratorHelper } from '../../src/bin/helper/app-generator.helper.js'
@@ -60,9 +61,6 @@ export const SETUP_BUDGET_MS = 600_000
 /** Runs a step as one group and stops the whole group at its budget, or with its caller; see the script for why. */
 export const boundedStep = path.join(path.dirname(fileURLToPath(import.meta.url)), 'bounded-step.mjs')
 
-/** The descriptor the step's runner reports a stop at the budget on, which the step itself doesn't inherit. */
-const STOP_REPORT_FD = 3
-
 /**
  * Runs a command to completion, throwing with its full output when it fails. When it outlasts `budgetMs`, it and every
  * process it started are stopped, and it throws with its label and how long it ran. On Windows, npm is a `.cmd`
@@ -71,15 +69,24 @@ const STOP_REPORT_FD = 3
 export function mustRun(label: string, command: string, args: string[], cwd: string, env = cleanEnv(), budgetMs = SETUP_BUDGET_MS): void {
   const how = process.platform === 'win32' && command === 'npm' ? 'shell' : 'direct'
   const started = performance.now()
-  const result = spawnSync(process.execPath, [boundedStep, String(budgetMs), how, command, ...args], {
-    cwd,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    env,
-    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
-  })
+  // Where the step's runner says it stopped the step at its budget
+  const reports = mkdtempSync(path.join(tmpdir(), 'meocord-step-'))
+  const report = path.join(reports, 'stopped')
+  let result: SpawnSyncReturns<string>
+  let stopped = false
+  try {
+    result = spawnSync(process.execPath, [boundedStep, report, String(budgetMs), how, command, ...args], {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      env,
+    })
+    stopped = existsSync(report)
+  } finally {
+    rmSync(reports, { recursive: true, force: true })
+  }
   const ran = [command, ...args].join(' ')
-  if (result.output[STOP_REPORT_FD]) {
+  if (stopped) {
     const seconds = ((performance.now() - started) / 1000).toFixed(1)
     throw new Error(`${label} did not finish within its ${budgetMs / 1000}s budget, stopped at ${seconds}s (${ran}, in ${cwd}):\n\n${outputOf(result)}`)
   }
