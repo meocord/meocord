@@ -55,12 +55,8 @@ describe('MeoCordFactory.create()', () => {
     const BUNDLE_ENTRY = Symbol.for('meocord.bundleEntry')
     const logger = () => (MeoCordFactory as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger
 
-    const exitCode = process.exitCode
-
     afterEach(() => {
       Reflect.deleteProperty(globalThis, BUNDLE_ENTRY)
-      // A refusal in a built application sets it, which would fail the test run
-      process.exitCode = exitCode
     })
 
     async function refused() {
@@ -91,12 +87,14 @@ describe('MeoCordFactory.create()', () => {
     })
 
     it('reaches a test or a script as it is: nothing logged, and the exit code left alone', async () => {
+      // A code another failure set, which the refusal must neither clear nor replace
+      process.exitCode = 3
       const { thrown, explained, exitCode } = await refused()
 
       expect(thrown.message).toBe('NoMetadataApp: not decorated with @MeoCord(), so there is no app to create.')
       expect(logger().error).not.toHaveBeenCalled()
       expect(explained).toBe(false)
-      expect(exitCode).toBeUndefined()
+      expect(exitCode).toBe(3)
     })
 
     const sameNamedShops = () => {

@@ -196,7 +196,7 @@ describe('the warning for an interaction left unanswered', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     process.env.NODE_ENV = env
-    process.exitCode = undefined
+    process.exitCode = 0
   })
 
   it('names, once, a handler that left its interaction unanswered or deferred, in development', async () => {

@@ -53,7 +53,6 @@ async function ready(client: Client) {
 }
 
 describe('app.stop()', () => {
-  const exitCode = process.exitCode
   let exit: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
@@ -61,7 +60,6 @@ describe('app.stop()', () => {
     exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
   })
   afterEach(() => {
-    process.exitCode = exitCode
     vi.restoreAllMocks()
     process.removeAllListeners('SIGINT')
     process.removeAllListeners('SIGTERM')
@@ -169,6 +167,8 @@ describe('app.stop()', () => {
     const unhandled: unknown[] = []
     const onUnhandled = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', onUnhandled)
+    // A code another failure set, which the stopped start must neither clear nor replace
+    process.exitCode = 3
     @MeoCord({
       controllers: [Ping],
       providers: [
@@ -189,7 +189,7 @@ describe('app.stop()', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     process.off('unhandledRejection', onUnhandled)
 
-    expect({ made, unhandled, exitCode: process.exitCode }).toEqual({ made: [], unhandled: [], exitCode })
+    expect({ made, unhandled, exitCode: process.exitCode }).toEqual({ made: [], unhandled: [], exitCode: 3 })
   })
 
   // Between the providers being made and the login beginning, there is a turn of the event loop a stop can take

@@ -77,7 +77,6 @@ describe('@MeoCord({ providers })', () => {
   })
   afterEach(() => {
     vi.restoreAllMocks()
-    process.exitCode = undefined
   })
 
   it('injects a value by a string, a symbol or a typed token', async () => {

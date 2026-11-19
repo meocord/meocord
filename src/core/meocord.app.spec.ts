@@ -119,12 +119,6 @@ describe('MeoCordApp', () => {
     // A bot that never came online is a failed start. Swallowing the error would let the entry point
     // report the bot as started and the process exit 0 -- a clean exit to anything supervising it.
     describe('when the login fails', () => {
-      const originalExitCode = process.exitCode
-
-      afterEach(() => {
-        process.exitCode = originalExitCode
-      })
-
       it('rejects, without reporting the bot online', async () => {
         const error = Object.assign(new Error('An invalid token was provided.'), { code: 'TokenInvalid' })
         mockClient.login.mockRejectedValueOnce(error)
@@ -238,10 +232,12 @@ describe('MeoCordApp', () => {
 
       it('leaves the exit code alone when the login succeeds', async () => {
         const app = new MeoCordApp([], createMockContainer() as any, mockClient as any, 'token')
+        // A code another failure set, which only a login that failed before may clear
+        process.exitCode = 3
 
         await app.start()
 
-        expect(process.exitCode).toBe(originalExitCode)
+        expect(process.exitCode).toBe(3)
       })
     })
 

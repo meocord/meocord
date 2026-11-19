@@ -152,7 +152,7 @@ describe('start()', () => {
   // `meocord start --dev` reads the failed login from the first app, and the recovery from whichever app comes online
   it("has a new app that comes online after another app's failed login clear the exit code and tell the dev runner", async () => {
     loginSucceedsOn(2)
-    process.exitCode = undefined
+    process.exitCode = 0
     const told: unknown[] = []
     vi.stubEnv(DEV_RUNNER_ENV, '1')
     Reflect.set(process, 'send', (message: unknown, _handle: unknown, _options: unknown, callback: () => void) => {

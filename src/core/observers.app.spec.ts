@@ -80,7 +80,6 @@ describe('observers at runtime', () => {
   })
   afterEach(() => {
     vi.restoreAllMocks()
-    process.exitCode = undefined
   })
 
   it('are not awaited: a slow observer never holds the call, and the answer goes out first', async () => {
