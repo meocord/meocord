@@ -25,9 +25,6 @@ updates:
       # discord.js is a peer dependency: the range is a compatibility contract with the
       # consumer, not something to bump on a schedule. Widen it deliberately instead.
       - dependency-name: discord.js
-      # Pinned exactly on purpose — @swc/core is the transform behind emitDecoratorMetadata,
-      # and a floating patch there changes what every generated app compiles to.
-      - dependency-name: '@swc/core'
       # vitest 5.1.1's fork pool calls child.channel.unref(), which Bun's IPC channel lacks (oven-sh/bun#33593), so
       # test:bun cannot start a worker. vitest-dev/vitest#12039 makes the call optional: until a vitest release carries
       # it, or Bun ships channel.unref, package.json holds vitest at 5.1.0. Later releases are still proposed.
