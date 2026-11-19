@@ -17,6 +17,18 @@ import {
   packageNameOfRequest,
 } from '@src/build/native-addons.js'
 
+/** Whether `readdirSync` lists a directory in reverse, as a file system may, rather than in this platform's order. */
+const listing = vi.hoisted(() => ({ reversed: false }))
+
+vi.mock('fs', async importOriginal => {
+  const fs = await importOriginal<typeof import('fs')>()
+  const readdirSync = ((...args: Parameters<typeof fs.readdirSync>) => {
+    const entries = fs.readdirSync(...args) as unknown[]
+    return listing.reversed ? [...entries].reverse() : entries
+  }) as typeof fs.readdirSync
+  return { ...fs, default: { ...fs, readdirSync }, readdirSync }
+})
+
 let root: string
 
 /** Writes an installed package: a package.json, optionally with optional dependencies and a binary. */
@@ -545,7 +557,8 @@ describe('dependencyChains', () => {
     expect(installedCopies('natpkg', chains).map(versionOf)).toEqual(['2.0.0', '1.0.0'])
   })
 
-  it('keeps the shortest chain to a package many reach, and walks undeclared top-level packages last', () => {
+  /** Declared, nested, undeclared and scoped packages, whose chains `chainsOfMixedTree` lists. */
+  function installMixedTree() {
     writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { zeta: '1.0.0' }, devDependencies: { alpha: '1.0.0' } }))
     install(path.join(root, 'node_modules', 'alpha'), 'alpha', { dependencies: ['natpkg'] })
     install(path.join(root, 'node_modules', 'zeta'), 'zeta', { dependencies: ['alpha'] })
@@ -553,8 +566,23 @@ describe('dependencyChains', () => {
     install(path.join(root, 'node_modules', 'aaa-undeclared'), 'aaa-undeclared', { dependencies: ['nested'] })
     install(path.join(root, 'node_modules', 'aaa-undeclared', 'node_modules', 'nested'), 'nested')
     install(path.join(root, 'node_modules', '@scope', 'phantom'), '@scope/phantom')
+  }
+  const chainsOfMixedTree = ['alpha', 'zeta', 'alpha>natpkg', '@scope/phantom', 'aaa-undeclared', 'aaa-undeclared>nested']
 
-    expect([...dependencyChains(root).values()]).toEqual(['alpha', 'zeta', 'alpha>natpkg', '@scope/phantom', 'aaa-undeclared', 'aaa-undeclared>nested'])
+  it('keeps the shortest chain to a package many reach, and walks undeclared top-level packages last', () => {
+    installMixedTree()
+
+    expect([...dependencyChains(root).values()]).toEqual(chainsOfMixedTree)
+  })
+
+  it('gives the same chains whatever order the file system lists node_modules in', () => {
+    installMixedTree()
+    listing.reversed = true
+    try {
+      expect([...dependencyChains(root).values()]).toEqual(chainsOfMixedTree)
+    } finally {
+      listing.reversed = false
+    }
   })
 })
 
