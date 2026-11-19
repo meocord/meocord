@@ -369,6 +369,30 @@ export interface EmitResult {
   error?: unknown
 }
 
+/** What a `TestingModule` is made from, in its constructor's order. */
+type TestingModuleParts = [
+  container: Container,
+  controllers?: readonly (new (...args: any[]) => unknown)[],
+  eventClasses?: readonly (new (...args: any[]) => unknown)[],
+  providers?: ProviderMap,
+  order?: readonly unknown[],
+  messageOptions?: MessageCommandOptions,
+  lifecycle?: readonly LifecycleUnit[],
+  constructed?: ReadonlySet<unknown>,
+  appWarnUnanswered?: boolean,
+  services?: readonly (new (...args: any[]) => unknown)[],
+  shutdownTimeout?: number,
+  app?: object,
+  eventFallback?: boolean,
+  botLifecycle?: readonly LifecycleUnit[],
+  hooks?: ContainerHooks,
+]
+
+// MeoCord's own makers, typed with the real parameters the public constructors declare `unknown`; each class sets its
+// maker as it is defined, and no entry exports either
+let makeTestingModule: (...parts: TestingModuleParts) => TestingModule
+let makeTestingModuleBuilder: (options: TestingModuleOptions, wiring?: AppWiring) => TestingModuleBuilder
+
 /**
  * A compiled testing module, which runs handlers as the bot does and resolves the classes it built.
  *
@@ -402,6 +426,31 @@ export interface EmitResult {
  * @see {@link https://meocord.dev/docs/4.2/invoke-and-dispatch | Invoke and dispatch}
  */
 export class TestingModule {
+  static {
+    makeTestingModule = (...parts) => new TestingModule(...parts)
+  }
+
+  /**
+   * A module is made by `MeoCordTestingModule.create(…).compile()` or `MeoCordTestingModule.fromApp(…).compile()`,
+   * not by hand. The parameters are what MeoCord builds it from, so they are typed `unknown`.
+   */
+  constructor(
+    container: unknown,
+    controllers?: unknown,
+    eventClasses?: unknown,
+    providers?: unknown,
+    order?: unknown,
+    messageOptions?: unknown,
+    lifecycle?: unknown,
+    constructed?: unknown,
+    appWarnUnanswered?: unknown,
+    services?: unknown,
+    shutdownTimeout?: unknown,
+    app?: unknown,
+    eventFallback?: unknown,
+    botLifecycle?: unknown,
+    hooks?: unknown,
+  )
   constructor(
     private readonly container: Container,
     private readonly controllers: readonly (new (...args: any[]) => unknown)[] = [],
@@ -1539,6 +1588,15 @@ export class TestingModuleBuilder {
   /** The IDs `overrideCommandId` gives, by command name. */
   private readonly commandIds = new Map<string, string>()
 
+  static {
+    makeTestingModuleBuilder = (options, wiring) => new TestingModuleBuilder(options, wiring)
+  }
+
+  /**
+   * A builder is made by `MeoCordTestingModule.create(…)` or `MeoCordTestingModule.fromApp(…)`, not by hand. The
+   * parameters are what MeoCord builds it from, so they are typed `unknown`.
+   */
+  constructor(options: unknown, wiring?: unknown)
   constructor(
     private readonly options: TestingModuleOptions,
     private readonly wiring?: AppWiring,
@@ -2053,7 +2111,7 @@ export class TestingModuleBuilder {
 
         const warnUnanswered = this.options.app && (Reflect.getMetadata(META.appOptions, this.options.app) as { warnUnanswered?: boolean })?.warnUnanswered
 
-        return new TestingModule(
+        return makeTestingModule(
           container,
           [...(this.options.controllers ?? [])],
           appClasses,
@@ -2118,7 +2176,7 @@ export class MeoCordTestingModule {
    */
   static create(options: TestingModuleOptions): TestingModuleBuilder {
     // A controller listed twice is one controller, as the bot and fromApp take it
-    return new TestingModuleBuilder({ ...options, ...(options.controllers && { controllers: [...new Set(options.controllers)] }) })
+    return makeTestingModuleBuilder({ ...options, ...(options.controllers && { controllers: [...new Set(options.controllers)] }) })
   }
 
   /**
@@ -2197,7 +2255,7 @@ export class MeoCordTestingModule {
       throw new TypeError(`${app?.name ?? String(app)} is not a @MeoCord app: fromApp takes the class @MeoCord decorates.`)
     }
     const controllers = [...new Set([...appOptions.controllers, ...(options.controllers ?? [])])]
-    return new TestingModuleBuilder(
+    return makeTestingModuleBuilder(
       {
         app,
         controllers,

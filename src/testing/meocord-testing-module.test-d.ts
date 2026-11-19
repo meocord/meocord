@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest'
 import { type ButtonInteraction, type Client, type Message, type MessageReaction, type User } from 'discord.js'
-import { type DispatchedCall, type InvocationResult, MeoCordTestingModule, type TestingModule, type TestingModuleBuilder } from '@src/testing/meocord-testing-module.js'
+import { type DispatchedCall, type InvocationResult, MeoCordTestingModule, TestingModule, TestingModuleBuilder } from '@src/testing/meocord-testing-module.js'
 import { ReactionHandlerAction } from '@src/enum/index.js'
 import { createExecutionContext } from '@src/testing/execution-context.js'
 import { createMockClient } from '@src/testing/mock-interaction.js'
@@ -147,5 +147,62 @@ describe('fromApp', () => {
     MeoCordTestingModule.fromApp(App, { services: [Extra] })
     // @ts-expect-error a provider is an object with provide, not a bare value
     MeoCordTestingModule.fromApp(App, { providers: [42] })
+  })
+})
+
+describe('TestingModule and TestingModuleBuilder constructors', () => {
+  it('declare every parameter as unknown, so the declarations name nothing MeoCord keeps internal', () => {
+    expectTypeOf<ConstructorParameters<typeof TestingModule>>().toEqualTypeOf<
+      [unknown, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?, unknown?]
+    >()
+    expectTypeOf<ConstructorParameters<typeof TestingModuleBuilder>>().toEqualTypeOf<[unknown, unknown?]>()
+  })
+
+  it('still take new and type as constructors', () => {
+    expectTypeOf(new TestingModule({})).toEqualTypeOf<TestingModule>()
+    expectTypeOf(new TestingModuleBuilder({})).toEqualTypeOf<TestingModuleBuilder>()
+    expectTypeOf(TestingModule).toExtend<new (...args: never[]) => TestingModule>()
+    expectTypeOf(TestingModuleBuilder).toExtend<new (...args: never[]) => TestingModuleBuilder>()
+  })
+
+  it('can be subclassed, the subclass calling the public API but no internal', () => {
+    class BareModule extends TestingModule {}
+    class Module extends TestingModule {
+      constructor(...args: ConstructorParameters<typeof TestingModule>) {
+        super(...args)
+      }
+
+      async run(interaction: ButtonInteraction) {
+        const notifications = this.get(NotificationService)
+        const dispatched = await this.dispatch(interaction)
+        const invoked = await this.invoke(ProfileController, 'show', interaction, { id: '7' })
+        // @ts-expect-error the container a module is made from stays private
+        void this.container
+        // @ts-expect-error the providers a module is made from stay private
+        void this.providers
+        return { notifications, dispatched, invoked }
+      }
+    }
+    class BareBuilder extends TestingModuleBuilder {}
+    class Builder extends TestingModuleBuilder {
+      constructor(...args: ConstructorParameters<typeof TestingModuleBuilder>) {
+        super(...args)
+      }
+
+      withNotifications() {
+        // @ts-expect-error the options a builder is made from stay private
+        void this.options
+        return this.overrideProvider(NotificationService).useValue({ notify: async () => 'ok' })
+      }
+    }
+    expectTypeOf(new BareModule({})).toExtend<TestingModule>()
+    expectTypeOf(new Module({})).toExtend<TestingModule>()
+    expectTypeOf<Awaited<ReturnType<Module['run']>>>().toEqualTypeOf<{
+      notifications: NotificationService
+      dispatched: DispatchedCall
+      invoked: InvocationResult
+    }>()
+    expectTypeOf(new BareBuilder({})).toExtend<TestingModuleBuilder>()
+    expectTypeOf(new Builder({}).withNotifications()).toEqualTypeOf<TestingModuleBuilder>()
   })
 })
