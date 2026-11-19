@@ -25,6 +25,21 @@ const bun = (globalThis as { Bun?: BunHeap }).Bun
  */
 export const keepsDroppedObjects = bun !== undefined
 
+/** The V8 flag that lets a function body call V8's own `%` functions. */
+const NATIVES_SYNTAX_FLAG = '--allow-natives-syntax'
+
+/**
+ * Makes a function that waits for V8's background compile jobs and installs their code. A job holds the closure it
+ * compiles until then, and with it whatever that closure's context reaches, so a collection while one runs can find a
+ * dropped object alive. Node only: JavaScriptCore has no `%` functions to parse.
+ */
+function backgroundCompilesFinisher(): () => void {
+  v8.setFlagsFromString(NATIVES_SYNTAX_FLAG)
+  return new Function('%WaitForBackgroundOptimization(); %FinalizeOptimization()') as () => void
+}
+
+const finishBackgroundCompiles = bun ? undefined : backgroundCompilesFinisher()
+
 /** Entries per node in a Bun heap snapshot's flat `nodes` array, and where the class-name index sits in each. */
 const SNAPSHOT_NODE_FIELDS = 4
 const SNAPSHOT_CLASS_NAME_FIELD = 2
@@ -56,11 +71,14 @@ export function countGrowth(type: Countable): () => number {
   return () => liveCount(type) - before
 }
 
-/** Lets the job end, collects garbage, then lets finalization callbacks run. */
+/** Lets the job end, lets V8's background compiles finish, collects garbage, then lets finalization callbacks run. */
 export async function collectGarbage(): Promise<void> {
   const turn = () => new Promise(resolve => setTimeout(resolve, 0))
   await turn()
   if (bun) bun.gc(true)
-  else v8.queryObjects(Object, { format: 'count' })
+  else {
+    finishBackgroundCompiles?.()
+    v8.queryObjects(Object, { format: 'count' })
+  }
   for (let i = 0; i < 3; i++) await turn()
 }
