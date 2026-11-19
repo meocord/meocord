@@ -354,6 +354,33 @@ export async function runShutdownSequence(
   }
 }
 
+/**
+ * Settles with `settled` once `work` has, whichever way, or with `outlasted` after `ms`, whichever comes first.
+ */
+export async function within(work: Promise<unknown>, ms: number): Promise<'settled' | 'outlasted'> {
+  const bound = after(ms, 'outlasted' as const)
+  try {
+    return await Promise.race([work.then(settledOutcome, settledOutcome), bound.promise])
+  } finally {
+    bound.cancel()
+  }
+}
+
+const settledOutcome = () => 'settled' as const
+
+/**
+ * Shuts down a value whose factory settled after a shutdown stopped waiting for it, as that shutdown would have: its
+ * own `onShutdown`, through the shutdown sequence, within `timeoutMs` of its arrival. What it injects was shut down
+ * already, so the hook may find that closed.
+ */
+export async function shutDownLateValue(
+  container: Container,
+  entry: LifecycleEntry,
+  report: Pick<ShutdownSequence, 'timeoutMs' | 'hookFailed' | 'warn'>,
+): Promise<void> {
+  await runShutdownSequence(container, () => [entry], { ...report, drainCalls: () => Promise.resolve() })
+}
+
 /** Settles once every promise in `calls` has, those added while waiting included. */
 export async function callsSettled(calls: ReadonlySet<Promise<unknown>>): Promise<void> {
   while (calls.size > 0) await Promise.allSettled([...calls])

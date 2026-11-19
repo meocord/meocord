@@ -109,7 +109,8 @@ export interface MeoCordApplication {
    *   invalid token; it also rejects when `stop()` ends the start, once the stop is done with the `onShutdown` hooks of
    *   what the start made: they have finished, or `shutdownTimeout` has ended the wait for them. A start still awaiting
    *   a provider's factory when the stop stops waiting for it rejects once that factory settles, after the stop has
-   *   resolved. In either mode, a start of an app already stopped rejects.
+   *   resolved and the value the factory returned is shut down. In either mode, a start of an app already stopped
+   *   rejects.
    */
   start(): Promise<void>
 
@@ -123,8 +124,10 @@ export interface MeoCordApplication {
    * A stop while the bot starts ends that start: it waits for the providers being made, at most `shutdownTimeout`, and
    * nothing more is made after it. What the start made is shut down by the rule {@link OnShutdown} gives; for a bot in
    * one process, the start then rejects, and the stop resolves after it. A start whose provider's factory outlasts that
-   * wait is the exception: the stop resolves without it, and the start rejects once the factory settles. A call after
-   * the first waits for it, and a stopped app does not start again.
+   * wait is the exception: the stop resolves without it, and the start rejects once the factory settles. The value that
+   * factory returns is shut down as it arrives, by its own `onShutdown`, within `shutdownTimeout`, unless it has an
+   * `onReady` hook: that never ran, so by the same rule it gets no `onShutdown`. What it injects is shut down already, so
+   * its `onShutdown` may find that closed. A call after the first waits for it, and a stopped app does not start again.
    *
    * @returns A promise that resolves once the bot is stopped. It never rejects: a failure to close is logged, and sets
    *   `process.exitCode` to 1 unless another code is already set.

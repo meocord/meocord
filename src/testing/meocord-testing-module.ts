@@ -87,8 +87,10 @@ import {
   ReadyPass,
   runReadyHooks,
   runShutdownSequence,
+  shutDownLateValue,
   SLOW_READY_HOOK_MS,
   slowReadyWarning,
+  within,
 } from '@src/core/lifecycle-hooks.js'
 import { closeReadyGate } from '@src/core/ready-gate.js'
 import { applyDispatchedReaction, createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
@@ -431,6 +433,14 @@ export class TestingModule {
   }
 
   private resolving?: Promise<void>
+  /** Whether `close()` was called while `init()` resolved the providers, after which `init()` makes nothing more. */
+  private closedDuringInit = false
+  /** The factory `init()` awaits, by its token, for a `close()` that stops waiting for it to name and shut down. */
+  private pendingFactory?: unknown
+  /** The factory `close()` stopped waiting for, whose value is shut down once it arrives and `close()` is done. */
+  private outlastedFactory?: unknown
+  /** The units `close()` shut down, so a value it shut down is not shut down again as it arrives. */
+  private readonly shutDown = new Set<unknown>()
   /** The instances whose `@On` and `@Once` handlers `emit` runs, read at `init()`. */
   private sources?: readonly EventSource[]
   private readying?: Promise<void>
@@ -453,6 +463,11 @@ export class TestingModule {
    * Ready, the module's app theme is also the one `useTheme()` reads outside any call, as a bot's is once
    * it is online, unless another module or app in the process was ready first: that one keeps it, and
    * this module's theme reaches its own calls only. {@link close} gives it up; nothing takes it over.
+   *
+   * A {@link close} while it makes the providers ends it, as a stop ends a bot's start: the factory under way finishes,
+   * and nothing after it is made, no other factory and no listed service, and no `onReady` hook runs. It resolves all
+   * the same. A factory that settles after `close()` stopped waiting for it has its value shut down once it arrives
+   * and `close()` is done, and `init()` resolves after that.
    *
    * @param options - `ready` to also run the `onReady` hooks, with the client and `primary` to pass them.
    * @returns The module, once every factory has made its value and every `onReady` hook asked for has
@@ -486,19 +501,27 @@ export class TestingModule {
    * ```
    */
   async init(options: TestingModuleInitOptions = {}): Promise<this> {
-    this.resolving ??= resolveProviders(this.container, this.providers, this.order).then(() => {
+    this.resolving ??= resolveProviders(this.container, this.providers, this.order, {
+      stopped: () => this.closedDuringInit,
+      pending: token => (this.pendingFactory = token),
+    }).then(async () => {
+      // A close() meanwhile: nothing more is made, and a value it stopped waiting for is shut down once close() is done
+      if (this.closedDuringInit) return this.shutDownLate()
       // As the bot reads them, once every provided value is made and before the services that could list them
       this.sources ??= eventSources(this.container, this.providers, this.lifecycle, this.eventClasses, text =>
         new Logger('TestingModule').warn(text),
       )
       listEventSources(this.container.get(HandlerRegistry), this.sources)
       prepareLateThemes(this.container, this.sources.map(({ cls }) => cls))
-      for (const service of this.services) this.container.get(service)
+      for (const service of this.services) {
+        if (this.closedDuringInit) return
+        this.container.get(service)
+      }
       // After the providers and listed services, as the bot makes it, so a provided value it injects is made
-      if (this.app) bindAppPresenter(this.container, this.app)
+      if (this.app && !this.closedDuringInit) bindAppPresenter(this.container, this.app)
     })
     await this.resolving
-    if (options.ready) {
+    if (options.ready && !this.closedDuringInit) {
       const { client = createMockClient(), primary = true } = options.ready === true ? {} : options.ready
       this.readying ??= this.readyPass.run(() => this.runReady(client, primary))
       await this.readying
@@ -518,13 +541,20 @@ export class TestingModule {
    *
    * A stopped bot runs nothing more. Once `close()` is called, a module still runs what `dispatch`, `invoke` and `emit`
    * are given, against services shut down, or shutting down, and warns once that it is closed, so a `close()` in the
-   * wrong place shows.
+   * wrong place shows. A `get()` afterwards returns what was shut down silently; one that makes an instance only then
+   * warns, naming it, since nothing shuts that down.
    *
    * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
    * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
    * they started, so the store's last writes still reach it. The module stops waiting for the whole sequence after
    * its `shutdownTimeout`, 10 seconds unless set, and logs that it did. Give a test whose fake store never answers, or
    * whose `onShutdown` never settles, a short `shutdownTimeout`.
+   *
+   * A `close()` while `init()` makes the providers waits for the factory under way at most `shutdownTimeout`; past it,
+   * it warns, naming the factory, and shuts down without it. `init()` makes nothing after that factory. A value the
+   * factory returns later is shut down once it arrives and `close()` is done, by its own `onShutdown`, within
+   * `shutdownTimeout`, and a failure of it is logged. What it injects is shut down already, so its `onShutdown` may find
+   * that closed.
    *
    * A `close()` while `init({ ready: true })` runs the `onReady` hooks waits for them first, within the same
    * `shutdownTimeout`. An `onReady` still running once only the hooks' share of it is left is named in a warning, and
@@ -563,14 +593,24 @@ export class TestingModule {
     // An onReady awaiting close() would otherwise hold up the close that waits for it
     this.readyPass.excuseCurrent()
     this.closing ??= (async () => {
-      // A close during init waits for the providers it started, and the sequence for its onReady hooks, so it shuts
-      // down whatever they constructed
-      await this.resolving?.catch(() => undefined)
+      // A close during init waits for the factory under way, at most shutdownTimeout, and the sequence for its onReady
+      // hooks, so it shuts down whatever they constructed; init makes nothing after that factory
+      if (this.resolving) {
+        this.closedDuringInit = true
+        if ((await within(this.resolving, this.shutdownTimeout)) === 'outlasted') {
+          this.outlastedFactory = this.pendingFactory
+          const what = this.pendingFactory === undefined ? 'its providers' : `the factory providing ${tokenName(this.pendingFactory)}`
+          new Logger('TestingModule').warn(`init() still waits for ${what} after ${this.shutdownTimeout} ms; close() shuts down without it.`)
+        }
+      }
       const entries = (): LifecycleEntry[] =>
         this.hookOrder(unit => this.constructed.has(unit.token) && this.hasHook(unit, 'onShutdown'))
           .filter(unit => this.constructed.has(unit.token))
           // Already made, so this returns the instance; a provided value may be anything, null included
-          .map(unit => lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}))
+          .map(unit => {
+            this.shutDown.add(unit.token)
+            return lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {})
+          })
       const failures: { name: string; error: unknown }[] = []
       await runShutdownSequence(this.container, entries, {
         drainCalls: () => callsSettled(this.calls),
@@ -584,6 +624,27 @@ export class TestingModule {
       throwFailures('onShutdown', failures)
     })()
     await this.closing
+  }
+
+  /**
+   * Shuts down the value of the factory `close()` stopped waiting for, once it arrives and `close()` is done, unless
+   * `close()` shut it down: its `onShutdown` only, within `shutdownTimeout`, a failure of it logged.
+   */
+  private async shutDownLate(): Promise<void> {
+    const token = this.outlastedFactory
+    if (token === undefined || !this.constructed.has(token) || this.shutDown.has(token)) return
+    const unit = this.lifecycle.find(candidate => candidate.token === token)
+    if (!unit) return
+    this.shutDown.add(token)
+    // After close()'s own hooks, as the bot shuts it down after the stop's; its failure is close()'s to report
+    await this.closing?.catch(() => undefined)
+    const logger = new Logger('TestingModule')
+    const instance = (this.container.get(token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {}
+    await shutDownLateValue(this.container, lifecycleEntry(unit, instance), {
+      timeoutMs: this.shutdownTimeout,
+      hookFailed: (name, error) => logger.error(`onShutdown failed in ${name}:`, error),
+      warn: message => logger.warn(message),
+    })
   }
 
   private warnedClosed = false
@@ -667,19 +728,37 @@ export class TestingModule {
   /**
    * Resolves an instance from the module, as the bot would inject it.
    *
+   * After {@link close}, it returns what `close()` shut down without a word, so a test can read how it ended. One it
+   * makes only then, such as a listed service an `init()` that `close()` ended did not make, is shut down by nothing;
+   * when it has an `onShutdown`, the first `get()` that makes it warns, naming it.
+   *
    * @param token - A controller, a provided token, or another bound class.
    * @returns The instance, with its dependencies and overrides applied.
-   * @throws When the instance depends on a factory that returns a promise and `init()` has not run.
+   * @throws When the instance depends on a factory that returns a promise and `init()` has not made its value: it has
+   *   not run, or a `close()` ended it first.
    */
   get<T>(token: ProviderToken<T> | ServiceIdentifier<T>): T {
+    // Not made when close() ran, so a value made now is one nothing shuts down
+    const madeAfterClose = this.closing !== undefined && !this.constructed.has(token)
     try {
-      return this.container.get<T>(token as ServiceIdentifier<T>)
+      const instance = this.container.get<T>(token as ServiceIdentifier<T>)
+      const unit = madeAfterClose && this.constructed.has(token) ? this.lifecycle.find(each => each.token === token) : undefined
+      // Only a value with an onShutdown misses one
+      if (unit && this.hasHook(unit, 'onShutdown')) {
+        const name = tokenName(token)
+        new Logger('TestingModule').warn(
+          `get(${name}) after close() makes ${name} now; the testing module is closed, so nothing shuts it down. ` +
+            'Close it after the last call, in afterEach.',
+        )
+      }
+      return instance
     } catch (error) {
       if (!/asynchronous/i.test(String((error as Error)?.message))) throw error
-      throw new Error(
-        `${tokenName(token)} depends on a factory that returns a promise: await module.init() before get().`,
-        { cause: error },
-      )
+      // An init() that close() ended was awaited all the same, and stopped before it made this value
+      const why = this.closedDuringInit
+        ? 'close() ended init() before it made that factory\'s value.'
+        : 'await module.init() before get().'
+      throw new Error(`${tokenName(token)} depends on a factory that returns a promise: ${why}`, { cause: error })
     }
   }
 
