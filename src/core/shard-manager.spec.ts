@@ -549,18 +549,20 @@ describe('ShardManager', () => {
         expect(shards[0].process).toBeNull()
         expect(process.exitCode).toBe(after)
       }
-      process.exitCode = undefined
+      process.exitCode = 0
     })
 
     it('leaves the exit code alone when every shard stops from stop()', async () => {
       const { manager, shards } = setup({ shards: 1 })
       await manager.start()
+      // A code another failure set, which a clean stop must neither clear nor replace
+      process.exitCode = 3
 
       const stopped = manager.stop()
       shards[0].die(0)
       await stopped
 
-      expect(process.exitCode).toBeUndefined()
+      expect(process.exitCode).toBe(3)
     })
 
     it('asks every shard to shut down, waits for them, and exits 0', async () => {
@@ -700,7 +702,6 @@ describe('ShardManager', () => {
     afterEach(() => {
       delete process.env[DEV_RUNNER_ENV]
       process.send = originalSend
-      process.exitCode = undefined
       send.mockClear()
       order.length = 0
       vi.useRealTimers()

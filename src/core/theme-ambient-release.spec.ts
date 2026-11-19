@@ -26,7 +26,7 @@ describe('the theme read outside calls', () => {
     @MeoCord({ controllers: [Plain], clientOptions: { intents: [] }, theme: { colors: { primary: '#0F0F02' } } })
     class Refused {}
     await MeoCordFactory.create(Refused).start().catch(() => {})
-    process.exitCode = undefined
+    process.exitCode = 0
 
     login.mockResolvedValue('token')
     @MeoCord({ controllers: [Plain], clientOptions: { intents: [] }, theme: { colors: { primary: '#0F0F03' } } })
@@ -47,7 +47,7 @@ describe('the theme read outside calls', () => {
     class Retried {}
     const app = MeoCordFactory.create(Retried)
     await app.start().catch(() => {})
-    process.exitCode = undefined
+    process.exitCode = 0
 
     await app.start()
     const online = useTheme().colors.primary

@@ -30,9 +30,7 @@ async function load() {
 
 // A start that fails drops the singletons it made, so a retry makes new instances: their direct calls keep the guards
 describe("a guarded override's direct call after a failed start", () => {
-  const exitCode = process.exitCode
   afterEach(() => {
-    process.exitCode = exitCode
     process.removeAllListeners('SIGINT')
     process.removeAllListeners('SIGTERM')
     vi.restoreAllMocks()

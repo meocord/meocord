@@ -96,11 +96,11 @@ ${body}
     ])('says it could not format, and keeps a success code, for %s', async (_case, body, reason) => {
       eslint(body)
       const exitCode = process.exitCode
-      process.exitCode = undefined
+      process.exitCode = 0
 
       await formatGeneratedFiles(['/src/a.ts'])
 
-      expect(process.exitCode).toBeUndefined()
+      expect(process.exitCode).toBe(0)
       expect(mockLoggerWarn).toHaveBeenCalledWith(`Could not format the generated files: ${reason}`)
       process.exitCode = exitCode
     })

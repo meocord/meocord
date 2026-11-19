@@ -81,7 +81,7 @@ describe('the exit code of a stop', () => {
   beforeAll(() => load(), WARM_UP_TIMEOUT_MS)
 
   beforeEach(() => {
-    process.exitCode = undefined
+    process.exitCode = 0
     exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     signalListeners = process.listeners('SIGINT') as NodeJS.SignalsListener[]
   })

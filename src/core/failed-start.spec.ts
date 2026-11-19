@@ -86,7 +86,6 @@ const SHARED_TIMEOUT_MS = 1_000
 const shutdownLines = () => logged.log.flat().filter(line => line === 'Shutting down bot...' || line === 'Bot has shut down')
 
 describe('a start that failed', () => {
-  const exitCode = process.exitCode
   let exit: ReturnType<typeof vi.spyOn>
   let signalListeners: NodeJS.SignalsListener[]
 
@@ -105,7 +104,6 @@ describe('a start that failed', () => {
         if (!signalListeners.includes(listener as NodeJS.SignalsListener)) process.off(signal, listener)
       }
     }
-    process.exitCode = exitCode
     delete config.shutdownTimeout
     vi.restoreAllMocks()
   })

@@ -24,7 +24,7 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    setupFiles: ['reflect-metadata', './vitest.setup.ts'],
+    setupFiles: ['reflect-metadata', './vitest.setup.ts', './vitest.exit-code.setup.ts'],
     clearMocks: true,
     restoreMocks: false,
     include: ['src/{common,core,decorator,testing}/**/*.spec.ts'],

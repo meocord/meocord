@@ -44,7 +44,6 @@ async function startApp(build: Awaited<ReturnType<typeof loadBuild>>) {
 }
 
 describe('a process that loads both builds', () => {
-  const exitCode = process.exitCode
   let exit: ReturnType<typeof vi.spyOn>
   let destroyed: Client[]
   let signalListeners: NodeJS.SignalsListener[]
@@ -67,7 +66,6 @@ describe('a process that loads both builds', () => {
         if (!signalListeners.includes(listener as NodeJS.SignalsListener)) process.off(signal, listener)
       }
     }
-    process.exitCode = exitCode
     vi.restoreAllMocks()
   })
 
@@ -114,7 +112,7 @@ describe('a process that loads both builds', () => {
   it("clears the exit code one build's failed login set once an app of the other logs in", async () => {
     const discord = await import('discord.js')
     vi.mocked(discord.Client.prototype.login).mockRejectedValueOnce(new Error('gateway unreachable (stand-in)'))
-    process.exitCode = undefined
+    process.exitCode = 0
     const first = await loadBuild()
     const second = await loadBuild()
 
