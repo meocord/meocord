@@ -6,4 +6,4 @@ A `route()` can now read a customId back: `route('ticket/{id:int}/close').match(
 
 The new `RouteMatch<T>` type, from `meocord/common`, is what `match` returns: the params a customId route gives its handler. It can type a handler's params too, such as `{ id }: RouteMatch<typeof closeTicket.pattern>`.
 
-`Route` gains the required `match` method. A bot that only calls `route()` needs nothing. Code that writes a `Route` object by hand no longer compiles until it adds `match(customId: string)`, returning the params or `undefined`; make the object with `route()` instead. See the [upgrade guide](https://meocord.dev/docs/4.3/migrating).
+`Route` gains the required `match` method. A bot that only calls `route()` needs nothing. Code that writes a `Route` object by hand no longer compiles until it adds `match(customId: string)`, returning the params or `undefined`; make the object with `route()` instead. See the [upgrade guide](https://meocord.dev/docs/4.3/migrating#route-match).
