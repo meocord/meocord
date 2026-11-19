@@ -314,18 +314,20 @@ export function staleDocsLinks(line: string, fix: boolean, root = repoRoot): str
   const stale: string[] = []
   for (const file of sourceFiles(path.join(root, 'src'))) {
     const text = readFileSync(file, 'utf8')
+    // With forward slashes on every system, so a refusal reads the same on any runner
+    const name = path.relative(root, file).split(path.sep).join('/')
     if (fix) {
       const fixed = text.replace(DOCS_LINK, (link, linked: string) => (linked === line ? link : `https://meocord.dev/docs/${line}/`))
       if (fixed !== text) {
         writeFileSync(file, fixed)
-        stale.push(path.relative(root, file))
+        stale.push(name)
       }
       continue
     }
     text.split('\n').forEach((content, index) => {
       for (const [, linked] of content.matchAll(DOCS_LINK)) {
         if (linked !== line) {
-          stale.push(`${path.relative(root, file)}:${index + 1}: links docs/${linked}; link docs/${line}, the package's line, or run with --fix.`)
+          stale.push(`${name}:${index + 1}: links docs/${linked}; link docs/${line}, the package's line, or run with --fix.`)
         }
       }
     })
