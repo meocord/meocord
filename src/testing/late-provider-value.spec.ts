@@ -208,13 +208,11 @@ describe('close() during init()', () => {
     expect(events.slice(5)).toEqual(['2050 Quiet made'])
   })
 
-  it('says close() ended init() when get() reads a factory value init() did not make', async () => {
+  it('names the factory init() did not reach when get() reads its value', async () => {
     const { module, inited } = await closeWhileMaking(slowValue(IN_TIME_MS, () => note('SLOW closed')))
     await inited
 
-    expect(() => module.get('AFTER')).toThrow(
-      "'AFTER' depends on a factory that returns a promise: close() ended init() before it made that factory's value.",
-    )
+    expect(() => module.get('AFTER')).toThrow("close() ended init() before it made 'AFTER'; its factory doesn't run after close().")
   })
 
   it('reads a value it shut down without a warning', async () => {

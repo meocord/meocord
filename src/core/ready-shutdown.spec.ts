@@ -292,6 +292,9 @@ describe("a testing module's close() during init({ ready: true })", () => {
       'Pool.onReady done',
       'Later.onReady',
     ])
-    expect(logged.warn).toEqual([])
+    // The pass goes on after the close, and makes Later only then, so nothing shuts it down
+    expect(logged.warn).toEqual([
+      'Later is made after close(); the testing module is closed, so nothing shuts it down. Close it after the last call, in afterEach.',
+    ])
   })
 })

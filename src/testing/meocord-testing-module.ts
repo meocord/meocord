@@ -128,7 +128,7 @@ import {
   tokenDependencies,
   tokenName,
 } from '@src/core/providers.js'
-import { type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
+import { type FactoryProvider, type Provider, type ProviderToken } from '@src/interface/provider.interface.js'
 import { getHandlerRoutes, getReactionHandlers } from '@src/decorator/controller.decorator.js'
 import { type EventHandlerMetadata, getEventHandlers } from '@src/decorator/event.decorator.js'
 import { strictMocks } from '@src/testing/strict-mocks.js'
@@ -423,7 +423,14 @@ export class TestingModule {
     private readonly eventFallback?: boolean,
     /** The units in the bot's hook order, which strict mocks run them in. */
     private readonly botLifecycle?: readonly LifecycleUnit[],
-  ) {}
+    /** The container's factory and activation hooks, which call into this module. */
+    hooks?: ContainerHooks,
+  ) {
+    if (hooks) {
+      hooks.beforeFactory = token => this.refuseLateFactory(token)
+      hooks.made = (token, instance) => this.warnIfMadeAfterClose(token, instance)
+    }
+  }
 
   /**
    * The units in the order a hook runs in: the bot's under strict mocks. Without them, the module's own, with one
@@ -568,8 +575,9 @@ export class TestingModule {
    * are given, against services shut down, or shutting down, and warns once that it is closed, so a `close()` in the
    * wrong place shows. A call made before `close()` that still waits for the `init()` it ended doesn't start, as a
    * call the bot drops when it stops: it resolves with `ran` `false`, or `0` for `emit`, and the error "The bot stopped
-   * before this call started.". A `get()` afterwards returns what was shut down silently; one that makes an instance
-   * only then warns, naming it, since nothing shuts that down.
+   * before this call started.". A `get()` afterwards returns what was shut down silently. A call or a `get()` that
+   * makes an instance with an `onShutdown` only then warns, naming it, since nothing shuts that down; one that needs a
+   * factory's value the `init()` that `close()` ended didn't reach fails, naming it, and the factory doesn't run.
    *
    * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
    * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
@@ -636,14 +644,17 @@ export class TestingModule {
           new Logger('TestingModule').warn(`init() still waits for ${what} after ${this.shutdownTimeout} ms; close() shuts down without it.`)
         }
       }
-      const entries = (): LifecycleEntry[] =>
-        this.hookOrder(unit => this.constructed.has(unit.token) && this.hasHook(unit, 'onShutdown'))
+      const entries = (): LifecycleEntry[] => {
+        // From here a unit made is in no list close() shuts down
+        this.shutdownListed = true
+        return this.hookOrder(unit => this.constructed.has(unit.token) && this.hasHook(unit, 'onShutdown'))
           .filter(unit => this.constructed.has(unit.token))
           // Already made, so this returns the instance; a provided value may be anything, null included
           .map(unit => {
             this.shutDown.add(unit.token)
             return lifecycleEntry(unit, (this.container.get(unit.token as ServiceIdentifier) as LifecycleEntry['instance'] | null) ?? {})
           })
+      }
       const failures: { name: string; error: unknown }[] = []
       await runShutdownSequence(this.container, entries, {
         drainCalls: () => this.calls.settled(),
@@ -686,6 +697,32 @@ export class TestingModule {
   }
 
   private warnedClosed = false
+
+  /**
+   * Throws instead of running the factory providing `token` once a `close()` has ended `init()`: `init()` didn't reach
+   * it, and its value would be made from values `close()` already shut down, with nothing to shut it down.
+   */
+  private refuseLateFactory(token: unknown): void {
+    if (!this.endedInit) return
+    throw new Error(`close() ended init() before it made ${tokenName(token)}; its factory doesn't run after close().`)
+  }
+
+  /** The token a `get()` under way resolves, whose warning names the `get()`. */
+  private getting?: unknown
+  /** Whether `close()` has listed the units it shuts down; one made after that is shut down by nothing. */
+  private shutdownListed = false
+
+  /** Warns that a unit with an `onShutdown`, made after `close()` listed what it shuts down, is shut down by nothing. */
+  private warnIfMadeAfterClose(token: unknown, instance: unknown): void {
+    // The value close() stopped waiting for is shut down as it arrives
+    if (!this.shutdownListed || token === this.outlastedFactory) return
+    if (typeof (instance as { onShutdown?: unknown } | null)?.onShutdown !== 'function') return
+    const name = tokenName(token)
+    new Logger('TestingModule').warn(
+      (token === this.getting ? `get(${name}) after close() makes ${name} now` : `${name} is made after close()`) +
+        '; the testing module is closed, so nothing shuts it down. Close it after the last call, in afterEach.',
+    )
+  }
 
   /**
    * Lists the instances whose `@On` and `@Once` handlers `emit` runs, for the handler registry and the themes too,
@@ -796,28 +833,18 @@ export class TestingModule {
    *
    * After {@link close}, it returns what `close()` shut down without a word, so a test can read how it ended. One it
    * makes only then, such as a listed service an `init()` that `close()` ended did not make, is shut down by nothing;
-   * when it has an `onShutdown`, the first `get()` that makes it warns, naming it.
+   * when it has an `onShutdown`, the `get()` that makes it warns, naming it, as `dispatch`, `invoke` and `emit` do.
    *
    * @param token - A controller, a provided token, or another bound class.
    * @returns The instance, with its dependencies and overrides applied.
    * @throws When the instance depends on a factory that returns a promise and `init()` has not made its value: it has
-   *   not run, or a `close()` ended it first.
+   *   not run, or a `close()` ended it first. And when it depends on a factory `init()` didn't reach before a `close()`
+   *   ended it: that factory doesn't run after `close()`.
    */
   get<T>(token: ProviderToken<T> | ServiceIdentifier<T>): T {
-    // Not made when close() ran, so a value made now is one nothing shuts down
-    const madeAfterClose = this.closing !== undefined && !this.constructed.has(token)
+    this.getting = token
     try {
-      const instance = this.container.get<T>(token as ServiceIdentifier<T>)
-      const unit = madeAfterClose && this.constructed.has(token) ? this.lifecycle.find(each => each.token === token) : undefined
-      // Only a value with an onShutdown misses one
-      if (unit && this.hasHook(unit, 'onShutdown')) {
-        const name = tokenName(token)
-        new Logger('TestingModule').warn(
-          `get(${name}) after close() makes ${name} now; the testing module is closed, so nothing shuts it down. ` +
-            'Close it after the last call, in afterEach.',
-        )
-      }
-      return instance
+      return this.container.get<T>(token as ServiceIdentifier<T>)
     } catch (error) {
       if (!/asynchronous/i.test(String((error as Error)?.message))) throw error
       // An init() that close() ended was awaited all the same, and stopped before it made this value
@@ -825,6 +852,8 @@ export class TestingModule {
         ? 'close() ended init() before it made that factory\'s value.'
         : 'await module.init() before get().'
       throw new Error(`${tokenName(token)} depends on a factory that returns a promise: ${why}`, { cause: error })
+    } finally {
+      this.getting = undefined
     }
   }
 
@@ -1914,11 +1943,13 @@ export class TestingModuleBuilder {
           bindsOwnToken(container, CooldownStore, store)
         }
 
+        // Filled in by the module once it is made; nothing resolves before then
+        const hooks: ContainerHooks = { beforeFactory: () => undefined, made: () => undefined }
         // Before the controllers, so a class token that is provided is not also bound as itself. A test's provider of a
         // token the module bound above, as HandlerRegistry or ShardContext, stands in for that binding
         for (const provider of providers.values()) {
           if (container.isBound(provider.provide as ServiceIdentifier)) container.unbind(provider.provide as ServiceIdentifier)
-          bindProvider(container, provider, bindClass)
+          bindProvider(container, isFactoryProvider(provider) ? guardedFactory(provider, hooks) : provider, bindClass)
         }
 
         for (const ctrl of this.options.controllers ?? []) bindClass(ctrl)
@@ -1970,6 +2001,8 @@ export class TestingModuleBuilder {
         const constructed = new Set<unknown>()
         for (const { token } of lifecycle) {
           container.onActivation(token as ServiceIdentifier, (_context, instance) => {
+            // A factory's binding activates on each resolve; only the first one makes it
+            if (!constructed.has(token)) hooks.made(token, instance)
             constructed.add(token)
             return instance
           })
@@ -2005,6 +2038,7 @@ export class TestingModuleBuilder {
           this.options.app,
           this.options.eventFallback,
           botLifecycle,
+          hooks,
         )
       })
     } catch (error) {
@@ -2150,3 +2184,23 @@ export class MeoCordTestingModule {
 // Built by MeoCordTestingModule, never injected; registered here, as meocord/core does not load the testing module
 adviseInPlaceOfInjecting(TestingModuleBuilder, 'build it with MeoCordTestingModule.create(…) or MeoCordTestingModule.fromApp(…)')
 adviseInPlaceOfInjecting(TestingModule, 'make it with MeoCordTestingModule.create(…).compile()')
+
+/** What the container's hooks ask of the testing module they are set up for, filled in once it is made. */
+interface ContainerHooks {
+  /** Throws when the factory providing `token` must not run now. */
+  beforeFactory(token: unknown): void
+  /** Notes that the container made the lifecycle unit `token`, as `instance`. */
+  made(token: unknown, instance: unknown): void
+}
+
+/** `provider` with its factory asking `hooks` first, so the module can refuse it before it runs. */
+function guardedFactory(provider: FactoryProvider, hooks: ContainerHooks): FactoryProvider {
+  const { provide, useFactory } = provider
+  return {
+    ...provider,
+    useFactory: (...args: unknown[]) => {
+      hooks.beforeFactory(provide)
+      return useFactory(...args)
+    },
+  }
+}
