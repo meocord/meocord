@@ -39,13 +39,25 @@ const { updates } = parse(readFileSync(path.join(repoRoot, '.github', 'dependabo
   updates: Update[]
 }
 
-/** The ranges a project's package.json asks for, its dependencies and devDependencies together */
-function ranges(directory: string): Ranges {
-  const manifest = JSON.parse(readFileSync(path.join(repoRoot, directory, 'package.json'), 'utf8')) as {
-    dependencies?: Ranges
-    devDependencies?: Ranges
-  }
-  return { ...manifest.dependencies, ...manifest.devDependencies }
+/** The package.json fields that declare a dependency, each a name-to-range map */
+const DECLARING_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const
+
+type Manifest = Partial<Record<(typeof DECLARING_FIELDS)[number], Ranges>>
+
+/** A project's package.json */
+function manifest(directory: string): Manifest {
+  return JSON.parse(readFileSync(path.join(repoRoot, directory, 'package.json'), 'utf8')) as Manifest
+}
+
+/** The ranges a manifest installs, its dependencies and devDependencies together */
+function ranges(project: Manifest): Ranges {
+  return { ...project.dependencies, ...project.devDependencies }
+}
+
+/** Each dependency an ignore rule names that no manifest declares, whether the rule skips some versions or all */
+function undeclared(manifests: Manifest[], rules: IgnoreRule[]): string[] {
+  const declared = new Set(manifests.flatMap(project => DECLARING_FIELDS.flatMap(field => Object.keys(project[field] ?? {}))))
+  return rules.map(rule => rule['dependency-name']).filter(name => !declared.has(name))
 }
 
 /** The update entry with this ecosystem that updates this directory */
@@ -159,6 +171,13 @@ describe('ignore rules against the manifests they update', () => {
       'tool: skips 5.1.1 but asks for ^5.0.5',
     ])
   })
+
+  it('refuses an ignore, of some versions or all, for a dependency no manifest declares', () => {
+    const rules: IgnoreRule[] = [{ 'dependency-name': 'gone' }, { 'dependency-name': 'tool', versions: ['5.1.1'] }]
+    expect(undeclared([{ devDependencies: { tool: '5.1.0' } }], rules)).toEqual(['gone'])
+    expect(undeclared([{ dependencies: {} }, { devDependencies: { tool: '5.1.0' } }], rules)).toEqual(['gone'])
+    expect(undeclared([{ peerDependencies: { gone: '*' } }, { optionalDependencies: { tool: '*' } }], rules)).toEqual([])
+  })
 })
 
 describe('.github/dependabot.yml', () => {
@@ -166,11 +185,18 @@ describe('.github/dependabot.yml', () => {
   // that cannot pass, and a skipped version nothing holds would hide releases from the weekly update. A hold is a
   // range capped below a release line, or an exact pin kept below the releases after it that break.
   it('skips exactly what package.json holds back', () => {
-    expect(mismatches([ranges('.')], entry(PACKAGE_ENTRY).ignore ?? [])).toEqual([])
+    expect(mismatches([ranges(manifest('.'))], entry(PACKAGE_ENTRY).ignore ?? [])).toEqual([])
   })
 
   it('skips exactly what the runner projects hold back', () => {
     const runners = entry(RUNNER_ENTRY)
-    expect(mismatches(runners.directories!.map(ranges), runners.ignore ?? [])).toEqual([])
+    expect(mismatches(runners.directories!.map(directory => ranges(manifest(directory))), runners.ignore ?? [])).toEqual([])
+  })
+
+  // A rule for a dependency nothing declares any more skips nothing, and would hide the dependency if it came back
+  it('ignores only dependencies its manifests declare', () => {
+    expect(undeclared([manifest('.')], entry(PACKAGE_ENTRY).ignore ?? [])).toEqual([])
+    const runners = entry(RUNNER_ENTRY)
+    expect(undeclared(runners.directories!.map(manifest), runners.ignore ?? [])).toEqual([])
   })
 })
