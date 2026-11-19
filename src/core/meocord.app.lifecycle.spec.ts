@@ -844,13 +844,23 @@ describe('lifecycle hooks', () => {
     })
 
     describe('while shutdown is running', () => {
+      let release: (() => void) | undefined
+
+      // The shutdown each test leaves running ends while process.exit is still stubbed: left to its timeout, it would call
+      // the real one during a later test
+      afterEach(async () => {
+        release?.()
+        release = undefined
+        await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+      })
+
       async function hangingApp() {
         const loaded = await load()
 
         @loaded.Service()
         class Hanging implements OnShutdown {
           onShutdown() {
-            return new Promise<void>(() => {})
+            return new Promise<void>(resolve => (release = resolve))
           }
         }
 
