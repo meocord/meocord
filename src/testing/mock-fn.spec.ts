@@ -2,7 +2,7 @@ import { vi } from 'vitest'
 import { clearAllMocks, createMockFn, isMockFunction, type MockedFunction, resetAllMocks } from '@src/testing/mock-fn.js'
 import { createMockClient, createMockInteraction } from '@src/testing/mock-interaction.js'
 import { ButtonInteraction } from 'discord.js'
-import { collectGarbage, countGrowth, PILE_UP_BOUND } from '@src/spec-collection.js'
+import { collectGarbage, countGrowth, keepsDroppedObjects, PILE_UP_BOUND } from '@src/spec-collection.js'
 
 /**
  * These assert parity with jest and vitest, which is the whole promise of this
@@ -431,7 +431,8 @@ describe('clearAllMocks and resetAllMocks', () => {
     expect([fn(1), fn(1)]).toEqual([2, 2])
   })
 
-  it('lets every mock a test let go of be collected once the test yields to the event loop', async () => {
+  // Node only: JavaScriptCore scans the native stack conservatively, so a dropped object can stay reachable
+  it.skipIf(keepsDroppedObjects)('lets every mock a test let go of be collected once the test yields to the event loop', async () => {
     const dropped = Array.from({ length: MOCKS_CHECKED_EACH }, () => new WeakRef(useAndDrop()))
     await collectGarbage()
 
@@ -442,11 +443,12 @@ describe('clearAllMocks and resetAllMocks', () => {
     const grown = countGrowth(Held)
     for (let i = 0; i < MOCKS_IN_ONE_STRETCH; i++) useAndDrop()
 
-    // queryObjects collects garbage first; a mock tracked through a WeakRef would stay until the job ends
+    // countGrowth collects garbage first; a mock tracked through a WeakRef would stay until the job ends
     expect(grown()).toBeLessThanOrEqual(PILE_UP_BOUND)
   })
 
-  it('lets every answered mock interaction be collected once the test yields to the event loop', async () => {
+  // Node only: JavaScriptCore scans the native stack conservatively, so a dropped object can stay reachable
+  it.skipIf(keepsDroppedObjects)('lets every answered mock interaction be collected once the test yields to the event loop', async () => {
     const dropped: WeakRef<object>[] = []
     for (let i = 0; i < INTERACTIONS_CHECKED_EACH; i++) dropped.push(new WeakRef(await answerAndDrop(i)))
     await collectGarbage()

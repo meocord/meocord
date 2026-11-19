@@ -12,7 +12,7 @@ import {
 } from '@src/testing/mock-fn.js'
 import { createMock, createMockInteraction } from '@src/testing/mock-interaction.js'
 import { createDiscordError, getResponse } from '@src/testing/response.js'
-import { collectGarbage, countGrowth, PILE_UP_BOUND } from '@src/spec-collection.js'
+import { collectGarbage, countGrowth, keepsDroppedObjects, PILE_UP_BOUND } from '@src/spec-collection.js'
 
 // As jest's and bun's mocks do, a reset drops the implementation the mock was created with
 const droppingOnReset = (impl?: (...args: any[]) => any) => {
@@ -108,7 +108,8 @@ describe('useMockFn', () => {
     expect(() => useMockFn(vi.fn)).toThrow(/before any mock is made.*setup file/)
   })
 
-  it('refuses a function after a mock made before it was collected', async () => {
+  // Node only: JavaScriptCore scans the native stack conservatively, so a dropped object can stay reachable
+  it.skipIf(keepsDroppedObjects)('refuses a function after a mock made before it was collected', async () => {
     const dropped = makeAndDrop()
     await collectGarbage()
 
@@ -116,7 +117,8 @@ describe('useMockFn', () => {
     expect(attempt(vi.fn)).toBe('refuses')
   })
 
-  it("refuses another function after the runner's mocks were made and collected", async () => {
+  // Node only: JavaScriptCore scans the native stack conservatively, so a dropped object can stay reachable
+  it.skipIf(keepsDroppedObjects)("refuses another function after the runner's mocks were made and collected", async () => {
     useMockFn(plainRunnerFn)
     const dropped = makeAndDrop()
     await collectGarbage()
