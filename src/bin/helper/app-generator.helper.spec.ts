@@ -17,6 +17,9 @@ const VARIABLES: AppTemplateVariables = {
   runtimePrefix: runtimePrefixFor('bun'),
 }
 
+/** A version written out in full, with no range operator: `5.1.0` */
+const EXACT_VERSION = /^\d+\.\d+\.\d+$/
+
 describe('AppGeneratorHelper', () => {
   const helper = new AppGeneratorHelper()
   const targets: string[] = []
@@ -58,6 +61,21 @@ describe('AppGeneratorHelper', () => {
   // pinned version comes from the running CLI rather than from the template.
   it('pins the framework to the version doing the generating', () => {
     expect(JSON.parse(read('package.json')).dependencies.meocord).toBe('^3.1.0')
+  })
+
+  // vitest refuses a coverage provider of another version, so the app's test:coverage would fail
+  it('asks for vitest and its coverage provider at one version', () => {
+    const { devDependencies } = JSON.parse(read('package.json')) as { devDependencies: Record<string, string> }
+
+    expect(devDependencies['@vitest/coverage-istanbul']).toBe(devDependencies.vitest)
+  })
+
+  // A Bun-only app can't start vitest's fork pool until a vitest release carries vitest-dev/vitest#12039 or Bun ships
+  // channel.unref; lifting the hold means changing this case on purpose
+  it('pins vitest to an exact version', () => {
+    const { devDependencies } = JSON.parse(read('package.json')) as { devDependencies: Record<string, string> }
+
+    expect(devDependencies.vitest).toMatch(EXACT_VERSION)
   })
 
   it('carries the readable name into the config and the readme', () => {
