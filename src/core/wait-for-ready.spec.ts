@@ -1620,11 +1620,13 @@ describe('a call without waitForReady', () => {
     expect(events).toEqual(['price runs'])
   })
 
-  // The microtask at which a call reaches its guard and its handler, counted from dispatch(): the option adds none
+  // The microtask at which a call reaches its guard and its handler, counted from dispatch(), with the option and
+  // without it in the same run: the option adds none. The counts themselves are the engine's (V8 takes two more for
+  // a finally than JavaScriptCore), so only the two are compared.
   it.each([
-    ['plain', false, { guard: 1, handler: 6 }],
-    ['deferred', true, { guard: 15, handler: 26 }],
-  ] as const)('reaches its guard and handler on the same microtasks as without the option, %s', async (_label, deferred, expected) => {
+    ['plain', false],
+    ['deferred', true],
+  ] as const)('reaches its guard and handler on the same microtasks as without the option, %s', async (_label, deferred) => {
     let at = 0
     const seen: { guard?: number; handler?: number } = {}
     @Guard()
@@ -1645,21 +1647,30 @@ describe('a call without waitForReady', () => {
     for (const decorate of decorators) decorate(Ping.prototype, 'ping', Object.getOwnPropertyDescriptor(Ping.prototype, 'ping')!)
     Controller()(Ping)
     @MeoCord({ controllers: [Ping], clientOptions: { intents: [] } })
-    class App {}
-    const module = await MeoCordTestingModule.create({ app: App, controllers: [Ping] }).compile().init({ ready: true })
-    const once = async () => {
-      at = 0
-      delete seen.guard
-      delete seen.handler
-      const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
-      const handled = module.dispatch(Object.assign(interaction, { options: createChatInputOptions({}) }))
-      for (; at < 100; at++) await Promise.resolve()
-      await handled
-      return { ...seen }
+    class Without {}
+    @MeoCord({ controllers: [Ping], clientOptions: { intents: [] }, waitForReady: true })
+    class With {}
+    const counted = async (app: typeof Without) => {
+      const module = await MeoCordTestingModule.create({ app, controllers: [Ping] }).compile().init({ ready: true })
+      const once = async () => {
+        at = 0
+        delete seen.guard
+        delete seen.handler
+        const interaction = createMockInteraction(ChatInputCommandInteraction, { commandName: 'ping' })
+        const handled = module.dispatch(Object.assign(interaction, { options: createChatInputOptions({}) }))
+        for (; at < 100; at++) await Promise.resolve()
+        await handled
+        return { ...seen }
+      }
+      await once()
+      return once()
     }
-    await once()
+    const without = await counted(Without)
 
-    expect(await once()).toEqual(expected)
+    // The counter reaches both, the handler after the guard
+    expect(without.guard).toBeGreaterThanOrEqual(1)
+    expect(without.handler).toBeGreaterThan(without.guard!)
+    expect(await counted(With)).toEqual(without)
   })
 })
 
