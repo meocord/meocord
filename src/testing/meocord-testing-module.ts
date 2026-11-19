@@ -99,7 +99,7 @@ import {
   slowReadyWarning,
   within,
 } from '@src/core/lifecycle-hooks.js'
-import { closeReadyGate } from '@src/core/ready-gate.js'
+import { closeReadyGate, stoppedBeforeStartError } from '@src/core/ready-gate.js'
 import { RunningCalls } from '@src/core/running-calls.js'
 import { applyDispatchedReaction, createMockClient, isMockClient, noteReactionDispatch } from '@src/testing/mock-interaction.js'
 
@@ -283,7 +283,11 @@ export interface InvocationResult {
   /** Whether the handler ran; `false` when a guard denied the call or an interceptor skipped it. */
   ran: boolean
 
-  /** The error a filter handled, when the call failed and a `@UseFilter` or global filter caught it. */
+  /**
+   * The error a filter handled, when the call failed and a `@UseFilter` or global filter caught it. For a call made
+   * while `init()` ran, which a `close()` then ended, it is an error with the message "The bot stopped before this call
+   * started.", and `ran` is `false`: the call doesn't start, as one the bot drops when it stops.
+   */
   error?: unknown
 }
 
@@ -331,10 +335,14 @@ export interface DispatchedCall extends InvocationResult {
   ran: boolean
   /**
    * The first error a handler's call ended with, or an error the built-in fallback answered as the
-   * user's own outcome, such as a `CommandNotFoundError`.
+   * user's own outcome, such as a `CommandNotFoundError`. For a call made while `init()` ran, which a `close()` then
+   * ended, it is an error with the message "The bot stopped before this call started.": the call doesn't start.
    */
   error?: unknown
-  /** Every handler dispatch reached, in the order it ran them; empty when none takes the input. */
+  /**
+   * Every handler dispatch reached, in the order it ran them; empty when none takes the input, and for a call that
+   * didn't start, which is never routed.
+   */
   handlers: DispatchedHandler[]
 }
 
@@ -351,6 +359,12 @@ export interface EmitResult {
    * the bot does.
    */
   ran: number
+  /**
+   * Set only for an event that didn't start: one emitted while `init()` ran, which a `close()` then ended. It is an
+   * error with the message "The bot stopped before this call started.", and `ran` is `0`. Every other event resolves
+   * with `ran` alone.
+   */
+  error?: unknown
 }
 
 /**
@@ -443,6 +457,10 @@ export class TestingModule {
   private resolving?: Promise<void>
   /** Whether `close()` was called while `init()` resolved the providers, after which `init()` makes nothing more. */
   private closedDuringInit = false
+  /** Whether `init()` has resolved the providers, or failed to. */
+  private resolved = false
+  /** Whether `close()` ended an `init()` still resolving the providers; a call made before then doesn't start. */
+  private endedInit = false
   /** The factory `init()` awaits, by its token, for a `close()` that stops waiting for it to name and shut down. */
   private pendingFactory?: unknown
   /** The factory `close()` stopped waiting for, whose value is shut down once it arrives and `close()` is done. */
@@ -527,6 +545,8 @@ export class TestingModule {
       }
       // After the providers and listed services, as the bot makes it, so a provided value it injects is made
       if (this.app && !this.closedDuringInit) bindAppPresenter(this.container, this.app)
+    }).finally(() => {
+      this.resolved = true
     })
     await this.resolving
     if (options.ready && !this.closedDuringInit) {
@@ -549,8 +569,10 @@ export class TestingModule {
    *
    * A stopped bot runs nothing more. Once `close()` is called, a module still runs what `dispatch`, `invoke` and `emit`
    * are given, against services shut down, or shutting down, and warns once that it is closed, so a `close()` in the
-   * wrong place shows. A `get()` afterwards returns what was shut down silently; one that makes an instance only then
-   * warns, naming it, since nothing shuts that down.
+   * wrong place shows. A call made before `close()` that still waits for the `init()` it ended doesn't start, as a
+   * call the bot drops when it stops: it resolves with `ran` `false`, or `0` for `emit`, and the error "The bot stopped
+   * before this call started.". A `get()` afterwards returns what was shut down silently; one that makes an instance
+   * only then warns, naming it, since nothing shuts that down.
    *
    * The cooldown store and what it injects shut down last, in the same sequence as the bot's. When any of them has an
    * `onShutdown`, the calls `invoke`, `dispatch` and `emit` have under way finish first, then the store operations
@@ -610,6 +632,7 @@ export class TestingModule {
       // hooks, so it shuts down whatever they constructed; init makes nothing after that factory
       if (this.resolving) {
         this.closedDuringInit = true
+        this.endedInit = !this.resolved
         if ((await within(this.resolving, this.shutdownTimeout)) === 'outlasted') {
           this.outlastedFactory = this.pendingFactory
           const what = this.pendingFactory === undefined ? 'its providers' : `the factory providing ${tokenName(this.pendingFactory)}`
@@ -666,6 +689,14 @@ export class TestingModule {
   }
 
   private warnedClosed = false
+
+  /**
+   * The error a call ends with, without starting, when it was made before `close()` and waited for the `init()` that
+   * `close()` ended; a call made after `close()` runs, warned.
+   */
+  private droppedByClose(madeAfterClose: boolean): Error | undefined {
+    return !madeAfterClose && this.endedInit ? stoppedBeforeStartError() : undefined
+  }
 
   /** Warns once, after `close()`, that a call runs against services already shut down. */
   private warnIfClosed(): void {
@@ -880,11 +911,14 @@ export class TestingModule {
     methodName: M,
     ...args: HandlerArgs<C, M>
   ): Promise<InvocationResult> {
+    const madeAfterClose = this.closing !== undefined
     this.warnIfClosed()
     await this.init()
     if (!this.controllers.includes(controller)) {
       throw new Error(`${controller.name} is not a controller of this testing module. Add it to \`controllers\`.`)
     }
+    const dropped = this.droppedByClose(madeAfterClose)
+    if (dropped) return { ran: false, error: dropped }
 
     const instance = this.container.get(controller) as Record<string, (...args: unknown[]) => unknown>
     if (typeof instance[methodName] !== 'function') throw new Error(`${controller.name}.${methodName} is not a method.`)
@@ -1212,8 +1246,11 @@ export class TestingModule {
     input: Interaction | Message | MessageReaction | PartialMessageReaction,
     options?: { user: User | PartialUser; action?: ReactionHandlerAction },
   ): Promise<DispatchedCall> {
+    const madeAfterClose = this.closing !== undefined
     this.warnIfClosed()
     await this.init()
+    const dropped = this.droppedByClose(madeAfterClose)
+    if (dropped) return { ran: false, error: dropped, handlers: [] }
     this.registerClient(input)
     const dispatcher = this.dispatcherOf()
     const handlers: DispatchedHandler[] = []
@@ -1304,8 +1341,11 @@ export class TestingModule {
    * ```
    */
   async emit<E extends keyof ClientEvents>(event: E, ...args: ClientEvents[E]): Promise<EmitResult> {
+    const madeAfterClose = this.closing !== undefined
     this.warnIfClosed()
     await this.init()
+    const dropped = this.droppedByClose(madeAfterClose)
+    if (dropped) return { ran: 0, error: dropped }
     this.registerEventClients(args)
     const calls: Promise<boolean>[] = []
     for (const [index, source] of (this.sources ?? []).entries()) {
