@@ -111,6 +111,26 @@ module, so jest loads `meocord/testing` without Node's VM modules. They are list
 `check:dist-cjs` fails when `dist/cjs` requires a package that is ES module only, so a new one goes in that list,
 and `check:dual-build` loads both builds in one Node process and fails when they disagree.
 
+**The suite on two runtimes.** A bot may run on Node or on Bun, so the specs run on both: `bun run test` on Node,
+`bun run test:bun` on Bun's runtime (`bunx --bun vitest run`), each in its own CI job reported under the `Test` check.
+Node must be installed for the Bun run too, since the specs that start a built bot spawn each runtime. A spec may not
+assume one engine's behaviour where the two differ:
+
+- `process.exitCode = undefined` leaves the old code on Bun. A setup file sets it to 0 before and after every test;
+  a spec that checks a code is left alone sets another one first and expects it unchanged.
+- Under `bunx --bun`, the `node` first on `PATH` is Bun. Spawn a runtime through `bun` and `node` from
+  `src/spec-runtimes.ts`, never by the bare name.
+- Bun's `path.resolve` ignores a replaced `process.cwd`. A spec that needs another working directory changes to it
+  with `process.chdir` and changes back in a `finally`.
+- Bun's `spawnSync` gives back no pipe beyond stderr. A child reports anything more through a file.
+- On JavaScriptCore, deleting `Error.prepareStackTrace` turns off every hook set later in the process. Set it to
+  `undefined` instead.
+- The microtask counts of one path differ between the engines (V8 takes two more for a `finally`). Compare counts
+  taken in the same run, never against a fixed number.
+- `queryObjects` exists only on V8. Count live objects with `countGrowth` from `src/spec-collection.ts`.
+- `bunfig.toml` turns off Bun's install of a missing package on import, so a spec cannot pass on a package that is not
+  in the lockfile.
+
 **The Windows job** installs the packed tarball globally and drives the CLI through the `.cmd` shim npm
 writes from the interpreter line. Nothing on a POSIX runner exercises that path, and generation is what
 walks and writes file paths, so it is also run where the separator and case rules differ.
