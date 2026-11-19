@@ -28,6 +28,13 @@ updates:
       # Pinned exactly on purpose — @swc/core is the transform behind emitDecoratorMetadata,
       # and a floating patch there changes what every generated app compiles to.
       - dependency-name: '@swc/core'
+      # vitest 5.1.1's fork pool calls child.channel.unref(), which Bun's IPC channel lacks (oven-sh/bun#33593), so
+      # test:bun cannot start a worker. vitest-dev/vitest#12039 makes the call optional: until a vitest release carries
+      # it, or Bun ships channel.unref, package.json holds vitest at 5.1.0. Later releases are still proposed.
+      - dependency-name: vitest
+        versions: ['5.1.1']
+      - dependency-name: '@vitest/coverage-istanbul'
+        versions: ['5.1.1']
 
   # The test runners scripts/verify-runners.ts installs, one project each. group-by: dependency-name opens one pull
   # request per dependency, moving it in all four projects at once. The nightly workflow tests the runners' newest
@@ -49,6 +56,10 @@ updates:
       runners:
         patterns: ['*']
         group-by: dependency-name
+    ignore:
+      # The vitest project pins vitest at 5.1.0, as package.json does: 5.1.1's fork pool cannot start under Bun.
+      - dependency-name: vitest
+        versions: ['5.1.1']
 
   - package-ecosystem: github-actions
     directory: /

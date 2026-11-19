@@ -639,7 +639,10 @@ describe('sharding', () => {
       const loaded = await load()
       await startApp(loaded)
 
-      process.emit('disconnect')
+      // Only the app's own listeners: the test runner's worker ends itself on a disconnect from its parent
+      for (const listener of process.listeners('disconnect')) {
+        if (!ipc.disconnect.includes(listener as () => void)) (listener as () => void)()
+      }
 
       await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
     })
