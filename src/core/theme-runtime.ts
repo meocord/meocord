@@ -5,8 +5,10 @@ import { type ThemeOverride } from '@src/interface/index.js'
 import { stageClasses, stageOwners } from '@src/core/guard-runner.js'
 import { makeInjectable } from '@src/util/injectable.util.js'
 import {
+  abandonLookups,
   attachThemeCache,
   cachedLayers,
+  lookupsInFlight,
   lookupLayers,
   resolverCaches,
   ThemeCache,
@@ -32,7 +34,9 @@ import {
 } from '@src/core/theme-scope.js'
 import { META } from '@src/util/metadata-keys.js'
 import { shared } from '@src/util/shared-state.util.js'
-import { type ReadyBound, readyBoundOf, readyGateOf } from '@src/core/ready-gate.js'
+import { answerDeadline, type ReadyBound, readyBoundOf, readyGateOf } from '@src/core/ready-gate.js'
+import { seconds } from '@src/core/autocomplete-timing.js'
+import { Logger } from '@src/common/logger.js'
 
 /** Classes with a `@UseTheme`, on the class or one of its methods, from either build of this version. */
 export const THEMED_CLASSES = shared('themedClasses', () => new WeakSet<object>())
@@ -87,6 +91,11 @@ export function configureThemes(
     container.bind(ThemeCache).toSelf().inSingletonScope()
   }
   attachThemeCache(container.get(ThemeCache), resolvers)
+}
+
+/** Ends the theme lookups in flight for the app on `container`, as it shuts down: nothing they give later is logged or kept. */
+export function abandonThemeLookups(container: Container): void {
+  abandonLookups(apps.get(container)?.resolvers)
 }
 
 /** Counts `classes`, whose handlers are prepared once the app's providers are made, among those a theme can vary by. */
@@ -151,16 +160,94 @@ function handlerTheme(themes: AppThemes, prototype: object, methodName: string):
 }
 
 type Layers = ReturnType<typeof lookupLayers>
+type FoundLayers = Exclude<Layers, Promise<unknown> | undefined>
+
+const logger = new Logger('Theme')
+
+/** What a wait for layers cut short at its interaction's first-answer deadline gives in their place. */
+const CUT = Symbol('cut at the first-answer deadline')
+
+/** The interaction a wait for layers answers, which bounds it: its bound, its targets, and what its warning names. */
+interface WaitFor {
+  bound: () => ReadyBound
+  resolvers: ThemeResolverCaches
+  targets: ThemeTargets
+  /** The handler or the answer that waits, for the warning. */
+  who: string
+}
+
+/** `read`'s value, read the first time it is asked for. */
+function once<T>(read: () => T): () => T {
+  let value: { of: T } | undefined
+  return () => (value ??= { of: read() }).of
+}
+
+/**
+ * The layers `pending` gives, or {@link CUT} once the first-answer deadline of the interaction `of` answers has
+ * expired: past with Discord told nothing. Layers landing once it is past are cut too, whichever of the two comes
+ * first within that moment. A wait with no deadline, as a message's, waits for the layers.
+ */
+function withinDeadline(pending: Promise<FoundLayers>, of: WaitFor | undefined): Promise<FoundLayers | typeof CUT> {
+  const bound = of?.bound()
+  if (!bound) return pending
+  const deadline = answerDeadline(bound)
+  const nameCut = lookupsInFlight(of!.resolvers, of!.targets)
+  let over = false
+  const end = (layers: FoundLayers | typeof CUT) => {
+    over = true
+    deadline.release()
+    return layers
+  }
+  const cut = () => {
+    const ended = end(CUT)
+    // One line per lookup in flight, unless a warning already named this interaction's wait; only a line written names one
+    const lookups = deadline.warned ? [] : nameCut()
+    if (lookups.length > 0) {
+      deadline.warned = true
+      const span = deadline.fromWait ? `after ${seconds(bound.ms)}` : `${seconds(bound.ms)} after the interaction was created`
+      const waits = bound.kind === 'interaction' ? 'an interaction Discord has been told nothing of' : 'an autocomplete'
+      logger.warn(
+        `${lookups.join(' and ')} had not answered ${span}, as long as ${waits} waits for its first answer, so ` +
+          `${of!.who} went on without it. The lookup goes on and its result is kept for later calls: this is not a failure and starts no backoff.`,
+      )
+    }
+    return ended
+  }
+  if (deadline.due()) return Promise.resolve(cut())
+  return new Promise(resolve => {
+    pending.then(layers => over || resolve(deadline.due() ? cut() : end(layers)))
+    void deadline.expired.then(() => over || resolve(cut()))
+  })
+}
+
+/**
+ * The layers for `targets`: at once when the resolver needn't be waited for, else a promise of them, or of {@link CUT}
+ * once the first-answer deadline of the interaction `of` answers ends the wait.
+ */
+function boundedLookup(resolvers: ThemeResolverCaches, targets: ThemeTargets, of: WaitFor | undefined): BoundedLayers {
+  const layers = lookupLayers(resolvers, targets)
+  return layers instanceof Promise ? withinDeadline(layers, of) : layers
+}
+
+type BoundedLayers = FoundLayers | undefined | Promise<FoundLayers | typeof CUT | undefined>
+
+/**
+ * The layers for `targets` once `after` settles, as a call under waitForReady starts its lookup only when its wait for
+ * the hooks is over. The gate bounds that wait itself, so the deadline bounds only the lookup's.
+ */
+const lookedUpAfter = (resolvers: ThemeResolverCaches, targets: ThemeTargets, after: Promise<void>, of: WaitFor | undefined) =>
+  after.then(() => boundedLookup(resolvers, targets, of))
 
 /**
  * A scope of `base` with a call's server's and user's `layers` over it. Layers still being looked up replace its theme
  * once found, and the scope's `ready` settles then, so an answer made in it before waits for them.
  */
-function layeredScope(base: ResolvedTheme, layers: Layers, rebuild: RebuildTheme | undefined): ThemeScope {
+function layeredScope(base: ResolvedTheme, layers: BoundedLayers, rebuild: RebuildTheme | undefined): ThemeScope {
   if (!(layers instanceof Promise)) return { theme: mergeTheme(mergeTheme(base, layers?.[0]), layers?.[1]), rebuild }
   const scope: ThemeScope = { theme: base, rebuild }
-  scope.ready = layers.then(([guild, user]) => {
-    scope.theme = mergeTheme(mergeTheme(base, guild), user)
+  scope.ready = layers.then(found => {
+    // Cut, the call keeps its handler's theme to its end, whatever lands later
+    if (found !== CUT) scope.theme = mergeTheme(mergeTheme(base, found?.[0]), found?.[1])
   })
   return scope
 }
@@ -179,7 +266,9 @@ function rebuildOver(container: Container, resolvers: ThemeResolverCaches, base:
   const rebuild: RebuildTheme = args => {
     const targets = themeTargets(args)
     if (targets.guildId === undefined && targets.userId === undefined) return undefined
-    return scopeOver(resolvers, base, targets, lookupReady(container, () => readyBoundOf(args)), rebuild)
+    const bound = once(() => readyBoundOf(args))
+    const of: WaitFor = { bound, resolvers, targets, who: 'a function bindTheme wraps' }
+    return scopeOver(resolvers, base, targets, lookupReady(container, bound), rebuild, undefined, of)
   }
   return rebuild
 }
@@ -189,14 +278,14 @@ function rebuildOver(container: Container, resolvers: ThemeResolverCaches, base:
  * synchronously, such as a call's observers' onStart or a bound function, runs before the resolver is asked. Layers
  * the resolver answers with a value are in the scope as that microtask ends; others replace its theme once found.
  */
-function lookedUpScope(base: ResolvedTheme, lookup: () => Layers, rebuild: RebuildTheme | undefined): ThemeScope {
+function lookedUpScope(base: ResolvedTheme, lookup: () => BoundedLayers, rebuild: RebuildTheme | undefined): ThemeScope {
   const looked = Promise.withResolvers<void>()
   const scope: ThemeScope = { theme: base, rebuild, ready: looked.promise }
   queueMicrotask(() => {
     // Nothing here throws: the call's targets were read as the scope was made, and the cache settles all the resolver does
     const layers = lookup()
     if (layers instanceof Promise) {
-      looked.resolve(layers.then(([guild, user]) => void (scope.theme = mergeTheme(mergeTheme(base, guild), user))))
+      looked.resolve(layers.then(found => void (found !== CUT && (scope.theme = mergeTheme(mergeTheme(base, found?.[0]), found?.[1])))))
       return
     }
     scope.theme = mergeTheme(mergeTheme(base, layers?.[0]), layers?.[1])
@@ -209,6 +298,7 @@ function lookedUpScope(base: ResolvedTheme, lookup: () => Layers, rebuild: Rebui
 /**
  * The scope of a call from `targets`: `base` with their server's and user's layers over it, looked up after `after`
  * when set. Layers all `cached` are in the scope at once; a lookup that has to ask the resolver asks it in a microtask.
+ * A wait for layers ends by the first-answer deadline of the interaction `of` answers.
  */
 function scopeOver(
   resolvers: ThemeResolverCaches,
@@ -217,10 +307,12 @@ function scopeOver(
   after: Promise<void> | undefined,
   rebuild: RebuildTheme | undefined,
   cached = cachedLayers(resolvers, targets),
+  of?: WaitFor,
 ): ThemeScope {
-  if (after) return layeredScope(base, lookupLayers(resolvers, targets, after), rebuild)
-  if (cached === 'uncached') return lookedUpScope(base, () => lookupLayers(resolvers, targets), rebuild)
-  return layeredScope(base, cached?.layers, rebuild)
+  if (cached === undefined) return { theme: base, rebuild }
+  if (after) return layeredScope(base, lookedUpAfter(resolvers, targets, after, of), rebuild)
+  if (cached === 'uncached') return lookedUpScope(base, () => boundedLookup(resolvers, targets, of), rebuild)
+  return layeredScope(base, cached.layers, rebuild)
 }
 
 /**
@@ -237,6 +329,8 @@ export function beginCallTheme(
 ): { scope: ThemeScope; ready?: Promise<void> } | undefined {
   const themes = current(container)
   if (!themes) return undefined
+  // Read once, for the gate and the deadline alike, and only by a call that waits
+  if (themes.resolvers) bound = once(bound)
   const after = themes.resolvers && lookupReady(container, bound)
   // The call's server and user, read once: every lookup of its themes, now or once the hooks settle, takes them from here
   const targets = themes.resolvers && themeTargets(args)
@@ -247,7 +341,15 @@ export function beginCallTheme(
   const rebuild = themes.resolvers && rebuildOver(container, themes.resolvers, base)
   // Until the server's and user's themes are found, the call has the handler's; the pipeline waits for them, and an
   // answer made before that wait, as in an observer's onStart, waits itself
-  const scope = looksUp ? scopeOver(themes.resolvers!, base, targets!, after, rebuild, cached) : { theme: base, rebuild }
+  const of: WaitFor | undefined = looksUp
+    ? {
+        bound,
+        resolvers: themes.resolvers!,
+        targets: targets!,
+        who: prototype && methodName ? `${(prototype.constructor as { name?: string }).name}.${methodName}` : 'the answer to a call no handler takes',
+      }
+    : undefined
+  const scope = looksUp ? scopeOver(themes.resolvers!, base, targets!, after, rebuild, cached, of) : { theme: base, rebuild }
   // With the theme the app owns outside calls, a function it binds rebuilds from the app's theme without this scope
   return scope.theme === base && !scope.ready && !themes.scoped ? undefined : { scope, ready: scope.ready }
 }
@@ -271,11 +373,14 @@ setThemeOutsideCalls(interaction => {
   const themes = container && current(container)
   if (!themes) return useTheme()
   if (!themes.resolvers) return themes.app
-  const after = lookupReady(container!, () => readyBoundOf([interaction]))
-  const layers = lookupLayers(themes.resolvers, themeTargets([interaction]), after)
-  if (!layers) return themes.app
-  if (layers instanceof Promise) return layers.then(([guild, user]) => mergeTheme(mergeTheme(themes.app, guild), user))
-  return mergeTheme(mergeTheme(themes.app, layers[0]), layers[1])
+  const bound = once(() => readyBoundOf([interaction]))
+  const after = lookupReady(container!, bound)
+  const targets = themeTargets([interaction])
+  if (cachedLayers(themes.resolvers, targets) === undefined) return themes.app
+  const of: WaitFor = { bound, resolvers: themes.resolvers, targets, who: 'an answer outside any call' }
+  const layers = after ? lookedUpAfter(themes.resolvers, targets, after, of) : boundedLookup(themes.resolvers, targets, of)
+  const over = (found: FoundLayers | typeof CUT | undefined) => (found === CUT ? themes.app : mergeTheme(mergeTheme(themes.app, found?.[0]), found?.[1]))
+  return layers instanceof Promise ? layers.then(over) : over(layers)
 })
 
 // A function bound outside any call's scope rebuilds each call's theme from the app of its first argument's client

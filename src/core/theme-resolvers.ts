@@ -66,6 +66,8 @@ const logger = new Logger('Theme')
 
 /** What a lookup that did not answer in time rejects with, told apart by identity alone, which no value can intercept. */
 const TIMED_OUT = Symbol('themeFor lookup timed out')
+/** What a lookup the app abandoned as it shut down rejects with: it ends quietly, as nothing is left to serve. */
+const ABANDONED = Symbol('themeFor lookup abandoned')
 
 /**
  * What a resolver threw or rejected with, as a log line names it. Reading it may throw too, as a getter or a Proxy may;
@@ -86,7 +88,9 @@ type Outcome = { result: unknown } | { error: unknown }
 class ResolverCache {
   private readonly entries = new Map<string, { layer: ThemeOverride | undefined; expiresAt: number }>()
   /** The lookup in flight for each id, shared by every call that asks meanwhile. */
-  private readonly pending = new Map<string, { token: object; result: Promise<ThemeOverride | undefined> }>()
+  private readonly pending = new Map<string, { token: object; result: Promise<ThemeOverride | undefined>; cut?: boolean }>()
+  /** How to end each lookup in flight, those an invalidation forgot included, until it settles. */
+  private readonly live = new Set<() => void>()
   /** The ids already warned about for an invalid result, until one gives a valid result again. */
   private readonly warned = new Set<string>()
   /**
@@ -126,9 +130,35 @@ class ResolverCache {
     // A resolver that answers or throws synchronously gives its layer at once, so a call it serves waits for nothing
     if (!(attempt instanceof Promise)) return this.settle(id, attempt, true)
     const token = {}
-    const result = this.fetch(id, token, attempt)
+    const result = this.fetch(id, token, this.within(attempt))
     this.pending.set(id, { token, result })
     return result
+  }
+
+  /** The lookup in flight for `id`, if one is: what a wait for it names should the wait be cut short. */
+  inFlight(id: string): { cut?: boolean } | undefined {
+    return this.pending.get(id)
+  }
+
+  /**
+   * Whether `lookup`, a lookup in flight as a wait for it began, is cut short for the first time, so the lookup
+   * is named once however many waits on it are cut, and whether or not it has landed since.
+   */
+  cutShort(lookup: { cut?: boolean }): boolean {
+    if (lookup.cut) return false
+    lookup.cut = true
+    return true
+  }
+
+  /**
+   * Ends every lookup in flight, an invalidated one included, as the app shuts down: each settles with no layer, so a
+   * wait on it goes on in the theme it has, and nothing it gives later is logged, counted or kept. Its timeout is
+   * cleared at once.
+   */
+  abandon(): void {
+    // Dropped first, so each settles as a lookup no longer current
+    this.pending.clear()
+    for (const end of [...this.live]) end()
   }
 
   /** Forgets `id`'s result, or every result, so the next call looks it up again; a lookup in flight is not kept. */
@@ -159,10 +189,10 @@ class ResolverCache {
     }
   }
 
-  private async fetch(id: string, token: object, attempt: Promise<unknown>): Promise<ThemeOverride | undefined> {
+  private async fetch(id: string, token: object, answer: Promise<unknown>): Promise<ThemeOverride | undefined> {
     let outcome: Outcome
     try {
-      outcome = { result: await this.within(attempt) }
+      outcome = { result: await answer }
     } catch (error) {
       outcome = { error }
     }
@@ -190,16 +220,23 @@ class ResolverCache {
     return layer
   }
 
-  /** The resolver's answer, or a rejection when it rejects or passes the timeout. */
+  /** The resolver's answer, or a rejection when it rejects, passes the timeout or is abandoned. */
   private within(attempt: Promise<unknown>): Promise<unknown> {
-    // A rejection after the timeout has nobody left to hear it
+    // A rejection after the timeout, or once abandoned, has nobody left to hear it
     attempt.catch(() => undefined)
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(TIMED_OUT), this.timeoutMs)
-      timer.unref?.()
+    const ended = Promise.withResolvers<never>()
+    const timer = setTimeout(() => ended.reject(TIMED_OUT), this.timeoutMs)
+    timer.unref?.()
+    const end = () => {
+      // At once, not once the race settles a few microtasks on, so no timer outlives the shutdown that abandons it
+      clearTimeout(timer)
+      ended.reject(ABANDONED)
+    }
+    this.live.add(end)
+    return Promise.race([attempt, ended.promise]).finally(() => {
+      clearTimeout(timer)
+      this.live.delete(end)
     })
-    return Promise.race([attempt, timeout]).finally(() => clearTimeout(timer))
   }
 
   /**
@@ -385,20 +422,33 @@ function serverOf(target: { guildId?: unknown; guild?: { id?: unknown } | null }
 export function lookupLayers(
   caches: ThemeResolverCaches,
   targets: ThemeTargets,
-  after?: Promise<void>,
 ): [ThemeOverride | undefined, ThemeOverride | undefined] | Promise<[ThemeOverride | undefined, ThemeOverride | undefined]> | undefined {
   const { guildId, userId } = targets
   const byGuild = caches.guild && guildId !== undefined ? caches.guild : undefined
   const byUser = caches.user && userId !== undefined ? caches.user : undefined
   if (!byGuild && !byUser) return undefined
-  // Once `after` settles, as a call under waitForReady starts its lookup only when its wait for the hooks is over
-  if (after) return after.then(() => lookupLayers(caches, targets)!)
   const now = performance.now()
   const guild = byGuild?.lookup(guildId!, now)
   const user = byUser?.lookup(userId!, now)
   // Two misses are looked up together, so the call waits for the slower, not both in turn
   if (guild instanceof Promise || user instanceof Promise) return Promise.all([guild, user])
   return [guild, user]
+}
+
+/**
+ * The lookups in flight for `targets` as a wait for them begins, and how to name them should the wait be cut short:
+ * each the first time a wait on it is cut, read from the lookups the wait began with, so a lookup landing in the same
+ * moment as the cut is named all the same.
+ */
+export function lookupsInFlight(caches: ThemeResolverCaches, targets: ThemeTargets): () => string[] {
+  const held: { cache: ResolverCache; lookup: { cut?: boolean }; name: string }[] = []
+  for (const kind of ['guild', 'user'] as const) {
+    const id = kind === 'guild' ? targets.guildId : targets.userId
+    const cache = caches[kind]
+    const lookup = id === undefined ? undefined : cache?.inFlight(id)
+    if (lookup) held.push({ cache: cache!, lookup, name: `themeFor.${kind} for ${kind} ${id}` })
+  }
+  return () => held.filter(({ cache, lookup }) => cache.cutShort(lookup)).map(({ name }) => name)
 }
 
 /**
@@ -466,6 +516,12 @@ export class ThemeCache {
   invalidateUser(userId?: string): void {
     stores.get(this)?.user?.invalidate(userId)
   }
+}
+
+/** Ends the lookups in flight through `caches`, as the app shuts down; see {@link ResolverCache.abandon}. */
+export function abandonLookups(caches: ThemeResolverCaches | undefined): void {
+  caches?.guild?.abandon()
+  caches?.user?.abandon()
 }
 
 /** Gives the `ThemeCache` an app's code injects the caches it clears. */

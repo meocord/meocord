@@ -7,6 +7,7 @@ import { storeOperationsSettled } from '@src/core/cooldown-runner.js'
 import { type OnReady, type OnShutdown, type ReadyInfo } from '@src/interface/index.js'
 import { RunningCalls } from '@src/core/running-calls.js'
 import { seconds } from '@src/core/autocomplete-timing.js'
+import { abandonThemeLookups } from '@src/core/theme-runtime.js'
 
 /** A unit a shutdown closes, with the instance whose `onShutdown` runs. */
 export interface LifecycleEntry {
@@ -338,6 +339,8 @@ export async function runShutdownSequence(
   } finally {
     drainEnds.cancel()
     whole.cancel()
+    // A call the drain outlasted has had its lookups until now; one still in flight serves nothing once the app is down
+    abandonThemeLookups(container)
   }
 }
 
