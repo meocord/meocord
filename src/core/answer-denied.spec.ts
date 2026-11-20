@@ -112,18 +112,19 @@ beforeEach(() => {
 })
 
 describe('@MeoCord({ answerDenied: true })', () => {
+  // A select menu is first put back as it was before the pick, with an update that sets no field
   it.each([
-    ['a command', () => slash('ping')],
-    ['a button', () => createMockInteraction(ButtonInteraction, { customId: 'card/1' })],
-    ['a select menu', () => createMockInteraction(StringSelectMenuInteraction, { customId: 'pick' })],
-    ['a modal', () => createMockInteraction(ModalSubmitInteraction, { customId: 'note' })],
-  ])("answers a guard's false on %s privately, as a thrown GuardDeniedError", async (_label, make) => {
+    ['a command', () => slash('ping'), ['reply']],
+    ['a button', () => createMockInteraction(ButtonInteraction, { customId: 'card/1' }), ['reply']],
+    ['a select menu', () => createMockInteraction(StringSelectMenuInteraction, { customId: 'pick' }), ['update', 'followUp']],
+    ['a modal', () => createMockInteraction(ModalSubmitInteraction, { customId: 'note' }), ['reply']],
+  ])("answers a guard's false on %s privately, as a thrown GuardDeniedError", async (_label, make, sent) => {
     const interaction = make()
 
     await app(true).dispatch(interaction)
 
-    expect(calls(interaction)).toEqual(['reply'])
-    expect(getResponse(interaction).calls[0].payload).toMatchObject({ flags: expect.anything() })
+    expect(calls(interaction)).toEqual(sent)
+    expect(getResponse(interaction).calls.at(-1)?.payload).toMatchObject({ flags: expect.anything() })
     expect(said(interaction)).toContain("You can't use this.")
     expect(settled).toEqual([expect.objectContaining({ outcome: 'denied', deniedBy: Deny, handled: true, error: expect.any(GuardDeniedError) })])
   })

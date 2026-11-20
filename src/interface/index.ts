@@ -493,8 +493,10 @@ export interface ResponsePresenter {
 
   /**
    * The view shown for an error. It may draw it asynchronously: an interaction not yet acknowledged is acknowledged
-   * first, privately, and the view then replaces the acknowledgement. Discord refusing that acknowledgement, such as
-   * for an interaction past its three seconds, is logged as the send it is, never as the presenter failing.
+   * first, privately, and the view then replaces the acknowledgement. A select-menu pick is acknowledged with an update
+   * that puts its menu back as it was before the pick, and the view then follows up privately. Discord refusing that
+   * acknowledgement, such as for an interaction past its three seconds, is logged as the send it is, never as the
+   * presenter failing.
    */
   error(context: ResponseContext, error: PresentedError): ResponseView | Promise<ResponseView>
 

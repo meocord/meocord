@@ -14,7 +14,8 @@ export const OWNER_PARAM = 'ownerId'
  *
  * Use it on a button, select menu or modal opened for one user, such as a confirmation, a paginator or a settings
  * card, whose route carries that user's id: `card/{ownerId:snowflake}`. Anyone else who clicks is told privately that
- * it is not theirs, and the handler does not run.
+ * it is not theirs, and the handler does not run. On a select menu, their pick is also put back, so the menu shows
+ * what it did before they picked.
  *
  * @remarks
  * It denies by throwing `GuardDeniedError`, so the fallback answers in the user's language, with
