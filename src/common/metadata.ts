@@ -49,7 +49,7 @@ export interface MetadataDecorator<T> {
  *
  * @group Utilities
  * @see {@link ExecutionContext}
- * @see {@link https://meocord.dev/docs/4.2/guards | Guards}
+ * @see {@link https://meocord.dev/docs/4.3/guards | Guards}
  */
 export function createMetadata<T>(description?: string): MetadataDecorator<T> {
   const key = Symbol(description)

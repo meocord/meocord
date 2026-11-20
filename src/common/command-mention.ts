@@ -41,7 +41,7 @@ function whereShown(target: Interaction | Message | Guild | Client): { client: o
  *
  * @group Utilities
  * @category Commands
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
  */
 export async function commandMention(path: string, target: Interaction | Message | Guild | Client): Promise<string> {
   const { client, guild } = whereShown(target)

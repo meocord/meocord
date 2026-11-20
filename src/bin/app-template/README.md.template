@@ -60,7 +60,7 @@ disables the message's controls with a loading view until the handler answers.
 
 `@Cooldown({ uses: 5, seconds: 60 })` limits how often a user can run a handler, and
 `OwnerGuard` from `meocord/common` lets only the user a button was made for click it. The
-[Guards](https://meocord.dev/docs/4.2/guards) page shows how to write your own, such as one
+[Guards](https://meocord.dev/docs/4.3/guards) page shows how to write your own, such as one
 that denies with a reason by throwing `GuardDeniedError`.
 
 ## Generating components

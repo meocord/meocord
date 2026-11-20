@@ -40,7 +40,7 @@ import { declaring, decoratedName, refuseOnMethod } from '@src/util/refusal.util
  * @group Decorators
  * @category Pipeline stages
  * @see {@link UseInterceptor}
- * @see {@link https://meocord.dev/docs/4.2/interceptors | Interceptors}
+ * @see {@link https://meocord.dev/docs/4.3/interceptors | Interceptors}
  */
 export function Interceptor(
   options: InterceptorOptions = {},
@@ -81,7 +81,7 @@ export function Interceptor(
  * @group Decorators
  * @category Pipeline stages
  * @see {@link Interceptor}
- * @see {@link https://meocord.dev/docs/4.2/interceptors | Interceptors}
+ * @see {@link https://meocord.dev/docs/4.3/interceptors | Interceptors}
  */
 export function UseInterceptor<const T extends readonly unknown[]>(
   ...interceptors: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => InterceptorInterface> }

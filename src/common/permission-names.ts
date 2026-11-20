@@ -67,8 +67,8 @@ type PermissionTarget = Interaction | Message | Locale | `${Locale}`
  *
  * @group Utilities
  * @category Localisation
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
- * @see {@link https://meocord.dev/docs/4.2/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/localisation | Localisation}
  */
 export function permissionNames(
   permissions: PermissionResolvable,
@@ -92,8 +92,8 @@ export function permissionNames(
  *
  * @group Utilities
  * @category Localisation
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
- * @see {@link https://meocord.dev/docs/4.2/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/localisation | Localisation}
  */
 export function permissionNames(permissions: PermissionResolvable, target?: PermissionTarget, options?: PermissionNamesOptions & { join?: undefined }): string[]
 export function permissionNames(permissions: PermissionResolvable, target?: PermissionTarget, options: PermissionNamesOptions = {}): string | string[] {

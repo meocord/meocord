@@ -193,7 +193,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Pr
  *
  * @group Controllers
  * @see {@link ShardCallResult}
- * @see {@link https://meocord.dev/docs/4.2/sharding | Sharding}
+ * @see {@link https://meocord.dev/docs/4.3/sharding | Sharding}
  */
 @sharedClass('ShardContext')
 export class ShardContext {

@@ -90,8 +90,8 @@ const unitIndex = (name: string, unit: unknown): number => {
  *
  * @group Utilities
  * @category Localisation
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
- * @see {@link https://meocord.dev/docs/4.2/localisation | Localisation}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/localisation | Localisation}
  */
 export function formatDuration(ms: number, target?: Interaction | Message | Locale | `${Locale}`, options: FormatDurationOptions = {}): string {
   const { units = 2, largest = 'd', smallest = 's', round = 'down', style = 'narrow' } = options

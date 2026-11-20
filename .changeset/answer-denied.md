@@ -1,5 +1,0 @@
----
-'meocord': minor
----
-
-`@MeoCord({ answerDenied: true })` answers a guard's `false` on an interaction as if the guard had thrown `GuardDeniedError`. A command, context menu, component or modal a guard denies is told privately "You can't use this." in the user's language, from `meocord.guard.denied`, which an app's catalogs translate; until now a denied command got Discord's "The application did not respond". The denial takes a thrown one's path: a filter catching `GuardDeniedError` sees it and can answer otherwise, observers get the outcome `'denied'` with `deniedBy` and the error, and a call with `@Defer` is answered into its deferral. Autocomplete still closes its menu, an event handler still skips the event, and a message command stays silent, since a `false` there is often a filter. A guard that throws its own `GuardDeniedError` keeps its words. In a testing module built from an app that sets the option, `invoke` rejects with that `GuardDeniedError` for a guard's `false` and sends nothing, as it does for a thrown denial, while `dispatch` answers it as the bot does. Nothing changes until an app sets the option. See https://meocord.dev/docs/4.3/guards.

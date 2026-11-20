@@ -408,7 +408,7 @@ function chunked(text: string, max: number, code: Code): string[] | undefined {
  * ```
  *
  * @group Utilities
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
  */
 export function splitMessage(text: string, options: { max?: number } = {}): string[] {
   const max = options.max ?? DiscordLimits.content
@@ -458,7 +458,7 @@ export function splitMessage(text: string, options: { max?: number } = {}): stri
  * ```
  *
  * @group Utilities
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
  */
 export function truncate(text: string, max: number, ellipsis = '…'): string {
   if (!Number.isInteger(max) || max < ellipsis.length) {

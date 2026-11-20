@@ -1,5 +1,0 @@
----
-'meocord': minor
----
-
-`meocord register --prune` finds your app's commands left in servers the configuration no longer names, such as a test server after you moved to global commands, where members see every command twice, and removes them. It runs after a successful registration, checks every server the bot is in, and deletes, one request per command removed, only the commands this build declares by name and type, keeping and listing those not declared by this build. `--prune all` removes those too, asking once in a terminal or with `--yes` outside one. `--dry-run` registers nothing and only reports, `--prune-guild <id>` adds a server the bot isn't in, and `--after <id>` resumes a run that stopped early. A development run now also warns when this checkout once registered to a server the configuration no longer names. A variable left in your shell or `.env` file, such as `MEOCORD_REGISTER_GUILD`, no longer steers `meocord register` or `meocord start`: each run registers as its own flags say. See [CLI](https://meocord.dev/docs/4.3/cli).
