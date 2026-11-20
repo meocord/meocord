@@ -3,7 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { CHANGESET_DIR, checkNotesCoverChangesets, COVERED_FILE, NOTES_DIR, readNotes, writeReleaseNotes } from './release-notes.js'
+import {
+  CHANGESET_DIR,
+  checkChangesetMentions,
+  checkNotesCoverChangesets,
+  COVERED_FILE,
+  NOTES_DIR,
+  readNotes,
+  writeReleaseNotes,
+} from './release-notes.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -193,6 +201,36 @@ describe('checkNotesCoverChangesets', () => {
   })
 })
 
+describe('checkChangesetMentions', () => {
+  /** Pending `changesets` by file name, beside a changesets README that mentions a user. */
+  function changesets(files: Record<string, string>): void {
+    mkdirSync(path.join(root, CHANGESET_DIR), { recursive: true })
+    for (const [file, markdown] of Object.entries({ 'README.md': 'Ask @someone.\n', ...files })) {
+      writeFileSync(path.join(root, CHANGESET_DIR, file), markdown)
+    }
+  }
+
+  it('refuses a word GitHub turns into a mention, naming each changeset and line, with no notes waiting', () => {
+    changesets({
+      'a.md': "---\n'meocord': patch\n---\n\nThe warning under @Defer.\n",
+      'b.md': "---\n'meocord': patch\n---\n\nApps start on `typescript-eslint`,\n@types/node 26 and @typescript-eslint/parser 8.\n",
+    })
+
+    expect(() => checkChangesetMentions(root)).toThrow(
+      `${path.join(CHANGESET_DIR, 'a.md')} has words GitHub turns into a mention of a user; write each in backticks:\n` +
+        '  line 5: @Defer\n' +
+        `${path.join(CHANGESET_DIR, 'b.md')} has words GitHub turns into a mention of a user; write each in backticks:\n` +
+        '  line 6: @types\n  line 6: @typescript-eslint',
+    )
+  })
+
+  it('takes a mention in code or in the front matter, and reads no README', () => {
+    changesets({ 'a.md': "---\n'@meocord/x': patch\n---\n\nThe warning under `@Defer`.\n" })
+
+    expect(() => checkChangesetMentions(root)).not.toThrow()
+  })
+})
+
 // The notes waiting in this repository, checked now rather than when the release's version step runs
 describe("the repository's notes", () => {
   const notesRoot = path.join(repoRoot, NOTES_DIR)
@@ -201,5 +239,11 @@ describe("the repository's notes", () => {
 
   it('each read as the docs site shows them, when any are waiting', () => {
     for (const version of versions) expect(() => readNotes(path.join(notesRoot, version)), version).not.toThrow()
+  })
+})
+
+describe("the repository's changesets", () => {
+  it('each mention no user', () => {
+    expect(() => checkChangesetMentions(repoRoot)).not.toThrow()
   })
 })

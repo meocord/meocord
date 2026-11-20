@@ -429,7 +429,9 @@ The prompt asks for a bump and a description, then writes a markdown file. Commi
 change. While `.changeset/release-notes/<version>/` holds the notes of the next stable version, also
 give the change a line in those notes and list the file in the folder's `covered.md`, or list it as
 `- <file>: <reason>` with why it needs no line. `bun run notes:check` names a changeset the list
-leaves out.
+leaves out. It also names a word GitHub would turn into a mention of a user, such as a bare
+`@Defer` or `@types/node`: a changeset's text reaches the release on GitHub, which lists each user
+it mentions, so write such words in backticks, as in the notes.
 
 | Bump    | For                                                        |
 | ------- | ---------------------------------------------------------- |
