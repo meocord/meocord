@@ -1,5 +1,6 @@
 import { AsyncResource } from 'node:async_hooks'
 import {
+  type AnySelectMenuInteraction,
   type APIEmbed,
   type APIMessageTopLevelComponent,
   type BitFieldResolvable,
@@ -446,12 +447,15 @@ export interface ResponseState {
    * reports, such as a missing permission, is logged at debug level; one whose body Discord could not read, a
    * presenter that fails, or any other failure, as an error.
    *
-   * - Unanswered: a private reply.
+   * - Unanswered: a private reply. A select-menu pick is answered first with an update that sets no field, which
+   *   puts the menu back as it was before the pick in the picker's client and changes nothing else, then follows up
+   *   privately.
    * - A command whose reply is deferred: `'reply'` edits that reply into the error; `'private'` edits a
    *   private deferral into it, and deletes a public one, then follows up privately.
    * - A component on a private (ephemeral) message: the error is added to that message, where it fits.
    * - Otherwise: a private follow-up. The message the user clicked is never edited into the error, only put back as
-   *   it was before a lock.
+   *   it was before a lock. A select-menu pick deferred and not since edited is first put back with an edit that sets
+   *   no field.
    *
    * A `UserError` shows its own message, privately, unless `options` say otherwise.
    *
@@ -1383,16 +1387,25 @@ export class InteractionResponse implements ResponseState {
     const theme = await this.answerTheme(visibility === 'private')
     // Drawn before anything is sent; a presenter that fails is answered for with MeoCord's own view, then thrown to
     // the caller, which reports it as the call's fault rather than passing it for a refusal
-    const { view, failure, gone } = await this.drawnView(error, message, theme)
+    const { view, failure, gone, reset } = await this.drawnView(error, message, theme)
     // Its refusal already logged, an interaction Discord no longer knows is not answered again
-    if (!gone) await this.deliverError(view, visibility, ifUnanswered)
+    if (!gone) await this.deliverError(view, visibility, ifUnanswered, reset)
     if (failure !== undefined) throw failure
   }
 
-  /** Sends an error's view where the interaction stands; a delivery Discord refuses is logged, never thrown. */
-  private async deliverError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered: boolean): Promise<void> {
+  /**
+   * Sends an error's view where the interaction stands; a delivery Discord refuses is logged, never thrown. A select-menu
+   * pick nothing has answered is first answered with the update that puts its menu back, unless `reset` says that was
+   * done already, and the view then follows up.
+   */
+  private async deliverError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered: boolean, reset = false): Promise<void> {
     try {
-      await this.withFilesFallback(view, shown => this.presentError(shown, visibility, ifUnanswered))
+      this.sync()
+      if (!reset && this.phase === 'unanswered' && this.interaction.isAnySelectMenu()) {
+        await this.resetPick()
+        reset = true
+      }
+      await this.withFilesFallback(view, shown => this.presentError(shown, visibility, { ifUnanswered, reset }))
     } catch (deliveryError) {
       if (errorCode(deliveryError) !== ALREADY_ACKNOWLEDGED) {
         logFailedSend(logger, 'deliver the error reply', deliveryError)
@@ -1416,15 +1429,16 @@ export class InteractionResponse implements ResponseState {
 
   /**
    * The presenter's error view, drawn and rendered as one step. One it draws asynchronously has the interaction
-   * acknowledged privately first, so the drawing never misses Discord's three seconds; `gone` when Discord no longer
-   * knows the interaction. Should the presenter fail, or draw a view MeoCord cannot render, MeoCord's own view takes its
-   * place, and the failure is returned for the caller to report once the user is answered.
+   * acknowledged first, so the drawing never misses Discord's three seconds: privately, or a select-menu pick with the
+   * update that puts its menu back, which `reset` reports; `gone` when Discord no longer knows the interaction. Should
+   * the presenter fail, or draw a view MeoCord cannot render, MeoCord's own view takes its place, and the failure is
+   * returned for the caller to report once the user is answered.
    */
   private async drawnView(
     error: unknown,
     message: string,
     theme: ResolvedTheme,
-  ): Promise<{ view: ResponseView; failure?: unknown; gone?: boolean }> {
+  ): Promise<{ view: ResponseView; failure?: unknown; gone?: boolean; reset?: boolean }> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
     const context = this.presenterContext(this.v2, theme)
     // Fitted to the mode's limit first, so a presenter that writes the message as its text, MeoCord's own included, renders
@@ -1445,6 +1459,8 @@ export class InteractionResponse implements ResponseState {
     }
     // Set when the interaction is one Discord no longer knows, which takes no answer at all
     let gone = false
+    // Set when a select-menu pick was answered with the update that puts its menu back
+    let reset = false
     if (isDrawing(produced)) {
       // Settled into a value now, so a drawing that rejects while the acknowledgement is awaited is still handled
       const drawing = Promise.resolve(produced).then(
@@ -1454,19 +1470,26 @@ export class InteractionResponse implements ResponseState {
       this.sync()
       // Discord's refusal is the acknowledgement's, never the presenter's, and is logged once
       if (this.phase === 'unanswered') {
-        await this.acknowledgePrivately().catch((refusal: unknown) => {
+        // A pick is acknowledged with the update that puts its menu back, which the view then follows up
+        const pick = this.interaction.isAnySelectMenu()
+        const acknowledging = pick ? this.resetPick().then(() => true) : this.acknowledgePrivately().then(() => false)
+        reset = await acknowledging.catch((refusal: unknown) => {
           gone = errorCode(refusal) === UNKNOWN_INTERACTION
-          logFailedSend(logger, 'acknowledge the interaction privately', refusal)
+          // A pick answered elsewhere is recorded as answered, as a private acknowledgement records it
+          if (errorCode(refusal) !== ALREADY_ACKNOWLEDGED) {
+            logFailedSend(logger, pick ? 'put the menu back' : 'acknowledge the interaction privately', refusal)
+          }
+          return false
         })
       }
       const drawn = await drawing
-      if ('failure' in drawn) return { ...fallback(drawn.failure), gone }
+      if ('failure' in drawn) return { ...fallback(drawn.failure), gone, reset }
       produced = drawn.view
     }
     try {
-      return { view: ready(produced), gone }
+      return { view: ready(produced), gone, reset }
     } catch (failure) {
-      return { ...fallback(failure), gone }
+      return { ...fallback(failure), gone, reset }
     }
   }
 
@@ -1533,12 +1556,21 @@ export class InteractionResponse implements ResponseState {
     return { ...body, flags: Number(body.flags ?? 0) | MessageFlags.Ephemeral } as ResponsePayload
   }
 
-  private async presentError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered = false): Promise<void> {
+  private async presentError(
+    view: ResponseView,
+    visibility: 'reply' | 'private',
+    { ifUnanswered = false, reset = false }: { ifUnanswered?: boolean; reset?: boolean } = {},
+  ): Promise<void> {
     this.sync()
     // The private deferral made for a drawn view is that view's reply
     if (this.privateDeferral && this.phase === 'deferred') {
       await this.editMessage(this.render(view, this.v2))
       this.privateDeferral = false
+      return
+    }
+    // A pick answered with the update that put its menu back is told privately
+    if (reset) {
+      await this.followUpNow(this.privateError(view))
       return
     }
     if (this.phase === 'unanswered') {
@@ -1574,7 +1606,35 @@ export class InteractionResponse implements ResponseState {
       }
     }
     await this.restore()
+    // A pick deferred and since edited by nothing, not even a restore, still shows in its menu
+    if (this.phase === 'deferred' && this.interaction.isAnySelectMenu()) await this.resetDeferredPick()
     await this.followUpNow(this.privateError(view))
+  }
+
+  /**
+   * Answers a select-menu pick nothing has answered with an update that sets no field. Discord then draws the menu
+   * again in the picker's client, as it was before the pick, and changes nothing else: the message keeps every edit and
+   * shows no "(edited)". Discord's refusal is thrown; one saying something else answered the pick first is recorded
+   * as that answer before it is thrown.
+   */
+  private async resetPick(): Promise<void> {
+    this.cancelScheduled()
+    const target = this.interaction as AnySelectMenuInteraction
+    await this.firstAnswer(() => this.call('update', {}, () => target.update({})))
+    this.phase = 'replied'
+  }
+
+  /**
+   * Puts a deferred pick's menu back with an edit that sets no field, as {@link resetPick} does for one nothing has
+   * answered. A failure is logged, and the error still follows up.
+   */
+  private async resetDeferredPick(): Promise<void> {
+    try {
+      await this.takeTurn(() => this.call('editReply', {}, () => this.interaction.editReply({})))
+      this.phase = 'replied'
+    } catch (error) {
+      logFailedSend(logger, 'put the menu back', error)
+    }
   }
 
   /** Whether a message stays within Discord's limits of 10 embeds and of Components V2 components. */
