@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { declaring } from '@src/util/refusal.util.js'
 
 /**
  * A typed metadata decorator, made by {@link createMetadata}.
@@ -54,13 +55,13 @@ export function createMetadata<T>(description?: string): MetadataDecorator<T> {
   const key = Symbol(description)
 
   const decorator = (value: T): ClassDecorator & MethodDecorator =>
-    function (target: object, propertyKey?: string | symbol): void {
+    declaring('a decorator made by createMetadata', function (target: object, propertyKey?: string | symbol): void {
       if (propertyKey !== undefined) {
         Reflect.defineMetadata(key, value, target, propertyKey)
       } else {
         Reflect.defineMetadata(key, value, target)
       }
-    } as ClassDecorator & MethodDecorator
+    }) as ClassDecorator & MethodDecorator
 
   return Object.assign(decorator, { key }) as MetadataDecorator<T>
 }

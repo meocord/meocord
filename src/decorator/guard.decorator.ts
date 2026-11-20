@@ -67,7 +67,7 @@ function ownHandlerDescriptor(prototype: object, methodName: string): PropertyDe
 export function Guard(
   options: GuardOptions = {},
 ) {
-  return declaring(function (target: any, propertyKey?: string | symbol) {
+  return declaring('@Guard', function (target: any, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@Guard', target, propertyKey)) return
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Guard')
@@ -110,7 +110,7 @@ export function UseGuard<const T extends readonly unknown[]>(
   ...entries: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => GuardInterface> }
 ): any {
   const guards = entries as unknown as GuardEntry[]
-  return declaring(function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) {
+  return declaring('@UseGuard', function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor) {
     const where = decoratedName(target, propertyKey)
     assertStageEntries('@UseGuard', 'guard', where, guards)
     if (descriptor && propertyKey) {

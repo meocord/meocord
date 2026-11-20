@@ -45,7 +45,7 @@ import { declaring, decoratedName, refuseOnMethod } from '@src/util/refusal.util
 export function Interceptor(
   options: InterceptorOptions = {},
 ) {
-  return declaring(function (target: new (...args: any[]) => InterceptorInterface, propertyKey?: string | symbol) {
+  return declaring('@Interceptor', function (target: new (...args: any[]) => InterceptorInterface, propertyKey?: string | symbol) {
     refuseOnMethod('@Interceptor', target, propertyKey)
     makeInjectable(target)
     defineStageTypes(target, options.types, 'Interceptor')
@@ -86,7 +86,7 @@ export function Interceptor(
 export function UseInterceptor<const T extends readonly unknown[]>(
   ...interceptors: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => InterceptorInterface> }
 ): ClassDecorator & MethodDecorator {
-  return declaring(function (target: object, propertyKey?: string | symbol) {
+  return declaring('@UseInterceptor', function (target: object, propertyKey?: string | symbol) {
     const where = decoratedName(target, propertyKey)
     assertStageEntries('@UseInterceptor', 'interceptor', where, interceptors)
     // Decorators apply bottom-up, so a higher decorator's interceptors go first, as with @UseGuard.

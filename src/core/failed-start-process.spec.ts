@@ -50,7 +50,9 @@ MeoCordFactory.create(App).start().catch(error => {
 `,
   )
 
-  const child = spawn(bun, ['main.ts'], { cwd: bot, stdio: ['ignore', 'pipe', 'pipe'] })
+  // The repository's tsconfig, for its experimental decorators: Bun reads the one in its cwd, and the bot has none
+  const tsconfig = path.resolve(import.meta.dirname, '..', '..', 'tsconfig.json')
+  const child = spawn(bun, [`--tsconfig-override=${tsconfig}`, 'main.ts'], { cwd: bot, stdio: ['ignore', 'pipe', 'pipe'] })
   let output = ''
   child.stdout.on('data', chunk => (output += chunk))
   child.stderr.on('data', chunk => (output += chunk))

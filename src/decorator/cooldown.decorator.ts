@@ -86,7 +86,7 @@ export function Cooldown(options: CooldownOptions<any>): ClassDecorator & Method
   const { seconds, uses = 1, per = 'user', by } = options
   const cooldown: StoredCooldown = { ...options, uses, per, windowMs: Math.round(seconds * 1000) }
 
-  return declaring(function (target: object, propertyKey?: string | symbol) {
+  return declaring('@Cooldown', function (target: object, propertyKey?: string | symbol) {
     // Checked where it applies, so the refusal names the handler or controller
     const problem = cooldownProblem(seconds, uses, per, by)
     if (problem) throw refuse(new Error(`${decoratedName(target, propertyKey)}: ${problem}`))

@@ -13,7 +13,7 @@ export interface EventHandlerMetadata {
 
 function eventDecorator<E extends keyof ClientEvents>(event: E, once: boolean) {
   // Generic over the method, so it is checked against the event's arguments rather than required to match exactly
-  return declaring(function <F extends (...args: ClientEvents[E]) => unknown>(
+  return declaring(once ? '@Once' : '@On', function <F extends (...args: ClientEvents[E]) => unknown>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<F>,

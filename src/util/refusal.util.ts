@@ -211,13 +211,39 @@ export function declarationOf(error: Error): string | undefined {
 }
 
 /**
+ * What MeoCord's decorators need from the compiler: they are TypeScript's experimental decorators, which get the
+ * declaration as `(target, propertyKey, descriptor)` and read the constructor's parameter types from its metadata.
+ */
+export const EXPERIMENTAL_DECORATORS_FIX =
+  'MeoCord\'s decorators are TypeScript\'s experimental decorators: set "experimentalDecorators": true and "emitDecoratorMetadata": true in tsconfig.json'
+
+/** The context object a standard (TC39) decorator gets in place of a property key, when experimental decorators are off. */
+interface StandardDecoratorContext {
+  kind: string
+  name?: string | symbol
+}
+
+const isStandardDecoratorContext = (value: unknown): value is StandardDecoratorContext =>
+  typeof value === 'object' && value !== null && typeof (value as { kind?: unknown }).kind === 'string'
+
+/** Refuses `decorator` applied as a standard decorator, naming what it was applied to and the compiler options to set. */
+function refuseStandardDecorator(decorator: string, context: StandardDecoratorContext): Error {
+  // An anonymous class expression may get '' for its name; a symbol name is kept
+  const name = context.name ? String(context.name) : `an anonymous ${context.kind}`
+  const declaration = context.kind === 'class' ? name : `the ${context.kind} ${name}`
+  return refuse(new Error(`${declaration}: ${decorator} ran as a standard (TC39) decorator. ${EXPERIMENTAL_DECORATORS_FIX}.`))
+}
+
+/**
  * A decorator that names, on each startup error it throws, the declaration it was applied to, `Class.method` or
  * `Class`, as `declaration`, and the source file it is declared in, as `file`: the same error, thrown at the same
  * moment, with its message unchanged. With `startupErrors: 'all'` the error is kept on the class instead, for create()
- * to report with the rest, and the decorator applies nothing more.
+ * to report with the rest, and the decorator applies nothing more. Applied as a standard (TC39) decorator, it throws at
+ * once, whatever `startupErrors` says, naming `decorator` and the compiler options it needs.
  */
-export function declaring<F extends (target: any, propertyKey?: any, ...rest: any[]) => any>(decorate: F): F {
+export function declaring<F extends (target: any, propertyKey?: any, ...rest: any[]) => any>(decorator: string, decorate: F): F {
   return function (this: unknown, target: object, propertyKey?: string | symbol, ...rest: unknown[]) {
+    if (isStandardDecoratorContext(propertyKey)) throw refuseStandardDecorator(decorator, propertyKey)
     try {
       return decorate.call(this, target, propertyKey, ...rest)
     } catch (error) {

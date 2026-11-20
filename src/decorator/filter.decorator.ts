@@ -40,7 +40,7 @@ import { declaring, decoratedName, refuseOnMethod } from '@src/util/refusal.util
  * @see {@link https://meocord.dev/docs/4.2/exception-filters | Exception filters}
  */
 export function Catch(...errorTypes: (abstract new (...args: any[]) => unknown)[]) {
-  return declaring(function (target: new (...args: any[]) => ExceptionFilter<any>, propertyKey?: string | symbol) {
+  return declaring('@Catch', function (target: new (...args: any[]) => ExceptionFilter<any>, propertyKey?: string | symbol) {
     refuseOnMethod('@Catch', target, propertyKey)
     makeInjectable(target)
     errorTypes.forEach((type, index) => {
@@ -95,7 +95,7 @@ const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth']
 export function UseFilter<const T extends readonly unknown[]>(
   ...filters: { [K in keyof T]: CheckedEntry<T[K], new (...args: any[]) => ExceptionFilter<any>> }
 ): ClassDecorator & MethodDecorator {
-  return declaring(function (target: object, propertyKey?: string | symbol) {
+  return declaring('@UseFilter', function (target: object, propertyKey?: string | symbol) {
     const where = decoratedName(target, propertyKey)
     assertStageEntries('@UseFilter', 'filter', where, filters)
     // Decorators apply bottom-up, so a higher decorator's filters are tried first.

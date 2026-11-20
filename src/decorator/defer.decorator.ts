@@ -40,7 +40,7 @@ import { META } from '@src/util/metadata-keys.js'
  * @see {@link https://meocord.dev/docs/4.2/defer | Deferring}
  */
 export function Defer(options: DeferOptions = {}): MethodDecorator {
-  return declaring((target: object, propertyKey: string | symbol) => {
+  return declaring('@Defer', (target: object, propertyKey: string | symbol) => {
     refuseOnClass('@Defer', target, propertyKey)
     const methodName = String(propertyKey)
     const kind = nonInteractionHandler(target, methodName)

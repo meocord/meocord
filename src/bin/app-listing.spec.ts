@@ -527,7 +527,8 @@ await listInApp(${JSON.stringify(root)}, ${JSON.stringify(classFile())}, 'Ticket
 console.log('listed')
 `,
       )
-      const child = spawn(process.versions.bun ? process.execPath : 'bun', ['list.ts'], { cwd: root, env: { ...process.env, TMPDIR: tmp }, stdio: ['ignore', 'pipe', 'inherit'] })
+      // The repository's tsconfig, for its experimental decorators: Bun reads the one in its cwd, and the root has none
+      const child = spawn(process.versions.bun ? process.execPath : 'bun', [`--tsconfig-override=${path.join(REPO, 'tsconfig.json')}`, 'list.ts'], { cwd: root, env: { ...process.env, TMPDIR: tmp }, stdio: ['ignore', 'pipe', 'inherit'] })
       let stdout = ''
       child.stdout.on('data', chunk => (stdout += chunk))
       const exited = new Promise<NodeJS.Signals | null>(resolve => child.on('exit', (_code, received) => resolve(received)))

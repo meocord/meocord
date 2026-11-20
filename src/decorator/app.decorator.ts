@@ -141,7 +141,7 @@ function assertLabelKey(appName: string, name: string, labelKey: unknown, i18n: 
 export function MeoCord<const G extends readonly unknown[] = [], const I extends readonly unknown[] = [], const F extends readonly unknown[] = []>(
   options: MeoCordOptions<G, I, F>,
 ): (target: any, propertyKey?: string | symbol) => void {
-  return declaring((target: any, propertyKey?: string | symbol): void => {
+  return declaring('@MeoCord', (target: any, propertyKey?: string | symbol): void => {
     if (deprecatedOnMethod('@MeoCord', target, propertyKey)) return
     assertClassOptions(target.name, options)
     assertStageEntries('@MeoCord({ guards })', 'guard', target.name, options.guards ?? [])
