@@ -14,7 +14,7 @@
  * ```
  *
  * @group Utilities
- * @see {@link https://meocord.dev/docs/4.2/formatting | Formatting}
+ * @see {@link https://meocord.dev/docs/4.3/formatting | Formatting}
  */
 export const DiscordLimits = Object.freeze({
   /** A message's `content`. */

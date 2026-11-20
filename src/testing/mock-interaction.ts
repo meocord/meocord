@@ -1701,7 +1701,7 @@ type NotRaw<T> = T extends { member: unknown } ? { member?: Exclude<MockProps<T>
  * @category Mocks
  * @see {@link MockProps}
  * @see {@link createChatInputOptions}
- * @see {@link https://meocord.dev/docs/4.2/mocks | Mocks}
+ * @see {@link https://meocord.dev/docs/4.3/mocks | Mocks}
  */
 export function createMockInteraction<T extends object>(
   Class: InteractionClass<T>,

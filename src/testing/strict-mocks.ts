@@ -82,7 +82,7 @@ export function noteMockMade(): void {
  * @group Testing
  * @category Mocks
  * @see {@link useMockFn}
- * @see {@link https://meocord.dev/docs/4.2/mocks | Mocks}
+ * @see {@link https://meocord.dev/docs/4.3/mocks | Mocks}
  */
 export function useStrictMocks(): void {
   if (settings.strict) return

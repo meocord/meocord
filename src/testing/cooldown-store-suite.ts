@@ -62,7 +62,7 @@ const CLOCK_SLACK_MS = 50
  * @group Testing
  * @category Inspection
  * @see {@link CooldownStore}
- * @see {@link https://meocord.dev/docs/4.2/recipes/cooldown-stores | Cooldown stores}
+ * @see {@link https://meocord.dev/docs/4.3/recipes/cooldown-stores | Cooldown stores}
  */
 export function testCooldownStore(
   name: string,

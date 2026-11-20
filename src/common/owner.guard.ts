@@ -44,7 +44,7 @@ export const OWNER_PARAM = 'ownerId'
  * @category Pipeline stages
  * @see {@link UseGuard}
  * @see {@link GuardDeniedError}
- * @see {@link https://meocord.dev/docs/4.2/guards | Guards}
+ * @see {@link https://meocord.dev/docs/4.3/guards | Guards}
  */
 @Guard({ types: ['interaction'] })
 export class OwnerGuard implements GuardInterface {

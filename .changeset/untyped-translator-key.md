@@ -1,5 +1,0 @@
----
-'meocord': patch
----
-
-A `Translator` injected without its catalog type, as `constructor(private readonly t: Translator)`, still translates no key, and its compile error now says what to write: "This Translator has no catalog type: type it as Translator<typeof enUS>, with your default catalog, to translate with it". It said "Expected 2 arguments, but got 1." for a key alone in `t.default`, `t.locale(l)`, `t.for(…)` and `t.forGuild(…)`, and "… is not assignable to parameter of type 'never'" for `t.localizations` and for a key given params. Every method that takes a key gives that sentence: `t.default`, `t.locale(l)`, `t.for(…)`, `t.forGuild(…)` and `t.localizations`. Such a translator passes on as before, as to `translateError`, and typed translators assign to and from it as before. `MessageKey` and `LocalizationKey` of `CatalogShape`, a bare `Translator`'s catalog type, or of an index signature with no keys that takes any catalog, are that sentence instead of `never`. See [Localisation](https://meocord.dev/docs/4.3/localisation).

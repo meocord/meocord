@@ -25,7 +25,7 @@ import { decoratedName, declaring, refuse, refuseOnClass } from '@src/util/refus
  * @category Params
  * @see {@link Service}
  * @see {@link createToken}
- * @see {@link https://meocord.dev/docs/4.2/services | Services}
+ * @see {@link https://meocord.dev/docs/4.3/services | Services}
  */
 export function Inject(
   token: ProviderToken,

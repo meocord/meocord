@@ -30,7 +30,7 @@ import { decoratedName, refuse, declaring } from '@src/util/refusal.util.js'
  *
  * @group Utilities
  * @see {@link createMetadata}
- * @see {@link https://meocord.dev/docs/4.2/custom-decorators | Custom decorators}
+ * @see {@link https://meocord.dev/docs/4.3/custom-decorators | Custom decorators}
  */
 export function applyDecorators(...decorators: (ClassDecorator | MethodDecorator)[]): ClassDecorator & MethodDecorator {
   return declaring('a decorator made by applyDecorators', function (target: any, propertyKey?: string | symbol, descriptor?: PropertyDescriptor): any {
