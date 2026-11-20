@@ -452,10 +452,12 @@ export interface ResponseState {
    *   privately.
    * - A command whose reply is deferred: `'reply'` edits that reply into the error; `'private'` edits a
    *   private deferral into it, and deletes a public one, then follows up privately.
-   * - A component on a private (ephemeral) message: the error is added to that message, where it fits.
+   * - A component on a private (ephemeral) message that MeoCord answered with an update or a deferred update: the
+   *   error is added to that message, where it fits. Any other answer, such as one the handler made with discord.js,
+   *   may be a reply, which an edit would replace, so the error follows up instead.
    * - Otherwise: a private follow-up. The message the user clicked is never edited into the error, only put back as
-   *   it was before a lock. A select-menu pick deferred and not since edited is first put back with an edit that sets
-   *   no field.
+   *   it was before a lock. A select-menu pick MeoCord deferred and did not since edit is first put back with an edit
+   *   that sets no field.
    *
    * A `UserError` shows its own message, privately, unless `options` say otherwise.
    *
@@ -535,6 +537,11 @@ export class InteractionResponse implements ResponseState {
   private underDefer = false
   /** Whether a raw discord.js call answered first, learned of in `sync()` whether or not `@Defer` configured the state yet. */
   #answeredRaw = false
+  /**
+   * Set once this state answers with `update` or `deferUpdate`, which makes the original response the message the
+   * component is on.
+   */
+  #answeredOnMessage = false
   private timer?: ReturnType<typeof setTimeout>
   /** A lock `@Defer({ mode: 'auto' })` asked for before acknowledging, applied once the timer acknowledges. */
   private pendingLock?: ResponseLockOptions
@@ -741,6 +748,7 @@ export class InteractionResponse implements ResponseState {
       } else if ('deferUpdate' in this.interaction) {
         const target = this.interaction
         await this.call('deferUpdate', undefined, () => target.deferUpdate())
+        this.#answeredOnMessage = true
       }
       this.phase = 'deferred'
     } catch (error) {
@@ -1230,6 +1238,7 @@ export class InteractionResponse implements ResponseState {
       this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never)),
     )
     this.phase = 'replied'
+    this.#answeredOnMessage = true
     this.lastMessage = (response as { resource?: { message?: Message } })?.resource?.message ?? this.lastMessage
     return this.lastMessage
   }
@@ -1598,7 +1607,9 @@ export class InteractionResponse implements ResponseState {
     }
     // The message the component is on: whether it is private does not change with edits.
     const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
-    if (current?.flags?.has(MessageFlags.Ephemeral)) {
+    // Added to only while that message is the answer: any other answer, made elsewhere or by the app, may be a reply,
+    // which an edit would replace
+    if (this.answerIsMessage() && current?.flags?.has(MessageFlags.Ephemeral)) {
       const appended = this.appendError(current, view)
       if (this.fits(appended)) {
         await this.editMessage(appended)
@@ -1606,9 +1617,17 @@ export class InteractionResponse implements ResponseState {
       }
     }
     await this.restore()
-    // A pick deferred and since edited by nothing, not even a restore, still shows in its menu
-    if (this.phase === 'deferred' && this.interaction.isAnySelectMenu()) await this.resetDeferredPick()
+    // A pick this state deferred, and since edited by nothing, not even a restore, still shows in its menu
+    if (this.phase === 'deferred' && this.answerIsMessage() && this.interaction.isAnySelectMenu()) await this.resetDeferredPick()
     await this.followUpNow(this.privateError(view))
+  }
+
+  /**
+   * Whether the answer is the message the component is on: this state answered with `update` or `deferUpdate`, and no
+   * follow-up has taken the answer's place since. An answer made elsewhere or by the app may be a reply instead.
+   */
+  private answerIsMessage(): boolean {
+    return this.#answeredOnMessage && this.answer.kind === 'original'
   }
 
   /**
@@ -1622,6 +1641,7 @@ export class InteractionResponse implements ResponseState {
     const target = this.interaction as AnySelectMenuInteraction
     await this.firstAnswer(() => this.call('update', {}, () => target.update({})))
     this.phase = 'replied'
+    this.#answeredOnMessage = true
   }
 
   /**
