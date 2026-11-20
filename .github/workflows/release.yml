@@ -65,8 +65,9 @@ jobs:
       - name: Check third-party notices
         run: bun run notices:check
 
-      # A stable release's curated notes replace its changesets' lines, so a changeset they leave out would be dropped.
-      - name: Check the release notes cover every changeset
+      # A stable release's curated notes replace its changesets' lines, so a changeset they leave out would be dropped;
+      # and a changeset's text reaches the GitHub release, where a bare @word lists a user among its contributors.
+      - name: Check the release notes cover every changeset and mention no user
         run: bun run notes:check
 
       # Outside pre-release mode main is the current major's line: a major changeset waits for the next one.

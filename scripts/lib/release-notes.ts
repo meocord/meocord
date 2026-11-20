@@ -3,7 +3,8 @@
  * release's changesets, so a release that leaves prereleases reads as one story rather than every beta's changes again.
  * The notes sit in `.changeset/release-notes/<version>/`, one file per section, and are deleted once written. As they
  * replace the changesets' entry whole, the folder's `covered.md` lists every pending changeset, and a check refuses one
- * it leaves out, so a change can't be dropped from the notes silently.
+ * it leaves out, so a change can't be dropped from the notes silently. A release's entry, from its notes or its
+ * changesets, becomes its GitHub release, so a check refuses a word in either that GitHub turns into a mention of a user.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -26,6 +27,9 @@ export const COVERED_FILE = 'covered.md'
 
 /** A line of `covered.md`: `- <file>`, or `- <file>: <reason>`, capturing the file. */
 const COVERED_ITEM = /^- ([^\s:]+\.md)(?::[ \t]+\S.*)?$/
+
+/** A changeset's front matter, which names the packages it bumps and reaches no release notes. */
+const FRONT_MATTER = /^---\r?\n(?:[^]*?\r?\n)?---[ \t]*\r?(?=\n|$)/
 
 /** Where GitHub reads no mention in a line: a code span, a link's target, and a bare URL. */
 const NOT_PROSE = /(`+).*?\1|\]\([^)]*\)|https?:\/\/\S+/g
@@ -94,6 +98,19 @@ function mentions(markdown: string): { line: number; word: string }[] {
   })
 }
 
+/**
+ * What's wrong with `markdown` from `file` if it has words GitHub turns into a mention of a user, naming each word's
+ * line: a release's notes become its GitHub release, which lists each user they mention among its contributors.
+ */
+function mentionProblem(file: string, markdown: string): string | undefined {
+  const mentioned = mentions(markdown)
+  if (mentioned.length === 0) return undefined
+  return (
+    `${file} has words GitHub turns into a mention of a user; write each in backticks:\n` +
+    mentioned.map(({ line, word }) => `  line ${line}: ${word}`).join('\n')
+  )
+}
+
 /** A version's notes, its section files joined in order; throws for a file that isn't a section or that the site would cut. */
 export function readNotes(folder: string): string {
   const files = readdirSync(folder).filter(file => file !== COVERED_FILE)
@@ -105,14 +122,8 @@ export function readNotes(folder: string): string {
   }
   const sections = SECTIONS.filter(file => files.includes(file)).map(file => {
     const raw = readFileSync(path.join(folder, file), 'utf8')
-    // A release's notes become its GitHub release, which lists each user they mention among its contributors
-    const mentioned = mentions(raw)
-    if (mentioned.length > 0) {
-      throw new Error(
-        `${path.join(folder, file)} has words GitHub turns into a mention of a user; write each in backticks:\n` +
-          mentioned.map(({ line, word }) => `  line ${line}: ${word}`).join('\n'),
-      )
-    }
+    const mentioned = mentionProblem(path.join(folder, file), raw)
+    if (mentioned) throw new Error(mentioned)
     const markdown = raw.trim()
     const stray = strayLines(markdown)
     if (stray.length > 0) {
@@ -148,6 +159,13 @@ function packageVersion(root: string): { version: string; parsed: Version } {
   return { version, parsed }
 }
 
+/** The pending changesets, by file name. */
+function pendingChangesets(root: string): string[] {
+  return readdirSync(path.join(root, CHANGESET_DIR))
+    .filter(file => file.endsWith('.md') && file !== CHANGESET_README)
+    .sort()
+}
+
 /**
  * Checks that the `covered.md` of each version's notes later than package.json's lists exactly the pending changesets:
  * `writeReleaseNotes` puts the notes in place of every changeset's line, so one they leave out would be dropped. Run
@@ -166,9 +184,7 @@ export function checkNotesCoverChangesets(root: string): void {
   })
   if (pending.length === 0) return
 
-  const changesets = readdirSync(path.join(root, CHANGESET_DIR))
-    .filter(file => file.endsWith('.md') && file !== CHANGESET_README)
-    .sort()
+  const changesets = pendingChangesets(root)
   const problems = pending.flatMap(version => {
     const covered = path.join(NOTES_DIR, version, COVERED_FILE)
     const listed = existsSync(path.join(root, covered)) ? readCovered(path.join(root, covered)) : []
@@ -180,6 +196,21 @@ export function checkNotesCoverChangesets(root: string): void {
         .filter(file => !changesets.includes(file))
         .map(file => `${covered} lists ${file}, which is not a pending changeset: remove it.`),
     ]
+  })
+  if (problems.length > 0) throw new Error(problems.join('\n'))
+}
+
+/**
+ * Checks that no pending changeset has a word GitHub turns into a mention of a user, outside its front matter, as
+ * `readNotes` checks curated notes: `changeset version` copies each changeset's text into CHANGELOG.md, whose entry
+ * becomes the release's GitHub release.
+ */
+export function checkChangesetMentions(root: string): void {
+  const problems = pendingChangesets(root).flatMap(file => {
+    const changeset = readFileSync(path.join(root, CHANGESET_DIR, file), 'utf8')
+    // Blank, not removed, so the lines after it keep their numbers
+    const prose = changeset.replace(FRONT_MATTER, match => match.replace(/[^\n]/g, ''))
+    return mentionProblem(path.join(CHANGESET_DIR, file), prose) ?? []
   })
   if (problems.length > 0) throw new Error(problems.join('\n'))
 }
