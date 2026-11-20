@@ -349,7 +349,7 @@ export function MessageHandler<
   const Pattern extends string = string,
 >(pattern: Pattern, options?: MessageHandlerOptions): PatternedMessageHandlerDecorator<T, R, Pattern>
 export function MessageHandler(pattern?: string, options: MessageHandlerOptions = {}) {
-  return declaring(function (target: object, propertyKey: string) {
+  return declaring('@MessageHandler', function (target: object, propertyKey: string) {
     refuseOnClass('@MessageHandler', target, propertyKey)
     // An empty pattern, or one of spaces alone, means every message, as no pattern does
     const blank = pattern !== undefined && pattern.trim() === ''
@@ -432,7 +432,7 @@ export function ReactionHandler(
   settings: ReactionHandlerSettings = {},
 ): ReactionHandlerDecorator<MessageReaction | PartialMessageReaction, unknown> {
   const [emoji, own] = typeof emojiOrSettings === 'object' ? [undefined, emojiOrSettings] : [emojiOrSettings, settings]
-  return declaring(function (target: object, propertyKey: string) {
+  return declaring('@ReactionHandler', function (target: object, propertyKey: string) {
     refuseOnClass('@ReactionHandler', target, propertyKey)
     const method = propertyKey.toString()
     addOwnHandler<ReactionHandlerMetadata>(
@@ -763,7 +763,7 @@ export function Command<
   N extends string | Route = string,
 >(name: N, builderOrType: T) {
   const commandName = typeof name === 'string' ? name : (name as Route).pattern
-  return declaring(function <P extends Record<string, any>, R>(
+  return declaring('@Command', function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,
     _descriptor: (
@@ -1025,7 +1025,7 @@ export function Autocomplete<_R = unknown>(
     | TypedPropertyDescriptor<() => R>,
 ) => void
 export function Autocomplete(commandPath: string, optionName?: string): AutocompleteDecorator {
-  return declaring(function <P extends Record<string, any>, R>(
+  return declaring('@Autocomplete', function <P extends Record<string, any>, R>(
     target: object,
     propertyKey: string,
     _descriptor:

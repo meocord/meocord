@@ -76,7 +76,7 @@ export function Validate<S extends StandardSchemaV1, const Pipes extends Validat
   schema: S,
   options: ValidateOptions<Pipes> = {},
 ) {
-  return declaring(function <M extends Handler>(
+  return declaring('@Validate', function <M extends Handler>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsInput<ParamsOf<M>, ValidatedInput<S, Pipes>>,
@@ -147,7 +147,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
   key: K,
   ...pipes: Pipes & { [I in keyof Pipes]: CheckedEntry<Pipes[I], new (...args: any[]) => PipeInterface> }
 ) {
-  return declaring(function <M extends Handler>(
+  return declaring('@UsePipe', function <M extends Handler>(
     target: object,
     propertyKey: string,
     _descriptor: TypedPropertyDescriptor<M> & AcceptsPiped<ParamsOf<M>, K, LastPipeOutput<Pipes>>,
@@ -187,7 +187,7 @@ export function UsePipe<K extends string, const Pipes extends readonly [PipeEntr
  * @see {@link https://meocord.dev/docs/4.2/validation | Validation and pipes}
  */
 export function Pipe() {
-  return declaring(function (target: new (...args: any[]) => PipeInterface, propertyKey?: string | symbol) {
+  return declaring('@Pipe', function (target: new (...args: any[]) => PipeInterface, propertyKey?: string | symbol) {
     refuseOnMethod('@Pipe', target, propertyKey)
     makeInjectable(target)
   })

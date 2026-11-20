@@ -40,7 +40,7 @@ import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.2/how-a-call-runs | How a call runs}
  */
 export function Controller(options: ControllerOptions = {}) {
-  return declaring(function (target: abstract new (...args: any[]) => unknown, propertyKey?: string | symbol) {
+  return declaring('@Controller', function (target: abstract new (...args: any[]) => unknown, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@Controller', target, propertyKey)) return
     makeInjectable(target)
     if (options.inheritStages === false) Reflect.defineMetadata(META.inheritStages, false, target)

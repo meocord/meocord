@@ -37,7 +37,7 @@ import { META } from '@src/util/metadata-keys.js'
  * @category Controllers
  */
 export function UseTheme(theme: ThemeOverride): ClassDecorator & MethodDecorator {
-  return declaring(function (target: object, propertyKey?: string | symbol) {
+  return declaring('@UseTheme', function (target: object, propertyKey?: string | symbol) {
     const onClass = propertyKey === undefined
     // The class it themes: the target itself on a class or a static member, else the target's constructor
     const owner: object = onClass || typeof target === 'function' ? target : target.constructor

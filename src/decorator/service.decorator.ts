@@ -30,7 +30,7 @@ import { deprecatedOnMethod, declaring } from '@src/util/refusal.util.js'
  * @see {@link https://meocord.dev/docs/4.2/services | Services}
  */
 export function Service<T>() {
-  return declaring(function (target: new (...args: any[]) => T, propertyKey?: string | symbol) {
+  return declaring('@Service', function (target: new (...args: any[]) => T, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@Service', target, propertyKey)) return
     makeInjectable(target)
   })

@@ -42,7 +42,7 @@ import { META } from '@src/util/metadata-keys.js'
 export function Observer(
   options: ObserverOptions = {},
 ) {
-  return declaring(function (target: new (...args: any[]) => DispatchObserver, propertyKey?: string | symbol) {
+  return declaring('@Observer', function (target: new (...args: any[]) => DispatchObserver, propertyKey?: string | symbol) {
     refuseOnMethod('@Observer', target, propertyKey)
     if (typeof (target.prototype as Partial<DispatchObserver>).onSettled !== 'function') {
       throw refuse(new Error(`${target.name}: an @Observer needs an onSettled method, and it has none.`))

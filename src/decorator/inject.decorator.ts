@@ -31,7 +31,7 @@ export function Inject(
   token: ProviderToken,
 ): (target: object, propertyKey: string | symbol | undefined, parameterIndex: number) => void {
   const decorate = inject(token as ServiceIdentifier)
-  return declaring((target, propertyKey, parameterIndex) => {
+  return declaring('@Inject', (target, propertyKey, parameterIndex) => {
     // A constructor parameter has no property key either, but has an index
     if (typeof parameterIndex !== 'number') refuseOnClass('@Inject', target, propertyKey, 'a constructor parameter or a property')
     // A method's parameter has both, and nothing injects it

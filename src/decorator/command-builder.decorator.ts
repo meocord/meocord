@@ -46,7 +46,7 @@ function guildsBase(target: object): { name: string } | undefined {
  * @see {@link https://meocord.dev/docs/4.2/slash-commands | Slash commands}
  */
 export function CommandBuilder<T extends BuildableCommandType>(commandType: T, options: CommandBuilderOptions = {}) {
-  return declaring(function (target: new () => CommandBuilderBase<T>, propertyKey?: string | symbol) {
+  return declaring('@CommandBuilder', function (target: new () => CommandBuilderBase<T>, propertyKey?: string | symbol) {
     if (deprecatedOnMethod('@CommandBuilder', target, propertyKey)) return
     makeInjectable(target)
 
