@@ -13,8 +13,8 @@ export interface ThemeScope {
   ready?: Promise<void>
   /**
    * The scope a function bound in this call runs a later call in: the handler's theme with the server's and user's
-   * themes over it of whatever the call's `args` name, such as an interaction, a message, a reaction or a member, or
-   * `undefined` when `args` name neither.
+   * themes over it of whatever the call's `args` name, such as an interaction, a message, a reaction, a member or a
+   * server, or `undefined` when `args` name neither.
    */
   rebuild?: RebuildTheme
 }
@@ -231,10 +231,10 @@ export function useTheme(): ResolvedTheme {
  *
  * Each call's theme is built as a handler's call is: the app's theme, the `@UseTheme` layers of the handler that
  * bound it, then `@MeoCord`'s `themeFor` for the server and the user its arguments name, as an interaction, a message,
- * a reaction or a member does. Every member who clicks a collector's button is answered in their own server's and
- * user's theme. A theme `themeFor` is still looking up replaces the handler's once found, so `respond()` waits for it
- * and `useTheme()` reads the handler's until then. A call whose arguments name neither a server nor a user, such as a
- * collector's `end`, runs in the whole theme of the call that bound it.
+ * a reaction, a member, a channel or the server itself does. Every member who clicks a collector's button is answered
+ * in their own server's and user's theme. A theme `themeFor` is still looking up replaces the handler's once found, so
+ * `respond()` waits for it and `useTheme()` reads the handler's until then. A call whose arguments name neither a
+ * server nor a user, such as a collector's `end`, runs in the whole theme of the call that bound it.
  *
  * @param fn - The function to run in the handler's theme; `this` and its arguments are passed through.
  * @returns A function that runs `fn` in that theme, and returns what `fn` returns.

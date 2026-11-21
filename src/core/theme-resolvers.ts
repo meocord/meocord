@@ -1,4 +1,15 @@
-import { BaseInteraction, Message, MessageReaction, User } from 'discord.js'
+import {
+  BaseChannel,
+  BaseInteraction,
+  DMChannel,
+  Guild,
+  Message,
+  MessageReaction,
+  PartialGroupDMChannel,
+  PollAnswer,
+  ThreadMember,
+  User,
+} from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@src/interface/index.js'
 import { themeProblems } from '@src/core/theme-validation.js'
@@ -390,12 +401,15 @@ export interface ThemeTargets {
 }
 
 /**
- * The server and user a call comes from: an interaction's or a message's server and its user or author; a
- * reaction's message's server and the user who reacted, which a reaction handler gets second as `{ user }` and a
- * reaction event as the `User`; an event argument's server and user, when it has them.
+ * The server and user a call comes from: an interaction's or a message's, with its user or author; a reaction's
+ * message's server and the user who reacted, given second; an event argument's, by its fields or its class, or else the
+ * first later server or channel in one, never after a direct message. An update whose old value is `null` is read from
+ * its new value.
  */
 export function themeTargets(args: readonly unknown[]): ThemeTargets {
-  const [first, second] = args as [Record<string, any> | undefined, Record<string, any> | undefined]
+  // discord.js gives an update null for an old value it had not cached, and the new value second
+  const given = args[0] === null && args.length > 1 ? args.slice(1) : args
+  const [first, second] = given as [Record<string, any> | undefined, Record<string, any> | undefined]
   if (!first || typeof first !== 'object') return {}
   // An interaction, a message and a reaction by their class, so nothing is read that the class lacks
   if (first instanceof BaseInteraction) return { guildId: serverOf(first), userId: idOf(first.user?.id) }
@@ -404,14 +418,46 @@ export function themeTargets(args: readonly unknown[]): ThemeTargets {
   if (first instanceof MessageReaction) return { guildId: idOf(first.message.guildId), userId: userOf(second) }
   // An event argument of any class, read quietly: a default-mode mock answers a key its class lacks with a placeholder
   return readQuietly(() => {
-    // A call whose guildId is null has no server at all
     const own: unknown = first.guildId
-    const guildId = idOf(own) ?? idOf(first.guild?.id) ?? (own === null ? undefined : idOf(first.message?.guildId))
+    const byClass = serverByClass(first)
+    // A call whose guildId is null, or a direct message's channel or poll, has no server at all
+    const direct = own === null || byClass === null
+    const guildId =
+      idOf(own) ??
+      idOf(first.guild?.id) ??
+      (direct ? undefined : (idOf(first.message?.guildId) ?? byClass ?? laterServer(given.slice(1))))
     // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
     const userId =
       idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)
     return { guildId, userId }
   })
+}
+
+/**
+ * A server named other than by `guildId`, `guild` or `message`: a server's own id, a thread member's thread's, a poll
+ * answer's message's; `null` for a direct message's channel or poll, which has none.
+ */
+function serverByClass(value: object): string | null | undefined {
+  if (value instanceof Guild) return idOf(value.id)
+  if (value instanceof DMChannel || value instanceof PartialGroupDMChannel) return null
+  if (value instanceof ThreadMember) return idOf(value.thread?.guildId)
+  if (value instanceof PollAnswer) {
+    const guildId: unknown = value.poll?.message?.guildId
+    return guildId === null ? null : idOf(guildId)
+  }
+  return undefined
+}
+
+/** The server of the first later argument that is a server or a channel in one, as a collection's event gives it. */
+function laterServer(rest: readonly unknown[]): string | undefined {
+  for (const value of rest) {
+    if (value instanceof Guild) return idOf(value.id)
+    if (value instanceof BaseChannel) {
+      const guildId = idOf((value as { guildId?: unknown }).guildId)
+      if (guildId !== undefined) return guildId
+    }
+  }
+  return undefined
 }
 
 /**
