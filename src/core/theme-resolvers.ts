@@ -420,12 +420,12 @@ export function themeTargets(args: readonly unknown[]): ThemeTargets {
   return readQuietly(() => {
     const own: unknown = first.guildId
     const byClass = serverByClass(first)
-    // A call whose guildId is null, or a direct message's channel or poll, has no server at all
-    const direct = own === null || byClass === null
-    const guildId =
-      idOf(own) ??
-      idOf(first.guild?.id) ??
-      (direct ? undefined : (idOf(first.message?.guildId) ?? byClass ?? laterServer(given.slice(1))))
+    let guildId = idOf(own) ?? idOf(first.guild?.id)
+    // A call whose guildId or message's guildId is null, or a direct message's channel or poll, has no server at all
+    if (guildId === undefined && own !== null && byClass !== null) {
+      const byMessage: unknown = first.message?.guildId
+      if (byMessage !== null) guildId = idOf(byMessage) ?? byClass ?? laterServer(given.slice(1))
+    }
     // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
     const userId =
       idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)
