@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -15,11 +16,19 @@ vi.mock('@src/common/index.js', () => ({
   ),
 }))
 
+// The runs the CLI starts are read from its calls to spawn: a run stopped before its process records anything, as a
+// slow start can be, still counts, and is still ended after its test
+vi.mock('child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
+
+const { spawn } = await import('child_process')
 const { ESLINT_KILL_GRACE_MS, ESLintBudget, formatGeneratedFiles, lintFile } = await import('@src/util/generator-cli.util.js')
 
 /**
  * The project's ESLint run as a real process: stand-ins in a project of their own, run by this runtime as the CLI runs
- * the real one, each recording its arguments and process ID before running `body`.
+ * the real one, each running `body`.
  */
 describe("the project's ESLint", () => {
   let root: string
@@ -27,15 +36,17 @@ describe("the project's ESLint", () => {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
     writeFileSync(path.join(root, file), text)
   }
-  const runs = () => (existsSync(path.join(root, 'runs.json')) ? readFileSync(path.join(root, 'runs.json'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as { pid: number; args: string[] }) : [])
-  /** An ESLint whose bin records each run, then runs `body`. */
+  /** The arguments of each run started, after the script. */
+  const runs = () => vi.mocked(spawn).mock.calls.map(([, args]) => (args as string[]).slice(1))
+  /** The process of each run started. */
+  const children = () => vi.mocked(spawn).mock.results.map(result => result.value as ChildProcess)
+  /** An ESLint whose bin runs `body`. */
   const eslint = (body: string) => {
     write('node_modules/eslint/package.json', JSON.stringify({ name: 'eslint', bin: { eslint: 'bin.js' } }))
     write(
       'node_modules/eslint/bin.js',
       `const fs = require('fs')
 const args = process.argv.slice(2)
-fs.appendFileSync(require('path').join(__dirname, '..', '..', 'runs.json'), JSON.stringify({ pid: process.pid, args }) + '\\n')
 ${body}
 `,
     )
@@ -64,10 +75,11 @@ ${body}
     vi.spyOn(process, 'cwd').mockReturnValue(root)
     mockLoggerLog.mockClear()
     mockLoggerWarn.mockClear()
+    vi.mocked(spawn).mockClear()
   })
   afterEach(() => {
     vi.restoreAllMocks()
-    for (const { pid } of runs()) if (alive(pid)) process.kill(pid, 'SIGKILL')
+    for (const { pid } of children()) if (pid !== undefined && alive(pid)) process.kill(pid, 'SIGKILL')
     rmSync(root, { recursive: true, force: true })
   })
 
@@ -78,7 +90,7 @@ ${body}
 
       await formatGeneratedFiles(['/src/a.service.ts', '/src/a.service.spec.ts'])
 
-      expect(runs().map(run => run.args)).toEqual([['--fix', '/src/a.service.ts', '/src/a.service.spec.ts']])
+      expect(runs()).toEqual([['--fix', '/src/a.service.ts', '/src/a.service.spec.ts']])
       expect(existsSync(path.join(root, 'done'))).toBe(true)
       expect(mockLoggerLog).toHaveBeenCalledWith("Formatting with your project's ESLint...")
       expect(mockLoggerWarn).not.toHaveBeenCalled()
@@ -130,7 +142,7 @@ ${body}
 
       expect(await lintFile(path.join(root, 'src/a.ts'), root, new ESLintBudget(300))).toEqual({ unchecked: 'ESLint did not finish within 0.3 s and was stopped' })
       expect(Date.now() - started).toBeLessThan(300 + ESLINT_KILL_GRACE_MS + 1_000)
-      expect(await gone(runs()[0].pid)).toBe(true)
+      expect(await gone(children()[0].pid!)).toBe(true)
     })
 
     // What a config starts is its own: ESLint's result is read once ESLint itself exits
