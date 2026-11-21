@@ -129,6 +129,22 @@ describe('themeTargets, given the arguments discord.js gives an event', () => {
     expect(later.reads.id).toBe(0)
   })
 
+  it("takes no server after a value whose message's guildId is null, a direct message's, reading no later argument", () => {
+    const later = countedGuild()
+
+    expect(themeTargets([{ message: { guildId: null } }, channel])).toEqual({})
+    expect(themeTargets([{ message: { guildId: null } }, later.guild])).toEqual({})
+    expect(later.reads.id).toBe(0)
+  })
+
+  it.each([
+    ["a message's server", { message: { guildId: HOME } }],
+    ["its own server over its message's null one", { guildId: HOME, message: { guildId: null } }],
+    ["its server's over its message's null one", { guild: { id: HOME }, message: { guildId: null } }],
+  ])('takes %s over a later channel', (_name, first) => {
+    expect(themeTargets([first, channel])).toEqual({ guildId: HOME })
+  })
+
   it.each([
     ['given first', (guild: djs.Guild) => [guild, guild]],
     ['given after a collection', (guild: djs.Guild) => [new Collection(), guild]],
