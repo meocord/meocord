@@ -333,6 +333,7 @@ function scopeOver(
  * The theme scope a call runs in, or `undefined` when it needs none: its handlers share the theme read outside any
  * call, and no resolver applies. The scope holds the handler's theme, or the app's without a handler, with the call's
  * server's and user's themes over it; when those are still being looked up, `ready` settles once they are in the scope.
+ * `event` names the event an `@On` or `@Once` call handles, for the user it names.
  */
 export function beginCallTheme(
   container: Container,
@@ -340,13 +341,14 @@ export function beginCallTheme(
   prototype?: object,
   methodName?: string,
   bound: () => ReadyBound = () => readyBoundOf(args),
+  event?: string,
 ): { scope: ThemeScope; ready?: Promise<void> } | undefined {
   const themes = current(container)
   if (!themes) return undefined
   // Read once, for the gate and the deadline alike, and only by a call that waits
   if (themes.resolvers) bound = once(bound)
   // The call's server and user, read once: every lookup of its themes, now or once the hooks settle, takes them from here
-  const targets = themes.resolvers && themeTargets(args)
+  const targets = themes.resolvers && themeTargets(args, event)
   const cached = targets && cachedLayers(themes.resolvers!, targets)
   const looksUp = cached !== undefined
   // Only a call that looks something up waits at the gate, so no wait is left that nothing reads

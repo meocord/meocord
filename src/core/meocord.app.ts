@@ -740,7 +740,7 @@ export class MeoCordApp implements MeoCordApplication {
           this.calls.run(label, async () => {
             try {
               const instance = source.resolve()
-              if (instance) await runHandler(this.container, instance, method, args, { fallback, type: 'event' })
+              if (instance) await runHandler(this.container, instance, method, args, { fallback, type: 'event', event })
             } catch (error) {
               // Only resolving the instance can fail here; the pipeline hands every other error to the fallback
               logError(error)

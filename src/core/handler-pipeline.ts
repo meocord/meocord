@@ -504,6 +504,8 @@ export interface RunOptions {
   fetchArgs?: (args: unknown[], admitted: AdmittedCall) => Promise<unknown[]>
   /** What the call handles, when its first argument cannot say, as for an event whose first argument is a message. */
   type?: ExecutionContextType
+  /** The event an `@On` or `@Once` call handles, which says whether a created structure's creator is its user. */
+  event?: string
   /**
    * Waits for the observers before the run settles, as the testing module does so a test sees what they
    * were told. At runtime they are never waited for.
@@ -603,7 +605,7 @@ export async function runHandler(
   const prototype = Object.getPrototypeOf(instance) as object
   // The handler's theme, with the call's server's and user's over it, for everything the call runs; with waitForReady,
   // looked up once the theme resolver's hooks have settled, within the call's own bound
-  const theme = beginCallTheme(container, args, prototype, methodName, () => callBound(args, options))
+  const theme = beginCallTheme(container, args, prototype, methodName, () => callBound(args, options), options.event)
   return theme
     ? runInThemeScope(theme.scope, () => runPipeline(container, instance, methodName, args, options, theme.ready))
     : runPipeline(container, instance, methodName, args, options)
