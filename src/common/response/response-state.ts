@@ -375,8 +375,9 @@ export interface ResponseState {
   /**
    * Locks the message a component is on, as `@Defer`'s second step does: snapshots its components
    * and embeds, disables its controls, shows the loading emoji on the clicked button, and adds the
-   * presenter's loading view. Commands have no message to lock. Does nothing once locked, with `disable: 'none'`, or
-   * once Discord refused the acknowledgement because something else answered first, which may have been a reply.
+   * presenter's loading view. Commands have no message to lock. Does nothing once locked, with `disable: 'none'`,
+   * after the interaction was answered with a reply or a deferred reply, as by the app's own `deferReply()`, or once
+   * Discord refused the acknowledgement because something else answered first, which may have been a reply.
    *
    * The loading view is left out when it would pass 10 embeds or the Components V2 component limit;
    * the lock still applies. A loading view left behind by a crash or restart is dropped first.
@@ -868,6 +869,10 @@ export class InteractionResponse implements ResponseState {
     this.sync()
     // Answered over since, or first by something else, whose answer may be a reply the lock would replace
     if ((this.phase === 'replied' && !this.acknowledging) || this.#acknowledgedElsewhere) return
+    // Deferred with a reply, the app's own or a private one for an error view: that reply is the original response, which
+    // the lock would replace. discord.js gives ephemeral a value only in reply() and deferReply(); this state's own
+    // deferred update is known to have left the message the answer, whatever ephemeral a test gave
+    if (this.phase === 'deferred' && !this.#answeredOnMessage && typeof this.interaction.ephemeral === 'boolean') return
 
     const theme = await themeForInteraction(this.interaction)
     // Drawn only now, after the acknowledgement, so a slow drawing never misses Discord's three seconds
