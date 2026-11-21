@@ -1052,7 +1052,7 @@ export class TestingModule {
     if (event && strictMocks()) {
       this.checkArgumentCount(controller, methodName, instance[methodName], first, args.length)
       this.registerEventClients(args as unknown[])
-      const { ran, error } = await this.track(() => this.runEventHandler(instance, methodName, args as unknown[]))
+      const { ran, error } = await this.track(() => this.runEventHandler(instance, methodName, args as unknown[], event.event))
       return error === undefined ? { ran } : { ran, error }
     }
     const interaction = first instanceof BaseInteraction ? (first as Interaction) : undefined
@@ -1078,7 +1078,7 @@ export class TestingModule {
     this.checkArgumentCount(controller, methodName, instance[methodName], first, callArgs.length)
     if (event) this.warnEventRun(controller, methodName, event, first, callArgs.length !== args.length)
     this.registerClient(first)
-    const { ran, error } = await this.track(() => runHandler(this.container, instance, methodName, callArgs, { awaitObservers: true, ...hooks }))
+    const { ran, error } = await this.track(() => runHandler(this.container, instance, methodName, callArgs, { event: event?.event, awaitObservers: true, ...hooks }))
     return error === undefined ? { ran } : { ran, error }
   }
 
@@ -1117,9 +1117,10 @@ export class TestingModule {
     instance: Record<string, (...args: unknown[]) => unknown>,
     method: string,
     args: unknown[],
+    event: string,
     fallback?: Fallback,
   ): Promise<HandlerOutcome> {
-    return runHandler(this.container, instance, method, args, { type: 'event', awaitObservers: true, fallback })
+    return runHandler(this.container, instance, method, args, { type: 'event', event, awaitObservers: true, fallback })
   }
 
   /** The autocomplete mismatches already warned about without strict mocks, so each handler and route warns once. */
@@ -1485,7 +1486,7 @@ export class TestingModule {
         const run = async () => {
           const instance = source.resolve()
           if (!instance) return false
-          const { ran } = await this.runEventHandler(instance, handler.method, args, fallback)
+          const { ran } = await this.runEventHandler(instance, handler.method, args, event, fallback)
           return ran
         }
         calls.push(this.track(run))

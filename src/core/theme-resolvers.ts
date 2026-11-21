@@ -1,14 +1,30 @@
 import {
+  AutoModerationActionExecution,
+  AutoModerationRule,
   BaseChannel,
   BaseInteraction,
+  Client,
   DMChannel,
+  Entitlement,
+  Events,
   Guild,
+  GuildAuditLogsEntry,
+  GuildEmoji,
+  GuildScheduledEvent,
+  Invite,
   Message,
   MessageReaction,
   PartialGroupDMChannel,
   PollAnswer,
+  Presence,
+  SoundboardSound,
+  Sticker,
+  Subscription,
+  ThreadChannel,
   ThreadMember,
   User,
+  VoiceChannelEffect,
+  VoiceState,
 } from 'discord.js'
 import { Logger } from '@src/common/logger.js'
 import { type ThemeOverride, type ThemeResolver, type ThemeResolvers } from '@src/interface/index.js'
@@ -402,11 +418,14 @@ export interface ThemeTargets {
 
 /**
  * The server and user a call comes from: an interaction's or a message's, with its user or author; a reaction's
- * message's server and the user who reacted, given second; an event argument's, by its fields or its class, or else the
- * first later server or channel in one, never after a direct message. An update whose old value is `null` is read from
- * its new value.
+ * message's server and the user who reacted, given second; a poll answer's server and the voter, whose id is given
+ * second; an event argument's, by its fields or its class, or else the first later server or channel in one, never
+ * after a direct message. The client and an action the bot took name no user. The creator of a sticker, an emoji, a
+ * soundboard sound, a thread, an AutoMod rule, a scheduled event or an invite is the user only in `event`, the event
+ * that created it; with no `event`, as for a function `bindTheme` wraps, no creator is. An update whose old value is
+ * `null` is read from its new value.
  */
-export function themeTargets(args: readonly unknown[]): ThemeTargets {
+export function themeTargets(args: readonly unknown[], event?: string): ThemeTargets {
   // discord.js gives an update null for an old value it had not cached, and the new value second
   const given = args[0] === null && args.length > 1 ? args.slice(1) : args
   const [first, second] = given as [Record<string, any> | undefined, Record<string, any> | undefined]
@@ -427,8 +446,15 @@ export function themeTargets(args: readonly unknown[]): ThemeTargets {
       if (byMessage !== null) guildId = idOf(byMessage) ?? byClass ?? laterServer(given.slice(1))
     }
     // Only a User's own id: an event of an old and a new channel, role or message would give the new one's otherwise
+    const byClassUser = userByClass(first, second, event)
     const userId =
-      idOf(first.user?.id) ?? idOf(first.author?.id) ?? idOf(second?.user?.id) ?? (second instanceof User ? idOf(second.id) : undefined)
+      byClassUser === null
+        ? undefined
+        : (byClassUser ??
+          idOf(first.user?.id) ??
+          idOf(first.author?.id) ??
+          idOf(second?.user?.id) ??
+          (second instanceof User ? idOf(second.id) : undefined))
     return { guildId, userId }
   })
 }
@@ -445,6 +471,55 @@ function serverByClass(value: object): string | null | undefined {
     const guildId: unknown = value.poll?.message?.guildId
     return guildId === null ? null : idOf(guildId)
   }
+  return undefined
+}
+
+/**
+ * The user a structure's class names: a poll vote's voter, given second; a voice state's, a thread member's, a
+ * presence's, a voice effect's, an AutoMod action's, an entitlement's or a subscription's user, whose `user` is missing
+ * or null while discord.js has not cached them; an audit log entry's executor unless it is the bot; a creator, in its
+ * create event only. `null` for no user, so no field is read for one: the client, whose `user` is the bot, and a
+ * sticker, an emoji or a soundboard sound outside its create event, whose `user` or `author` is its creator.
+ */
+function userByClass(first: object, second: unknown, event: string | undefined): string | null | undefined {
+  if (first instanceof PollAnswer) return idOf(second)
+  if (first instanceof VoiceState || first instanceof ThreadMember) return idOf(first.id)
+  if (
+    first instanceof Presence ||
+    first instanceof VoiceChannelEffect ||
+    first instanceof AutoModerationActionExecution ||
+    first instanceof Entitlement ||
+    first instanceof Subscription
+  ) {
+    return idOf(first.userId)
+  }
+  if (first instanceof Client) return null
+  if (first instanceof GuildAuditLogsEntry) {
+    const executorId = idOf(first.executorId)
+    const botId = idOf(first.executor?.client.user?.id) ?? (second instanceof Guild ? idOf(second.client.user?.id) : undefined)
+    return executorId === botId ? undefined : executorId
+  }
+  const created = creation(first, second)
+  if (!created) return undefined
+  const [createEvent, creatorId] = created
+  if (event === createEvent) return idOf(creatorId)
+  // Elsewhere a sticker's, an emoji's or a sound's `user` or `author` is its creator, not the call's user
+  return first instanceof Sticker || first instanceof GuildEmoji || first instanceof SoundboardSound ? null : undefined
+}
+
+/**
+ * The event that creates a structure whose creator is a call's user only in that event, and the creator's id. A thread
+ * the bot only gained access to, as when it is added to a private one, comes with `threadCreate` too, but not newly
+ * created, as the event's second argument says: its owner did not cause the call.
+ */
+function creation(value: object, second: unknown): [event: string, creatorId: unknown] | undefined {
+  if (value instanceof Sticker) return [Events.GuildStickerCreate, value.user?.id]
+  if (value instanceof GuildEmoji) return [Events.GuildEmojiCreate, value.author?.id]
+  if (value instanceof SoundboardSound) return [Events.GuildSoundboardSoundCreate, value.user?.id]
+  if (value instanceof ThreadChannel) return [Events.ThreadCreate, second === true ? value.ownerId : undefined]
+  if (value instanceof AutoModerationRule) return [Events.AutoModerationRuleCreate, value.creatorId]
+  if (value instanceof GuildScheduledEvent) return [Events.GuildScheduledEventCreate, value.creatorId]
+  if (value instanceof Invite) return [Events.InviteCreate, value.inviterId]
   return undefined
 }
 
