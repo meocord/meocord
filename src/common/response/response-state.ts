@@ -375,7 +375,8 @@ export interface ResponseState {
   /**
    * Locks the message a component is on, as `@Defer`'s second step does: snapshots its components
    * and embeds, disables its controls, shows the loading emoji on the clicked button, and adds the
-   * presenter's loading view. Commands have no message to lock. Does nothing once locked, or with `disable: 'none'`.
+   * presenter's loading view. Commands have no message to lock. Does nothing once locked, with `disable: 'none'`, or
+   * once Discord refused the acknowledgement because something else answered first, which may have been a reply.
    *
    * The loading view is left out when it would pass 10 embeds or the Components V2 component limit;
    * the lock still applies. A loading view left behind by a crash or restart is dropped first.
@@ -542,6 +543,11 @@ export class InteractionResponse implements ResponseState {
    * component is on.
    */
   #answeredOnMessage = false
+  /**
+   * Set once Discord refuses this state's own acknowledgement because something it can't see answered first. That
+   * answer may be a reply, which is then the original response, so no lock is drawn over it.
+   */
+  #acknowledgedElsewhere = false
   private timer?: ReturnType<typeof setTimeout>
   /** A lock `@Defer({ mode: 'auto' })` asked for before acknowledging, applied once the timer acknowledges. */
   private pendingLock?: ResponseLockOptions
@@ -753,6 +759,7 @@ export class InteractionResponse implements ResponseState {
       this.phase = 'deferred'
     } catch (error) {
       if (errorCode(error) !== ALREADY_ACKNOWLEDGED) throw error
+      this.#acknowledgedElsewhere = true
       this.answeredElsewhere()
     }
   }
@@ -859,7 +866,8 @@ export class InteractionResponse implements ResponseState {
     }
     await this.acknowledgeNow()
     this.sync()
-    if (this.phase === 'replied' && !this.acknowledging) return
+    // Answered over since, or first by something else, whose answer may be a reply the lock would replace
+    if ((this.phase === 'replied' && !this.acknowledging) || this.#acknowledgedElsewhere) return
 
     const theme = await themeForInteraction(this.interaction)
     // Drawn only now, after the acknowledgement, so a slow drawing never misses Discord's three seconds
