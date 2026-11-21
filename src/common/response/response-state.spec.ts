@@ -17,7 +17,7 @@ import {
   resolveColor,
   StringSelectMenuInteraction,
 } from 'discord.js'
-import { vi } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { Theme } from '@src/common/theme.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
@@ -27,6 +27,7 @@ import { LOCK_MEMORY_MS, lockedMessageCount, respond, responseOf } from '@src/co
 import { RENDERED_CONTAINER_ID, setPresenter } from '@src/common/response/presenter.js'
 import { UnroutedExecutionContext } from '@src/common/execution-context.js'
 import { createDiscordError, createMockInteraction, createMockMessage, getResponse } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import { collectGarbage, keepsDroppedObjects } from '@src/spec-collection.js'
 import { type ResponsePresenter } from '@src/interface/index.js'
 
@@ -842,8 +843,10 @@ describe('respond(), call by call', () => {
       await interaction.deferUpdate()
 
       await respond(interaction).lock()
+      await respond(interaction).send({ content: 'done' })
 
-      expect(interaction.editReply).toHaveBeenCalled()
+      expect(interaction.editReply).toHaveBeenCalledTimes(2)
+      expect(interaction.editReply.mock.calls[1][0]).toMatchObject({ content: 'done', components: [row('refresh')] })
     })
 
     it('locks nothing on a message a raw update already answered', async () => {
@@ -856,15 +859,43 @@ describe('respond(), call by call', () => {
       expect(respond(interaction).original).toBeUndefined()
     })
 
-    // 40060 from our own acknowledgement means another process acknowledged it: the message is still ours to lock
-    it('still locks after its own acknowledgement found the interaction acknowledged elsewhere', async () => {
+    // 40060 from our own acknowledgement means something else answered first, maybe with a reply, which is then the
+    // original response: a lock would replace it with the loading view, and its restore with a copy of the message
+    // Only 40060 says something else answered: an acknowledgement refused for another reason and made again is this
+    // state's own, so the message is still the answer, and a private follow-up from outside leaves it locked
+    it.each([
+      ['default', false],
+      ['strict', true],
+    ])('still locks after its own acknowledgement was refused for another reason and made again, with %s mocks', async (_mode, strict) => {
+      forgetStrictMocks()
+      if (strict) useStrictMocks()
+      onTestFinished(() => forgetStrictMocks())
+      const interaction = button(messageWith({ components: [row('refresh')] }))
+      interaction.deferUpdate.mockRejectedValueOnce(createDiscordError(50013))
+      interaction.editReply.mockResolvedValue(createMockMessage() as never)
+
+      await expect(respond(interaction).acknowledge()).rejects.toMatchObject({ code: 50013 })
+      await respond(interaction).acknowledge()
+      await interaction.followUp({ content: 'noted', flags: MessageFlags.Ephemeral })
+      await respond(interaction).lock()
+      await respond(interaction).send({ content: 'done' })
+
+      expect(interaction.editReply).toHaveBeenCalledTimes(2)
+      expect(JSON.stringify(interaction.editReply.mock.calls[0][0])).toContain('"disabled":true')
+      expect(interaction.editReply.mock.calls[1][0]).toMatchObject({ content: 'done', components: [row('refresh')] })
+    })
+
+    it('locks nothing after its own acknowledgement found the interaction acknowledged elsewhere', async () => {
       const interaction = button(messageWith({ components: [row('refresh')] }))
       interaction.deferUpdate.mockRejectedValueOnce(createDiscordError(40060))
       interaction.editReply.mockResolvedValue(createMockMessage() as never)
 
       await respond(interaction).lock()
+      await respond(interaction).send({ content: 'done' })
 
-      expect(interaction.editReply).toHaveBeenCalled()
+      expect(interaction.editReply.mock.calls).toEqual([[expect.objectContaining({ content: 'done' })]])
+      expect(interaction.editReply.mock.calls[0][0]).not.toHaveProperty('components')
+      expect(respond(interaction).original).toBeUndefined()
     })
 
     it('adds the loading container to a Components V2 card only while it fits in 40 components', async () => {
