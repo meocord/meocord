@@ -1855,15 +1855,20 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
     Object.defineProperty(instance, 'ephemeral', {
       get: () => {
-        // Quiet once a test answered the interaction itself: MeoCord then reads ephemeral only for truthiness, where false
-        // and null act alike
-        if (!ephemeralDecided && !strict && !answeredOutside()) {
-          warnPlaceholder(
-            mockLogger,
-            `${(Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name}.ephemeral`,
-            'it is null until reply() or deferReply() decides it, as discord.js has it',
-            'Reply or defer first, or call useStrictMocks() to read null now.',
-          )
+        // Undecided in default mode: false with a warning before any answer, and false quietly once a test marked the
+        // interaction replied itself. Marked only deferred, null, as discord.js's flag holds it after a deferred update,
+        // so MeoCord's lock draws as it does on a bot
+        if (!ephemeralDecided && !strict) {
+          if (answeredOutside()) {
+            if (instance.deferred && !instance.replied) return null
+          } else {
+            warnPlaceholder(
+              mockLogger,
+              `${(Object.getPrototypeOf(instance) as { constructor: { name: string } }).constructor.name}.ephemeral`,
+              'it is null until reply() or deferReply() decides it, as discord.js has it',
+              'Reply or defer first, or call useStrictMocks() to read null now.',
+            )
+          }
         }
         return ephemeral
       },
@@ -2017,11 +2022,13 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
           refuse(method, alreadyReplied(), byTest)
         }
         // Read first: flags discord.js refuses throw before anything changes; reply() and deferReply() decide
-        // ephemeral, as discord.js's do, and update() and deferUpdate() leave it
+        // ephemeral, as discord.js's do, and update() and deferUpdate() leave it null there, which default mode reads
+        // too once they ran, as MeoCord's lock tells an update from a reply by it
         const flagged = method === 'reply' || method === 'deferReply' ? hasEphemeralFlag(args[0]) : undefined
         const undo = snapshot()
         instance[kind] = true
         if (flagged !== undefined) decideEphemeral(flagged, true)
+        else if ((method === 'update' || method === 'deferUpdate') && !ephemeralDecided) decideEphemeral(null, true)
         answeredByTest = byTest
         answeredByMock = true
         try {
