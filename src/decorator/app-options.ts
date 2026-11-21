@@ -200,10 +200,14 @@ export interface MeoCordOptions<
    * `onShutdown` hooks wait for that, and for an answer the call made, no longer than the calls' share of
    * `shutdownTimeout`, so they always have their own, and the stop resolves after them. A call whose answer to Discord,
    * or in a testing module an observer's `onStart`, is still running then tells its observers when that settles, which
-   * can be after the stop. Nothing is sent to Discord for such a call beyond an acknowledgement `@Defer` already made
-   * and an answer an observer began in `onStart`, which goes out in the handler's theme. The bot names each such call
-   * in a warning of its own. A testing module's `dispatch()` and `invoke()` resolve with `ran: false` and that error,
-   * and `emit()` doesn't count it. A theme lookup still waiting then goes on in the handler's theme, without asking the
+   * can be after the stop. Nothing more is sent to Discord for such a call, with two exceptions: an answer an observer
+   * began in `onStart` goes out in the handler's theme, and a deferred reply `@Defer` already made for a command, with
+   * nothing sent into it, is deleted, so the user isn't left on "thinking…". An answer asked for after that is refused,
+   * so the reply is never both edited and deleted. The replies are deleted at once, and the `onShutdown` hooks wait for
+   * them up to 1 second of their own share, never more than half of it; deletions that fail are named in one warning. A
+   * component's deferred update shows nothing and is left as it is. The bot names each such call in a warning of its
+   * own. A testing module's `dispatch()` and `invoke()` resolve with `ran: false` and that error, and `emit()` doesn't
+   * count it. A theme lookup still waiting then goes on in the handler's theme, without asking the
    * resolver.
    *
    * A `MeoCordTestingModule` takes it from here too: its calls wait only for the hooks `init({ ready: true })` runs,

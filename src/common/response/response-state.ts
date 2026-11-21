@@ -497,6 +497,15 @@ interface AskedAcknowledgement {
   wentAhead?: (attempt: Promise<void>) => void
 }
 
+/** What {@link InteractionResponse.withdraw}'s deletion came to: whether the deferred reply is gone, and the error if it failed. */
+export interface WithdrawnReply {
+  deleted: boolean
+  error?: unknown
+}
+
+/** What an answer asked for after a stop claimed the call's deferred reply for deletion rejects with. */
+const WITHDRAWN_MESSAGE = 'The bot stopped before this call started; its deferred reply is deleted, and nothing more is sent for it.'
+
 /** The response state behind `respond()`, with what `@Defer` and the testing helpers use besides. */
 export class InteractionResponse implements ResponseState {
   // An own key, where it has always been, made a getter by the constructor: it reads the interaction's guildId, which
@@ -554,6 +563,14 @@ export class InteractionResponse implements ResponseState {
   private pendingLock?: ResponseLockOptions
   /** An acknowledgement asked for and still queued, which a step waiting only for its theme lets go first. */
   readonly #askedAcknowledgements = new Set<AskedAcknowledgement>()
+  /** Whether this state was asked for an acknowledgement, which may still be on its way. */
+  #acknowledgementAsked = false
+  /** Whether this state was asked for anything but an acknowledgement: an answer, a deletion, a modal or a restore. */
+  #answerAsked = false
+  /** Whether {@link withdraw} ran; once it has, it gives the same result again. */
+  #withdrawn = false
+  /** The deletion {@link withdraw} claimed, after which no answer is sent. */
+  #withdrawal?: Promise<WithdrawnReply>
 
   constructor(readonly interaction: RepliableInteraction) {
     Object.defineProperty(this, 'location', {
@@ -663,7 +680,12 @@ export class InteractionResponse implements ResponseState {
    * the last left the interaction. Steps call each other's unqueued forms, which never wait on the queue they run in.
    * A Discord call that hangs holds the steps after it until discord.js's REST timeout (15 s by default) rejects it.
    */
-  private queued<T>(step: () => Promise<T>): Promise<T> {
+  private queued<T>(step: () => Promise<T>, kind: 'answer' | 'acknowledgement' | 'withdrawal' = 'answer'): Promise<T> {
+    if (kind === 'answer') {
+      // Claimed for deletion by a stop that dropped the call: an answer now would edit a reply about to be deleted
+      if (this.#withdrawal) return Promise.reject(new Error(WITHDRAWN_MESSAGE))
+      this.#answerAsked = true
+    }
     this.pending++
     const run = this.queue.then(step).finally(() => this.pending--)
     this.queue = run.catch(() => undefined)
@@ -715,13 +737,14 @@ export class InteractionResponse implements ResponseState {
     wentAhead?: (attempt: Promise<void>) => void,
   ): Promise<void> {
     const asked: AskedAcknowledgement = { options, applies, wentAhead }
+    this.#acknowledgementAsked = true
     const { preparing } = this.telling()
     if (preparing) this.goAhead(asked, preparing.ephemeral)
     else this.#askedAcknowledgements.add(asked)
     return this.queued(() => {
       this.#askedAcknowledgements.delete(asked)
       return step(asked.ahead)
-    })
+    }, 'acknowledgement')
   }
 
   /** Lets an acknowledgement asked for go ahead of a step waiting for its theme, as private as that step's answer. */
@@ -970,11 +993,38 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
-   * Cancels an acknowledgement scheduled and not yet made, without making one: for a call a stop dropped before it
-   * started, which never reached `@Defer`'s lock. Never throws.
+   * Ends a call a stop dropped before it started, which never reached `@Defer`'s lock, in one step as the stop decides.
+   * An acknowledgement scheduled and not yet made is cancelled without one. A deferred reply this state made, or is
+   * making, with nothing else asked of it, is claimed for deletion: from then on, an answer asked for is refused, so a
+   * reply is never both edited and deleted. The deletion waits for an acknowledgement still on its way, and deletes
+   * nothing if that fails or Discord refused it as answered elsewhere. A component's deferred update shows nothing and
+   * is left alone, as is anything a raw call or an answer asked for before made. A second call claims nothing more.
+   *
+   * @returns The claimed deletion, which never rejects, for the stop to wait on; `undefined` when nothing was claimed.
    */
-  cancel(): void {
+  withdraw(): Promise<WithdrawnReply> | undefined {
+    if (this.#withdrawn) return this.#withdrawal
+    this.#withdrawn = true
+    // Learns of a raw first answer, which is not this state's to delete
+    this.sync()
+    // Every call but an acknowledgement is asked for as an answer, so a command acknowledged and asked nothing else has
+    // made, or is making, only its deferReply
+    const ownAcknowledgement = answersWithOwnMessage(this.interaction) && (this.calls.length > 0 || this.#acknowledgementAsked)
+    const claimed = ownAcknowledgement && !this.#answerAsked && !this.#answeredRaw
     this.cancelScheduled()
+    if (!claimed) return undefined
+    this.#withdrawal = this.queued(async () => {
+      this.sync()
+      // An acknowledgement that failed, or that Discord refused as answered elsewhere, left nothing of this state's
+      if (this.phase !== 'deferred' || this.calls.length === 0) return { deleted: false }
+      try {
+        await this.call('deleteReply', undefined, () => this.interaction.deleteReply())
+        return { deleted: true }
+      } catch (error) {
+        return { deleted: false, error }
+      }
+    }, 'withdrawal')
+    return this.#withdrawal
   }
 
   /**
@@ -982,6 +1032,7 @@ export class InteractionResponse implements ResponseState {
    * calls it after the handler, for a handler that never answered. Never throws.
    */
   release(): Promise<void> {
+    if (this.#withdrawal) return Promise.resolve()
     const waiting = this.timer !== undefined
     this.cancelScheduled()
     // A component's handler that returned before the 'auto' timer, unanswered, gets eager's invisible acknowledgement
@@ -1024,6 +1075,7 @@ export class InteractionResponse implements ResponseState {
    * waiting on, whose deferred reply is then deleted, as `@Defer`'s is while nothing was sent into it. Never throws.
    */
   abandon(): Promise<void> {
+    if (this.#withdrawal) return Promise.resolve()
     const waiting = this.timer !== undefined
     this.cancelScheduled()
     // A command's acknowledgement shows "thinking…", so one is made only for the timer that would have made it
@@ -1387,6 +1439,8 @@ export class InteractionResponse implements ResponseState {
    * "Command not found!" to a click a collector took, so Discord refusing it as already answered ends it.
    */
   async error(error: unknown, options: ResponseErrorOptions = {}, answer: { ifUnanswered?: boolean } = {}): Promise<void> {
+    // Nothing is sent for a call a stop dropped and whose deferred reply it deletes
+    if (this.#withdrawal) return
     try {
       await this.presentAnswer(error, options, answer)
     } catch (renderError) {

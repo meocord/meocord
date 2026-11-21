@@ -1303,7 +1303,8 @@ export interface MeoCordConfig {
    *
    * The calls are waited for first, but no longer than the timeout less a reserve kept for the hooks: a quarter of it,
    * at least 1 second and never more than half. A call still running then is named in a warning, and the hooks run in
-   * the time left.
+   * the time left. Deleting the deferred reply `@Defer` made for a call `waitForReady` held, which never starts, may take
+   * up to 1 second of that reserve, never more than half.
    *
    * @defaultValue `10_000`
    */
