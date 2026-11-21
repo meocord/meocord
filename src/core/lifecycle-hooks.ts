@@ -342,6 +342,20 @@ export function hooksReserveMs(timeoutMs: number): number {
   return Math.min(Math.max(timeoutMs / 4, 1_000), timeoutMs / 2)
 }
 
+/**
+ * The most the stop waits for the deferred replies `@Defer` made for the calls it dropped to be deleted, all at once.
+ * Calls are dropped only as the drain's time runs out, so this comes out of the hooks' reserve: without it, every
+ * deletion would race the hooks, `client.destroy()` and a signal's exit, and most would be lost. One second leaves a
+ * Discord REST round trip room to finish while keeping most of the default reserve (2.5 s of 10 s) for the hooks;
+ * {@link droppedReplyDeleteMs} caps it at half the reserve for shorter timeouts.
+ */
+const DROPPED_REPLY_DELETE_MS = 1_000
+
+/** How long the stop waits for dropped calls' deferred replies to be deleted: at most half the hooks' reserve. */
+export function droppedReplyDeleteMs(timeoutMs: number): number {
+  return Math.min(DROPPED_REPLY_DELETE_MS, hooksReserveMs(timeoutMs) / 2)
+}
+
 /** Resolves in the event loop's next turn, once every microtask queued before it has run. */
 const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve))
 
@@ -366,12 +380,15 @@ function after<T>(ms: number, value: T, fired?: () => unknown): { promise: Promi
  *
  * The whole sequence is waited for at most `timeoutMs`. The wait for the `onReady` and the drain stop early enough to
  * leave the hooks {@link hooksReserveMs}, with a warning naming what still runs, and the hooks run in the time left.
+ * A call the ready gate still holds then is dropped and never starts; the deletion of the deferred reply `@Defer` made
+ * for it is waited for up to {@link droppedReplyDeleteMs} out of that reserve.
  */
 export async function runShutdownSequence(
   container: Container,
   readEntries: () => readonly LifecycleEntry[],
   { drainCalls, drainAlways = false, runningCalls, readyPass, droppedCall, droppedBy = 'stop', timeoutMs, hookFailed, warn }: ShutdownSequence,
 ): Promise<void> {
+  const startedAt = performance.now()
   const whole = after(timeoutMs, 'timeout' as const)
   const reserve = hooksReserveMs(timeoutMs)
   // The ready gate closes as the stop stops waiting: in the drain-end timer's own callback, so the hooks that settle in
@@ -411,35 +428,68 @@ export async function runShutdownSequence(
     // Decided before the hooks run and the warning is composed: a call the gate drops never starts, and is named apart
     // Without a gate nothing is held, so there is nothing to decide
     const dropped = gate ? await closeGate() : []
-    const named = dropped.flatMap(({ of, hook }) => {
-      const label = of && droppedCall?.(of)
-      return label ? [`${label} for onReady in ${hook}`] : []
-    })
+    // Named once each: naming a call takes it off the calls still running
+    const labels = dropped.map(({ of }) => (of && droppedCall?.(of)) || undefined)
+    const named = dropped.flatMap(({ hook }, index) => (labels[index] ? [`${labels[index]} for onReady in ${hook}`] : []))
+    const cause = DROPPED_BY[droppedBy]
     let unfinished = false
+    // How long the sequence had run when the hooks' reserve began, as the lines report it: the drain's time, or more
+    // once the deletions of dropped calls' deferred replies took part of the reserve
+    let spent = timeoutMs - reserve
+    const failedDeletions: string[] = []
     if (dropped.length > 0) {
       // A dropped call ends, its observers told and an answer it made sent, within the drain's time, as a running call
       // drains, or at least the decision's turn, so its observers hear of it before the hooks when nothing they do waits
       // The turn wait only runs that turn to its end, and never awaits an observer's or a reply's promise
-      const remaining = drainDeadline - performance.now()
+      const decidedAt = performance.now()
+      const remaining = drainDeadline - decidedAt
       const bound = remaining > 0 ? after(remaining, false) : undefined
-      unfinished = !(await Promise.race([Promise.all(dropped.map(({ ended }) => ended)).then(() => true), bound?.promise ?? nextTurn().then(() => false)]))
+      const ended = Promise.all(dropped.map(call => call.ended)).then(() => true)
+      unfinished = !(await Promise.race([ended, bound?.promise ?? nextTurn().then(() => false)]))
       bound?.cancel()
+      // The deletions of the deferred replies @Defer made for them, claimed in the decision's turn and all under way at
+      // once, share one deadline: droppedReplyDeleteMs from the drain's end, or from the decision when that came
+      // sooner, as calls are dropped when the drain's time runs out, which would cut them all
+      const deletions = dropped.flatMap(({ deletion }, index) => deletion()?.then(outcome => ({ index, ...outcome })) ?? [])
+      if (deletions.length > 0) {
+        // Settled already when every dropped call has ended, as each ends once its deletion has
+        const deletionEnds = unfinished ? Math.max(drainDeadline, Math.min(decidedAt, drainDeadline) + droppedReplyDeleteMs(timeoutMs)) : 0
+        const left = unfinished ? after(Math.max(0, deletionEnds - performance.now()), false) : undefined
+        let cut = false
+        const reported = deletions.map(deletion =>
+          deletion.then(({ index, error }) => {
+            if (error === undefined) return
+            const failure = `${labels[index] ?? 'a call'} (${String(error)})`
+            // One that fails once the hooks have begun is reported on its own, as it settles
+            if (cut) warn(`Deleting the deferred reply of a call dropped at ${cause.at} failed after the hooks began: ${failure}.`)
+            else failedDeletions.push(failure)
+          }),
+        )
+        const deleted = await Promise.race([Promise.allSettled(reported).then(() => true), left?.promise ?? nextTurn().then(() => false)])
+        left?.cancel()
+        if (!deleted && left) cut = true
+        if (unfinished) {
+          unfinished = !(await Promise.race([ended, nextTurn().then(() => false)]))
+          // Waited for, settled or cut, the deletions took their time from the reserve
+          spent = Math.max(spent, Math.round(performance.now() - startedAt))
+        }
+      }
       // A dropped call is not running, so a drain that waited only on calls the gate dropped ends with them
       if (!drained && draining) drained = await Promise.race([draining, nextTurn().then(() => false)])
     }
     if (!drained) {
       const running = runningCalls?.() ?? []
       warn(
-        `Calls still running after ${timeoutMs - reserve} ms${running.length > 0 ? `: ${running.join(', ')}` : ''}; ` +
-          `running the onShutdown hooks in the ${reserve} ms left.`,
+        `Calls still running after ${spent} ms${running.length > 0 ? `: ${running.join(', ')}` : ''}; ` +
+          `running the onShutdown hooks in the ${timeoutMs - spent} ms left.`,
       )
     }
-    const cause = DROPPED_BY[droppedBy]
     if (named.length > 0) warn(`Calls dropped before they started, as ${cause.came} while they waited: ${named.join(', ')}.`)
+    if (failedDeletions.length > 0) warn(`Deleting the deferred replies of calls dropped at ${cause.at} failed: ${failedDeletions.join(', ')}.`)
     if (unfinished) {
       warn(
-        `Calls dropped at ${cause.at} still had an answer to Discord or an observer under way after ${timeoutMs - reserve} ms; ` +
-          `running the onShutdown hooks in the ${reserve} ms left.`,
+        `Calls dropped at ${cause.at} still had an answer to Discord or an observer under way after ${spent} ms; ` +
+          `running the onShutdown hooks in the ${timeoutMs - spent} ms left.`,
       )
     }
 

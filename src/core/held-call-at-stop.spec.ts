@@ -1,5 +1,5 @@
 // Real timers throughout: a fake timer fires outside the call's AsyncLocalStorage context, which the gate reads
-import { ButtonInteraction, ChatInputCommandInteraction } from 'discord.js'
+import { ButtonInteraction, ChatInputCommandInteraction, DiscordAPIError } from 'discord.js'
 import { inject } from 'inversify'
 import { vi } from 'vitest'
 import { bindTheme, Logger, respond } from '@src/common/index.js'
@@ -7,16 +7,20 @@ import { Command, Controller, Cooldown, Defer, MeoCord, Observer, On, Service } 
 import { CommandType } from '@src/enum/index.js'
 import { type DispatchObserver, type DispatchResult, type OnReady, type OnShutdown } from '@src/interface/index.js'
 import { type ExecutionContext } from '@src/common/execution-context.js'
-import { hooksReserveMs } from '@src/core/lifecycle-hooks.js'
+import { droppedReplyDeleteMs, hooksReserveMs } from '@src/core/lifecycle-hooks.js'
 import { ReadyGate } from '@src/core/ready-gate.js'
 import { type CooldownEntry, MemoryCooldownStore } from '@src/common/cooldown-store.js'
 import { createMockGuild, createMockInteraction, getResponse, MeoCordTestingModule } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 import {
   actAround,
   after,
   CALLBACK_ORDERS,
   forgetFrameworkTimers,
   interceptFrameworkTimer,
+  nextInOrder,
+  stopRecord,
+  TIMER_EARLY_MS,
   sleep,
   timersLeftByStop,
   trackFrameworkTimers,
@@ -33,6 +37,10 @@ const DRAIN = TIMEOUT - hooksReserveMs(TIMEOUT)
 const CLOSE_AT = 50
 /** How long LateStore takes to answer: past the drain's end, so only a drain that finished waits for it. */
 const LATE_STORE_MS = 320
+/** How long past the drain's end the stop waits for a dropped call's deferred reply to be deleted. */
+const DELETE_GRACE = droppedReplyDeleteMs(TIMEOUT)
+/** How late the late-deadline row's deadline fires: past any early firing and rounding, so a figure taken from when it was due shows. */
+const LATE_MS = 30
 
 /** Runs `act` at `order` relative to the drain-end timer's callback, where the close decides. */
 const atDrainEnd = (order: (typeof CALLBACK_ORDERS)[number], act: () => void) =>
@@ -51,6 +59,10 @@ let warming: PromiseWithResolvers<void>
 let running: PromiseWithResolvers<void>
 /** How many warnings were logged when Ledger's onShutdown ran, so a row can tell which came before the hooks. */
 let warnedAtShutdown = 0
+/** Where Ledger's onShutdown ran in the order the timer tracker keeps: when the hooks began. */
+let ledgerSeq = 0
+/** Where each deletion a row made with deletesIn settled in that order. */
+const deletedSeq: number[] = []
 /** How long Slow's onSettled takes, or never. */
 let settleTakes: number | 'never' = 'never'
 /** What StartsSlowly's onStart waits for: a row resolves it once close() has resolved, or never. */
@@ -63,6 +75,7 @@ let row = 0
 beforeEach(() => {
   events.length = 0
   warned.length = 0
+  deletedSeq.length = 0
   forgetFrameworkTimers()
   warnedAtShutdown = 0
   settleTakes = 'never'
@@ -102,6 +115,7 @@ class Ledger implements OnShutdown {
   onShutdown() {
     events.push('Ledger.onShutdown')
     warnedAtShutdown = warned.length
+    ledgerSeq = nextInOrder()
   }
 }
 
@@ -233,6 +247,15 @@ class AnswersOnStart implements DispatchObserver {
   }
 }
 
+/** Answers 10 ms after onStart, once an eager @Defer's deferred reply has gone out, so its answer edits that reply. */
+@Observer()
+class AnswersSoon implements DispatchObserver {
+  onStart(context: ExecutionContext) {
+    after(10, () => void respond(context.getInteraction() as ChatInputCommandInteraction).send('Working'))
+  }
+  onSettled() {}
+}
+
 /** Finishes its onStart once the row resolves `starts`, or never. */
 @Observer()
 class StartsSlowly implements DispatchObserver {
@@ -273,6 +296,16 @@ class Quotes {
   @Command('eager', CommandType.SLASH)
   eager() {
     events.push('eager runs')
+  }
+  @Defer({ ephemeral: true })
+  @Command('privately', CommandType.SLASH)
+  privately() {
+    events.push('privately runs')
+  }
+  @Defer()
+  @Command('press', CommandType.BUTTON)
+  press() {
+    events.push('press runs')
   }
   @Defer({ mode: 'auto' })
   @Command('auto', CommandType.SLASH)
@@ -411,22 +444,6 @@ describe('a call the ready gate holds when a testing module closes', () => {
     expect(await settledBy(handled)).toMatchObject({ ran: false, error: expect.objectContaining({ message: STOP_MESSAGE }) })
     await sleep(500)
     expect(events).not.toContain('quote runs')
-  })
-
-  it("keeps an eager @Defer's acknowledgement and sends nothing more", async () => {
-    const module = moduleOf()
-    await readying(module)
-    const eager = slash('eager')
-    const since = performance.now()
-    const handled = module.dispatch(eager)
-    await closeAt(module, since)
-    warm.resolve()
-    await handled
-    await sleep(50)
-
-    expect(sent(eager)).toEqual(['deferReply'])
-    expect(events).toContain(`onSettled error handled=false response=deferred ${STOP_MESSAGE}`)
-    expect(events).not.toContain('eager runs')
   })
 
   it.each([
@@ -631,6 +648,228 @@ describe('a call the ready gate holds when a testing module closes', () => {
     await expect(module.dispatch(slash('lookalike'))).rejects.toThrow(STOP_MESSAGE)
     // The filters and the fallback answer it
     expect(events).toEqual(['Cache.onReady', 'Cache ready', 'onStart', `onSettled error handled=true response=replied ${STOP_MESSAGE}`])
+  })
+})
+
+describe('how long the stop waits for dropped calls\' deferred replies to be deleted', () => {
+  it.each([
+    // The default shutdownTimeout: the hooks keep 1.5 s of their 2.5 s reserve
+    [10_000, 2_500, 1_000],
+    [8_000, 2_000, 1_000],
+    [4_000, 1_000, 500],
+    [TIMEOUT, 200, 100],
+  ])('gives %i ms of shutdownTimeout a %i ms reserve, and the deletions %i ms of it', (timeoutMs, reserve, grace) => {
+    expect(hooksReserveMs(timeoutMs)).toBe(reserve)
+    expect(droppedReplyDeleteMs(timeoutMs)).toBe(grace)
+  })
+})
+
+describe.each([
+  ['default mode', false],
+  ['strict mode', true],
+])("the deferred reply @Defer made for a call the testing module's close drops, in %s", (_mode, strict) => {
+  beforeEach(() => {
+    forgetStrictMocks()
+    if (strict) useStrictMocks()
+  })
+  afterAll(() => forgetStrictMocks())
+
+  /**
+   * Dispatches `interactions` to a module whose Cache is still getting ready, and closes it; resolves with when close()
+   * did, and when the hooks began, from the dispatch, once dispatch() has resolved too, unless `settles` is false.
+   */
+  async function dropped(interactions: object | object[], { observers, settles = true }: { observers?: unknown[]; settles?: boolean } = {}) {
+    const module = moduleOf({ observers })
+    await readying(module)
+    const since = performance.now()
+    const handled = [interactions].flat().map(interaction => module.dispatch(interaction as never))
+    await closeAt(module, since)
+    if (settles) await Promise.all(handled)
+  }
+  /** Makes `interaction`'s deleteReply take `ms`, or never settle, then reject with `failure` if given. */
+  function deletesIn(interaction: ChatInputCommandInteraction, ms: number | 'never', failure?: Error) {
+    vi.mocked(interaction.deleteReply).mockImplementation(async () => {
+      events.push('deleting')
+      if (ms === 'never') await new Promise(() => undefined)
+      await sleep(ms as number)
+      deletedSeq.push(nextInOrder())
+      events.push('deleted')
+      if (failure) throw failure
+      return undefined as never
+    })
+  }
+  const onReadyLine = 'onReady in Cache is still running after 200 ms; shutting down without waiting for it.'
+  /**
+   * The close's one deletion deadline, checked as the delay the code asked for from its own clock reads: the grace
+   * past the drain's end, or past the decision when the drain's timer fired early.
+   */
+  function deadlineOf() {
+    const record = stopRecord(DRAIN)
+    expect(record).toBeDefined()
+    const { deadlines, drainDeadline, decidedAt, readBefore } = record!
+    expect(deadlines).toHaveLength(1)
+    const deadline = deadlines[0]!
+    const ends = Math.max(drainDeadline, Math.min(decidedAt!, drainDeadline) + DELETE_GRACE)
+    expect(deadline.delay).toBeCloseTo(Math.max(0, ends - readBefore(deadline)!.at), 6)
+    return { record: record!, deadline }
+  }
+  /** The figure warning `index` gives: the time the close ran by its last clock read, taken once the wait ended at `endedSeq`. */
+  function figureOf(index: number, endedSeq: number) {
+    const spent = Number(/after (\d+) ms/.exec(warned[index] ?? '')?.[1])
+    const { startedAt, last } = stopRecord(DRAIN)!
+    expect(last?.seq).toBeGreaterThan(endedSeq)
+    expect(spent).toBe(Math.max(DRAIN, Math.round(last!.at - startedAt)))
+    return spent
+  }
+  const droppedLine = (spent: number) =>
+    `Calls dropped at the stop still had an answer to Discord or an observer under way after ${spent} ms; running the onShutdown hooks in the ${TIMEOUT - spent} ms left.`
+
+  it.each([
+    ['an eager @Defer on a slash command', 'eager'],
+    ['a private eager @Defer', 'privately'],
+  ])('deletes the deferred reply of %s before the onShutdown hooks', async (_name, command) => {
+    const interaction = slash(command)
+    await dropped(interaction)
+
+    expect(sent(interaction)).toEqual(['deferReply', 'deleteReply'])
+    expect(events.indexOf(`onSettled error handled=false response=deferred ${STOP_MESSAGE}`)).toBeLessThan(events.indexOf('Ledger.onShutdown'))
+    expect(events.filter(event => event.endsWith('runs'))).toEqual([])
+    expect(warned).toEqual([onReadyLine])
+  })
+
+  it("deletes the deferred reply @Defer({ mode: 'auto' }) made while the call waited", async () => {
+    // Created 2.48 s ago, so the timer acknowledges 20 ms in, at the 2.5 s limit, while the gate holds the call
+    const interaction = slash('auto', -480)
+    await dropped(interaction)
+
+    expect(sent(interaction)).toEqual(['deferReply', 'deleteReply'])
+  })
+
+  it("leaves an eager @Defer's deferred update on a component, which shows nothing", async () => {
+    const interaction = createMockInteraction(ButtonInteraction, { customId: 'press' })
+    await dropped(interaction)
+    await sleep(50)
+
+    expect(sent(interaction)).toEqual(['deferUpdate'])
+  })
+
+  it("leaves a deferred reply an observer's onStart answer was sent into", async () => {
+    const interaction = slash('eager')
+    await dropped(interaction, { observers: [AnswersSoon] })
+    await sleep(50)
+
+    expect(sent(interaction)).toEqual(['deferReply', 'editReply'])
+  })
+
+  // Calls are dropped as the drain's time runs out: the deletions get DELETE_GRACE out of the hooks' reserve
+  it('waits past the drain for a deletion that settles within the grace, the hooks right after it', async () => {
+    const interaction = slash('eager')
+    deletesIn(interaction, DELETE_GRACE / 2)
+    await dropped(interaction)
+    const { deadline } = deadlineOf()
+
+    expect(events.indexOf('deleted')).toBeGreaterThan(-1)
+    expect(events.indexOf('deleted')).toBeLessThan(events.indexOf('Ledger.onShutdown'))
+    // Not the whole grace: the wait ends as the deletion settles, its deadline cleared unfired
+    expect(deadline.firedSeq).toBeUndefined()
+    expect(warned).toEqual([onReadyLine])
+  })
+
+  it('runs the deletions of several dropped calls at once, under one deadline, the hooks after the last', async () => {
+    const interactions = [slash('eager'), slash('eager'), slash('privately')]
+    for (const interaction of interactions) deletesIn(interaction, DELETE_GRACE / 2)
+    await dropped(interactions)
+    const { deadline } = deadlineOf()
+
+    expect(interactions.map(sent)).toEqual(Array(3).fill(['deferReply', 'deleteReply']))
+    // All under way before any settles: one after another, they would take 1.5 of the grace and be cut
+    expect(events.filter(event => event.startsWith('delet'))).toEqual([...Array(3).fill('deleting'), ...Array(3).fill('deleted')])
+    expect(events.slice(0, events.indexOf('Ledger.onShutdown')).filter(event => event === 'deleted')).toHaveLength(3)
+    expect(deadline.firedSeq).toBeUndefined()
+    expect(warned).toEqual([onReadyLine])
+  })
+
+  it.each([
+    ['never settles', 'never' as const],
+    ['outlasts the grace', DELETE_GRACE * 3],
+  ])("runs the onShutdown hooks at the grace's end, with half their reserve or more, for a deletion that %s", async (_name, ms) => {
+    const interaction = slash('eager')
+    deletesIn(interaction, ms)
+    await dropped(interaction, { settles: ms !== 'never' })
+    const { deadline } = deadlineOf()
+
+    expect(events).toContain('deleting')
+    expect(events.slice(0, events.indexOf('Ledger.onShutdown'))).not.toContain('deleted')
+    expect(deadline.firedSeq).toBeDefined()
+    expect(ledgerSeq).toBeGreaterThan(deadline.firedSeq!)
+    // The time the sequence really ran, which the grace took from the reserve
+    expect(warned[1]).toBe(droppedLine(figureOf(1, deadline.firedSeq!)))
+  })
+
+  it('reports the time a deadline that fired late took, not the time it was due', async () => {
+    const interaction = slash('eager')
+    deletesIn(interaction, 'never')
+    // The deadline's callback runs LATE_MS past its time, as on a loaded runner; the drain's own wait is shorter still
+    interceptFrameworkTimer(
+      (file, delay) => file === 'core/lifecycle-hooks.ts' && delay >= TIMER_EARLY_MS && delay <= DELETE_GRACE,
+      run => () => {
+        const until = performance.now() + LATE_MS
+        while (performance.now() < until);
+        run()
+      },
+    )
+    await dropped(interaction, { settles: false })
+    const { deadline } = deadlineOf()
+
+    expect(warned[1]).toBe(droppedLine(figureOf(1, deadline.firedSeq!)))
+  })
+
+  // One deadline for the batch: deletions waited for in turn, each with its own grace, would take the hooks' reserve
+  it("runs the onShutdown hooks at the one deadline's end for several deletions that never settle", async () => {
+    const interactions = [slash('eager'), slash('eager')]
+    for (const interaction of interactions) deletesIn(interaction, 'never')
+    await dropped(interactions, { settles: false })
+    const { deadline } = deadlineOf()
+
+    expect(events.filter(event => event === 'deleting')).toHaveLength(2)
+    expect(deadline.firedSeq).toBeDefined()
+    expect(ledgerSeq).toBeGreaterThan(deadline.firedSeq!)
+  })
+
+  it('reports the time a deletion that settled took from the reserve, when an observer is still under way', async () => {
+    const interaction = slash('eager')
+    deletesIn(interaction, DELETE_GRACE / 2)
+    await dropped(interaction, { observers: [NeverForDropped], settles: false })
+    const { deadline } = deadlineOf()
+
+    expect(deadline.firedSeq).toBeUndefined()
+    expect(events.indexOf('deleted')).toBeLessThan(events.indexOf('Ledger.onShutdown'))
+    expect(warned[1]).toBe(droppedLine(figureOf(1, deletedSeq[0]!)))
+  })
+
+  it('closes without delay when the deletions fail, the hooks run, and names the failures in one line', async () => {
+    const interactions = [slash('eager'), slash('eager')]
+    vi.mocked(interactions[0]!.deleteReply).mockRejectedValue(new DiscordAPIError({ code: 10062, message: 'Unknown interaction' }, 10062, 404, 'DELETE', '/x', {}))
+    vi.mocked(interactions[1]!.deleteReply).mockRejectedValue(new Error('socket hang up'))
+    await dropped(interactions)
+
+    // Settled by the drain's end: no deadline armed
+    expect(stopRecord(DRAIN)?.deadlines).toEqual([])
+    expect(events).toContain('Ledger.onShutdown')
+    // The module names no dropped call
+    expect(warned).toEqual([
+      onReadyLine,
+      'Deleting the deferred replies of calls dropped at the stop failed: a call (DiscordAPIError[10062]: Unknown interaction), a call (Error: socket hang up).',
+    ])
+    expect(warnedAtShutdown).toBe(warned.length)
+  })
+
+  it('reports on its own a deletion that fails once the hooks have begun', async () => {
+    const interaction = slash('eager')
+    deletesIn(interaction, DELETE_GRACE * 2, new Error('socket hang up'))
+    await dropped(interaction)
+
+    expect(warned.slice(warnedAtShutdown)).toEqual(['Deleting the deferred reply of a call dropped at the stop failed after the hooks began: a call (Error: socket hang up).'])
   })
 })
 

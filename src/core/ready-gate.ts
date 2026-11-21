@@ -2,7 +2,7 @@ import { type Container } from 'inversify'
 import { injectedTokens } from '@src/core/guard-runner.js'
 import { isAppClassToken, type LifecycleUnit } from '@src/core/lifecycle-order.js'
 import { seconds } from '@src/core/autocomplete-timing.js'
-import { responseOf, type Told } from '@src/common/response/response-state.js'
+import { responseOf, type Told, type WithdrawnReply } from '@src/common/response/response-state.js'
 import { readQuietly } from '@src/util/quiet-reads.util.js'
 import { shared } from '@src/util/shared-state.util.js'
 
@@ -57,24 +57,32 @@ interface Waiter {
 }
 
 /**
- * A call a stop dropped before it started: the call as the app tracks it, the hook it waited for, and when it has
- * ended, its observers told and an answer it made sent.
+ * A call a stop dropped before it started: the call as the app tracks it, the hook it waited for, when it has ended,
+ * its observers told and an answer it made sent, and the deletion of the deferred reply `@Defer` made for it, once
+ * under way.
  */
 export interface DroppedCall {
   of?: object
   hook: string
   ended: Promise<void>
+  deletion(): Promise<WithdrawnReply> | undefined
 }
 
-/** The errors {@link stoppedBeforeStart} made, told apart by identity alone, each with the end of the call it dropped. */
-const stops = new WeakMap<Error, PromiseWithResolvers<void>>()
+/** What the stop knows of a call it dropped: when the call has ended, and its deferred reply's deletion, once under way. */
+interface StopRecord {
+  ended: PromiseWithResolvers<void>
+  deletion?: Promise<WithdrawnReply>
+}
 
-/** What a call the ready gate held when the app stopped ends with, as it never started, and when that call has ended. */
-function stoppedBeforeStart(): { error: Error; ended: Promise<void> } {
+/** The errors {@link stoppedBeforeStart} made, told apart by identity alone, each with the record of the call it dropped. */
+const stops = new WeakMap<Error, StopRecord>()
+
+/** What a call the ready gate held when the app stopped ends with, as it never started, and what the stop knows of it. */
+function stoppedBeforeStart(): { error: Error; ended: Promise<void>; deletion: () => Promise<WithdrawnReply> | undefined } {
   const error = new Error('The bot stopped before this call started.')
-  const ended = Promise.withResolvers<void>()
-  stops.set(error, ended)
-  return { error, ended: ended.promise }
+  const record: StopRecord = { ended: Promise.withResolvers<void>() }
+  stops.set(error, record)
+  return { error, ended: record.ended.promise, deletion: () => record.deletion }
 }
 
 /** The error a call ends with when the app stopped before it started, which {@link isStoppedBeforeStart} recognises. */
@@ -89,7 +97,16 @@ export function isStoppedBeforeStart(error: unknown): boolean {
 
 /** Marks the call `error` dropped as ended, which the stop waits for, within the drain's time, before its hooks. */
 export function droppedCallEnded(error: unknown): void {
-  if (error instanceof Error) stops.get(error)?.resolve()
+  if (error instanceof Error) stops.get(error)?.ended.resolve()
+}
+
+/**
+ * Notes the deletion of the deferred reply `@Defer` made for the call `error` dropped, claimed in the turn the stop
+ * decides, which the stop waits for past the drain's end, out of its hooks' reserve, and whose failure it reports.
+ */
+export function droppedCallDeleting(error: unknown, deletion: Promise<WithdrawnReply>): void {
+  const record = error instanceof Error ? stops.get(error) : undefined
+  if (record) record.deletion = deletion
 }
 
 /** A call or a lookup waiting on its interaction's bound. */
@@ -406,9 +423,9 @@ export class ReadyGate {
     this.waiters.delete(waiter)
     // Off its decision first, so the deadline is let go of only once nothing waits on it
     waiter.leave?.()
-    const { error, ended } = stoppedBeforeStart()
+    const { error, ended, deletion } = stoppedBeforeStart()
     // A lookup is no call: its answer goes on in the handler's theme, and nothing names it
-    if (!waiter.call.lookup) this.dropped.push({ ...(waiter.of && { of: waiter.of }), hook: this.pendingHook(waiter.needed)?.name ?? 'a unit', ended })
+    if (!waiter.call.lookup) this.dropped.push({ ...(waiter.of && { of: waiter.of }), hook: this.pendingHook(waiter.needed)?.name ?? 'a unit', ended, deletion })
     waiter.reject(error)
   }
 

@@ -28,15 +28,19 @@ vi.mock('@src/util/meocord-config-loader.util.js', () => ({ loadMeoCordConfig: (
 vi.mock('@src/util/platform.util.js', () => ({ assertBuiltForThisPlatform: () => {} }))
 
 import { bindTheme, respond } from '@src/common/index.js'
-import { Command, Controller, MeoCord, Observer, On, Service } from '@src/decorator/index.js'
+import { Command, Controller, Defer, MeoCord, Observer, On, Service } from '@src/decorator/index.js'
 import { MeoCordFactory } from '@src/core/meocord-factory.js'
 import { CommandType } from '@src/enum/index.js'
 import { type DispatchObserver, type DispatchResult, type MeoCordApplication, type OnReady, type OnShutdown } from '@src/interface/index.js'
 import { createMockGuild, createMockInteraction, getResponse } from '@src/testing/index.js'
+import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
+import { droppedReplyDeleteMs, hooksReserveMs } from '@src/core/lifecycle-hooks.js'
 import {
   after,
   forgetFrameworkTimers,
   interceptFrameworkTimer,
+  nextInOrder,
+  stopRecord,
   sleep,
   timersLeftByStop,
   trackFrameworkTimers,
@@ -57,6 +61,8 @@ let warming: PromiseWithResolvers<void>
 let running: PromiseWithResolvers<void>
 /** How many lines were logged when Early's onShutdown ran, so a row can tell which came before the hooks. */
 let loggedAtShutdown = 0
+/** Where Early's onShutdown ran in the order the timer tracker keeps: when the hooks began. */
+let shutdownSeq = 0
 
 beforeAll(() => trackFrameworkTimers())
 afterAll(() => untrackFrameworkTimers())
@@ -93,6 +99,7 @@ class Early implements OnShutdown {
   onShutdown() {
     events.push('Early.onShutdown')
     loggedAtShutdown = logged.length
+    shutdownSeq = nextInOrder()
   }
 }
 
@@ -171,6 +178,11 @@ class Quotes {
   @Command('quote', CommandType.SLASH)
   quote() {
     events.push('quote runs')
+  }
+  @Defer()
+  @Command('eager', CommandType.SLASH)
+  eager() {
+    events.push('eager runs')
   }
 }
 
@@ -372,6 +384,144 @@ describe('a call the ready gate holds when the bot stops', () => {
     expect(logged.length).toBe(before)
     expect(events).toEqual(['Cache.onReady', `onSettled error ${STOP_MESSAGE}`, 'Early.onShutdown', 'Cache ready'])
     expect(getResponse(shown).calls).toEqual([])
+  })
+})
+
+describe.each([
+  ['default mode', false],
+  ['strict mode', true],
+])('the deferred reply @Defer made for a call the bot drops, in %s', (_mode, strict) => {
+  beforeEach(() => {
+    forgetStrictMocks()
+    if (strict) useStrictMocks()
+  })
+  afterAll(() => forgetStrictMocks())
+
+  const drainMs = () => config.shutdownTimeout - hooksReserveMs(config.shutdownTimeout)
+  const grace = () => droppedReplyDeleteMs(config.shutdownTimeout)
+  /**
+   * The stop's one deletion deadline, checked as the delay the code asked for from its own clock reads: the grace past
+   * the drain's end, or past the decision when the drain's timer fired early.
+   */
+  function deadlineOf() {
+    const record = stopRecord(drainMs())
+    expect(record).toBeDefined()
+    const { deadlines, drainDeadline, decidedAt, readBefore } = record!
+    expect(deadlines).toHaveLength(1)
+    const deadline = deadlines[0]!
+    const ends = Math.max(drainDeadline, Math.min(decidedAt!, drainDeadline) + grace())
+    expect(deadline.delay).toBeCloseTo(Math.max(0, ends - readBefore(deadline)!.at), 6)
+    return deadline
+  }
+  /** The figure the last line starting with `start` gives: the time the stop ran by its last clock read, taken once the deadline fired. */
+  function figureOf(start: string, deadline: { firedSeq?: number }) {
+    const spent = Number(/after (\d+) ms/.exec(logged.findLast(line => line.startsWith(start)) ?? '')?.[1])
+    const { startedAt, last } = stopRecord(drainMs())!
+    expect(last?.seq).toBeGreaterThan(deadline.firedSeq!)
+    expect(spent).toBe(Math.max(drainMs(), Math.round(last!.at - startedAt)))
+    return spent
+  }
+
+  /** Marks when the client is destroyed, after the onShutdown hooks. */
+  const markDestroy = () => vi.mocked(Client.prototype.destroy).mockImplementation(async () => void events.push('client.destroy'))
+
+  it('deletes it before the onShutdown hooks and client.destroy', async () => {
+    const { client } = await startBot()
+    markDestroy()
+    const held = slash(client, 'eager')
+    vi.mocked(held.deleteReply).mockImplementation(async () => {
+      events.push('deleteReply')
+      return undefined as never
+    })
+    const handled = deliver(client, 'interactionCreate', held)
+    await sleep(50)
+    await app.stop()
+    await handled
+
+    expect(getResponse(held).calls.map(call => call.method)).toEqual(['deferReply', 'deleteReply'])
+    expect(events).toEqual(['Cache.onReady', 'deleteReply', `onSettled error ${STOP_MESSAGE}`, 'Early.onShutdown', 'client.destroy'])
+    expect(stopLines()).toEqual([
+      'onReady in Cache is still running after 200 ms; shutting down without waiting for it.',
+      `${DROPPED}interaction "/eager" for onReady in Cache.`,
+    ])
+  })
+
+  it("runs the onShutdown hooks and client.destroy at the grace's end for a deletion that never settles", async () => {
+    const { client } = await startBot()
+    markDestroy()
+    const held = slash(client, 'eager')
+    vi.mocked(held.deleteReply).mockImplementation(() => new Promise(() => undefined))
+    void deliver(client, 'interactionCreate', held)
+    await sleep(50)
+    await app.stop()
+    const deadline = deadlineOf()
+
+    expect(events).toEqual(['Cache.onReady', 'Early.onShutdown', 'client.destroy'])
+    expect(deadline.firedSeq).toBeDefined()
+    expect(shutdownSeq).toBeGreaterThan(deadline.firedSeq!)
+    // The time the stop really took, the grace taken from the hooks' reserve
+    const spent = figureOf('Calls dropped at the stop', deadline)
+    expect(stopLines().at(-1)).toBe(
+      `Calls dropped at the stop still had an answer to Discord or an observer under way after ${spent} ms; running the onShutdown hooks in the ${config.shutdownTimeout - spent} ms left.`,
+    )
+  })
+
+  it('gives the running-calls line and the dropped-calls line the same figures when a deletion takes from the reserve', async () => {
+    const { client } = await startBot()
+    const gone = deliver(client, 'guildDelete', createMockGuild())
+    const held = slash(client, 'eager')
+    vi.mocked(held.deleteReply).mockImplementation(() => new Promise(() => undefined))
+    void deliver(client, 'interactionCreate', held)
+    after(600, () => running.resolve())
+    await sleep(50)
+    await app.stop()
+    await gone
+    const deadline = deadlineOf()
+
+    // Both the time the stop really ran, once the deadline fired
+    const spent = figureOf('Calls still running', deadline)
+    expect(figureOf('Calls dropped at the stop', deadline)).toBe(spent)
+    expect(stopLines().find(line => line.startsWith('Calls still running'))).toBe(
+      `Calls still running after ${spent} ms: @On('guildDelete') in Early.gone; running the onShutdown hooks in the ${config.shutdownTimeout - spent} ms left.`,
+    )
+    expect(stopLines().at(-1)).toBe(
+      `Calls dropped at the stop still had an answer to Discord or an observer under way after ${spent} ms; running the onShutdown hooks in the ${config.shutdownTimeout - spent} ms left.`,
+    )
+  })
+
+  it('stops without delay when the deletions reject, naming each call in one line', async () => {
+    const { client } = await startBot()
+    const held = [slash(client, 'eager'), slash(client, 'eager')]
+    vi.mocked(held[0]!.deleteReply).mockRejectedValue(new Error('socket hang up'))
+    vi.mocked(held[1]!.deleteReply).mockRejectedValue(new Error('read ECONNRESET'))
+    const handled = held.map(interaction => deliver(client, 'interactionCreate', interaction))
+    await sleep(50)
+    await expect(app.stop()).resolves.toBeUndefined()
+    await Promise.all(handled)
+
+    // Settled by the drain's end: no deadline armed
+    expect(stopRecord(drainMs())?.deadlines).toEqual([])
+    expect(events).toEqual(['Cache.onReady', `onSettled error ${STOP_MESSAGE}`, `onSettled error ${STOP_MESSAGE}`, 'Early.onShutdown'])
+    expect(logged.filter(line => line.startsWith('Deleting'))).toEqual([
+      'Deleting the deferred replies of calls dropped at the stop failed: interaction "/eager" (Error: socket hang up), interaction "/eager" (Error: read ECONNRESET).',
+    ])
+    expect(loggedAtShutdown).toBe(logged.length)
+  })
+
+  // The failed start's undo drops what its gate held as a stop does, and the user's "thinking…" is as stuck either way
+  it('deletes it for a call the gate held as the login failed', async () => {
+    let held: ChatInputCommandInteraction | undefined
+    const refused = (client: Client) => {
+      held = slash(client, 'eager')
+      void deliver(client, 'interactionCreate', held)
+      return new Promise<string>((_, reject) => setImmediate(() => reject(new Error('login refused'))))
+    }
+    await startBot({ logins: [refused, () => Promise.resolve('token')] })
+    await sleep(20)
+
+    expect(getResponse(held!).calls.map(call => call.method)).toEqual(['deferReply', 'deleteReply'])
+    expect(logged).toContain('Calls dropped before they started, as the login failed while they waited: interaction "/eager" for onReady in Cache.')
+    await app.stop()
   })
 })
 
