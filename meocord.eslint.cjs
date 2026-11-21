@@ -1,3 +1,6 @@
+// Loaded up front, with nothing awaited: typescript-eslint finds a bot's tsconfig.json beside the eslint.config.ts or
+// .cjs on the call stack when this file reads its configs. After an await that frame is gone, and a bot linted
+// from a workspace root would get TS5012 on every file.
 const { importX } = require('eslint-plugin-import-x')
 const globals = require('globals')
 const tsParser = require('@typescript-eslint/parser')

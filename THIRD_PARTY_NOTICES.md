@@ -32,20 +32,10 @@ Installed with MeoCord.
 
 Installed by the application using MeoCord.
 
-| Package                                                                                              | License      | Source                                                         |
-| ---------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------- |
-| [@typescript-eslint/parser](https://www.npmjs.com/package/@typescript-eslint/parser)                 | MIT          | https://github.com/typescript-eslint/typescript-eslint         |
-| [discord.js](https://www.npmjs.com/package/discord.js)                                               | Apache-2.0   | https://github.com/discordjs/discord.js                        |
-| [dotenv](https://www.npmjs.com/package/dotenv)                                                       | BSD-2-Clause | https://github.com/motdotla/dotenv                             |
-| [eslint](https://www.npmjs.com/package/eslint)                                                       | MIT          | https://github.com/eslint/eslint                               |
-| [eslint-config-prettier](https://www.npmjs.com/package/eslint-config-prettier)                       | MIT          | https://github.com/prettier/eslint-config-prettier             |
-| [eslint-import-resolver-typescript](https://www.npmjs.com/package/eslint-import-resolver-typescript) | ISC          | https://github.com/import-js/eslint-import-resolver-typescript |
-| [eslint-plugin-import-x](https://www.npmjs.com/package/eslint-plugin-import-x)                       | MIT          | https://github.com/un-ts/eslint-plugin-import-x                |
-| [eslint-plugin-prettier](https://www.npmjs.com/package/eslint-plugin-prettier)                       | MIT          | https://github.com/prettier/eslint-plugin-prettier             |
-| [globals](https://www.npmjs.com/package/globals)                                                     | MIT          | https://github.com/sindresorhus/globals                        |
-| [prettier](https://www.npmjs.com/package/prettier)                                                   | MIT          | https://github.com/prettier/prettier                           |
-| [typescript](https://www.npmjs.com/package/typescript)                                               | Apache-2.0   | https://github.com/microsoft/TypeScript                        |
-| [typescript-eslint](https://www.npmjs.com/package/typescript-eslint)                                 | MIT          | https://github.com/typescript-eslint/typescript-eslint         |
+| Package                                                | License      | Source                                  |
+| ------------------------------------------------------ | ------------ | --------------------------------------- |
+| [discord.js](https://www.npmjs.com/package/discord.js) | Apache-2.0   | https://github.com/discordjs/discord.js |
+| [dotenv](https://www.npmjs.com/package/dotenv)         | BSD-2-Clause | https://github.com/motdotla/dotenv      |
 
 ## Bundled into the CommonJS build
 
