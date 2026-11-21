@@ -3,6 +3,7 @@ import fs from 'fs'
 import { createRequire, isBuiltin } from 'module'
 import os from 'os'
 import path from 'path'
+import ts from 'typescript'
 import { ESLint, type Linter } from 'eslint'
 import esmConfig from '../meocord.eslint.mjs'
 
@@ -237,31 +238,49 @@ describe('the peer dependencies meocord/eslint needs', () => {
     peerDependencies: Record<string, string>
     peerDependenciesMeta?: Record<string, { optional?: boolean }>
   }
+  const CONFIG_FILES = ['meocord.eslint.mjs', 'meocord.eslint.cjs']
   // What every bot needs; every other peer is for meocord/eslint alone
-  const BOT_PEERS = new Set(['discord.js', 'dotenv'])
+  const BOT_PEERS = ['discord.js', 'dotenv']
   // Needed by the config without being imported: eslint runs it, typescript serves its typed rules and prettier its plugin
   const UNIMPORTED_NEEDS = ['eslint', 'typescript', 'prettier']
-  // npm still checks an optional peer against the version a project has, so any range, a floor included, fails
-  // `npm install meocord` with ERESOLVE for a bot with an older or prerelease version that never uses the config
-  const ANY_VERSION = '*'
   const packageName = (request: string) => request.split('/').slice(0, request.startsWith('@') ? 2 : 1).join('/')
+  const source = (file: string) => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
   const imported = (file: string) =>
-    [...fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').matchAll(/(?:from |require\(|resolve\()'([^']+)'/g)]
+    [...source(file).matchAll(/(?:from |require\(|resolve\()'([^']+)'/g)]
       .map(([, request]) => request)
       .filter(request => !isBuiltin(request))
       .map(packageName)
-  const configPeers = Object.keys(manifest.peerDependencies).filter(name => !BOT_PEERS.has(name))
+  const configPeers = Object.keys(manifest.peerDependenciesMeta ?? {})
 
-  it.each(['meocord.eslint.mjs', 'meocord.eslint.cjs'])('declares every package %s imports as a peer', file => {
+  it.each(CONFIG_FILES)('declares every package %s imports as an optional peer', file => {
     const packages = [...imported(file), ...UNIMPORTED_NEEDS]
 
     expect(packages).toContain('eslint-plugin-import-x')
-    expect(packages.filter(name => !(name in manifest.peerDependencies))).toEqual([])
+    expect(packages.filter(name => !configPeers.includes(name))).toEqual([])
   })
 
-  it('keeps each of them optional, constraining no version', () => {
+  // In peerDependencies, npm and Yarn 1 would install them in the production install of a bot that has them as
+  // devDependencies, and npm would fail `npm install meocord` with ERESOLVE for a bot whose version misses the range.
+  // peerDependenciesMeta alone marks them as optional peers of any version for the managers that read it.
+  it('declares them only in peerDependenciesMeta, each optional', () => {
+    expect(Object.keys(manifest.peerDependencies).sort()).toEqual(BOT_PEERS)
     expect(configPeers).toHaveLength(10)
     expect(configPeers.filter(name => manifest.peerDependenciesMeta?.[name]?.optional !== true)).toEqual([])
-    expect(configPeers.filter(name => manifest.peerDependencies[name] !== ANY_VERSION)).toEqual([])
+  })
+
+  // typescript-eslint finds a bot's tsconfig.json beside the eslint.config.ts or .cjs on the call stack; after an
+  // await that frame is gone, and a bot linted from a workspace root would get TS5012 on every file
+  it.each(CONFIG_FILES)('%s loads its packages without awaiting', file => {
+    const tree = ts.createSourceFile(file, source(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+    const found: string[] = []
+    const visit = (node: ts.Node): void => {
+      const line = () => tree.getLineAndCharacterOfPosition(node.getStart()).line + 1
+      if (ts.isAwaitExpression(node) || (ts.isForOfStatement(node) && node.awaitModifier)) found.push(`await, line ${line()}`)
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) found.push(`import(), line ${line()}`)
+      ts.forEachChild(node, visit)
+    }
+    visit(tree)
+
+    expect(found).toEqual([])
   })
 })
