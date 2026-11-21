@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import path from 'path'
-import { createRsbuild, type Rspack } from '@rsbuild/core'
+import type { Rspack } from '@rsbuild/core'
 import { createHash } from 'node:crypto'
 import { Logger } from '@src/common/index.js'
 import { spawn, ChildProcess } from 'node:child_process'
@@ -94,6 +94,9 @@ function installFailure(error: unknown): Error {
 
   return new Error(reported || message || String(error))
 }
+
+/** `@rsbuild/core` loads Rspack's native binding, which only the commands that build need. */
+const loadBundler = async () => (await import('@rsbuild/core')).createRsbuild
 
 /**
  * Whether a child is still running. `killed` says only that a signal was sent, and stays false for a
@@ -486,7 +489,7 @@ copies or substantial portions of the Software.
       ]
     }
 
-    const rsbuild = await createRsbuild({ cwd: this.projectRoot, config })
+    const rsbuild = await (await loadBundler())({ cwd: this.projectRoot, config })
     return { rsbuild, meocordConfig, natives }
   }
 
@@ -607,7 +610,7 @@ copies or substantial portions of the Software.
       })
       fs.mkdirSync(dist, { recursive: true })
       staging = fs.mkdtempSync(path.join(dist, '.meocord-config-'))
-      const rsbuild = await createRsbuild({
+      const rsbuild = await (await loadBundler())({
         cwd: this.projectRoot,
         config: {
           ...base,
