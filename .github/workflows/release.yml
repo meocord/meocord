@@ -422,6 +422,16 @@ jobs:
       - name: Run CLI scenarios
         run: bun run cli:scenarios
 
+      # The commands that run a built bot load no bundler on the oldest Node `engines.node` admits either; the steps
+      # above ran on lts/*. Last in the job, since every step after it would run on this Node
+      - name: Setup Node.js 22.13
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.13'
+
+      - name: Run the bundler-free CLI scenarios on Node 22.13
+        run: bun run cli:scenarios --only 'loads no bundler'
+
   # The packed package installed into one project per test runner its users test with: jest, vitest, node:test and bun
   # test. Each typechecks against the built declarations and runs a test of meocord/testing in that runner's own idiom.
   # The runners install as the consumers' lockfiles pin them, so a jest or vitest release cannot block a release; the

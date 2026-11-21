@@ -59,6 +59,8 @@ interface Scenario {
   thenEdits?: Record<string, (current: string) => string>
   /** Paths, relative to cwd, moved away while it runs. */
   hides?: string[]
+  /** Installed packages, relative to cwd, replaced once `before` has run by one that throws as soon as it is loaded. */
+  stubs?: string[]
   /**
    * A signal sent once the output shows `after`: to the whole process group, as a terminal's Ctrl+C is,
    * or to the CLI alone, as Docker sends one. `repeatAfterMs` sends it again that much later.
@@ -573,6 +575,15 @@ function applyFiles(dir: string, files: Record<string, string | null> = {}): () 
   }
 }
 
+/** The package `name` at `dir`, whose entry, imported or required, throws `<name> was loaded`. */
+function writeThrowingPackage(dir: string, name: string): void {
+  const entry = `throw new Error(${JSON.stringify(`${name} was loaded`)})\n`
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version: '0.0.0', exports: { import: './index.mjs', require: './index.cjs' } }))
+  writeFileSync(path.join(dir, 'index.mjs'), entry)
+  writeFileSync(path.join(dir, 'index.cjs'), entry)
+}
+
 /** Every file under a directory, skipping installed and built output. */
 function filesIn(dir: string, root = dir): string[] {
   if (!existsSync(dir)) return []
@@ -765,6 +776,8 @@ async function check(scenario: Scenario): Promise<string[]> {
   const kept = new Map((scenario.expect.keeps ?? []).map(file => [file, readFileSync(path.join(dir, file), 'utf8')]))
   const runtime = runtimeBinary(scenario.runtime ?? 'node')
   const hidden: { from: string; to: string }[] = []
+  // Only these paths hold a stub; a setup step that throws first leaves the real package where it is
+  const stubbed: string[] = []
   const edited = (scenario.edits ?? []).flatMap(edit => Object.keys(edit.files))
   const restoreEdited = applyFiles(dir, Object.fromEntries(edited.map(file => [file, readFileSync(path.join(dir, file), 'utf8')])))
   const discord = scenario.discord && (await startFakeDiscord(scenario.discord))
@@ -777,11 +790,16 @@ async function check(scenario: Scenario): Promise<string[]> {
     for (const [file, edit] of Object.entries(scenario.thenEdits ?? {})) {
       writeFileSync(path.join(dir, file), edit(readFileSync(path.join(dir, file), 'utf8')))
     }
-    for (const file of scenario.hides ?? []) {
+    for (const file of [...(scenario.hides ?? []), ...(scenario.stubs ?? [])]) {
       const moved = { from: path.join(dir, file), to: path.join(hiddenDir, file) }
       mkdirSync(path.dirname(moved.to), { recursive: true })
       renameSync(moved.from, moved.to)
       hidden.push(moved)
+    }
+    for (const file of scenario.stubs ?? []) {
+      // The real package is aside by now, so whatever is at its path, the stub whole or in part, is removed after
+      stubbed.push(file)
+      writeThrowingPackage(path.join(dir, file), file.replace(/^.*node_modules\//, ''))
     }
 
     const [command, ...args] = scenario.command ?? [runtime, cliOf(scenario), ...(scenario.argv ?? [])]
@@ -821,6 +839,7 @@ async function check(scenario: Scenario): Promise<string[]> {
   } finally {
     await discord?.close()
     restoreEdited()
+    for (const file of stubbed) rmSync(path.join(dir, file), { recursive: true, force: true })
     for (const { from, to } of hidden) renameSync(to, from)
     // Anything the run wrote goes, so the next scenario starts from the same app.
     for (const file of filesIn(dir)) if (!filesBefore.has(file)) rmSync(path.join(dir, file), { force: true })
@@ -993,6 +1012,26 @@ const scenarios: Scenario[] = [
     ...('command' in run ? { command: [...run.command] } : { argv: [...run.argv] }),
     expect: { code: 1, says: ['failed to load', 'Fix meocord.config.ts'], counts: { 'Unexpected token': 1 } },
   })),
+  // Only the commands that build load the bundler. @rsbuild/core is replaced by a package that throws when loaded, and a
+  // static import of it fails before that, at link: either way the output names @rsbuild/core
+  ...(['node', 'bun'] as const).flatMap(runtime =>
+    [
+      { argv: ['--version'], code: 0, says: ['4.'] },
+      { argv: ['--help'], code: 0, says: ['create', 'build', 'start'] },
+      { argv: ['show', '--license'], code: 0, says: ['MIT License'] },
+      { argv: ['start', '--prod'], code: 1, says: ['Discord token is missing'], files: { '.env': 'DISCORD_TOKEN=\n' } },
+    ].map(
+      ({ argv, code, says, files }): Scenario => ({
+        name: `on ${runtime}, meocord ${argv.join(' ')} loads no bundler`,
+        tier: 'fast',
+        runtime,
+        files,
+        stubs: ['node_modules/@rsbuild/core'],
+        argv,
+        expect: { code, says, never: ['@rsbuild/core'] },
+      }),
+    ),
+  ),
   {
     name: 'start --prod without a token says where the token comes from',
     tier: 'fast',
