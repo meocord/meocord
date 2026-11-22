@@ -1,5 +1,11 @@
 # meocord
 
+## 4.3.3
+
+### Patch Changes
+
+- [#1103](https://github.com/meocord/meocord/pull/1103) [`2688e40`](https://github.com/meocord/meocord/commit/2688e40b078179f25e6af591ab6bdacd61d7e6e6) Thanks [@l7aromeo](https://github.com/l7aromeo)! - A command dropped at stop no longer leaves the user on "thinking…". Under `waitForReady`, a call still waiting for an `onReady` hook when the bot stops never starts; when its eager `@Defer`, or an `'auto'` timer that already fired, had sent a deferred reply, that reply stayed loading until Discord's 15-minute token expired. MeoCord now deletes the deferred reply it made, when nothing was sent into it, before the `onShutdown` hooks run. Several such replies are deleted at once, and an answer sent for the call after the stop decided is refused, so a reply is never both edited and deleted. The `onShutdown` hooks may start up to 1 second later while a deletion is under way, and the deletions never take more than half of the hooks' share of `shutdownTimeout`; a deletion still running then goes on without them, and failed deletions are logged in one warning. A component's deferred update shows nothing and is left as it is. A testing module's `close()` does the same, so `getResponse(interaction).calls` ends with `deleteReply` there too. See https://meocord.dev/docs/4.3/lifecycle-hooks#waiting-for-the-hooks.
+
 ## 4.3.2
 
 ### Patch Changes
