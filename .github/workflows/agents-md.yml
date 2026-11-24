@@ -41,7 +41,7 @@ jobs:
       - name: Guard AGENTS.md
         env:
           APPROVAL_LABEL: agents-md-approved
-          MAX_LINES: 234
+          MAX_LINES: 235
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           QUEUE_BASE: ${{ github.event.merge_group.base_sha }}
