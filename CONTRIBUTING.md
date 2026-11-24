@@ -110,6 +110,8 @@ module, so jest loads `meocord/testing` without Node's VM modules. They are list
 `scripts/es-module-only.js`, which the rollup config and `bun run notices` read. After `bun run build`,
 `check:dist-cjs` fails when `dist/cjs` requires a package that is ES module only, so a new one goes in that list,
 and `check:dual-build` loads both builds in one Node process and fails when they disagree.
+The bundled versions are the ones `bun.lock` resolves, so moving one in the lockfile alone changes `dist/cjs` and
+needs a changeset (see [Changesets and releases](#changesets-and-releases)).
 
 **The suite on two runtimes.** A bot may run on Node or on Bun, so the specs run on both: `bun run test` on Node,
 `bun run test:bun` on Bun's runtime (`bunx --bun vitest run`), each in its own CI job reported under the `Test` check.
@@ -444,6 +446,16 @@ edits, CI configuration, tests, internal refactors — has nothing to tell a use
 no changeset. Judge by what a consumer installs, not by which file you edited: JSDoc compiles into
 the shipped `.d.ts` and is what a user reads in their editor, so correcting a wrong `@example` is a
 `patch` even though you only touched a comment.
+
+**Dependencies count too.** A changed range in `package.json`'s `dependencies`, `peerDependencies` or
+`optionalDependencies`, a change to its `peerDependenciesMeta`, and a changed pin in the application template
+(`src/bin/app-template/package.json.template`) change what a consumer installs. So does a lockfile-only move of a
+package the CommonJS build bundles: `bun.lock` decides which version of it goes into `dist/cjs`. Any other lockfile-only
+move ships nothing, since the lockfile isn't published. `bun run dependencies:check`, run in CI's Lint job, fails a pull
+request or queued merge that makes one of these changes without adding a changeset. Dependabot writes none, so its pull
+requests need one added by hand. To run it locally, commit and run `bun run dependencies:check --base origin/main`: it
+compares your last commit with where your branch left that base. A change that needs no release note, such as a bundled
+package's move that changes only its types, commits an empty changeset instead: `bun run changeset --empty`.
 
 Getting it wrong is recoverable. A changeset is a file, so a forgotten or mis-sized one is fixed by
 committing another — nothing depends on a commit message being right the first time.

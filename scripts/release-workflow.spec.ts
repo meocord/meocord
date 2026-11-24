@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import ts from 'typescript'
 import { parse } from 'yaml'
+import { CHECKOUT_DEPTH } from './lib/dependency-changeset.js'
 
 interface Job {
   name?: string
@@ -65,6 +66,9 @@ const ONCE_PER_PUSH = [
 /** The required check whose job refuses a major changeset, and the command it runs */
 const LINT_CHECK = 'Lint'
 const MAJOR_CHECK = 'bun run major:check'
+
+/** The Lint step that fails a change to what a consumer installs without a changeset */
+const DEPENDENCY_CHECK = 'bun run dependencies:check'
 
 /** The jobs that run code from outside the lockfile, which keep no token in their checkout */
 const OUTSIDE_LOCKFILE = ['build', 'slow-scenarios', 'release-checks']
@@ -340,6 +344,15 @@ describe('the Release workflow', () => {
 
     expect(lint.if).toBeUndefined()
     expect((lint.steps ?? []).filter(step => step.if === undefined).map(step => step.run)).toContain(MAJOR_CHECK)
+  })
+
+  // A pull request's checkout is its merge commit: the check reads the base from its first parent
+  it('asks for a changeset in the Lint check, with the base of a pull request in its checkout', () => {
+    const lint = jobs[reporterOf(LINT_CHECK)!]!
+    const checkout = lint.steps!.find(step => step.uses?.startsWith('actions/checkout@'))
+
+    expect((lint.steps ?? []).filter(step => step.if === undefined).map(step => step.run)).toContain(DEPENDENCY_CHECK)
+    expect(checkout?.with?.['fetch-depth']).toBe(CHECKOUT_DEPTH)
   })
 })
 

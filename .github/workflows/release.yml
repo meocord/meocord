@@ -42,6 +42,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request's merge commit and its first parent, the base the changeset check compares with
+          fetch-depth: 2
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -73,6 +76,12 @@ jobs:
       # Outside pre-release mode main is the current major's line: a major changeset waits for the next one.
       - name: Check no changeset makes the next release a major
         run: bun run major:check
+
+      # Dependabot writes no changeset, so a bump that changes what a consumer installs would ship unannounced: a range
+      # in package.json, a template pin, or the locked version of a package dist/cjs bundles. Compares the pull
+      # request or the queued merge with its base; a push has none and skips.
+      - name: Check a change to what a consumer installs adds a changeset
+        run: bun run dependencies:check
 
   test:
     name: Test (node ${{ matrix.node }})
