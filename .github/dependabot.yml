@@ -1,9 +1,12 @@
 version: 2
 updates:
-  # A runtime dependency ships inside the published package, so a bump to one is a `patch`
-  # a consumer should see in the changelog — add a changeset to the pull request before
-  # merging it. Dev dependencies and actions reach no consumer and need none. Majors are
-  # split out of the groups because they are the ones that need reading rather than merging.
+  # Dependabot writes no changeset. A bump that changes what a consumer installs needs one before it merges, and
+  # the Lint check fails without it: a changed range in package.json's dependencies, peerDependencies or
+  # optionalDependencies, or a new locked version of a package dist/cjs bundles (chalk, inversify and their
+  # dependencies). Run `bun run changeset` on the branch, or `bun run changeset --empty` for a bump that needs no
+  # release note. Any other bump changes only bun.lock, which isn't published, so it needs none, and neither do dev
+  # dependencies or actions. Majors are split out of the groups because they are the ones that need reading rather
+  # than merging.
   - package-ecosystem: bun
     directory: /
     schedule:

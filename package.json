@@ -29,6 +29,7 @@
     "release:version": "bun run notes:check && changeset version && bun scripts/check-jsdoc-examples.ts --fix && bun scripts/release-notes.ts && prettier --write CHANGELOG.md",
     "notes:check": "bun scripts/release-notes.ts --check",
     "major:check": "bun scripts/check-major-changeset.ts",
+    "dependencies:check": "bun scripts/check-dependency-changeset.ts",
     "notices": "bun scripts/third-party-notices.ts",
     "notices:check": "bun scripts/third-party-notices.ts --check",
     "check:jsdoc-examples": "bun scripts/check-jsdoc-examples.ts",
