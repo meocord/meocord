@@ -141,6 +141,32 @@ export interface MeoCordOptions<
   presenter?: new (...args: any[]) => ResponsePresenter
 
   /**
+   * The form of the views MeoCord answers an interaction with in a message it starts: `'embed'`, or `'v2'` for a
+   * Components V2 container sent with `IsComponentsV2`.
+   *
+   * @remarks
+   * It covers the answers of commands, components and modals: the private reply to an interaction not yet answered,
+   * error follow-ups, the private follow-up that replaces a public deferral, and the edit of a deferred reply nothing
+   * has been sent into yet. A message that already exists keeps its own form, since Discord can make a message
+   * Components V2 but never turn it back: the loading view `@Defer` adds to a component's message, its restore, and an
+   * error added to a private component message stay as that message is. A component on a Components V2 message is
+   * answered with containers either way. A message command's replies, `messageError` and the direct messages
+   * included, stay embeds. The presenter draws as before; `context.mode` tells it which form the view takes.
+   *
+   * A Components V2 answer carries only components, so a later `respond(interaction).send()` or `edit()` to it
+   * drops `content` and `embeds`, with a warning.
+   *
+   * @defaultValue `'embed'`
+   *
+   * @example
+   * ```ts
+   * @MeoCord({ controllers: [PingController], viewMode: 'v2' })
+   * class App {}
+   * ```
+   */
+  viewMode?: 'embed' | 'v2'
+
+  /**
    * How message commands start and match across the app: the `prefix`, a mention of the bot, `mention: 'only'`, the
    * app's own param `types`, how usage replies look, and the built-in `help`.
    */

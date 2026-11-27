@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { type Container } from 'inversify'
 import { collectStartupErrors, isRefusal, refuse, startupError, startupErrorsOf } from '@src/util/refusal.util.js'
 import { type ResponsePresenter, type ThemeOverride, type ThemeResolvers } from '@src/interface/index.js'
-import { setPresenter } from '@src/common/response/presenter.js'
+import { setPresenter, type ViewMode } from '@src/common/response/presenter.js'
 import { type InteractionResponse, responseOf } from '@src/common/response/response-state.js'
 import { deferMisuseError, handlerDefer, nonInteractionHandler, startDefer } from '@src/core/defer.js'
 import { droppedCallDeleting, droppedCallEnded, isStoppedBeforeStart, type ReadyBound, readyBoundFor, type ReadyWait, readyGateOf } from '@src/core/ready-gate.js'
@@ -151,6 +151,12 @@ export function bindAppPresenter(container: Container, app: object, client?: obj
   container.bind<ResponsePresenter>(APP_PRESENTER).toConstantValue(presenter)
   if (client) setPresenter(client, presenter)
   return presenter
+}
+
+/** The form `@MeoCord({ viewMode })` gives the views MeoCord starts a message with: `'embed'` unless it says `'v2'`. */
+export function appViewMode(app: object | undefined): ViewMode {
+  const options = app && (Reflect.getMetadata(META.appOptions, app) as { viewMode?: ViewMode } | undefined)
+  return options?.viewMode ?? 'embed'
 }
 
 /** Binds the app's presenter class as a shared stage, checking it as one, without making it. */
