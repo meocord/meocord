@@ -552,6 +552,11 @@ export class InteractionResponse implements ResponseState {
   /** Whether the interaction's own reply was sent by a raw call, whose format an edit of it reads back first. */
   #replyFormatUnread = false
   /**
+   * Whether a message MeoCord starts follows a Components V2 one: the component's message, until MeoCord's own reply
+   * takes its place. A raw reply doesn't, so the answer's format and the one new messages follow stay apart.
+   */
+  #followsV2 = false
+  /**
    * Set once this state answers with `update` or `deferUpdate`, which makes the original response the message the
    * component is on.
    */
@@ -582,7 +587,7 @@ export class InteractionResponse implements ResponseState {
       configurable: true,
     })
     const message = 'message' in interaction ? interaction.message : undefined
-    this.v2 = Boolean(message?.flags?.has(MessageFlags.IsComponentsV2))
+    this.v2 = this.#followsV2 = Boolean(message?.flags?.has(MessageFlags.IsComponentsV2))
   }
 
   get state(): ResponsePhase {
@@ -654,6 +659,7 @@ export class InteractionResponse implements ResponseState {
    */
   private learnRawAnswer(): void {
     if (typeof this.interaction.ephemeral !== 'boolean') return
+    this.v2 = false
     this.#replyFormatUnread = this.interaction.replied
   }
 
@@ -1294,7 +1300,7 @@ export class InteractionResponse implements ResponseState {
   private async reply(body: Body): Promise<Message | undefined> {
     this.cancelScheduled()
     const flags = this.withSuppression(this.flagsFor('reply', body.flags, false))
-    this.v2 = hasComponentsV2(flags)
+    this.v2 = this.#followsV2 = hasComponentsV2(flags)
     const sent = forMode(body, this.v2)
     const response = await this.firstAnswer(() =>
       this.call('reply', { ...sent, flags }, () =>
@@ -1427,11 +1433,16 @@ export class InteractionResponse implements ResponseState {
     this.#replyFormatUnread = false
     try {
       const reply = await this.interaction.fetchReply()
-      if (reply?.flags?.has(MessageFlags.IsComponentsV2)) this.v2 = true
+      this.v2 = Boolean(reply?.flags?.has(MessageFlags.IsComponentsV2))
     } catch {
       // Unread, it is edited as this state knows it
     }
     return this.v2
+  }
+
+  /** Whether a message MeoCord starts is Components V2: as the answer is, or as the component's message it follows. */
+  private newMessageV2(): boolean {
+    return this.v2 || this.#followsV2
   }
 
   private render(view: ResponseView, v2: boolean): Body {
@@ -1551,14 +1562,14 @@ export class InteractionResponse implements ResponseState {
     theme: ResolvedTheme,
   ): Promise<{ view: ResponseView; failure?: unknown; gone?: boolean; reset?: boolean }> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
-    const context = this.presenterContext(this.v2, theme)
+    const context = this.presenterContext(this.newMessageV2(), theme)
     // Fitted to the mode's limit first, so a presenter that writes the message as its text, MeoCord's own included, renders
     const generic = () => textFor(this.interaction, { key: 'meocord.fallback.error' })
     const presented = { message: presentedMessage(message, TEXT_LIMITS[context.mode], generic), error, tone } as const
     const ready = (view: ResponseView) => {
       const sendable = this.sendable(themedView(view, theme), this.keptBeside())
       // Rendered once here, so a view MeoCord cannot render fails before anything is sent
-      this.render(sendable, this.v2)
+      this.render(sendable, this.newMessageV2())
       return sendable
     }
     const fallback = (failure: unknown) => ({ view: ready(defaultPresenter.error(context, presented)), failure })
@@ -1663,7 +1674,7 @@ export class InteractionResponse implements ResponseState {
   }
 
   private privateError(view: ResponseView): ResponsePayload {
-    const body = this.render(view, this.v2)
+    const body = this.render(view, this.newMessageV2())
     return { ...body, flags: Number(body.flags ?? 0) | MessageFlags.Ephemeral } as ResponsePayload
   }
 
@@ -1675,7 +1686,7 @@ export class InteractionResponse implements ResponseState {
     this.sync()
     // The private deferral made for a drawn view is that view's reply
     if (this.privateDeferral && this.phase === 'deferred') {
-      await this.editMessage(this.render(view, this.v2))
+      await this.editMessage(this.render(view, this.newMessageV2()))
       this.privateDeferral = false
       return
     }
@@ -1694,7 +1705,7 @@ export class InteractionResponse implements ResponseState {
     // A command answers with its own reply; a modal leaves no message to edit, so its error follows up too
     if (answersWithOwnMessage(this.interaction) || this.modalShown) {
       if (this.phase === 'deferred' && visibility === 'reply') {
-        await this.editMessage(this.render(view, this.v2))
+        await this.editMessage(this.render(view, this.newMessageV2()))
         return
       }
       // A private follow-up edits a private deferral into it, and replaces a public one
