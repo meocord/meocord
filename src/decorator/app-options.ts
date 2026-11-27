@@ -160,7 +160,20 @@ export interface MeoCordOptions<
    *
    * @example
    * ```ts
-   * @MeoCord({ controllers: [PingController], viewMode: 'v2' })
+   * @Controller()
+   * class PingController {
+   *   @Command('ping', CommandType.SLASH)
+   *   async ping(interaction: ChatInputCommandInteraction) {
+   *     // Sent as a private Components V2 container
+   *     await respond(interaction).error(new UserError('Pings are paused.'))
+   *   }
+   * }
+   *
+   * @MeoCord({
+   *   controllers: [PingController],
+   *   clientOptions: { intents: [GatewayIntentBits.Guilds] },
+   *   viewMode: 'v2',
+   * })
    * class App {}
    * ```
    */

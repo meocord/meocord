@@ -5,7 +5,11 @@
 New `@MeoCord({ viewMode: 'v2' })` sends MeoCord's own answers to commands, components and modals as Components V2 containers in the messages it starts, for a bot whose own messages are V2:
 
 ```ts
-@MeoCord({ controllers: [PingController], viewMode: 'v2' })
+@MeoCord({
+  controllers: [PingController],
+  clientOptions: { intents: [GatewayIntentBits.Guilds] },
+  viewMode: 'v2',
+})
 class App {}
 ```
 
