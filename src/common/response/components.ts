@@ -9,6 +9,9 @@ export const V2_COMPONENT_LIMIT = 40
 /** Discord's limit on the embeds of one message. */
 export const EMBED_LIMIT = 10
 
+/** Discord's limit on the characters across every embed of one message, counted as discord.js's `embedLength` counts them. */
+export const EMBED_TEXT_LIMIT = 6000
+
 const SELECTS = new Set<unknown>([
   ComponentType.StringSelect,
   ComponentType.UserSelect,
@@ -59,6 +62,14 @@ export function countComponents(components: readonly Json[]): number {
   return components.reduce((total, node) => {
     const nested = children(node) ?? []
     return total + 1 + countComponents(nested) + (node.accessory ? 1 : 0)
+  }, 0)
+}
+
+/** How many characters the Text Displays of a Components V2 message hold, nested ones included. */
+export function countText(components: readonly Json[]): number {
+  return components.reduce((total, node) => {
+    const own = node.type === ComponentType.TextDisplay && typeof node.content === 'string' ? node.content.length : 0
+    return total + own + countText(children(node) ?? [])
   }, 0)
 }
 
