@@ -6,7 +6,7 @@ import { respond } from '@src/common/response/response-state.js'
 import { createMockInteraction, createMockMessage, getResponse } from '@src/testing/index.js'
 import { forgetStrictMocks } from '@src/testing/strict-mocks.js'
 
-const { IsComponentsV2 } = MessageFlags
+const { Ephemeral, IsComponentsV2 } = MessageFlags
 
 interface Payload {
   flags?: number
@@ -80,5 +80,40 @@ describe("the format of the app's own answer", () => {
 
     expect(calls(interaction, 'editReply').at(-1)?.flags).toBe(0)
     expect(interaction.fetchReply).not.toHaveBeenCalled()
+  })
+
+  it('edits a Components V2 follow-up that replaced a public deferral as V2, by its id', async () => {
+    const interaction = command()
+    await respond(interaction).acknowledge()
+    await respond(interaction).followUp({ components: [text('Working')], flags: Ephemeral | IsComponentsV2 })
+
+    await respond(interaction).send({ components: [text('Done')] })
+
+    const [replaced] = calls(interaction, 'followUp')
+    const edit = calls(interaction, 'editReply').at(-1)!
+    expect([replaced.flags, edit.flags, typeof edit.message]).toEqual([Ephemeral | IsComponentsV2, IsComponentsV2, 'string'])
+  })
+
+  it("edits an embed follow-up that became the answer after delete() as an embed, whatever the component's message was", async () => {
+    const interaction = button(createMockMessage({ flags: IsComponentsV2, components: [text('Panel').toJSON()] }))
+    await respond(interaction).acknowledge()
+    await respond(interaction).delete()
+    await respond(interaction).followUp({ embeds: [embed('Working')] })
+
+    await respond(interaction).send({ embeds: [embed('Done')] })
+
+    const edit = calls(interaction, 'editReply').at(-1)!
+    expect([edit.flags, edit.embeds?.length]).toEqual([0, 1])
+  })
+
+  it('keeps a follow-up that became the answer Components V2 once an edit makes it so', async () => {
+    const interaction = command()
+    await respond(interaction).acknowledge()
+    await respond(interaction).followUp({ embeds: [embed('Working')], flags: Ephemeral })
+
+    await respond(interaction).send({ components: [text('Done')], flags: IsComponentsV2 })
+    await respond(interaction).send({ components: [text('Done again')] })
+
+    expect(calls(interaction, 'editReply').map(edit => edit.flags)).toEqual([IsComponentsV2, IsComponentsV2])
   })
 })

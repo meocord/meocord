@@ -523,12 +523,13 @@ export class InteractionResponse implements ResponseState {
   private v2: boolean
   private lastMessage?: Message
   /**
-   * Which message is the answer: the interaction's own reply, a follow-up that took its place, or none since `delete()`,
-   * with whether the deleted one was private. `sync()` leaves it alone, so every edit follows it.
+   * Which message is the answer: the interaction's own reply, a follow-up that took its place, with whether it is
+   * private and Components V2, or none since `delete()`, with whether the deleted one was private. `sync()` leaves it
+   * alone, so every edit follows it.
    */
   private answer:
     | { kind: 'original' }
-    | { kind: 'followUp'; id: string; ephemeral: boolean }
+    | { kind: 'followUp'; id: string; ephemeral: boolean; v2: boolean }
     | { kind: 'deleted'; ephemeral: boolean } = { kind: 'original' }
   private readonly calls: ResponseCall[] = []
 
@@ -1155,8 +1156,8 @@ export class InteractionResponse implements ResponseState {
   /** Sends a follow-up that becomes the answer, which later edits and `delete()` act on by its id. */
   private async answerWith(body: Body): Promise<Message> {
     const { message, flags } = await this.sendFollowUp(body)
-    // Its privacy as sent, not as read back from the message
-    this.answer = { kind: 'followUp', id: message.id, ephemeral: hasEphemeral(flags) }
+    // Its privacy and format as sent, not as read back from the message
+    this.answer = { kind: 'followUp', id: message.id, ephemeral: hasEphemeral(flags), v2: hasComponentsV2(flags) }
     this.lastMessage = message
     return message
   }
@@ -1392,9 +1393,12 @@ export class InteractionResponse implements ResponseState {
       entry.drawn = false
       body = { ...body, attachments: [...entry.attachments] }
     }
-    const flags = this.flagsFor('edit', body.flags, await this.originalV2()) | this.keptFlags(body)
-    this.v2 ||= hasComponentsV2(flags)
-    const sent = { ...this.withAttachments(forMode(body, this.v2)), flags }
+    // A follow-up that is the answer has its own format; the interaction's reply has the one this state knows, or reads
+    const v2 = answer.kind === 'followUp' ? answer.v2 : await this.originalV2()
+    const flags = this.flagsFor('edit', body.flags, v2) | this.keptFlags(body)
+    if (answer.kind === 'followUp') answer.v2 ||= hasComponentsV2(flags)
+    else this.v2 ||= hasComponentsV2(flags)
+    const sent = { ...this.withAttachments(forMode(body, hasComponentsV2(flags))), flags }
     // A follow-up that is the answer is edited by its id
     const edit = answer.kind === 'followUp' ? { ...sent, message: answer.id } : sent
     try {
