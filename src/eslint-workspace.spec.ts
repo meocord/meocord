@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { ESLint, type Linter } from 'eslint'
 import meocordESLint from '../meocord.eslint.mjs'
+import { CHILD_PROCESS_CASE_TIMEOUT_MS, CHILD_PROCESS_TIMEOUT_MS, WARM_UP_TIMEOUT_MS } from '@src/spec-timeouts.js'
 
 // A bot linted with `meocord/eslint` as a package of a workspace, by ESLint's own CLI in a process of its own, so ESLint
 // loads the bot's config file as it does for a user: .ts through jiti on Node and natively on Bun, the others natively
@@ -71,8 +72,9 @@ function lint(root: string, from: 'root' | 'bot'): Lint {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, NODE_OPTIONS: '' },
+    timeout: CHILD_PROCESS_TIMEOUT_MS,
   })
-  if (!fs.existsSync(output)) throw new Error(`ESLint wrote no results (exit ${run.status}):\n${run.stderr}${run.stdout}`)
+  if (!fs.existsSync(output)) throw new Error(`ESLint wrote no results (exit ${run.status}, signal ${run.signal}):\n${run.stderr}${run.stdout}`)
   const results = JSON.parse(fs.readFileSync(output, 'utf8')) as {
     filePath: string
     messages: { ruleId: string | null; fatal?: boolean; message: string }[]
@@ -93,18 +95,23 @@ describe.each(Object.keys(LAYOUTS) as (keyof typeof LAYOUTS)[])('a bot of a %s w
     const root = workspace(layout, config)
 
     // Typed rules read the bot's own tsconfigs, and the cycle check resolves the alias they declare
-    it.each(['root', 'bot'] as const)("lints with the bot's tsconfigs from the workspace %s", from => {
-      expect(lint(root, from)).toEqual({
-        fatal: [],
-        floating: ['dropped.spec.ts', 'dropped.ts'],
-        cycles: ['alpha.ts', 'bravo.ts'],
-      })
-    })
+    it.each(['root', 'bot'] as const)(
+      "lints with the bot's tsconfigs from the workspace %s",
+      from => {
+        expect(lint(root, from)).toEqual({
+          fatal: [],
+          floating: ['dropped.spec.ts', 'dropped.ts'],
+          cycles: ['alpha.ts', 'bravo.ts'],
+        })
+      },
+      CHILD_PROCESS_CASE_TIMEOUT_MS,
+    )
   })
 })
 
 describe('a tsconfigRootDir the app sets', () => {
-  // The bot's tsconfigs in a folder of their own, which only the app's own root finds
+  // The bot's tsconfigs in a folder of their own, which only the app's own root finds; typed linting in this process
+  // reads typescript's library files first, as a setup hook's warm-up does
   it('wins over the folder of its eslint.config.*', async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-eslint-root-')))
     workspaces.push(root)
@@ -129,5 +136,5 @@ describe('a tsconfigRootDir the app sets', () => {
     expect(result.messages.filter(message => message.fatal || message.ruleId === '@typescript-eslint/no-floating-promises').map(message => message.ruleId)).toEqual([
       '@typescript-eslint/no-floating-promises',
     ])
-  })
+  }, WARM_UP_TIMEOUT_MS)
 })
