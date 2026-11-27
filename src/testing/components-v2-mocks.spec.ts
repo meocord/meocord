@@ -132,6 +132,22 @@ describe('Components V2 edits under useStrictMocks(), as Discord makes them', ()
     expect(flagsOf(message)).toEqual(['IsComponentsV2'])
     await expect(message.edit({ content: 'hi' })).rejects.toMatchObject(INVALID_BODY)
   })
+
+  it.each([
+    ["a channel's send with content", () => command().channel!.send({ content: 'hi', components: [text()], flags: IsComponentsV2 })],
+    ["a message's reply with embeds", () => createMockMessage().reply({ embeds: [embed()], components: [text()], flags: IsComponentsV2 })],
+    ["a user's direct message with content", () => command().user.send({ content: 'hi', components: [text()], flags: IsComponentsV2 })],
+  ] as const)('refuses %s and IsComponentsV2 with a 400', async (_, send) => {
+    await expect(send()).rejects.toMatchObject(INVALID_BODY)
+  })
+
+  it("takes a channel's send and a message's reply that hold only components", async () => {
+    const options = { components: [text()], flags: IsComponentsV2 } as const
+
+    const messages = await Promise.all([command().channel!.send(options), createMockMessage().reply(options)])
+
+    expect(messages.map(flagsOf)).toEqual([['IsComponentsV2'], ['IsComponentsV2']])
+  })
 })
 
 describe('Components V2 edits in default mode', () => {
@@ -153,6 +169,16 @@ describe('Components V2 edits in default mode', () => {
 
     expect(interaction.replied).toBe(true)
     expect(warned).toEqual([expect.stringMatching(/^reply\(\) here sends a Components V2 message with content.*400.*5\.0.*useStrictMocks\(\)/s)])
+  })
+
+  it.each([
+    ['send', () => command().channel!.send({ content: 'hi', components: [text()], flags: IsComponentsV2 })],
+    ['reply', () => createMockMessage().reply({ embeds: [embed()], components: [text()], flags: IsComponentsV2 })],
+  ] as const)('sends what %s() gives with IsComponentsV2 and content or embeds, as before, with a warning', async (method, send) => {
+    const message = await send()
+
+    expect(flagsOf(message)).toEqual(['IsComponentsV2'])
+    expect(warned).toEqual([expect.stringMatching(new RegExp(`^${method}\\(\\) here sends a Components V2 message with (content|embeds).*400`, 's'))])
   })
 
   it('keeps the embeds an edit making a reply Components V2 leaves, as before, with a warning', async () => {
