@@ -66,6 +66,23 @@ export function presenterFor(client: object | null | undefined): ResponsePresent
   return (client && presenters.get(client)) || defaultPresenter
 }
 
+/** The form MeoCord's views take on a message MeoCord starts: an embed, or a Components V2 container. */
+export type ViewMode = 'embed' | 'v2'
+
+// Shared by both builds of this version, as the presenters are
+const viewModes = shared('clientViewModes', () => new WeakMap<object, ViewMode>())
+
+/** Sets the form of the views MeoCord starts a message with for the interactions a client receives. */
+export function setViewMode(client: object, mode: ViewMode): void {
+  if (mode === 'v2') viewModes.set(client, mode)
+  else viewModes.delete(client)
+}
+
+/** The form of the views MeoCord starts a message with for an interaction's client: `'embed'` unless set. */
+export function viewModeFor(client: object | null | undefined): ViewMode {
+  return (client && viewModes.get(client)) || 'embed'
+}
+
 /** Discord's limits on a message's text, counted by `String.length` as discord.js's builders count them. */
 export const TEXT_LIMITS = { embed: 4096, v2: 4000, content: 2000 } as const
 

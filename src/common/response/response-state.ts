@@ -46,6 +46,7 @@ import {
   renderEmbed,
   withoutFiles,
   TEXT_LIMITS,
+  viewModeFor,
   withSendableFiles,
 } from '@src/common/response/presenter.js'
 import {
@@ -251,6 +252,12 @@ function droppedByV2(body: Body): ('content' | 'embeds')[] {
 
 interface Snapshot { components: Record<string, unknown>[]; embeds: APIEmbed[] }
 
+/** An error's view as drawn: MeoCord's own in place of a presenter that failed, with the failure. */
+interface DrawnError { view: ResponseView; failure?: unknown; gone?: boolean; reset?: boolean }
+
+/** An error's view in the form it goes in, `true` for Components V2, drawn for each form once. */
+type ErrorViews = (v2: boolean) => Promise<ResponseView>
+
 /**
  * Whether a message was edited after MeoCord's own edit at `ours`: only a later stamp says so. A message with no
  * stamp, or an edit of ours Discord returned without one, cannot tell, and counts as not edited since.
@@ -413,8 +420,8 @@ export interface ResponseState {
    * After `@Defer` locked a message, omitting `components` puts back its components as they were
    * before the lock, and omitting `embeds` drops the loading view; `components: []` clears them.
    *
-   * A Components V2 message carries only components: an answer to one, such as a V2 reply, is sent without `content`
-   * and `embeds`, and a warning names what was dropped.
+   * A Components V2 message carries only components: an answer to one, such as a V2 reply or MeoCord's V2 error, is
+   * sent without `content` and `embeds`, and a warning names what was dropped.
    *
    * @param payload - Text, or reply options.
    * @param options - `fill: false` leaves this message's embeds and containers uncoloured.
@@ -480,6 +487,9 @@ export interface ResponseState {
    *   that sets no field.
    *
    * A `UserError` shows its own message, privately, unless `options` say otherwise.
+   *
+   * The error added to a message takes that message's form. Every other one is a Components V2 container when the
+   * component's message is one or the app sets `@MeoCord({ viewMode: 'v2' })`, and an embed otherwise.
    *
    * @param error - The error, handed to the presenter so it can style it by kind.
    * @param options - What the user is told, and who sees it.
@@ -1473,9 +1483,12 @@ export class InteractionResponse implements ResponseState {
     return rest
   }
 
-  /** Whether a message MeoCord starts is Components V2: as the answer is, or as the component's message it follows. */
+  /**
+   * Whether a message MeoCord starts is Components V2: as the answer is, as the component's message it follows, or as
+   * `viewMode` asks.
+   */
   private newMessageV2(): boolean {
-    return this.v2 || this.#followsV2
+    return this.v2 || this.#followsV2 || viewModeFor(this.interaction.client) === 'v2'
   }
 
   private render(view: ResponseView, v2: boolean): Body {
@@ -1514,6 +1527,25 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
+   * Sends an error's views with `send`, and again without their files should Discord refuse them as too large, as
+   * {@link withFilesFallback} does for one view.
+   */
+  private async withViewsFilesFallback(views: ErrorViews, send: (views: ErrorViews) => Promise<void>): Promise<void> {
+    let withFiles = false
+    try {
+      await send(async v2 => {
+        const view = await views(v2)
+        withFiles ||= Boolean(view.files?.length)
+        return view
+      })
+    } catch (error) {
+      if (!withFiles || !isTooLarge(error)) throw error
+      this.warnFilesDropped(REFUSED_AS_TOO_LARGE)
+      await send(async v2 => withoutFiles(await views(v2)))
+    }
+  }
+
+  /**
    * `ifUnanswered`, for MeoCord's own answers alone: the answer is moot once anything else has answered, as for
    * "Command not found!" to a click a collector took, so Discord refusing it as already answered ends it.
    */
@@ -1540,12 +1572,22 @@ export class InteractionResponse implements ResponseState {
     const own = error instanceof UserError
     const { message = own ? error.message : textFor(this.interaction, { key: 'meocord.fallback.error' }), visibility = own ? 'private' : 'reply' } = options
     const theme = await this.answerTheme(visibility === 'private')
-    // Drawn before anything is sent; a presenter that fails is answered for with MeoCord's own view, then thrown to
-    // the caller, which reports it as the call's fault rather than passing it for a refusal
-    const { view, failure, gone, reset } = await this.drawnView(error, message, theme)
+    // Drawn before anything is sent, for the form of where it goes, and again only should it go elsewhere; a presenter
+    // that fails is answered for with MeoCord's own view, then thrown to the caller, which reports it as the call's
+    // fault rather than passing it for a refusal
+    const drawn = new Map<boolean, Promise<DrawnError>>()
+    const draw = (v2: boolean): Promise<DrawnError> => {
+      let view = drawn.get(v2)
+      if (!view) drawn.set(v2, (view = this.drawnView(error, message, theme, v2)))
+      return view
+    }
+    const { gone, reset } = await draw(this.plannedErrorV2())
     // Its refusal already logged, an interaction Discord no longer knows is not answered again
-    if (!gone) await this.deliverError(view, visibility, ifUnanswered, reset)
-    if (failure !== undefined) throw failure
+    if (!gone) await this.deliverError(async v2 => (await draw(v2)).view, visibility, ifUnanswered, reset)
+    for (const view of drawn.values()) {
+      const { failure } = await view
+      if (failure !== undefined) throw failure
+    }
   }
 
   /**
@@ -1553,14 +1595,14 @@ export class InteractionResponse implements ResponseState {
    * pick nothing has answered is first answered with the update that puts its menu back, unless `reset` says that was
    * done already, and the view then follows up.
    */
-  private async deliverError(view: ResponseView, visibility: 'reply' | 'private', ifUnanswered: boolean, reset = false): Promise<void> {
+  private async deliverError(views: ErrorViews, visibility: 'reply' | 'private', ifUnanswered: boolean, reset = false): Promise<void> {
     try {
       this.sync()
       if (!reset && this.phase === 'unanswered' && this.interaction.isAnySelectMenu()) {
         await this.resetPick()
         reset = true
       }
-      await this.withFilesFallback(view, shown => this.presentError(shown, visibility, { ifUnanswered, reset }))
+      await this.withViewsFilesFallback(views, shown => this.presentError(shown, visibility, { ifUnanswered, reset }))
     } catch (deliveryError) {
       if (errorCode(deliveryError) !== ALREADY_ACKNOWLEDGED) {
         logFailedSend(logger, 'deliver the error reply', deliveryError)
@@ -1571,7 +1613,8 @@ export class InteractionResponse implements ResponseState {
       this.answeredElsewhere()
       if (ifUnanswered) return
       try {
-        await this.withFilesFallback(view, async shown => void (await this.followUpNow(this.privateError(shown))))
+        const fresh = this.newMessageV2()
+        await this.withViewsFilesFallback(views, async shown => void (await this.followUpNow(this.privateError(await shown(fresh), fresh))))
       } catch (retryError) {
         logFailedSend(logger, 'deliver the error reply', retryError)
       }
@@ -1583,26 +1626,22 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
-   * The presenter's error view, drawn and rendered as one step. One it draws asynchronously has the interaction
-   * acknowledged first, so the drawing never misses Discord's three seconds: privately, or a select-menu pick with the
-   * update that puts its menu back, which `reset` reports; `gone` when Discord no longer knows the interaction. Should
-   * the presenter fail, or draw a view MeoCord cannot render, MeoCord's own view takes its place, and the failure is
-   * returned for the caller to report once the user is answered.
+   * The presenter's error view for the form `v2` names, drawn and rendered as one step. One it draws asynchronously has
+   * the interaction acknowledged first, so the drawing never misses Discord's three seconds: privately, or a
+   * select-menu pick with the update that puts its menu back, which `reset` reports; `gone` when Discord no longer
+   * knows the interaction. Should the presenter fail, or draw a view MeoCord cannot render, MeoCord's own view takes
+   * its place, and the failure is returned for the caller to report once the user is answered.
    */
-  private async drawnView(
-    error: unknown,
-    message: string,
-    theme: ResolvedTheme,
-  ): Promise<{ view: ResponseView; failure?: unknown; gone?: boolean; reset?: boolean }> {
+  private async drawnView(error: unknown, message: string, theme: ResolvedTheme, v2: boolean): Promise<DrawnError> {
     const tone = isUserOutcome(error, this.interaction) ? 'warning' : 'danger'
-    const context = this.presenterContext(this.newMessageV2(), theme)
+    const context = this.presenterContext(v2, theme)
     // Fitted to the mode's limit first, so a presenter that writes the message as its text, MeoCord's own included, renders
     const generic = () => textFor(this.interaction, { key: 'meocord.fallback.error' })
     const presented = { message: presentedMessage(message, TEXT_LIMITS[context.mode], generic), error, tone } as const
     const ready = (view: ResponseView) => {
       const sendable = this.sendable(themedView(view, theme), this.keptBeside())
-      // Rendered once here, so a view MeoCord cannot render fails before anything is sent
-      this.render(sendable, this.newMessageV2())
+      // Rendered once here, in the form it goes in, so a view MeoCord cannot render fails before anything is sent
+      this.render(sendable, v2)
       return sendable
     }
     const fallback = (failure: unknown) => ({ view: ready(defaultPresenter.error(context, presented)), failure })
@@ -1706,30 +1745,48 @@ export class InteractionResponse implements ResponseState {
     }
   }
 
-  private privateError(view: ResponseView): ResponsePayload {
-    const body = this.render(view, this.newMessageV2())
+  private privateError(view: ResponseView, v2: boolean): ResponsePayload {
+    const body = this.render(view, v2)
     return { ...body, flags: Number(body.flags ?? 0) | MessageFlags.Ephemeral } as ResponsePayload
   }
 
+  /**
+   * Whether an error would be added to the message the component is on: its private message, while that message is
+   * the answer. Any other answer, made elsewhere or by the app, may be a reply, which an edit would replace.
+   */
+  private addsErrorToMessage(): boolean {
+    if (answersWithOwnMessage(this.interaction) || this.modalShown || this.answer.kind === 'deleted') return false
+    // Whether the message is private does not change with edits
+    const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
+    return this.answerIsMessage() && Boolean(current?.flags?.has(MessageFlags.Ephemeral))
+  }
+
+  /** The form an error's view is first drawn for: the message it would be added to, or a message MeoCord starts. */
+  private plannedErrorV2(): boolean {
+    return this.addsErrorToMessage() ? this.v2 : this.newMessageV2()
+  }
+
   private async presentError(
-    view: ResponseView,
+    views: ErrorViews,
     visibility: 'reply' | 'private',
     { ifUnanswered = false, reset = false }: { ifUnanswered?: boolean; reset?: boolean } = {},
   ): Promise<void> {
     this.sync()
+    // Every answer here but an addition to the component's message is a message MeoCord starts, or a deferral it fills
+    const fresh = this.newMessageV2()
     // The private deferral made for a drawn view is that view's reply
     if (this.privateDeferral && this.phase === 'deferred') {
-      await this.editMessage(this.render(view, this.newMessageV2()))
+      await this.editMessage(this.render(await views(fresh), fresh))
       this.privateDeferral = false
       return
     }
     // A pick answered with the update that put its menu back is told privately
     if (reset) {
-      await this.followUpNow(this.privateError(view))
+      await this.followUpNow(this.privateError(await views(fresh), fresh))
       return
     }
     if (this.phase === 'unanswered') {
-      await this.reply(toBody(this.privateError(view)))
+      await this.reply(toBody(this.privateError(await views(fresh), fresh)))
       return
     }
     // Answered meanwhile, as by a collector while the theme was looked up: an answer only for an unanswered one is moot
@@ -1738,25 +1795,23 @@ export class InteractionResponse implements ResponseState {
     // A command answers with its own reply; a modal leaves no message to edit, so its error follows up too
     if (answersWithOwnMessage(this.interaction) || this.modalShown) {
       if (this.phase === 'deferred' && visibility === 'reply') {
-        await this.editMessage(this.render(view, this.newMessageV2()))
+        await this.editMessage(this.render(await views(fresh), fresh))
         return
       }
       // A private follow-up edits a private deferral into it, and replaces a public one
-      await this.followUpNow(this.privateError(view))
+      await this.followUpNow(this.privateError(await views(fresh), fresh))
       return
     }
 
     // A deleted message has nothing to add the error to or put back: the error follows up, and is the answer
     if (this.answer.kind === 'deleted') {
-      await this.followUpNow(this.privateError(view))
+      await this.followUpNow(this.privateError(await views(fresh), fresh))
       return
     }
-    // The message the component is on: whether it is private does not change with edits.
-    const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
-    // Added to only while that message is the answer: any other answer, made elsewhere or by the app, may be a reply,
-    // which an edit would replace
-    if (this.answerIsMessage() && current?.flags?.has(MessageFlags.Ephemeral)) {
-      const appended = this.appendError(current, view)
+    if (this.addsErrorToMessage()) {
+      const current = 'message' in this.interaction ? this.interaction.message! : this.message!
+      // In the message's own form, which an edit can't change back
+      const appended = this.appendError(current, await views(this.v2))
       if (this.fits(appended)) {
         await this.editMessage(appended)
         return
@@ -1765,7 +1820,7 @@ export class InteractionResponse implements ResponseState {
     await this.restore()
     // A pick this state deferred, and since edited by nothing, not even a restore, still shows in its menu
     if (this.phase === 'deferred' && this.answerIsMessage() && this.interaction.isAnySelectMenu()) await this.resetDeferredPick()
-    await this.followUpNow(this.privateError(view))
+    await this.followUpNow(this.privateError(await views(fresh), fresh))
   }
 
   /**

@@ -152,6 +152,9 @@ export function MeoCord<const G extends readonly unknown[] = [], const I extends
     providerMap(options.providers ?? [], `${target.name}: @MeoCord({ providers })`)
     assertMessageOptions(target.name, options.messages, options.i18n)
     assertCooldownPolicy(target.name, options)
+    if (options.viewMode !== undefined && options.viewMode !== 'embed' && options.viewMode !== 'v2') {
+      throw refuse(new TypeError(`${target.name}: @MeoCord({ viewMode }) must be 'embed' or 'v2' (got ${JSON.stringify(options.viewMode)}).`))
+    }
     for (const name of ['warnUnanswered', 'warnSlow', 'waitForReady', 'answerDenied', 'globalStagesOnEvents'] as const) {
       if (options[name] !== undefined && typeof options[name] !== 'boolean') {
         throw refuse(new TypeError(`${target.name}: @MeoCord({ ${name} }) takes true or false.`))
