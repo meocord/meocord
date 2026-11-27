@@ -33,7 +33,7 @@ import {
   resolveFlags,
   type ResponseStep,
 } from '@src/common/response/flags.js'
-import { keptAttachmentNames, rewriteAttachmentUrls } from '@src/common/response/attachments.js'
+import { keptFiles, type ListedUpload, listedUploads, rewriteAttachmentUrls, shadowedFiles } from '@src/common/response/attachments.js'
 import {
   attachmentsOf,
   DEFAULT_ATTACHMENT_SIZE_LIMIT,
@@ -277,10 +277,10 @@ interface MessageLock {
   /** The message with no call holding it: before the first lock, then as the last settled call left it. */
   original: Snapshot
   /**
-   * The message's own attachments when it was first locked, which an edit lists to keep them as a loading view's files
-   * come and go.
+   * The uploads the message kept when it was first locked, those its media show and those nothing shows, which an edit
+   * lists to keep them as a loading view's files come and go.
    */
-  attachments: unknown[]
+  attachments: ListedUpload[]
   /** Whether a loading view put files of its own on it, which putting it back has to leave out. */
   drawn?: boolean
   /** The calls holding it, with the control each disabled, in the order they locked it. */
@@ -339,10 +339,23 @@ function themedView(view: ResponseView, theme: ResolvedTheme): ResponseView {
   return view.color === undefined ? { ...view, color: theme.colors.primary } : view
 }
 
-/** A message's attachments, as an edit lists them to keep them. */
-function attachmentList(message: { attachments?: unknown } | null | undefined): unknown[] {
+/** A message's attachments: the uploads nothing on it shows. */
+function attachmentList(message: { attachments?: unknown } | null | undefined): { id?: unknown; name?: unknown }[] {
   const values = (message?.attachments as { values?: () => unknown } | undefined)?.values?.()
-  return values && typeof (values as Iterable<unknown>)[Symbol.iterator] === 'function' ? [...(values as Iterable<unknown>)] : []
+  return values && typeof (values as Iterable<unknown>)[Symbol.iterator] === 'function' ? [...(values as Iterable<{ id?: unknown; name?: unknown }>)] : []
+}
+
+/** The uploads an edit that keeps `shown` on `message` lists, so that none of them is dropped. */
+function uploadsKept(message: Message, shown: Snapshot): ListedUpload[] {
+  return listedUploads(shown, attachmentList(message), typeof message.channelId === 'string' ? message.channelId : undefined)
+}
+
+/** A message's components and embeds as a lock snapshots them: without MeoCord's rendered views or `loadingEmbed`. */
+function snapshotOf(message: Message, loadingEmbed?: APIEmbed): Snapshot {
+  return {
+    components: withoutRenderedViews(message.components.map(component => component.toJSON() as unknown as Record<string, unknown>)),
+    embeds: message.embeds.map(embed => embed.toJSON()).filter(embed => !loadingEmbed || !sameEmbed(embed, loadingEmbed)),
+  }
 }
 
 /** What a loading drawing that missed its deadline is taken as. */
@@ -961,19 +974,16 @@ export class InteractionResponse implements ResponseState {
     if (this.phase === 'deferred' && !this.#answeredOnMessage && typeof this.interaction.ephemeral === 'boolean') return
 
     const theme = await themeForInteraction(this.interaction)
-    // Drawn only now, after the acknowledgement, so a slow drawing never misses Discord's three seconds
-    const view = await this.drawnLoading(theme, attachmentList(message).length)
-    const loadingEmbed = renderEmbed(view)
     const key = typeof message.id === 'string' ? message.id : message
+    // Drawn only now, after the acknowledgement, so a slow drawing never misses Discord's three seconds
+    const view = await this.drawnLoading(theme, messageLocks.get(key)?.attachments ?? uploadsKept(message, snapshotOf(message)))
     // A message another call holds is snapshotted as it was before any lock, not as that call's lock shows it
     let entry = messageLocks.get(key)
     if (!entry) {
+      const original = snapshotOf(message, renderEmbed(view))
       entry = {
-        original: {
-          components: withoutRenderedViews(message.components.map(component => component.toJSON() as unknown as Record<string, unknown>)),
-          embeds: message.embeds.map(embed => embed.toJSON()).filter(embed => !sameEmbed(embed, loadingEmbed)),
-        },
-        attachments: attachmentList(message),
+        original,
+        attachments: uploadsKept(message, original),
         holders: new Map(),
         edits: Promise.resolve(),
       }
@@ -1396,7 +1406,14 @@ export class InteractionResponse implements ResponseState {
   }
 
   private withAttachments(body: Body): Body {
-    return rewriteAttachmentUrls(body, keptAttachmentNames(body, this.message?.attachments?.values() ?? []))
+    const kept = keptFiles(body, this.message?.attachments?.values() ?? [])
+    for (const name of shadowedFiles(body, kept)) {
+      logger.warn(
+        `${describeInteraction(this.interaction as Interaction)} keeps ${name} in a File component beside a newer upload of that name, ` +
+          `which attachment://${name} reaches instead; Discord takes a File only by attachment://, so it may refuse this edit.`,
+      )
+    }
+    return rewriteAttachmentUrls(body, kept)
   }
 
   /**
@@ -1526,7 +1543,7 @@ export class InteractionResponse implements ResponseState {
   }
 
   /** A view Discord takes, its files dropped with a warning when it would refuse them; `kept` attachments stay beside them. */
-  private sendable(view: ResponseView, kept = 0): ResponseView {
+  private sendable(view: ResponseView, kept: readonly ListedUpload[] = []): ResponseView {
     const limit = (this.interaction as { attachmentSizeLimit?: unknown }).attachmentSizeLimit
     const sizeLimit = typeof limit === 'number' && limit > 0 ? limit : DEFAULT_ATTACHMENT_SIZE_LIMIT
     return withSendableFiles(view, { kept, sizeLimit }, problem => this.warnFilesDropped(problem))
@@ -1692,7 +1709,7 @@ export class InteractionResponse implements ResponseState {
    * presenter throw or reject, take longer than {@link LOADING_DRAW_TIMEOUT_MS}, or draw a view MeoCord cannot render,
    * it is warned about and MeoCord's own loading view is shown, so the lock, and the handler after it, still go ahead.
    */
-  private async drawnLoading(theme: ResolvedTheme, kept: number): Promise<ResponseView> {
+  private async drawnLoading(theme: ResolvedTheme, kept: readonly ListedUpload[]): Promise<ResponseView> {
     const context = this.presenterContext(this.v2, theme)
     const ready = (view: ResponseView) => {
       const sendable = this.sendable(themedView(view, theme), kept)
@@ -1725,11 +1742,11 @@ export class InteractionResponse implements ResponseState {
     }
   }
 
-  /** How many attachments the message an error view may be added to keeps: a private component message's own. */
-  private keptBeside(): number {
-    if (answersWithOwnMessage(this.interaction) || this.modalShown) return 0
+  /** The uploads the message an error view may be added to keeps: a private component message's own. */
+  private keptBeside(): ListedUpload[] {
+    if (answersWithOwnMessage(this.interaction) || this.modalShown) return []
     const current = 'message' in this.interaction ? (this.interaction.message ?? undefined) : this.message
-    return current?.flags?.has(MessageFlags.Ephemeral) ? attachmentList(current).length : 0
+    return current?.flags?.has(MessageFlags.Ephemeral) ? uploadsKept(current, this.appendBase(current)) : []
   }
 
   /** Acknowledges with a private deferred reply, which the error view then replaces, as a private reply would show it. */
@@ -1856,17 +1873,24 @@ export class InteractionResponse implements ResponseState {
     return embeds.length <= EMBED_LIMIT && embeds.reduce((total, embed) => total + embedLength(embed), 0) <= EMBED_TEXT_LIMIT
   }
 
+  /** The private message the component is on as it was before loading, which an error view is added to. */
+  private appendBase(current: Message): Snapshot {
+    return (
+      this.snapshot ?? {
+        components: current.components.map(component => component.toJSON() as unknown as Record<string, unknown>),
+        embeds: current.embeds.map(embed => embed.toJSON()),
+      }
+    )
+  }
+
   /** The private message the component is on, as it was before loading, with the error added. */
   private appendError(current: Message, view: ResponseView): Body {
-    const base = this.snapshot ?? {
-      components: current.components.map(component => component.toJSON()),
-      embeds: current.embeds.map(embed => embed.toJSON()),
-    }
+    const base = this.appendBase(current)
     const body: Body = this.v2
       ? { components: [...base.components, renderContainer(view)] }
       : { components: base.components, embeds: [...base.embeds, renderEmbed(view)] }
     const files = attachmentsOf(view)
-    return files.length > 0 ? { ...body, files, attachments: attachmentList(current) } : body
+    return files.length > 0 ? { ...body, files, attachments: uploadsKept(current, base) } : body
   }
 }
 
