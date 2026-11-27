@@ -16,7 +16,7 @@ import { forgetDeprecationWarnings } from '@src/common/deprecation.js'
 import { respond } from '@src/common/response/response-state.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type PresentedError, type ResponseContext } from '@src/interface/index.js'
-import { createMockInteraction, createMockMessage, getResponse } from '@src/testing/index.js'
+import { createMockInteraction, createMockMessage, getResponse, useStrictMocks } from '@src/testing/index.js'
 import { forgetStrictMocks } from '@src/testing/strict-mocks.js'
 
 const { Ephemeral, IsComponentsV2 } = MessageFlags
@@ -279,5 +279,70 @@ describe('content and embeds dropped from a Components V2 answer', () => {
     await respond(interaction).send({ content: '', embeds: [], components: [text('Again')] })
 
     expect(warned).toEqual([])
+  })
+})
+
+describe('an embed answer made Components V2', () => {
+  // Strict mocks refuse a V2 message left holding content or embeds, as Discord does
+  beforeEach(() => useStrictMocks())
+  const cleared = { content: null, embeds: [], components: [expect.anything()], flags: IsComponentsV2 }
+
+  it("clears the content and embeds of MeoCord's own embed reply when an edit makes it V2", async () => {
+    const interaction = command()
+    await respond(interaction).send({ content: 'Working', embeds: [embed('Working')] })
+
+    await respond(interaction).send({ components: [text('Done')], flags: IsComponentsV2 })
+
+    expect(calls(interaction, 'editReply')).toEqual([cleared])
+    const reply = await interaction.fetchReply()
+    expect([reply.content, reply.embeds.length, reply.flags.has(IsComponentsV2)]).toEqual(['', 0, true])
+  })
+
+  it("clears the content and embeds of the app's own embed reply when an edit makes it V2", async () => {
+    const interaction = command()
+    await interaction.reply({ embeds: [embed('Working')] })
+
+    await respond(interaction).send({ components: [text('Done')], flags: IsComponentsV2 })
+
+    expect(calls(interaction, 'editReply')).toEqual([cleared])
+  })
+
+  it('clears an embed follow-up that became the answer when an edit makes it V2, whatever the reply before it was', async () => {
+    const interaction = command()
+    await respond(interaction).send({ components: [text('First')], flags: IsComponentsV2 })
+    await respond(interaction).delete()
+    await respond(interaction).send({ embeds: [embed('Again')] })
+
+    await respond(interaction).send({ components: [text('Done')], flags: IsComponentsV2 })
+
+    expect(calls(interaction, 'editReply')).toEqual([{ ...cleared, message: expect.any(String) }])
+  })
+
+  it("clears a component's embed message when its update makes it V2", async () => {
+    const interaction = button(createMockMessage({ content: 'Panel', embeds: [embed('Panel').toJSON()] }))
+
+    await respond(interaction).send({ components: [text('Opened')], flags: IsComponentsV2 })
+
+    expect(calls(interaction, 'update')).toEqual([cleared])
+  })
+
+  it('clears nothing when an edit keeps a V2 answer V2, or an embed answer an embed', async () => {
+    const v2 = command()
+    await respond(v2).send({ components: [text('Working')], flags: IsComponentsV2 })
+    await respond(v2).send({ components: [text('Done')] })
+    const embedded = command()
+    await respond(embedded).send({ embeds: [embed('Working')] })
+    await respond(embedded).send({ components: [] })
+
+    expect(calls(v2, 'editReply')).toEqual([{ components: [expect.anything()], flags: IsComponentsV2 }])
+    expect(calls(embedded, 'editReply')).toEqual([{ components: [], flags: 0 }])
+  })
+
+  it("clears nothing on a component's V2 message its update keeps V2", async () => {
+    const interaction = button(createMockMessage({ flags: IsComponentsV2, components: [new ContainerBuilder().addTextDisplayComponents(text('Panel')).toJSON()] }))
+
+    await respond(interaction).send({ components: [text('Opened')], flags: IsComponentsV2 })
+
+    expect(calls(interaction, 'update')).toEqual([{ components: [expect.anything()], flags: IsComponentsV2 }])
   })
 })

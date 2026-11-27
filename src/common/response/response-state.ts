@@ -230,6 +230,17 @@ function toBody(payload: ResponsePayload | ResponseEditPayload): Body {
   return body
 }
 
+/**
+ * What an edit that makes a message Components V2 sends with it: Discord refuses the edit unless the content and embeds
+ * the message holds are cleared in the same request.
+ */
+const CLEARED_FOR_V2 = { content: null, embeds: [] } as const
+
+/** The fields an edit sends to clear what a message turned Components V2 must lose, if `wasV2` says it may hold any. */
+function clearedForV2(wasV2: boolean, v2: boolean): Partial<typeof CLEARED_FOR_V2> {
+  return v2 && !wasV2 ? CLEARED_FOR_V2 : {}
+}
+
 /** What a body gives that a Components V2 message cannot carry, and loses there: non-empty `content` or `embeds`. */
 function droppedByV2(body: Body): ('content' | 'embeds')[] {
   const dropped: ('content' | 'embeds')[] = []
@@ -1324,8 +1335,9 @@ export class InteractionResponse implements ResponseState {
     this.cancelScheduled()
     this.settled = true
     const flags = this.flagsFor('update', body.flags) | this.keptFlags(body)
+    const wasV2 = this.v2
     this.v2 ||= hasComponentsV2(flags)
-    const sent = this.withAttachments(this.forMode(body, this.v2))
+    const sent = { ...this.withAttachments(this.forMode(body, this.v2)), ...clearedForV2(wasV2, this.v2) }
     const target = this.interaction
     const response = await this.firstAnswer(() =>
       this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never)),
@@ -1411,7 +1423,7 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('edit', body.flags, v2) | this.keptFlags(body)
     if (answer.kind === 'followUp') answer.v2 ||= hasComponentsV2(flags)
     else this.v2 ||= hasComponentsV2(flags)
-    const sent = { ...this.withAttachments(this.forMode(body, hasComponentsV2(flags))), flags }
+    const sent = { ...this.withAttachments(this.forMode(body, hasComponentsV2(flags))), ...clearedForV2(v2, hasComponentsV2(flags)), flags }
     // A follow-up that is the answer is edited by its id
     const edit = answer.kind === 'followUp' ? { ...sent, message: answer.id } : sent
     try {
