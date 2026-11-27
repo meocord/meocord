@@ -15,6 +15,7 @@ import {
   type JSONEncodable,
   type APIModalInteractionResponseCallbackData,
   ComponentType,
+  embedLength,
   type RepliableInteraction,
   resolveColor,
 } from 'discord.js'
@@ -49,7 +50,9 @@ import {
 } from '@src/common/response/presenter.js'
 import {
   countComponents,
+  countText,
   EMBED_LIMIT,
+  EMBED_TEXT_LIMIT,
   lockComponents,
   type LockOptions,
   sameEmbed,
@@ -1770,11 +1773,17 @@ export class InteractionResponse implements ResponseState {
     }
   }
 
-  /** Whether a message stays within Discord's limits of 10 embeds and of Components V2 components. */
+  /**
+   * Whether a message stays within Discord's limits for its form: of Components V2 components and the 4000 characters
+   * their Text Displays total, or of 10 embeds and the 6000 characters across them.
+   */
   private fits(body: Body): boolean {
-    return this.v2
-      ? countComponents((body.components ?? []) as Record<string, unknown>[]) <= V2_COMPONENT_LIMIT
-      : (body.embeds?.length ?? 0) <= EMBED_LIMIT
+    if (this.v2) {
+      const components = (body.components ?? []) as Record<string, unknown>[]
+      return countComponents(components) <= V2_COMPONENT_LIMIT && countText(components) <= TEXT_LIMITS.v2
+    }
+    const embeds = (body.embeds ?? []).map(embed => toJson(embed) as APIEmbed)
+    return embeds.length <= EMBED_LIMIT && embeds.reduce((total, embed) => total + embedLength(embed), 0) <= EMBED_TEXT_LIMIT
   }
 
   /** The private message the component is on, as it was before loading, with the error added. */

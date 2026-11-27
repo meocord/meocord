@@ -1,4 +1,14 @@
-import { ButtonInteraction, ChatInputCommandInteraction, ContainerBuilder, EmbedBuilder, MessageFlags, TextDisplayBuilder } from 'discord.js'
+import {
+  type APIEmbed,
+  ButtonInteraction,
+  ChatInputCommandInteraction,
+  ComponentType,
+  ContainerBuilder,
+  EmbedBuilder,
+  embedLength,
+  MessageFlags,
+  TextDisplayBuilder,
+} from 'discord.js'
 import { vi } from 'vitest'
 import { Logger } from '@src/common/logger.js'
 import { UserError } from '@src/common/errors.js'
@@ -177,5 +187,45 @@ describe("the answer's format, apart from the component message's", () => {
     await respond(interaction).error(new UserError('Not yours.'))
 
     expect([calls(interaction, 'reply').length, followUpV2(interaction)]).toEqual([1, false])
+  })
+})
+
+describe("an error added to a private message, within Discord's text limits", () => {
+  interface Node { type?: number; content?: string; components?: Node[] }
+  /** The characters of every Text Display in `components`, nested ones included. */
+  const textTotal = (components: Node[] = []): number =>
+    components.reduce((total, node) => total + (node.type === ComponentType.TextDisplay ? (node.content?.length ?? 0) : 0) + textTotal(node.components), 0)
+  const embedTotal = (embeds: unknown[] = []) => embeds.reduce<number>((total, each) => total + embedLength(each as APIEmbed), 0)
+  const privateV2 = (content: string) =>
+    createMockMessage({ flags: IsComponentsV2 | Ephemeral, components: [new ContainerBuilder().addTextDisplayComponents(text(content)).toJSON()] })
+  const privateEmbeds = (...descriptions: string[]) => createMockMessage({ flags: Ephemeral, embeds: descriptions.map(description => ({ description })) })
+  const addError = async (message: ReturnType<typeof createMockMessage>) => {
+    const interaction = button(message)
+    await respond(interaction).acknowledge()
+    await respond(interaction).error(new UserError('Not yours.'))
+    return interaction
+  }
+  /** How many characters the error adds, measured on a message it fits. */
+  const added = async (message: ReturnType<typeof createMockMessage>, before: number, total: (edit: Payload) => number) =>
+    total(calls(await addError(message), 'editReply').at(-1)!) - before
+
+  it('adds it to a Components V2 message whose Text Displays then total 4000 characters, and follows up past that', async () => {
+    const error = await added(privateV2('Panel'), 'Panel'.length, edit => textTotal(edit.components as Node[]))
+
+    const fits = await addError(privateV2('x'.repeat(4000 - error)))
+    const over = await addError(privateV2('x'.repeat(4001 - error)))
+
+    expect([textTotal(calls(fits, 'editReply').at(-1)!.components as Node[]), calls(fits, 'followUp').length]).toEqual([4000, 0])
+    expect([calls(over, 'editReply').length, calls(over, 'followUp').length]).toEqual([0, 1])
+  })
+
+  it("adds it to an embed message whose embeds then total 6000 characters, and follows up past that", async () => {
+    const error = await added(privateEmbeds('Card'), 'Card'.length, edit => embedTotal(edit.embeds))
+
+    const fits = await addError(privateEmbeds('x'.repeat(3000), 'x'.repeat(3000 - error)))
+    const over = await addError(privateEmbeds('x'.repeat(3000), 'x'.repeat(3001 - error)))
+
+    expect([embedTotal(calls(fits, 'editReply').at(-1)!.embeds), calls(fits, 'followUp').length]).toEqual([6000, 0])
+    expect([calls(over, 'editReply').length, calls(over, 'followUp').length]).toEqual([0, 1])
   })
 })
