@@ -133,6 +133,17 @@ import { Logger } from '@src/common/logger.js'
 import { hasWarned, warnOnce, warnPlaceholder } from '@src/common/deprecation.js'
 import { asMockCode } from '@src/testing/mock-code.js'
 import { asDiscordStores, embedsAsDiscordStores } from '@src/testing/discord-shape.js'
+import {
+  attachmentsOf,
+  fileRefusals,
+  formBodyError,
+  keptUploads,
+  type Upload,
+  uploadsHeldBy,
+  uploadsOf,
+  withEmbedUploads,
+  withUploads,
+} from '@src/testing/uploads.js'
 import { MOCK_BOT_ID, nextSnowflake } from '@src/testing/snowflake.js'
 import { isOwnCall } from '@src/common/response/call-order.js'
 import { noteMockMade, strictMocks } from '@src/testing/strict-mocks.js'
@@ -1056,7 +1067,7 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   }
   // A channel's send resolves to the message it sent there
   if (key === 'send' && target instanceof BaseChannel) {
-    return createMockFn(async (options?: unknown) => sentMessage(messageSent('send', options), receiver()))
+    return createMockFn(async (options?: unknown) => sentMessage(messageSent('send', options, idOf(receiver())), receiver()))
   }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
   if (target instanceof BaseManager) {
@@ -1964,7 +1975,12 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     }
 
     /** What a reply or a follow-up sends, as a message the interaction sent, refused as Discord refuses it. */
-    const answerSent = (method: string, options: unknown): HeldMessage => ({ ...messageSent(method, options), sentHere: true })
+    // The channel the interaction answers in, which serves the uploads its answers send
+    const answerChannel = (): string | undefined => {
+      const id = readPlaceQuietly(() => instance.channelId as unknown)
+      return typeof id === 'string' ? id : undefined
+    }
+    const answerSent = (method: string, options: unknown): HeldMessage => ({ ...messageSent(method, options, answerChannel()), sentHere: true })
 
     /**
      * What an answer sends, built now, as discord.js builds it when sending. One it refuses to build is refused under
@@ -2231,7 +2247,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       later('editReply', ([options]) => {
         const id = targetId((options as { message?: unknown } | undefined)?.message)
         const held = target(id)
-        const next = held && edited(held, options)
+        const next = held && edited(held, options, { channelId: answerChannel() })
         // Refused before it replaces anything, as Discord refuses the edit whole
         if (next) refuseComponentsV2Leftover('editReply', next)
         made = next
@@ -2288,7 +2304,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
             // Discord updates only a message a component is on; a modal from a command has none
             if (!onMessage()) refuseModalUpdate()
             original = answerMade = hold('update', () => {
-              const updated = edited(heldFrom(instance.message, false), options, { method: 'update' })
+              const updated = edited(heldFrom(instance.message, false), options, { method: 'update', channelId: answerChannel() })
               refuseComponentsV2Leftover('update', updated)
               return updated
             })
@@ -3989,6 +4005,10 @@ interface HeldMessage {
   editedTimestamp: number | null
   /** Whether the interaction holding it sent it, as a reply or a follow-up, so Discord names the interaction on it. */
   sentHere?: boolean
+  /** Its uploads, which strict mocks keep as Discord does: shown by its components' media, or listed in `attachments`. */
+  uploads?: Upload[]
+  /** The uploads its edits took off, whose CDN URLs it reads back as not found when an edit points at them again. */
+  removed?: Upload[]
 }
 
 /** A value as its API JSON: a builder or discord.js structure through `toJSON()`, anything else as it is. */
@@ -4009,19 +4029,31 @@ function heldFrom(message: unknown, allocate = true): HeldMessage {
     embeds: Array.isArray(from.embeds) ? from.embeds.map(jsonOf) : [],
     flags: from.flags instanceof MessageFlagsBitField ? from.flags : undefined,
     editedTimestamp: typeof from.editedTimestamp === 'number' ? from.editedTimestamp : null,
+    uploads: uploadsHeldBy(
+      from.attachments instanceof Collection ? from.attachments.values() : [],
+      Array.isArray(from.components) ? from.components.map(jsonOf) : [],
+      Array.isArray(from.embeds) ? from.embeds.map(jsonOf) : [],
+      typeof from.channelId === 'string' ? from.channelId : undefined,
+    ),
   }
 }
 
+/** A structure's id, read as the mock's own: a channel's, for where a message's uploads are served. */
+const idOf = (structure: unknown): string | undefined => {
+  const id = readPlaceQuietly(() => (structure as { id?: unknown } | null | undefined)?.id)
+  return typeof id === 'string' ? id : undefined
+}
+
 /** A message as an answer sends it: a new one, with what the answer gave, never edited. */
-const sent = (options: unknown, allocate = true): HeldMessage => {
+const sent = (options: unknown, allocate = true, { method, channelId }: { method?: string; channelId?: string } = {}): HeldMessage => {
   // Its id taken only once it builds, so a payload that fails to build takes none
-  const held = edited(heldFrom(undefined, false), options, { sending: true })
+  const held = edited(heldFrom(undefined, false), options, { sending: true, method, channelId })
   return { ...held, id: allocate ? nextSnowflake() : '', editedTimestamp: null }
 }
 
 /** A new message a call sends, refused as Discord refuses it; `method` names the call in default mode's warning. */
-const messageSent = (method: string, options: unknown): HeldMessage => {
-  const held = sent(options, false)
+const messageSent = (method: string, options: unknown, channelId?: string): HeldMessage => {
+  const held = sent(options, false, { method, channelId })
   refuseComponentsV2Leftover(method, held)
   return held
 }
@@ -4078,16 +4110,69 @@ function refuseComponentsV2Leftover(method: string, held: Pick<HeldMessage, 'con
   )
 }
 
+/** Logged once in default mode, where a call's files reach nowhere and strict mocks hold them as Discord does. */
+const FILES_WARNING =
+  "here sends files, which the mock keeps nowhere: Discord holds them as the message's uploads, shown by its " +
+  "components' media with attachment_id or listed in attachments, and an edit that sends files or attachments keeps only " +
+  'the uploads it lists. ' +
+  'In the next major version (5.0) the mock holds them; call useStrictMocks() to have it hold them now.'
+
+/** Logged once in default mode, where strict mocks refuse a File component pointed at a URL, as Discord does. */
+const FILE_URL_WARNING =
+  "here sends a File component whose file isn't attachment://<name>, which Discord refuses with a 400: a File shows " +
+  'only an upload. The mock sends it; in the next major version (5.0) it refuses it. Call useStrictMocks() to have it ' +
+  'refused now.'
+
+/**
+ * What a request's `files` and `attachments` do to a held message under strict mocks, as Discord takes what discord.js
+ * sends: its uploads after the request, the components it sends with their media resolved against them, and the
+ * components it keeps with media whose upload is gone read back broken. A request Discord refuses throws its 400.
+ * Default mode holds no uploads, and warns once where strict mocks differ.
+ */
+function withFiles(
+  held: HeldMessage,
+  edit: { components?: unknown[]; embeds?: unknown[]; files?: unknown[]; attachments?: unknown[] },
+  { sending, method, channelId, ephemeral }: { sending: boolean; method: string; channelId: string; ephemeral: boolean },
+): { uploads?: Upload[]; removed?: Upload[]; resolved?: unknown[]; resolvedEmbeds?: unknown[]; components?: unknown[]; returned?: unknown[] } {
+  const touched = Array.isArray(edit.files) || Array.isArray(edit.attachments)
+  if (!strictMocks()) {
+    if ((edit.files?.length ?? 0) > 0 || Array.isArray(edit.attachments)) warnOnce(mockLogger, `${method}() ${FILES_WARNING}`)
+    if (edit.components && fileRefusals(edit.components.map(jsonOf)).length > 0) warnOnce(mockLogger, `${method}() ${FILE_URL_WARNING}`)
+    return {}
+  }
+  const { kept, named, refusals } = sending ? { kept: [] as Upload[], named: [] as Upload[], refusals: [] } : keptUploads(held.uploads ?? [], edit)
+  const fresh = uploadsOf(edit.files ?? [], { channelId, ephemeral })
+  const after = [...kept, ...fresh]
+  const gone = [...(held.removed ?? []), ...(held.uploads ?? []).filter(upload => !kept.includes(upload))]
+  // attachment:// resolves to a new file of the name first, then to a kept upload the request still names
+  const request = edit.components && withUploads(edit.components.map(jsonOf), { pool: [...fresh, ...named], held: after, gone, resent: true })
+  // In the order Discord's 400 lists them: the components' first, then the attachments'
+  const refused = [...(request?.refusals ?? []), ...refusals]
+  if (refused.length > 0) throw formBodyError(refused)
+  // An embed takes a kept upload however the request lists it
+  const resolvedEmbeds = edit.embeds && withEmbedUploads(edit.embeds.map(jsonOf), [...fresh, ...kept])
+  if (request) return { uploads: after, removed: gone, resolved: request.components, resolvedEmbeds }
+  if (!touched) return { uploads: after, removed: gone, resolvedEmbeds }
+  const left = asDiscordStores(withUploads(held.components, { pool: [], held: after, gone, resent: false }).components)
+  return { uploads: after, removed: gone, components: left, returned: left, resolvedEmbeds }
+}
+
 /**
  * A held message after an edit: what the edit sets replaced in Discord's shape, and a later edit stamp. `sending` reads
  * the payload as a new message's, whose flags are the ones it gives.
  */
-function edited(held: HeldMessage, options: unknown, { sending = false, method = 'editReply' } = {}): HeldMessage {
+function edited(
+  held: HeldMessage,
+  options: unknown,
+  { sending = false, method = 'editReply', channelId }: { sending?: boolean; method?: string; channelId?: string } = {},
+): HeldMessage {
   const edit = (typeof options === 'string' ? { content: options } : (options ?? {})) as {
     content?: string | null
     components?: unknown[]
     embeds?: unknown[]
     flags?: MessageFlagsResolvable
+    files?: unknown[]
+    attachments?: unknown[]
   }
   // An edit ends a deferral's loading, as Discord shows the message sent once the deferral is edited
   const loading = held.flags !== undefined && new MessageFlagsBitField(held.flags).has(MessageFlags.Loading)
@@ -4095,17 +4180,19 @@ function edited(held: HeldMessage, options: unknown, { sending = false, method =
   const flags = edit.flags === undefined ? before : sending ? edit.flags : flagsAfterEdit(before, edit.flags, method)
   // discord.js sends `null` content as empty, which strict mocks read back
   const content = edit.content === null && strictMocks() ? '' : edit.content
+  const { resolved, resolvedEmbeds, ...uploaded } = withFiles(held, edit, { sending, method, channelId: channelId ?? nextSnowflake(), ephemeral: (flagBits(flags) & MessageFlags.Ephemeral) !== 0 })
   return {
     ...held,
+    ...uploaded,
     ...(content !== undefined && { content: content as string }),
     // The first edit that keeps a file uploaded with the message has Discord process it again: the response has it
     // loading, and it has loaded by the time the message is read back. Later edits find it processed.
     ...(edit.components !== undefined && {
-      components: asDiscordStores(edit.components.map(jsonOf)),
-      returned: asDiscordStores(edit.components.map(jsonOf), { loading: !held.reprocessed }),
+      components: asDiscordStores(resolved ?? edit.components.map(jsonOf)),
+      returned: asDiscordStores(resolved ?? edit.components.map(jsonOf), { loading: !held.reprocessed }),
       reprocessed: true,
     }),
-    ...(edit.embeds !== undefined && { embeds: embedsAsDiscordStores(edit.embeds.map(jsonOf)) }),
+    ...(edit.embeds !== undefined && { embeds: embedsAsDiscordStores(resolvedEmbeds ?? edit.embeds.map(jsonOf)) }),
     ...(flags !== undefined && { flags }),
     // Later than the last edit, even within one millisecond or under fake timers
     editedTimestamp: Math.max(Date.now(), (held.editedTimestamp ?? 0) + 1),
@@ -4338,7 +4425,8 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
     'edit',
     createMockFn(async (options?: unknown) => {
       if (instance.deleted) throw alreadyDeleted()
-      const held = edited(heldFrom(undefined, false), options, { sending: true })
+      // Edited as it holds itself, so the edit keeps or removes its uploads as Discord does
+      const held = edited(heldFrom(message, false), options, { method: 'edit', channelId: idOf(instance.channel) })
       const edit = (typeof options === 'string' ? { content: options } : (options ?? {})) as Record<string, unknown>
       const current = instance.flags as MessageFlagsBitField
       const flags = edit.flags === undefined ? current : new MessageFlagsBitField(flagsAfterEdit(current, held.flags!, 'edit'))
@@ -4352,7 +4440,11 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
         })
       }
       if (edit.content !== undefined) instance.content = held.content
-      if (edit.components !== undefined) instance.components = held.components.map(component => asHeld(component as never, 'component'))
+      const touchesUploads = Array.isArray(edit.files) || Array.isArray(edit.attachments)
+      if (edit.components !== undefined || (strictMocks() && touchesUploads)) {
+        instance.components = held.components.map(component => asHeld(component as never, 'component'))
+      }
+      if (strictMocks()) instance.attachments = attachmentsOf(held.uploads ?? [], held.components, held.embeds)
       if (edit.embeds !== undefined) instance.embeds = held.embeds.map(embed => asHeld(embed as never, 'embed'))
       if (edit.flags !== undefined) instance.flags = flags
       instance.editedTimestamp = Math.max(Date.now(), ((instance.editedTimestamp as number | null) ?? 0) + 1)
@@ -4363,7 +4455,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
     'reply',
     createMockFn(async (options?: unknown) => {
       if (instance.deleted) throw alreadyDeleted()
-      return sentMessage(messageSent('reply', options), instance.channel, instance.client)
+      return sentMessage(messageSent('reply', options, idOf(instance.channel)), instance.channel, instance.client)
     }),
   )
   // Crossposting publishes this message, and forwarding sends one in the channel it is forwarded to
@@ -4460,6 +4552,8 @@ function sentMessage(held: HeldMessage, channel: unknown, client?: unknown, fiel
     made,
   )
   if (dm && !strict) sentInDm.set(mockTargets.get(message) ?? message, channel as { id: string })
+  // Discord lists the uploads no component shows
+  if (strict) Object.assign(message, { attachments: attachmentsOf(held.uploads ?? [], held.components, held.embeds) })
   return message
 }
 

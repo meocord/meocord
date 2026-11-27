@@ -72,7 +72,7 @@ function rewriteComponent(component: Json, kept: ReadonlySet<string>): Json {
 }
 
 /** The name a file sent in a payload's `files` goes by. */
-function fileName(file: unknown): string | undefined {
+export function fileName(file: unknown): string | undefined {
   if (typeof file === 'string') return path.basename(file)
   if (file && typeof file === 'object') {
     const named = file as { name?: unknown; attachment?: unknown }

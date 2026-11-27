@@ -47,7 +47,16 @@ export function noteMockMade(): void {
  * `respond()`'s `send()` resolves to the message a reply or an update sent. An edit changes only the flags Discord lets
  * it change, so a private message stays private and a Components V2 message stays V2, and a Components V2 message that
  * holds content or embeds, sent so or made V2 by an edit that doesn't clear them, is refused with a 400; without strict
- * mocks an edit's flags replace the message's and such a message is sent, each with a warning. A client from
+ * mocks an edit's flags replace the message's and such a message is sent, each with a warning. A message holds the
+ * files sent with it as uploads, as Discord does: an embed's image and a Components V2 component's media show their
+ * upload by CDN URL, the component's with `attachment_id`, and `attachments` lists the uploads nothing shows. An edit
+ * with `files` or `attachments` keeps only the uploads it lists, none when it lists no `attachments`, as discord.js
+ * then lists the new files alone, and component media whose upload it removed reads back not found; a CDN URL from
+ * another channel is an image the message doesn't hold. A component's `attachment://` reaches a kept upload only in an
+ * edit that lists no attachments, or lists it as `{ id, filename }`; Discord's 400 refuses any other, an attachment the
+ * message doesn't have, an upload listed under another filename, and a File component pointed at a URL. A name reaches
+ * a new file of that name first, then the newer of two kept uploads sharing it. Without strict mocks files are held
+ * nowhere, with a warning. A client from
  * `createMockClient()` has a working emitter, and `dispatch` leaves a component or modal no route takes to its
  * `interactionCreate` listeners, such as a collector's, and delivers a message or a reaction to its message and
  * reaction listeners, routed or not, having applied the reaction to its message as the gateway does. A mock interaction
