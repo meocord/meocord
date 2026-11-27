@@ -34,7 +34,7 @@ const { ShardedCooldownStore } = await import('@src/common/sharded-cooldown-stor
 const { Command, Controller, Cooldown } = await import('@src/decorator/index.js')
 const { CommandType } = await import('@src/enum/index.js')
 const { runHandler } = await import('@src/core/handler-pipeline.js')
-const { presenterFor } = await import('@src/common/response/presenter.js')
+const { presenterFor, viewModeFor } = await import('@src/common/response/presenter.js')
 const { isExplainedError } = await import('@src/common/explained-error.js')
 
 /** What start() runs before login: providers resolved, listed services made, the presenter bound. */
@@ -303,6 +303,20 @@ describe('MeoCordFactory.create()', () => {
     const client = Reflect.get(app, 'discordClient') as object
 
     expect(presenterFor(client)).toBeInstanceOf(Presenter)
+  })
+
+  it.each([
+    ['v2', { viewMode: 'v2' }],
+    ['embed', {}],
+  ])("makes the @MeoCord({ viewMode }) the bot client's, %s, with MeoCord's own presenter", async (mode, viewMode) => {
+    mockLoadConfig.mockReturnValue({ discordToken: 'test-token' })
+    class MyApp {}
+    Reflect.defineMetadata(MetadataKey.AppOptions, { controllers: [], clientOptions: { intents: [] }, ...viewMode }, MyApp)
+
+    const app = MeoCordFactory.create(MyApp)
+    await runStartup(app)
+
+    expect(viewModeFor(Reflect.get(app, 'discordClient') as object)).toBe(mode)
   })
 
   it('refuses a controller dependency that injects ExecutionContext, since it is shared across calls', () => {

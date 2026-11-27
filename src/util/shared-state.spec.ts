@@ -7,7 +7,7 @@ import { Command, Controller, MeoCord, MessageHandler, Service } from '@src/deco
 import { CommandType } from '@src/enum/index.js'
 import { CATALOGS, LOCALE_CHAIN, Translator } from '@src/common/translator.js'
 import { registerClientTranslator } from '@src/common/meocord-text.js'
-import { defaultPresenter, setPresenter } from '@src/common/response/presenter.js'
+import { defaultPresenter, setPresenter, setViewMode } from '@src/common/response/presenter.js'
 import { DEFAULT_THEME } from '@src/core/theme-defaults.js'
 import { mergeTheme, runWithTheme } from '@src/core/theme-scope.js'
 import { createMockFn, createMockInteraction, createMockMessage, getResponse, MeoCordTestingModule, withTheme } from '@src/testing/index.js'
@@ -104,17 +104,19 @@ describe('state the two builds of one meocord version share', () => {
     expect(JSON.stringify(getResponse(interaction).calls.at(-1)?.payload)).toContain('You need 5 more coins.')
   })
 
-  it("reads a translator's catalogs, a client's translator and its presenter from either build", () => {
+  it("reads a translator's catalogs, a client's translator, its presenter and its view mode from either build", () => {
     const client = {}
     const translator = {} as never
     const presenter = { ...defaultPresenter }
     registerClientTranslator(client, translator)
     setPresenter(client, presenter)
+    setViewMode(client, 'v2')
 
     expect(other.translator.CATALOGS).toBe(CATALOGS)
     expect(other.translator.LOCALE_CHAIN).toBe(LOCALE_CHAIN)
     expect(other.text.translatorOfClient(client)).toBe(translator)
     expect(other.presenter.presenterFor(client)).toBe(presenter)
+    expect(other.presenter.viewModeFor(client)).toBe('v2')
   })
 
   it("reads a call's theme from either build", () => {

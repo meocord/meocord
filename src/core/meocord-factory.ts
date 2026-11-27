@@ -14,7 +14,8 @@ import { CooldownStore, MemoryCooldownStore } from '@src/common/cooldown-store.j
 import { handlerCooldowns } from '@src/core/cooldown-runner.js'
 import { getCommandMap, getMessageHandlers } from '@src/decorator/controller.decorator.js'
 import { injectedTokens, prepareDirectCalls, singletonContextError } from '@src/core/guard-runner.js'
-import { appStages, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
+import { appStages, appViewMode, bindAppPresenter, bindGlobalStages, prepareHandlerStages, prepareThemes } from '@src/core/handler-pipeline.js'
+import { setViewMode } from '@src/common/response/presenter.js'
 import { assertStartupClasses, lateGuardCheck, perCallEventWarnings, stageDependencies, startupClasses } from '@src/core/startup-roots.js'
 import { type EventSource, eventSources } from '@src/core/event-sources.js'
 import { assertStartupChecked, markStartupChecked } from '@src/core/startup-checked.js'
@@ -439,6 +440,7 @@ export class MeoCordFactory {
         warnPerShardCooldowns(options.controllers, logger)
       }
       bindAppPresenter(container, target as object, discordClient)
+      setViewMode(discordClient, appViewMode(target as object))
       registerClientTheme(discordClient, container)
       registerClientTranslator(discordClient, options.i18n)
     }

@@ -157,16 +157,27 @@ app.decorator.UseGuard(Gate)(Tokens.prototype, 'show', show)
 app.decorator.Cooldown({ seconds: 60, uses: 5 })(Tokens.prototype, 'show', show)
 Object.defineProperty(Tokens.prototype, 'show', show)
 app.decorator.Controller()(Tokens)
+// A refusal answered through the other build's respond(), which reads the viewMode the app's build registered
+class Refusal {
+  refuse(interaction) {
+    return other.common.respond(interaction).error(new other.common.UserError('Not yours.'))
+  }
+}
+const refuse = Object.getOwnPropertyDescriptor(Refusal.prototype, 'refuse')
+app.decorator.Command('refuse', app.enum.CommandType.BUTTON)(Refusal.prototype, 'refuse', refuse)
+Object.defineProperty(Refusal.prototype, 'refuse', refuse)
+app.decorator.Controller()(Refusal)
 const translator = app.common.createTranslator({ default: 'en-US', locales: { 'en-US': { hi: 'Hello' } } })
 
 class App {}
 const lookups = { asked: 0 }
 app.decorator.MeoCord({
-  controllers: [Panel, Tokens],
+  controllers: [Panel, Tokens, Refusal],
   i18n: translator,
   providers: [{ provide: LOOKUPS, useValue: lookups }],
   themeFor: LookupThemes,
   clientOptions: { intents: [], allowedMentions: { parse: [] } },
+  viewMode: 'v2',
 })(App)
 
 const interaction = (customId = 'press') => Object.assign(app.testing.createMockInteraction(discord.ButtonInteraction, { customId }), { guildId: GUILD })
@@ -225,6 +236,10 @@ expect("the other build's theme in a call", seen.inCall?.other, GUILD_COLOR)
 expect('a service the other build decorated is injected', seen.inCall?.greeting, 'hi')
 expect('the resolver the other build decorated was asked', lookups.asked > 0, true)
 
+const refused = await invoke(Refusal, 'refuse', 'refuse')
+const refusal = app.testing.getResponse(refused).calls.find(call => call.method === 'reply')
+expect("the other build's respond() answers in the app's viewMode", (Number(refusal?.payload?.flags ?? 0) & discord.MessageFlags.IsComponentsV2) !== 0, true)
+
 // Outside a call, the theme is read through the shared state whichever build set it
 const sharedKey = name => Symbol.for(`meocord@${version}:${name}`)
 await attempt('the theme outside a call', async () => {
@@ -282,6 +297,7 @@ const STORES = {
   clientPresenters: 'presenters by client',
   clientThemes: "an app's container by client, asked only through its own methods",
   clientTranslators: 'translators by client',
+  clientViewModes: "the app's viewMode by client",
   commandIdScopes: 'command IDs by client',
   commandInteractionChecks: "each @Command method's check of its interaction, by the class that declares it",
   commandIdSources: 'keyed by an app container, holding functions over its commands',

@@ -320,7 +320,8 @@ export interface InterceptorInterface {
 /**
  * What a presenter renders for a loading view or an error.
  *
- * MeoCord turns it into an embed, or into a Components V2 container on a Components V2 message.
+ * MeoCord turns it into an embed, or into a Components V2 container: on a Components V2 message, and on a message
+ * MeoCord starts to answer an interaction when the app sets `@MeoCord({ viewMode: 'v2' })`.
  *
  * @group Responses
  * @category Presenters
@@ -383,7 +384,10 @@ export interface ResponseContext {
   /** The locale of the user who made the interaction. */
   locale: string
 
-  /** Whether the view is rendered as an embed or as a Components V2 container. */
+  /**
+   * Whether the view is rendered as an embed or as a Components V2 container: the form of the message it is added to,
+   * or, on a message MeoCord starts, the one `@MeoCord({ viewMode })` names, unless it follows a Components V2 message.
+   */
   mode: 'embed' | 'v2'
 
   /** The theme of the call being answered, to style the view from: the same one `useTheme()` returns in it. */
@@ -503,8 +507,9 @@ export interface ResponsePresenter {
   /**
    * The view a message command's error reply is drawn as: its usage, a guard's or validation's reason, a `UserError`'s
    * message, and the direct messages `dmOnError` and `dmOnCooldown` send. Without this method they are plain text. The
-   * view is sent as an embed, with its files. Should it throw or reject, or return a view MeoCord cannot render, the
-   * reply is sent as plain text, and the failure is then reported as the call's fault, as for `error`.
+   * view is sent as an embed, with its files, whatever `@MeoCord({ viewMode })` says. Should it throw or reject, or
+   * return a view MeoCord cannot render, the reply is sent as plain text, and the failure is then reported as the
+   * call's fault, as for `error`.
    *
    * @param context - The message being answered, its locale and theme.
    * @param error - The words the fallback chose, the error, and its tone.

@@ -29,6 +29,7 @@ import { injectedTokens, prepareDirectCalls, singletonContextError } from '@src/
 import {
   appPresenterOf,
   appStages,
+  appViewMode,
   bindAppPresenter,
   bindGlobalStages,
   type GlobalStages,
@@ -40,7 +41,7 @@ import {
   type RunOptions,
   runHandler,
 } from '@src/core/handler-pipeline.js'
-import { clientPresenter, setPresenter } from '@src/common/response/presenter.js'
+import { clientPresenter, setPresenter, setViewMode } from '@src/common/response/presenter.js'
 import { autocompleteMismatch, commandMismatch, componentRouteFor, handlerInput } from '@src/core/handler-input.js'
 import { buildComponentRoutes, type ComponentRoute } from '@src/core/component-routes.js'
 import { hasCustomId } from '@src/util/interaction.util.js'
@@ -1171,7 +1172,7 @@ export class TestingModule {
    * Makes this module the app of the input's client, as the bot is of its own: its answers are drawn by this
    * module's presenter, in its theme and language, `respond()` outside any call included, as in a collector's callback
    * on that client. A module without a presenter clears the client's under strict mocks, so the default draws; default
-   * mode leaves another module's in place and warns once.
+   * mode leaves another module's in place and warns once. Its `viewMode` is the client's in either mode.
    */
   private registerClient(input: unknown): void {
     const client = (input as { client?: unknown } | undefined)?.client
@@ -1185,14 +1186,15 @@ export class TestingModule {
           "useStrictMocks() this module's own presenter, or the default, is used.",
       )
     }
+    setViewMode(client, appViewMode(this.app))
     registerClientTheme(client, this.container)
     registerClientTranslator(client, this.container.isBound(Translator) ? this.container.get(Translator) : undefined)
   }
 
   /**
    * Makes this module the app of each event argument's client, as the bot is of its own, under strict mocks or with
-   * `eventFallback: true`; default mode leaves the clients as they are and warns once where this module would draw
-   * answers otherwise.
+   * `eventFallback: true`; default mode leaves the clients' presenter, theme and translator as they are and warns once
+   * where this module would draw answers otherwise, and sets its `viewMode` on them as the bot has it.
    */
   private registerEventClients(args: readonly unknown[]): void {
     const withClient = args.filter(arg => typeof (arg as { client?: unknown } | null)?.client === 'object')
@@ -1202,6 +1204,8 @@ export class TestingModule {
       for (const arg of withClient) this.registerClient(arg)
       return
     }
+    // Set in default mode too, so an event's answers take the form the bot's would
+    for (const arg of withClient) setViewMode((arg as { client: object }).client, appViewMode(this.app))
     const ownTheme = appTheme(this.container) !== defaultTheme()
     if (!appPresenterOf(this.container) && !this.container.isBound(Translator) && !ownTheme) return
     warnOnce(
