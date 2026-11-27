@@ -98,7 +98,7 @@ describe('a mock made without a server', () => {
 describe('the autocomplete mock', () => {
   it('refuses more than 25 choices, as Discord does', async () => {
     const choices = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `c${i}`, value: `c${i}` }))
-    await expect(createMockInteraction(AutocompleteInteraction).respond(choices(26))).rejects.toThrow(/25/)
+    await expect(createMockInteraction(AutocompleteInteraction).respond(choices(26))).rejects.toMatchObject({ code: 50035, message: expect.stringMatching(/25/) })
     await expect(createMockInteraction(AutocompleteInteraction).respond(choices(25))).resolves.toBeUndefined()
   })
 })

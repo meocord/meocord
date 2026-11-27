@@ -9,6 +9,7 @@ import {
   type GuildMemberFlags,
   type PermissionResolvable,
   PermissionsBitField,
+  RESTJSONErrorCodes,
   type APIEmbed,
   type APIMessageTopLevelComponent,
   Component,
@@ -2367,7 +2368,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         async (choices?: unknown) => {
           // Discord refuses a list longer than its limit, and the menu shows nothing
           if (Array.isArray(choices) && choices.length > MAX_AUTOCOMPLETE_CHOICES) {
-            throw createDiscordError(50035, `Invalid Form Body\ndata.choices[BASE_TYPE_MAX_LENGTH]: Must be ${MAX_AUTOCOMPLETE_CHOICES} or fewer in length.`)
+            throw createDiscordError(RESTJSONErrorCodes.InvalidFormBodyOrContentType, `Invalid Form Body\ndata.choices[BASE_TYPE_MAX_LENGTH]: Must be ${MAX_AUTOCOMPLETE_CHOICES} or fewer in length.`)
           }
         },
         log,
@@ -4069,7 +4070,7 @@ function refuseComponentsV2Leftover(method: string, held: Pick<HeldMessage, 'con
   const leftover = componentsV2Leftover(held)
   if (!leftover) return
   const problem = `a Components V2 message with ${leftover}, which Discord refuses with a 400: such a message can only contain components`
-  if (strictMocks()) throw createDiscordError(50035, `Invalid Form Body\n${problem}.`)
+  if (strictMocks()) throw createDiscordError(RESTJSONErrorCodes.InvalidFormBodyOrContentType, `Invalid Form Body\n${problem}.`)
   warnOnce(
     mockLogger,
     `${method}() here sends ${problem}. The mock sends it; in the next major version (5.0) it refuses it. Call ` +
