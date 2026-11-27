@@ -1055,7 +1055,7 @@ function methodStub(target: object, key: string, method: (...args: unknown[]) =>
   }
   // A channel's send resolves to the message it sent there
   if (key === 'send' && target instanceof BaseChannel) {
-    return createMockFn(async (options?: unknown) => sentMessage(sent(options, false), receiver()))
+    return createMockFn(async (options?: unknown) => sentMessage(messageSent('send', options), receiver()))
   }
   if (MESSAGE_METHODS.has(key)) return createMockFn(async () => createMockMessage())
   if (target instanceof BaseManager) {
@@ -1962,17 +1962,13 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       warnOnce(mockLogger, `${reason} The mock runs it; in the next major version (5.0) it refuses it. Call useStrictMocks() to have it refused now.`)
     }
 
+    /** What a reply or a follow-up sends, as a message the interaction sent, refused as Discord refuses it. */
+    const answerSent = (method: string, options: unknown): HeldMessage => ({ ...messageSent(method, options), sentHere: true })
+
     /**
      * What an answer sends, built now, as discord.js builds it when sending. One it refuses to build is refused under
      * strict mocks; default mode warns and holds it to build when first read.
      */
-    /** What a reply or a follow-up sends, as a message the interaction sent, refused as Discord refuses it. */
-    const answerSent = (method: string, options: unknown): HeldMessage => {
-      const held = { ...sent(options, false), sentHere: true }
-      refuseComponentsV2Leftover(method, held)
-      return held
-    }
-
     const hold = (method: string, build: () => HeldMessage): Held => {
       try {
         return build()
@@ -4022,6 +4018,13 @@ const sent = (options: unknown, allocate = true): HeldMessage => {
   return { ...held, id: allocate ? nextSnowflake() : '', editedTimestamp: null }
 }
 
+/** A new message a call sends, refused as Discord refuses it; `method` names the call in default mode's warning. */
+const messageSent = (method: string, options: unknown): HeldMessage => {
+  const held = sent(options, false)
+  refuseComponentsV2Leftover(method, held)
+  return held
+}
+
 /** The flags an edit can change: it sets or clears `SuppressEmbeds` and sets `IsComponentsV2`; Discord ignores the rest. */
 const EDITABLE_FLAGS = MessageFlags.SuppressEmbeds | MessageFlags.IsComponentsV2
 
@@ -4059,8 +4062,8 @@ function componentsV2Leftover(held: Pick<HeldMessage, 'content' | 'embeds' | 'fl
 }
 
 /**
- * Refuses a Components V2 message that also holds content or embeds, as Discord refuses it with a 400 (Execute and Edit
- * Webhook Message, discord-api-docs developers/resources/webhook.mdx): sent so, or made V2 by an edit that doesn't clear
+ * Refuses a Components V2 message that also holds content or embeds, as Discord refuses it with a 400 (Create and Edit
+ * Message, Execute and Edit Webhook Message in discord-api-docs): sent so, or made V2 by an edit that doesn't clear
  * them. Default mode sends it, as it always has, and warns once.
  */
 function refuseComponentsV2Leftover(method: string, held: Pick<HeldMessage, 'content' | 'embeds' | 'flags'>): void {
@@ -4360,7 +4363,7 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
     'reply',
     createMockFn(async (options?: unknown) => {
       if (instance.deleted) throw alreadyDeleted()
-      return sentMessage(sent(options, false), instance.channel, instance.client)
+      return sentMessage(messageSent('reply', options), instance.channel, instance.client)
     }),
   )
   // Crossposting publishes this message, and forwarding sends one in the channel it is forwarded to
