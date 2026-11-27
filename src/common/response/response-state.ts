@@ -236,9 +236,22 @@ function toBody(payload: ResponsePayload | ResponseEditPayload): Body {
  */
 const CLEARED_FOR_V2 = { content: null, embeds: [] } as const
 
-/** The fields an edit sends to clear what a message turned Components V2 must lose, if `wasV2` says it may hold any. */
-function clearedForV2(wasV2: boolean, v2: boolean): Partial<typeof CLEARED_FOR_V2> {
-  return v2 && !wasV2 ? CLEARED_FOR_V2 : {}
+/** The fields an edit sends to clear what a message it turns Components V2 holds: none for one that holds nothing. */
+function clearedForV2(wasV2: boolean, v2: boolean, holdsText: boolean): Partial<typeof CLEARED_FOR_V2> {
+  return v2 && !wasV2 && holdsText ? CLEARED_FOR_V2 : {}
+}
+
+/** Whether a body sends what a Components V2 message cannot hold: non-empty `content` or `embeds`. */
+function sendsText(body: Body): boolean {
+  return (body.content !== undefined && body.content !== null && body.content !== '') || (body.embeds?.length ?? 0) > 0
+}
+
+/**
+ * Whether a message holds content or embeds, which an edit that makes it Components V2 clears. Only string content
+ * counts, so a mock message that sets none, whose `content` reads as a stub, holds none.
+ */
+function holdsText(message: { content?: unknown; embeds?: readonly unknown[] } | null | undefined): boolean {
+  return (typeof message?.content === 'string' && message.content !== '') || (message?.embeds?.length ?? 0) > 0
 }
 
 /** What a body gives that a Components V2 message cannot carry, and loses there: non-empty `content` or `embeds`. */
@@ -547,7 +560,7 @@ export class InteractionResponse implements ResponseState {
    */
   private answer:
     | { kind: 'original' }
-    | { kind: 'followUp'; id: string; ephemeral: boolean; v2: boolean }
+    | { kind: 'followUp'; id: string; ephemeral: boolean; v2: boolean; holdsText: boolean }
     | { kind: 'deleted'; ephemeral: boolean } = { kind: 'original' }
   private readonly calls: ResponseCall[] = []
 
@@ -574,6 +587,11 @@ export class InteractionResponse implements ResponseState {
    * takes its place. A raw reply doesn't, so the answer's format and the one new messages follow stay apart.
    */
   #followsV2 = false
+  /**
+   * Whether the original response may hold content or embeds: the component's message as it shows, or the reply once
+   * one is sent. A deferral holds none until something is sent into it, so its Components V2 edit clears nothing.
+   */
+  #originalHoldsText = false
   /**
    * Set once this state answers with `update` or `deferUpdate`, which makes the original response the message the
    * component is on.
@@ -606,6 +624,7 @@ export class InteractionResponse implements ResponseState {
     })
     const message = 'message' in interaction ? interaction.message : undefined
     this.v2 = this.#followsV2 = Boolean(message?.flags?.has(MessageFlags.IsComponentsV2))
+    this.#originalHoldsText = !this.v2 && holdsText(message)
   }
 
   get state(): ResponsePhase {
@@ -676,9 +695,14 @@ export class InteractionResponse implements ResponseState {
    * deferral edited since, keeps no flags in discord.js, so it is read back before its first edit.
    */
   private learnRawAnswer(): void {
-    if (typeof this.interaction.ephemeral !== 'boolean') return
+    // A raw reply or update may have sent content or embeds, which only a raw reply's read-back tells; a raw deferral holds none
+    if (typeof this.interaction.ephemeral !== 'boolean') {
+      if (this.interaction.replied) this.#originalHoldsText = !this.v2
+      return
+    }
     this.v2 = false
     this.#replyFormatUnread = this.interaction.replied
+    this.#originalHoldsText = this.interaction.replied
   }
 
   /** Makes a Discord call, recorded as it is made so the order stays as issued, and marked with its error if it rejects. */
@@ -1181,7 +1205,8 @@ export class InteractionResponse implements ResponseState {
   private async answerWith(body: Body): Promise<Message> {
     const { message, flags } = await this.sendFollowUp(body)
     // Its privacy and format as sent, not as read back from the message
-    this.answer = { kind: 'followUp', id: message.id, ephemeral: hasEphemeral(flags), v2: hasComponentsV2(flags) }
+    const v2 = hasComponentsV2(flags)
+    this.answer = { kind: 'followUp', id: message.id, ephemeral: hasEphemeral(flags), v2, holdsText: !v2 && sendsText(body) }
     this.lastMessage = message
     return message
   }
@@ -1320,6 +1345,7 @@ export class InteractionResponse implements ResponseState {
     const flags = this.withSuppression(this.flagsFor('reply', body.flags, false))
     this.v2 = this.#followsV2 = hasComponentsV2(flags)
     const sent = this.forMode(body, this.v2)
+    this.#originalHoldsText = sendsText(sent)
     const response = await this.firstAnswer(() =>
       this.call('reply', { ...sent, flags }, () =>
         this.interaction.reply({ ...sent, flags, withResponse: true } as InteractionReplyOptions & { withResponse: true }),
@@ -1337,7 +1363,9 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('update', body.flags) | this.keptFlags(body)
     const wasV2 = this.v2
     this.v2 ||= hasComponentsV2(flags)
-    const sent = { ...this.withAttachments(this.forMode(body, this.v2)), ...clearedForV2(wasV2, this.v2) }
+    const shown = this.withAttachments(this.forMode(body, this.v2))
+    const sent = { ...shown, ...clearedForV2(wasV2, this.v2, this.#originalHoldsText) }
+    this.#originalHoldsText = !this.v2 && (this.#originalHoldsText || sendsText(shown))
     const target = this.interaction
     const response = await this.firstAnswer(() =>
       this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never)),
@@ -1420,10 +1448,20 @@ export class InteractionResponse implements ResponseState {
     }
     // A follow-up that is the answer has its own format; the interaction's reply has the one this state knows, or reads
     const v2 = answer.kind === 'followUp' ? answer.v2 : await this.originalV2()
+    const held = answer.kind === 'followUp' ? answer.holdsText : this.#originalHoldsText
     const flags = this.flagsFor('edit', body.flags, v2) | this.keptFlags(body)
-    if (answer.kind === 'followUp') answer.v2 ||= hasComponentsV2(flags)
-    else this.v2 ||= hasComponentsV2(flags)
-    const sent = { ...this.withAttachments(this.forMode(body, hasComponentsV2(flags))), ...clearedForV2(v2, hasComponentsV2(flags)), flags }
+    const nowV2 = hasComponentsV2(flags)
+    const shown = this.withAttachments(this.forMode(body, nowV2))
+    const sent = { ...shown, ...clearedForV2(v2, nowV2, held), flags }
+    // A Components V2 message holds no content or embeds; any other keeps what it held and gains what the edit sends
+    const holds = !nowV2 && (held || sendsText(shown))
+    if (answer.kind === 'followUp') {
+      answer.v2 ||= nowV2
+      answer.holdsText = holds
+    } else {
+      this.v2 ||= nowV2
+      this.#originalHoldsText = holds
+    }
     // A follow-up that is the answer is edited by its id
     const edit = answer.kind === 'followUp' ? { ...sent, message: answer.id } : sent
     try {
@@ -1453,6 +1491,7 @@ export class InteractionResponse implements ResponseState {
     try {
       const reply = await this.interaction.fetchReply()
       this.v2 = Boolean(reply?.flags?.has(MessageFlags.IsComponentsV2))
+      this.#originalHoldsText = !this.v2 && holdsText(reply)
     } catch {
       // Unread, it is edited as this state knows it
     }
@@ -1698,6 +1737,7 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('deferReply', MessageFlags.Ephemeral)
     try {
       await this.call('deferReply', { flags }, () => this.interaction.deferReply({ flags }))
+      this.#originalHoldsText = false
       this.phase = 'deferred'
       this.privateDeferral = true
     } catch (error) {
