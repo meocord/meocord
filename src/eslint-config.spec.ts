@@ -1,4 +1,3 @@
-import { vi } from 'vitest'
 import fs from 'fs'
 import { createRequire, isBuiltin } from 'module'
 import os from 'os'
@@ -51,6 +50,12 @@ describe('import-x/no-cycle', () => {
   for (const [name, tsconfig] of Object.entries(tsconfigs)) fs.writeFileSync(path.join(root, name), JSON.stringify(tsconfig))
   // import-x tells an alias from a package by the package.json above what it resolves to
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'no-cycle', type: 'module' }))
+  // The config file that makes this folder the app's root, which the configs below stand in for
+  fs.writeFileSync(path.join(root, 'eslint.config.js'), 'export default []\n')
+  // The resolver the cycle check loads, installed in the project as an app installs it
+  fs.mkdirSync(path.join(root, 'node_modules'))
+  const resolverPackage = path.join('node_modules', 'eslint-import-resolver-typescript')
+  fs.symlinkSync(path.resolve(import.meta.dirname, '..', resolverPackage), path.join(root, resolverPackage), 'junction')
   // The resolver warns once per process, when first asked, so it is watched from before any lint; not with a
   // spy, which the suite's settings restore after each test
   const warnings: unknown[] = []
@@ -89,25 +94,8 @@ describe('import-x/no-cycle', () => {
   )
 
   const lintCycles = async (file: string) => {
-    const eslint = new ESLint({
-      cwd: root,
-      overrideConfigFile: true,
-      overrideConfig: [
-        ...(esmConfig as Linter.Config[]),
-        { files: ['**/*.ts'], languageOptions: { parserOptions: { tsconfigRootDir: root } } },
-      ],
-    })
-    // The resolver reads the config's tsconfigs from the working directory, as an app's lint runs from its root. A real
-    // change of directory, put back after: Bun's path.resolve reads the process's directory, not a replaced
-    // process.cwd. The suite runs in forked processes, where chdir is allowed
-    const before = process.cwd()
-    process.chdir(root)
-    let result: ESLint.LintResult
-    try {
-      ;[result] = await eslint.lintFiles([path.join(root, 'src', file)])
-    } finally {
-      process.chdir(before)
-    }
+    const eslint = new ESLint({ cwd: root, overrideConfigFile: true, overrideConfig: esmConfig as Linter.Config[] })
+    const [result] = await eslint.lintFiles([path.join(root, 'src', file)])
     return result.messages
       .filter(message => message.ruleId === 'import-x/no-cycle')
       .map(message => [message.severity, message.message])
@@ -117,32 +105,26 @@ describe('import-x/no-cycle', () => {
     expect(await lintCycles('notes.ts')).toEqual([[1, 'Dependency cycle detected']])
   })
 
-  // A project without eslint-import-resolver-typescript: its imports cannot be resolved, so the check stays off
+  // A project without eslint-import-resolver-typescript: its imports cannot be resolved, so the check finds nothing
   // rather than warn on every import and fail `eslint --max-warnings=0`
-  it('is left out, with the resolver setting, where the project cannot resolve the TypeScript resolver', async () => {
-    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root)
+  it('finds no cycle and warns of nothing where the project has no TypeScript resolver', async () => {
+    const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-no-resolver-')))
     try {
-      vi.resetModules()
-      const esm = ((await import('../meocord.eslint.mjs')) as { default: Linter.Config[] }).default
-      const requireFresh = createRequire(import.meta.url)
-      delete requireFresh.cache[requireFresh.resolve('../meocord.eslint.cjs')]
-      const cjs: Linter.Config[] = requireFresh('../meocord.eslint.cjs')
+      for (const [name, tsconfig] of Object.entries(tsconfigs)) fs.writeFileSync(path.join(bare, name), JSON.stringify(tsconfig))
+      fs.writeFileSync(path.join(bare, 'package.json'), JSON.stringify({ name: 'no-resolver', type: 'module' }))
+      fs.writeFileSync(path.join(bare, 'eslint.config.js'), 'export default []\n')
+      fs.mkdirSync(path.join(bare, 'src'))
+      for (const name of ['notes.ts', 'store.ts']) fs.writeFileSync(path.join(bare, 'src', name), files[name])
+      const before = warnings.length
 
-      for (const config of [esm, cjs]) {
-        const merged = config.filter(entry => entry.rules?.['prettier/prettier'])
-        expect(merged.map(entry => entry.rules?.['import-x/no-cycle'])).toEqual([undefined])
-        expect(merged.map(entry => entry.settings?.['import-x/resolver'])).toEqual([undefined])
-
-        const eslint = new ESLint({
-          cwd: root,
-          overrideConfigFile: true,
-          overrideConfig: [...config, { files: ['**/*.ts'], languageOptions: { parserOptions: { tsconfigRootDir: root } } }],
-        })
-        const results = await eslint.lintFiles([path.join(root, 'src', 'notes.ts'), path.join(root, 'src', 'store.ts')])
+      for (const config of [esmConfig as Linter.Config[], cjsConfig]) {
+        const eslint = new ESLint({ cwd: bare, overrideConfigFile: true, overrideConfig: config })
+        const results = await eslint.lintFiles([path.join(bare, 'src', 'notes.ts'), path.join(bare, 'src', 'store.ts')])
         expect(results.flatMap(result => result.messages).filter(message => message.ruleId !== 'prettier/prettier')).toEqual([])
       }
+      expect(warnings.slice(before)).toEqual([])
     } finally {
-      cwd.mockRestore()
+      fs.rmSync(bare, { recursive: true, force: true })
     }
   })
 
@@ -268,8 +250,8 @@ describe('the peer dependencies meocord/eslint needs', () => {
     expect(configPeers.filter(name => manifest.peerDependenciesMeta?.[name]?.optional !== true)).toEqual([])
   })
 
-  // typescript-eslint finds a bot's tsconfig.json beside the eslint.config.ts or .cjs on the call stack; after an
-  // await that frame is gone, and a bot linted from a workspace root would get TS5012 on every file
+  // A file above every eslint.config.* gets its tsconfig root from the eslint.config.* frame typescript-eslint finds
+  // on the call stack, which an await would drop
   it.each(CONFIG_FILES)('%s loads its packages without awaiting', file => {
     const tree = ts.createSourceFile(file, source(file), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
     const found: string[] = []
