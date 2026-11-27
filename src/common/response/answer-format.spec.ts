@@ -229,3 +229,55 @@ describe("an error added to a private message, within Discord's text limits", ()
     expect([calls(over, 'editReply').length, calls(over, 'followUp').length]).toEqual([0, 1])
   })
 })
+
+describe('content and embeds dropped from a Components V2 answer', () => {
+  const dropped = (what: string, call: string) => new RegExp(`^Dropped the ${what} of an answer to ${call}: it goes to a Components V2 message, which carries only components\\.`)
+  const onV2 = () => createMockMessage({ flags: IsComponentsV2, components: [new ContainerBuilder().addTextDisplayComponents(text('Panel')).toJSON()] })
+
+  it('warns, naming the call, when an edit of a V2 answer drops them', async () => {
+    const interaction = command()
+    await respond(interaction).send({ components: [text('Working')], flags: IsComponentsV2 })
+
+    await respond(interaction).send({ content: 'Done', embeds: [embed('All set')] })
+
+    expect(calls(interaction, 'editReply').at(-1)).toEqual({ flags: IsComponentsV2 })
+    expect(warned).toEqual([expect.stringMatching(dropped('content and embeds', 'command "ping"'))])
+  })
+
+  it('warns when a V2 reply drops its content', async () => {
+    const interaction = command()
+
+    await respond(interaction).send({ content: 'Done', components: [text('Done')], flags: IsComponentsV2 })
+
+    expect('content' in calls(interaction, 'reply')[0]).toBe(false)
+    expect(warned).toEqual([expect.stringMatching(dropped('content', 'command "ping"'))])
+  })
+
+  it('warns when an update of a V2 message drops its embeds', async () => {
+    const interaction = button(onV2())
+
+    await respond(interaction).send({ embeds: [embed('Opened')] })
+
+    expect('embeds' in calls(interaction, 'update')[0]).toBe(false)
+    expect(warned).toEqual([expect.stringMatching(dropped('embeds', 'customId "open"'))])
+  })
+
+  it('warns when a V2 follow-up drops its content', async () => {
+    const interaction = command()
+    await respond(interaction).send('First')
+
+    await respond(interaction).followUp({ content: 'More', components: [text('More')], flags: IsComponentsV2 })
+
+    expect('content' in calls(interaction, 'followUp')[0]).toBe(false)
+    expect(warned).toEqual([expect.stringMatching(dropped('content', 'command "ping"'))])
+  })
+
+  it('warns of nothing for empty content and embeds', async () => {
+    const interaction = button(onV2())
+    await respond(interaction).acknowledge()
+
+    await respond(interaction).send({ content: '', embeds: [], components: [text('Again')] })
+
+    expect(warned).toEqual([])
+  })
+})

@@ -230,11 +230,12 @@ function toBody(payload: ResponsePayload | ResponseEditPayload): Body {
   return body
 }
 
-/** Drops what a Components V2 message cannot carry. */
-function forMode(body: Body, v2: boolean): Body {
-  if (!v2) return body
-  const { content: _content, embeds: _embeds, ...rest } = body
-  return rest
+/** What a body gives that a Components V2 message cannot carry, and loses there: non-empty `content` or `embeds`. */
+function droppedByV2(body: Body): ('content' | 'embeds')[] {
+  const dropped: ('content' | 'embeds')[] = []
+  if (body.content !== undefined && body.content !== null && body.content !== '') dropped.push('content')
+  if ((body.embeds?.length ?? 0) > 0) dropped.push('embeds')
+  return dropped
 }
 
 interface Snapshot { components: Record<string, unknown>[]; embeds: APIEmbed[] }
@@ -400,6 +401,9 @@ export interface ResponseState {
    *
    * After `@Defer` locked a message, omitting `components` puts back its components as they were
    * before the lock, and omitting `embeds` drops the loading view; `components: []` clears them.
+   *
+   * A Components V2 message carries only components: an answer to one, such as a V2 reply, is sent without `content`
+   * and `embeds`, and a warning names what was dropped.
    *
    * @param payload - Text, or reply options.
    * @param options - `fill: false` leaves this message's embeds and containers uncoloured.
@@ -1155,7 +1159,7 @@ export class InteractionResponse implements ResponseState {
   /** Sends a follow-up, with the flags it was sent with. */
   private async sendFollowUp(body: Body): Promise<{ message: Message; flags: number }> {
     const flags = this.withSuppression(this.flagsFor('followUp', body.flags, false))
-    const sent = forMode(body, hasComponentsV2(flags))
+    const sent = this.forMode(body, hasComponentsV2(flags))
     const message = await this.call('followUp', { ...sent, flags }, () =>
       this.interaction.followUp({ ...sent, flags } as InteractionReplyOptions),
     )
@@ -1304,7 +1308,7 @@ export class InteractionResponse implements ResponseState {
     this.cancelScheduled()
     const flags = this.withSuppression(this.flagsFor('reply', body.flags, false))
     this.v2 = this.#followsV2 = hasComponentsV2(flags)
-    const sent = forMode(body, this.v2)
+    const sent = this.forMode(body, this.v2)
     const response = await this.firstAnswer(() =>
       this.call('reply', { ...sent, flags }, () =>
         this.interaction.reply({ ...sent, flags, withResponse: true } as InteractionReplyOptions & { withResponse: true }),
@@ -1321,7 +1325,7 @@ export class InteractionResponse implements ResponseState {
     this.settled = true
     const flags = this.flagsFor('update', body.flags) | this.keptFlags(body)
     this.v2 ||= hasComponentsV2(flags)
-    const sent = this.withAttachments(forMode(body, this.v2))
+    const sent = this.withAttachments(this.forMode(body, this.v2))
     const target = this.interaction
     const response = await this.firstAnswer(() =>
       this.call('update', { ...sent, flags }, () => target.update({ ...sent, flags, withResponse: true } as never)),
@@ -1407,7 +1411,7 @@ export class InteractionResponse implements ResponseState {
     const flags = this.flagsFor('edit', body.flags, v2) | this.keptFlags(body)
     if (answer.kind === 'followUp') answer.v2 ||= hasComponentsV2(flags)
     else this.v2 ||= hasComponentsV2(flags)
-    const sent = { ...this.withAttachments(forMode(body, hasComponentsV2(flags))), flags }
+    const sent = { ...this.withAttachments(this.forMode(body, hasComponentsV2(flags))), flags }
     // A follow-up that is the answer is edited by its id
     const edit = answer.kind === 'followUp' ? { ...sent, message: answer.id } : sent
     try {
@@ -1441,6 +1445,20 @@ export class InteractionResponse implements ResponseState {
       // Unread, it is edited as this state knows it
     }
     return this.v2
+  }
+
+  /** `body` without what a Components V2 message cannot carry, warning, with the call named, of any it held. */
+  private forMode(body: Body, v2: boolean): Body {
+    if (!v2) return body
+    const dropped = droppedByV2(body)
+    if (dropped.length > 0) {
+      logger.warn(
+        `Dropped the ${dropped.join(' and ')} of an answer to ${describeInteraction(this.interaction as Interaction)}: it ` +
+          'goes to a Components V2 message, which carries only components. Send them as components, such as a Text Display.',
+      )
+    }
+    const { content: _content, embeds: _embeds, ...rest } = body
+    return rest
   }
 
   /** Whether a message MeoCord starts is Components V2: as the answer is, or as the component's message it follows. */
