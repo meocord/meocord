@@ -1420,9 +1420,9 @@ export class InteractionResponse implements ResponseState {
   }
 
   /**
-   * Whether the interaction's own reply is Components V2. A reply a raw discord.js call sent is read back once, as
-   * discord.js keeps no flags of it; a deferral, raw or not, is never V2 until edited, and a component's message is
-   * known.
+   * Whether the interaction's own reply is Components V2, which its edit must know: Discord refuses content or embeds
+   * on a V2 message. A reply a raw discord.js call sent is read back once, as discord.js keeps no flags of it; a
+   * deferral, raw or not, is never V2 until edited, and a component's message is known.
    */
   private async originalV2(): Promise<boolean> {
     if (this.v2 || !this.#answeredRaw || this.#rawFormatRead || !this.interaction.replied) return this.v2
