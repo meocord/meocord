@@ -548,6 +548,8 @@ export class InteractionResponse implements ResponseState {
   private underDefer = false
   /** Whether a raw discord.js call answered first, learned of in `sync()` whether or not `@Defer` configured the state yet. */
   #answeredRaw = false
+  /** Whether the interaction's own reply was sent by a raw call, whose format an edit of it reads back first. */
+  #replyFormatUnread = false
   /**
    * Set once this state answers with `update` or `deferUpdate`, which makes the original response the message the
    * component is on.
@@ -636,10 +638,22 @@ export class InteractionResponse implements ResponseState {
     // Where the state first learns of a first answer it didn't make; moving the phase on, it learns of it once
     if (this.phase === 'unanswered' && this.calls.length === 0 && (this.interaction.replied || this.interaction.deferred)) {
       this.#answeredRaw = true
+      this.learnRawAnswer()
       this.warnAnsweredOutside()
     }
     if (this.interaction.replied) this.phase = 'replied'
     else if (this.interaction.deferred && this.phase === 'unanswered') this.phase = 'deferred'
+  }
+
+  /**
+   * Takes in the format of a first answer a raw call made. discord.js gives `ephemeral` a value only in `reply()` and
+   * `deferReply()`, whose message is the interaction's own reply; after `update()` or `deferUpdate()` the answer is the
+   * component's message, whose format is known. A deferral is never Components V2 until edited, and a reply, or a
+   * deferral edited since, keeps no flags in discord.js, so it is read back before its first edit.
+   */
+  private learnRawAnswer(): void {
+    if (typeof this.interaction.ephemeral !== 'boolean') return
+    this.#replyFormatUnread = this.interaction.replied
   }
 
   /** Makes a Discord call, recorded as it is made so the order stays as issued, and marked with its error if it rejects. */
@@ -1378,7 +1392,7 @@ export class InteractionResponse implements ResponseState {
       entry.drawn = false
       body = { ...body, attachments: [...entry.attachments] }
     }
-    const flags = this.flagsFor('edit', body.flags) | this.keptFlags(body)
+    const flags = this.flagsFor('edit', body.flags, await this.originalV2()) | this.keptFlags(body)
     this.v2 ||= hasComponentsV2(flags)
     const sent = { ...this.withAttachments(forMode(body, this.v2)), flags }
     // A follow-up that is the answer is edited by its id
@@ -1397,6 +1411,23 @@ export class InteractionResponse implements ResponseState {
       this.lockEntry.editedAt = this.lastMessage?.editedTimestamp ?? undefined
     }
     return this.lastMessage
+  }
+
+  /**
+   * Whether the interaction's own reply is Components V2, which its edit must know: Discord refuses content or embeds
+   * on a V2 message. A reply a raw discord.js call sent, embed or V2, is read back once before MeoCord first edits it,
+   * as discord.js keeps no flags of it; every other answer's format is known from the call that made it.
+   */
+  private async originalV2(): Promise<boolean> {
+    if (!this.#replyFormatUnread) return this.v2
+    this.#replyFormatUnread = false
+    try {
+      const reply = await this.interaction.fetchReply()
+      if (reply?.flags?.has(MessageFlags.IsComponentsV2)) this.v2 = true
+    } catch {
+      // Unread, it is edited as this state knows it
+    }
+    return this.v2
   }
 
   private render(view: ResponseView, v2: boolean): Body {
