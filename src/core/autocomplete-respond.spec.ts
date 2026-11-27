@@ -132,6 +132,7 @@ beforeEach(() => {
 afterEach(() => {
   process.off('unhandledRejection', noteUnhandled)
   how = 'awaited'
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -167,10 +168,14 @@ describe("an autocomplete handler's respond() in a bot", () => {
     how = 'unawaited'
     const dispatch = await startBot()
     const { interaction } = typed(fails)
+    // The clock moves only by Discord's answer time, so however long the dispatch itself takes doesn't count
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] })
     // Created before the call, so the answer's own time decides which side of 2 s it lands
     Object.defineProperty(interaction, 'createdTimestamp', { value: Date.now() - lag })
 
-    await dispatch(interaction)
+    const dispatched = dispatch(interaction)
+    await vi.advanceTimersByTimeAsync(ANSWER_MS)
+    await dispatched
 
     expect(warned.filter(text => text.startsWith('Search.suggest took')).map(text => text.slice(0, 'Search.suggest took 2.0 s'.length))).toEqual(expected)
   })
