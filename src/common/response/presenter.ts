@@ -141,17 +141,24 @@ export function attachmentsOf(view: ResponseView): AttachmentBuilder[] {
 
 /**
  * Why Discord would refuse a view's files, if it would: more attachments than a message takes, counting the
- * `kept` ones a message it is added to keeps, a file without a name, or a file over `sizeLimit` bytes.
+ * `kept` files a message it is added to keeps, a file without a name, a file named like a kept one, or a file over
+ * `sizeLimit` bytes. A kept file's `attachment://` would reach the view's file of its name instead.
  */
-export function filesProblem(view: ResponseView, { kept = 0, sizeLimit = DEFAULT_ATTACHMENT_SIZE_LIMIT } = {}): string | undefined {
+export function filesProblem(
+  view: ResponseView,
+  { kept = [], sizeLimit = DEFAULT_ATTACHMENT_SIZE_LIMIT }: { kept?: readonly { filename: string }[]; sizeLimit?: number } = {},
+): string | undefined {
   const files = view.files ?? []
   if (files.length === 0) return undefined
-  if (files.length + kept > ATTACHMENT_LIMIT) {
-    const total = kept > 0 ? `${files.length} files beside the ${kept} the message keeps` : `${files.length} files`
+  if (files.length + kept.length > ATTACHMENT_LIMIT) {
+    const total = kept.length > 0 ? `${files.length} files beside the ${kept.length} the message keeps` : `${files.length} files`
     return `it has ${total}, and Discord takes ${ATTACHMENT_LIMIT} files on a message`
   }
   const unnamed = files.find(file => !nameOf(file))
   if (unnamed) return 'a file has no name, which its attachment:// URL needs'
+  const keptNames = new Set(kept.map(file => file.filename))
+  const clash = files.find(file => keptNames.has(nameOf(file) ?? ''))
+  if (clash) return `${nameOf(clash)} is named like a file the message keeps, whose attachment:// would show it instead`
   const large = files.find(file => (sizeOf(file) ?? 0) > sizeLimit)
   if (large) return `${nameOf(large)} is ${sizeOf(large)} bytes, over the ${sizeLimit} bytes Discord takes for each file here`
   return undefined
@@ -163,7 +170,7 @@ export function filesProblem(view: ResponseView, { kept = 0, sizeLimit = DEFAULT
  */
 export function withSendableFiles(
   view: ResponseView,
-  limits: { kept?: number; sizeLimit?: number },
+  limits: { kept?: readonly { filename: string }[]; sizeLimit?: number },
   warn: (problem: string) => void,
 ): ResponseView {
   const problem = filesProblem(view, limits)
