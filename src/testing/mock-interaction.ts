@@ -1966,6 +1966,13 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
      * What an answer sends, built now, as discord.js builds it when sending. One it refuses to build is refused under
      * strict mocks; default mode warns and holds it to build when first read.
      */
+    /** What a reply or a follow-up sends, as a message the interaction sent, refused as Discord refuses it. */
+    const answerSent = (method: string, options: unknown): HeldMessage => {
+      const held = { ...sent(options, false), sentHere: true }
+      refuseComponentsV2Leftover(method, held)
+      return held
+    }
+
     const hold = (method: string, build: () => HeldMessage): Held => {
       try {
         return build()
@@ -2182,7 +2189,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
     answer(
       'reply',
       resolvedAnswer('reply'),
-      resolvesUndefined(first('reply', 'replied', ([options]) => (original = answerMade = hold('reply', () => ({ ...sent(options, false), sentHere: true }))))),
+      resolvesUndefined(first('reply', 'replied', ([options]) => (original = answerMade = hold('reply', () => answerSent('reply', options))))),
     )
     answer(
       'deferReply',
@@ -2208,7 +2215,7 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
         ([options]) => {
           // Held as it is when sent, as Discord stores it, so a later change to what was passed isn't seen; its id taken
         // once built, so one that fails to build under strict mocks takes none
-        const held = hold('followUp', () => ({ ...sent(options, false), sentHere: true }))
+        const held = hold('followUp', () => answerSent('followUp', options))
         const id = nextSnowflake()
         made = undefined
         followUps.set(id, typeof held === 'function' ? () => ({ ...held(), id }) : { ...held, id })
@@ -2227,7 +2234,10 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
       later('editReply', ([options]) => {
         const id = targetId((options as { message?: unknown } | undefined)?.message)
         const held = target(id)
-        made = held && edited(held, options)
+        const next = held && edited(held, options)
+        // Refused before it replaces anything, as Discord refuses the edit whole
+        if (next) refuseComponentsV2Leftover('editReply', next)
+        made = next
         if (!made) return
         if (id === undefined) original = made
         else followUps.set(id, made)
@@ -2280,7 +2290,11 @@ export function createMockInteraction<T extends object>(Class: InteractionClass<
           first('update', 'replied', ([options]) => {
             // Discord updates only a message a component is on; a modal from a command has none
             if (!onMessage()) refuseModalUpdate()
-            original = answerMade = hold('update', () => edited(heldFrom(instance.message, false), options))
+            original = answerMade = hold('update', () => {
+              const updated = edited(heldFrom(instance.message, false), options, { method: 'update' })
+              refuseComponentsV2Leftover('update', updated)
+              return updated
+            })
           }),
         ),
       )
@@ -4004,21 +4018,83 @@ function heldFrom(message: unknown, allocate = true): HeldMessage {
 /** A message as an answer sends it: a new one, with what the answer gave, never edited. */
 const sent = (options: unknown, allocate = true): HeldMessage => {
   // Its id taken only once it builds, so a payload that fails to build takes none
-  const held = edited(heldFrom(undefined, false), options)
+  const held = edited(heldFrom(undefined, false), options, { sending: true })
   return { ...held, id: allocate ? nextSnowflake() : '', editedTimestamp: null }
 }
 
-/** A held message after an edit: what the edit sets replaced in Discord's shape, and a later edit stamp. */
-function edited(held: HeldMessage, options: unknown): HeldMessage {
+/** The flags an edit can change: it sets or clears `SuppressEmbeds` and sets `IsComponentsV2`; Discord ignores the rest. */
+const EDITABLE_FLAGS = MessageFlags.SuppressEmbeds | MessageFlags.IsComponentsV2
+
+const flagBits = (flags: MessageFlagsResolvable | null | undefined): number =>
+  flags === undefined || flags === null ? 0 : Number(MessageFlagsBitField.resolve(flags))
+
+/** Logged once in default mode, where an edit's flags replace the message's and strict mocks keep them as Discord does. */
+const EDIT_FLAGS_WARNING =
+  "here sets the message's flags to the edit's, where Discord keeps the ones an edit can't change, such as Ephemeral, " +
+  'and never clears IsComponentsV2. In the next major version (5.0) the mock keeps them; call useStrictMocks() to have ' +
+  'it keep them now.'
+
+/**
+ * The flags a message has after an edit asking for `requested`, as Discord keeps them under strict mocks: an edit
+ * changes only `SuppressEmbeds`, and only adds `IsComponentsV2`. Default mode takes the edit's flags, as it always has,
+ * and warns once where they differ, for an edit MeoCord didn't make. `method` names the call in the warning.
+ */
+function flagsAfterEdit(
+  before: MessageFlagsResolvable | undefined,
+  requested: MessageFlagsResolvable,
+  method: string,
+): MessageFlagsResolvable {
+  const kept = (flagBits(before) & ~MessageFlags.SuppressEmbeds) | (flagBits(requested) & EDITABLE_FLAGS)
+  if (strictMocks()) return kept
+  // MeoCord's own edits ask for their flags afresh, so only the app's or the test's edit is told
+  if (kept !== flagBits(requested) && !isOwnCall()) warnOnce(mockLogger, `${method}() ${EDIT_FLAGS_WARNING}`)
+  return requested
+}
+
+/** What a Components V2 message holds that Discord refuses on one, which "can only contain components". */
+function componentsV2Leftover(held: Pick<HeldMessage, 'content' | 'embeds' | 'flags'>): 'content' | 'embeds' | undefined {
+  if ((flagBits(held.flags) & MessageFlags.IsComponentsV2) === 0) return undefined
+  if (held.content) return 'content'
+  return held.embeds.length > 0 ? 'embeds' : undefined
+}
+
+/**
+ * Refuses a Components V2 message that also holds content or embeds, as Discord refuses it with a 400 (Execute and Edit
+ * Webhook Message, discord-api-docs developers/resources/webhook.mdx): sent so, or made V2 by an edit that doesn't clear
+ * them. Default mode sends it, as it always has, and warns once.
+ */
+function refuseComponentsV2Leftover(method: string, held: Pick<HeldMessage, 'content' | 'embeds' | 'flags'>): void {
+  const leftover = componentsV2Leftover(held)
+  if (!leftover) return
+  const problem = `a Components V2 message with ${leftover}, which Discord refuses with a 400: such a message can only contain components`
+  if (strictMocks()) throw createDiscordError(50035, `Invalid Form Body\n${problem}.`)
+  warnOnce(
+    mockLogger,
+    `${method}() here sends ${problem}. The mock sends it; in the next major version (5.0) it refuses it. Call ` +
+      'useStrictMocks() to have it refused now.',
+  )
+}
+
+/**
+ * A held message after an edit: what the edit sets replaced in Discord's shape, and a later edit stamp. `sending` reads
+ * the payload as a new message's, whose flags are the ones it gives.
+ */
+function edited(held: HeldMessage, options: unknown, { sending = false, method = 'editReply' } = {}): HeldMessage {
   const edit = (typeof options === 'string' ? { content: options } : (options ?? {})) as {
-    content?: string
+    content?: string | null
     components?: unknown[]
     embeds?: unknown[]
     flags?: MessageFlagsResolvable
   }
+  // An edit ends a deferral's loading, as Discord shows the message sent once the deferral is edited
+  const loading = held.flags !== undefined && new MessageFlagsBitField(held.flags).has(MessageFlags.Loading)
+  const before = loading ? new MessageFlagsBitField(held.flags).remove(MessageFlags.Loading) : held.flags
+  const flags = edit.flags === undefined ? before : sending ? edit.flags : flagsAfterEdit(before, edit.flags, method)
+  // discord.js sends `null` content as empty, which strict mocks read back
+  const content = edit.content === null && strictMocks() ? '' : edit.content
   return {
     ...held,
-    ...(edit.content !== undefined && { content: edit.content }),
+    ...(content !== undefined && { content: content as string }),
     // The first edit that keeps a file uploaded with the message has Discord process it again: the response has it
     // loading, and it has loaded by the time the message is read back. Later edits find it processed.
     ...(edit.components !== undefined && {
@@ -4027,10 +4103,7 @@ function edited(held: HeldMessage, options: unknown): HeldMessage {
       reprocessed: true,
     }),
     ...(edit.embeds !== undefined && { embeds: embedsAsDiscordStores(edit.embeds.map(jsonOf)) }),
-    // An edit ends a deferral's loading, as Discord shows the message sent once the deferral is edited
-    ...(held.flags !== undefined &&
-      new MessageFlagsBitField(held.flags).has(MessageFlags.Loading) && { flags: new MessageFlagsBitField(held.flags).remove(MessageFlags.Loading) }),
-    ...(edit.flags !== undefined && { flags: edit.flags }),
+    ...(flags !== undefined && { flags }),
     // Later than the last edit, even within one millisecond or under fake timers
     editedTimestamp: Math.max(Date.now(), (held.editedTimestamp ?? 0) + 1),
   }
@@ -4262,12 +4335,23 @@ function messageMock(overrides: MockMessageOverrides = {}, sentBy?: SentInDefaul
     'edit',
     createMockFn(async (options?: unknown) => {
       if (instance.deleted) throw alreadyDeleted()
-      const held = edited(heldFrom(undefined, false), options)
+      const held = edited(heldFrom(undefined, false), options, { sending: true })
       const edit = (typeof options === 'string' ? { content: options } : (options ?? {})) as Record<string, unknown>
+      const current = instance.flags as MessageFlagsBitField
+      const flags = edit.flags === undefined ? current : new MessageFlagsBitField(flagsAfterEdit(current, held.flags!, 'edit'))
+      // What the message keeps, read as the mock's own, only for a Components V2 message
+      if (flags.has(MessageFlags.IsComponentsV2)) {
+        const kept = readPlaceQuietly(() => ({ content: instance.content as unknown, embeds: instance.embeds as unknown[] }))
+        refuseComponentsV2Leftover('edit', {
+          content: edit.content !== undefined ? held.content : typeof kept.content === 'string' ? kept.content : undefined,
+          embeds: edit.embeds !== undefined ? held.embeds : kept.embeds,
+          flags,
+        })
+      }
       if (edit.content !== undefined) instance.content = held.content
       if (edit.components !== undefined) instance.components = held.components.map(component => asHeld(component as never, 'component'))
       if (edit.embeds !== undefined) instance.embeds = held.embeds.map(embed => asHeld(embed as never, 'embed'))
-      if (edit.flags !== undefined) instance.flags = new MessageFlagsBitField(held.flags)
+      if (edit.flags !== undefined) instance.flags = flags
       instance.editedTimestamp = Math.max(Date.now(), ((instance.editedTimestamp as number | null) ?? 0) + 1)
       return message
     }),
