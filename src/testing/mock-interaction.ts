@@ -4040,7 +4040,7 @@ const EDIT_FLAGS_WARNING =
 /**
  * The flags a message has after an edit asking for `requested`, as Discord keeps them under strict mocks: an edit
  * changes only `SuppressEmbeds`, and only adds `IsComponentsV2`. Default mode takes the edit's flags, as it always has,
- * and warns once where they differ, for an edit MeoCord didn't make. `method` names the call in the warning.
+ * and warns once where they differ, MeoCord's own edits included. `method` names the call in the warning.
  */
 function flagsAfterEdit(
   before: MessageFlagsResolvable | undefined,
@@ -4049,8 +4049,7 @@ function flagsAfterEdit(
 ): MessageFlagsResolvable {
   const kept = (flagBits(before) & ~MessageFlags.SuppressEmbeds) | (flagBits(requested) & EDITABLE_FLAGS)
   if (strictMocks()) return kept
-  // MeoCord's own edits ask for their flags afresh, so only the app's or the test's edit is told
-  if (kept !== flagBits(requested) && !isOwnCall()) warnOnce(mockLogger, `${method}() ${EDIT_FLAGS_WARNING}`)
+  if (kept !== flagBits(requested)) warnOnce(mockLogger, `${method}() ${EDIT_FLAGS_WARNING}`)
   return requested
 }
 
