@@ -2,6 +2,8 @@ import { spawnSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { ESLint, type Linter } from 'eslint'
+import meocordESLint from '../meocord.eslint.mjs'
 
 // A bot linted with `meocord/eslint` as a package of a workspace, by ESLint's own CLI in a process of its own, so ESLint
 // loads the bot's config file as it does for a user: .ts through jiti on Node and natively on Bun, the others natively
@@ -98,5 +100,34 @@ describe.each(Object.keys(LAYOUTS) as (keyof typeof LAYOUTS)[])('a bot of a %s w
         cycles: ['alpha.ts', 'bravo.ts'],
       })
     })
+  })
+})
+
+describe('a tsconfigRootDir the app sets', () => {
+  // The bot's tsconfigs in a folder of their own, which only the app's own root finds
+  it('wins over the folder of its eslint.config.*', async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'meocord-eslint-root-')))
+    workspaces.push(root)
+    const configs = path.join(root, 'config')
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+    fs.mkdirSync(configs)
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'bot', private: true, type: 'module' }))
+    fs.writeFileSync(path.join(root, 'eslint.config.js'), 'export default []\n')
+    const options = { strict: true, module: 'ESNext', moduleResolution: 'Bundler' }
+    for (const name of Object.keys(TSCONFIGS)) {
+      fs.writeFileSync(path.join(configs, name), JSON.stringify({ compilerOptions: options, include: ['../src/**/*.ts'] }))
+    }
+    fs.writeFileSync(path.join(root, 'src', 'dropped.ts'), SOURCES['dropped.ts'])
+
+    const eslint = new ESLint({
+      cwd: root,
+      overrideConfigFile: true,
+      overrideConfig: [...(meocordESLint as Linter.Config[]), { files: ['**/*.ts'], languageOptions: { parserOptions: { tsconfigRootDir: configs } } }],
+    })
+    const [result] = await eslint.lintFiles([path.join(root, 'src', 'dropped.ts')])
+
+    expect(result.messages.filter(message => message.fatal || message.ruleId === '@typescript-eslint/no-floating-promises').map(message => message.ruleId)).toEqual([
+      '@typescript-eslint/no-floating-promises',
+    ])
   })
 })
