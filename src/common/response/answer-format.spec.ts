@@ -1,6 +1,9 @@
 import {
+  ActionRowBuilder,
   type APIEmbed,
+  ButtonBuilder,
   ButtonInteraction,
+  ButtonStyle,
   ChatInputCommandInteraction,
   ComponentType,
   ContainerBuilder,
@@ -344,5 +347,153 @@ describe('an embed answer made Components V2', () => {
     await respond(interaction).send({ components: [text('Opened')], flags: IsComponentsV2 })
 
     expect(calls(interaction, 'update')).toEqual([{ components: [expect.anything()], flags: IsComponentsV2 }])
+  })
+})
+
+/** The keys of each payload sent with `method`, which for an edit into V2 of an empty answer are only these two. */
+const keys = (interaction: object, method: string) => calls(interaction, method).map(payload => Object.keys(payload).sort())
+const onlyComponents = [['components', 'flags']]
+const sendV2 = (interaction: Parameters<typeof respond>[0]) => respond(interaction).send({ components: [text('Done')], flags: IsComponentsV2 })
+
+describe.each([
+  ['strict mocks', true],
+  ['default mode', false],
+])('a Components V2 edit of an answer that holds no content or embeds, under %s', (_mode, strict) => {
+  beforeEach(() => {
+    if (strict) useStrictMocks()
+  })
+
+  it("sends only components and flags into MeoCord's own deferral", async () => {
+    const interaction = command()
+    await respond(interaction).acknowledge()
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual(onlyComponents)
+  })
+
+  it("sends only components and flags into the app's own deferReply()", async () => {
+    const interaction = command()
+    await interaction.deferReply()
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual(onlyComponents)
+  })
+
+  it("sends only components and flags after a component's deferred update of a message with only components", async () => {
+    const interaction = button(createMockMessage({ components: [] }))
+    await respond(interaction).acknowledge()
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual(onlyComponents)
+  })
+
+  it("sends only components and flags into the app's own reply that it reads back as holding only components", async () => {
+    const interaction = command()
+    await interaction.reply({ components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('go').setLabel('Go').setStyle(ButtonStyle.Primary))] })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual(onlyComponents)
+  })
+})
+
+describe.each([
+  ['strict mocks', true],
+  ['default mode', false],
+])('a Components V2 edit of an answer that holds content or embeds, under %s', (_mode, strict) => {
+  beforeEach(() => {
+    if (strict) useStrictMocks()
+  })
+  const row = () => new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('go').setLabel('Go').setStyle(ButtonStyle.Primary))
+
+  it("clears a component's embed message that an update sending only components left holding its embeds", async () => {
+    const interaction = button(createMockMessage({ embeds: [embed('Panel').toJSON()] }))
+    await respond(interaction).send({ components: [row()] })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'update')).toEqual([['components', 'flags']])
+    expect(keys(interaction, 'editReply')).toEqual([['components', 'content', 'embeds', 'flags']])
+  })
+
+  it("clears a component's embed message that an edit sending only components left holding its embeds", async () => {
+    const interaction = button(createMockMessage({ embeds: [embed('Panel').toJSON()] }))
+    await respond(interaction).acknowledge()
+    await respond(interaction).send({ components: [row()] })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['components', 'flags'], ['components', 'content', 'embeds', 'flags']])
+  })
+
+  it('clears an answer that an edit sending only components left holding the embeds sent before', async () => {
+    const interaction = command()
+    await respond(interaction).acknowledge()
+    await respond(interaction).send({ embeds: [embed('Working')] })
+    await respond(interaction).send({ components: [row()] })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['embeds', 'flags'], ['components', 'flags'], ['components', 'content', 'embeds', 'flags']])
+  })
+
+
+  it("clears a component's embed message after its deferred update, when the edit makes it V2", async () => {
+    const interaction = button(createMockMessage({ content: 'Panel', embeds: [embed('Panel').toJSON()] }))
+    await respond(interaction).acknowledge()
+
+    await sendV2(interaction)
+
+    expect(calls(interaction, 'editReply')).toEqual([{ content: null, embeds: [], components: [expect.anything()], flags: IsComponentsV2 }])
+  })
+
+  it("clears a component's message that holds only content after its deferred update, when the edit makes it V2", async () => {
+    const interaction = button(createMockMessage({ content: 'Panel', components: [] }))
+    await respond(interaction).acknowledge()
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['components', 'content', 'embeds', 'flags']])
+  })
+
+  it("clears MeoCord's own deferral once an edit has sent embeds into it", async () => {
+    const interaction = command()
+    await respond(interaction).acknowledge()
+    await respond(interaction).send({ embeds: [embed('Working')] })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['embeds', 'flags'], ['components', 'content', 'embeds', 'flags']])
+  })
+
+  it("clears a component's message once MeoCord's update has sent content into it", async () => {
+    const interaction = button(createMockMessage({ components: [] }))
+    await respond(interaction).send({ content: 'Opened' })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['components', 'content', 'embeds', 'flags']])
+  })
+
+  it("clears the app's own reply when it can't be read back, as it may hold content", async () => {
+    const interaction = command()
+    await interaction.reply({ content: 'Working' })
+    interaction.fetchReply.mockRejectedValueOnce(new Error('gone'))
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['components', 'content', 'embeds', 'flags']])
+  })
+
+  it("clears a component's message after the app's own update of it, which may have added content", async () => {
+    const interaction = button(createMockMessage({ components: [] }))
+    await interaction.update({ content: 'Opened' })
+
+    await sendV2(interaction)
+
+    expect(keys(interaction, 'editReply')).toEqual([['components', 'content', 'embeds', 'flags']])
   })
 })
