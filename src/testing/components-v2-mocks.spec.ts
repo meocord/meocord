@@ -191,13 +191,15 @@ describe('Components V2 edits in default mode', () => {
     expect(warned).toEqual([expect.stringMatching(/^editReply\(\) here sends a Components V2 message with embeds/)])
   })
 
-  it("doesn't warn of the flags of MeoCord's own edit of a private reply", async () => {
+  it("warns once that strict mocks keep a private reply private through MeoCord's own edits", async () => {
     const interaction = command()
-    await respond(interaction).send({ content: 'first', flags: Ephemeral })
+    await interaction.reply({ content: 'first', flags: Ephemeral })
 
     await respond(interaction).send('second')
+    await respond(interaction).send('third')
 
-    expect(warned).toEqual([])
+    expect((await interaction.fetchReply()).flags.has(Ephemeral)).toBe(false)
+    expect(warned).toEqual([expect.stringMatching(/^editReply\(\) here sets the message's flags to the edit's/)])
   })
 
   it('warns of nothing for Components V2 answers Discord takes', async () => {

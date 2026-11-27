@@ -1099,7 +1099,11 @@ describe('a call with waitForReady and a themeFor class', () => {
         await respond(interaction as never).send(hushed)
         await respond(interaction as never).send(hushed)
         expect(privacy(interaction)).toEqual(['reply private', 'editReply'])
-        expect(warned).toEqual([expect.stringMatching(/^Dropped flags Ephemeral, which an edit cannot take\./)])
+        // The second is default mode's mock, which reads the edited reply back public where strict mocks keep it private
+        expect(warned).toEqual([
+          expect.stringMatching(/^Dropped flags Ephemeral, which an edit cannot take\./),
+          expect.stringMatching(/^editReply\(\) here sets the message's flags to the edit's/),
+        ])
       })
     })
 
