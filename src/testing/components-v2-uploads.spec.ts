@@ -332,6 +332,57 @@ describe("a message's uploads under useStrictMocks(), as Discord keeps them", ()
     expect(namesOf(after)).toEqual([])
   })
 
+  it("answers a click's first edit that links a kept upload through attachment:// with it loaded, and a CDN re-send with it loading", async () => {
+    const sent = async () => {
+      const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'card' })
+      await command.reply({ components: [gallery()], files: [png()], flags: IsComponentsV2 })
+      const click = button(await command.fetchReply())
+      await click.deferUpdate()
+      return click
+    }
+    const linking = await sent()
+    const resending = await sent()
+
+    const linked = await linking.editReply({ components: [gallery()] })
+    const resent = await resending.editReply({ components: resending.message.components.map(component => component.toJSON()) as never })
+
+    // As Discord answers the first edit that keeps an upload: linked, it stays linked; by CDN URL, it is processed again
+    expect(mediaOf(linked)[0]).toMatchObject({ attachment_id: mediaOf(linking.message)[0].attachment_id, loading_state: 2 })
+    expect(mediaOf(resent)[0]).toMatchObject({ loading_state: 1 })
+    expect(mediaOf(resent)[0]).not.toHaveProperty('attachment_id')
+  })
+
+  it("answers a click's first edit with a kept upload and a new one both linked and loaded", async () => {
+    const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'card' })
+    await command.reply({ components: [gallery('a.png')], files: [png('a.png')], flags: IsComponentsV2 })
+    const click = button(await command.fetchReply())
+    await click.deferUpdate()
+    const [kept] = mediaOf(click.message)
+
+    const edited = await click.editReply({
+      components: [gallery('a.png'), gallery('b.png')],
+      files: [png('b.png')],
+      attachments: [{ id: kept.attachment_id, filename: 'a.png' }],
+    } as never)
+
+    const [a, b] = mediaOf(edited)
+    expect(a).toMatchObject({ attachment_id: kept.attachment_id, loading_state: 2 })
+    expect(b).toMatchObject({ attachment_id: expect.any(String), loading_state: 2 })
+    expect(b?.attachment_id).not.toBe(kept.attachment_id)
+  })
+
+  it("answers a click's first edit with an image from outside Discord loaded, as only uploads are processed again", async () => {
+    const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'card' })
+    await command.reply({ components: [gallery()], files: [png()], flags: IsComponentsV2 })
+    const click = button(await command.fetchReply())
+    await click.deferUpdate()
+    const external = new MediaGalleryBuilder().addItems({ media: { url: 'https://example.com/card.png' } })
+
+    const edited = await click.editReply({ components: [external] })
+
+    expect(mediaOf(edited)[0]).toMatchObject({ url: 'https://example.com/card.png', loading_state: 2 })
+  })
+
   it('links media again that a CDN re-send unlinked, through attachment:// with no attachments', async () => {
     const interaction = button()
     await interaction.reply({ components: [gallery()], files: [png()], flags: IsComponentsV2 })
@@ -470,6 +521,19 @@ describe("a message's uploads in default mode", () => {
       expect.stringMatching(/^reply\(\) here sends files.*5\.0.*useStrictMocks\(\)/s),
       expect.stringMatching(/^editReply\(\) here sends files/),
     ])
+  })
+
+  it("answers a click's first edit with media sent with an attachment_id loading and without it, as before", async () => {
+    const command = createMockInteraction(ChatInputCommandInteraction, { commandName: 'card' })
+    await command.reply({ components: [gallery()], files: [png()], flags: IsComponentsV2 })
+    const click = button(await command.fetchReply())
+    await click.deferUpdate()
+    const media = { url: 'https://cdn.discordapp.com/attachments/111/222/probe.png', attachment_id: '222' }
+
+    const edited = await click.editReply({ components: [{ type: ComponentType.MediaGallery, items: [{ media }] }] as never })
+
+    expect(mediaOf(edited)[0]).toMatchObject({ url: media.url, loading_state: 1 })
+    expect(mediaOf(edited)[0]).not.toHaveProperty('attachment_id')
   })
 
   it('takes a File component pointed at a URL, and warns once that Discord refuses it', async () => {

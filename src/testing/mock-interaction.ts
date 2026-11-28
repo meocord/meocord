@@ -4185,11 +4185,15 @@ function edited(
     ...held,
     ...uploaded,
     ...(content !== undefined && { content: content as string }),
-    // The first edit that keeps a file uploaded with the message has Discord process it again: the response has it
-    // loading, and it has loaded by the time the message is read back. Later edits find it processed.
+    // The first edit that re-sends a file uploaded with the message by its CDN URL has Discord process it again: the
+    // response has it loading, and it has loaded by the time the message is read back. Later edits find it processed.
+    // One that links an upload the edit keeps or adds through attachment:// has it returned loaded and linked.
     ...(edit.components !== undefined && {
       components: asDiscordStores(resolved ?? edit.components.map(jsonOf)),
-      returned: asDiscordStores(resolved ?? edit.components.map(jsonOf), { loading: !held.reprocessed }),
+      returned: asDiscordStores(resolved ?? edit.components.map(jsonOf), {
+        loading: !held.reprocessed,
+        linked: resolved && new Set((uploaded.uploads ?? []).map(upload => upload.id)),
+      }),
       reprocessed: true,
     }),
     ...(edit.embeds !== undefined && { embeds: embedsAsDiscordStores(resolvedEmbeds ?? edit.embeds.map(jsonOf)) }),
