@@ -114,10 +114,10 @@ export function listedUploads(
 }
 
 /**
- * The files a message has after an edit, as `attachment://` reaches them. `names` are the files the edit sends, the
- * entries it lists by `name`, and, unless it lists the ones to keep, the message's current attachments. `uploads` are
- * the uploads it lists as `{ id, filename }`, by id, each the newest of its file name: `attachment://` of a name two kept
- * uploads share reaches the newer, so the older keeps its URL.
+ * The files a message has after an edit, as `attachment://` reaches them. `names` are the files the edit sends: a URL
+ * of a file of that name points at the new one. `uploads` are the kept uploads the edit's media may point at, by id,
+ * each the newest of its file name: `attachment://` of a name two kept uploads share reaches the newer, so the older
+ * keeps its URL.
  */
 export interface KeptFiles {
   names: ReadonlySet<string>
@@ -128,43 +128,114 @@ export interface KeptFiles {
 const age = (id: string): bigint => (/^\d+$/.test(id) ? BigInt(id) : -1n)
 
 /** The `{ id, filename }` entries of an edit's `attachments`. */
-function listedOf(payload: { attachments?: readonly unknown[] }): ListedUpload[] {
-  return (payload.attachments ?? []).filter((entry): entry is ListedUpload => {
+function listedOf(attachments: readonly unknown[] | undefined): ListedUpload[] {
+  return (attachments ?? []).filter((entry): entry is ListedUpload => {
     const { id, filename } = (entry ?? {}) as { id?: unknown; filename?: unknown }
     return typeof id === 'string' && typeof filename === 'string'
   })
 }
 
-/** The files a message keeps through an edit: see {@link KeptFiles}. */
-export function keptFiles(
-  payload: { files?: readonly unknown[]; attachments?: readonly unknown[] },
-  current: Iterable<{ name?: string | null }>,
-): KeptFiles {
-  const names = new Set<string>()
-  for (const file of payload.files ?? []) {
-    const name = fileName(file)
-    if (name) names.add(name)
-  }
-  // An entry listed as { id, filename } has no name: it is kept by id below
-  for (const attachment of payload.attachments ?? current) {
-    const name = (attachment as { name?: unknown })?.name
-    if (typeof name === 'string') names.add(name)
-  }
+/** The names of the files an edit sends. */
+function sentNames(files: readonly unknown[] | undefined): Set<string> {
+  return new Set((files ?? []).map(fileName).filter((name): name is string => name !== undefined))
+}
+
+/** `uploads` by id, each the newest of its file name. */
+function newestOf(uploads: readonly ListedUpload[]): Map<string, string> {
   const newest = new Map<string, ListedUpload>()
-  for (const upload of listedOf(payload)) {
+  for (const upload of uploads) {
     const other = newest.get(upload.filename)
     if (!other || age(upload.id) > age(other.id)) newest.set(upload.filename, upload)
   }
-  return { names, uploads: new Map([...newest.values()].map(upload => [upload.id, upload.filename])) }
+  return new Map([...newest.values()].map(upload => [upload.id, upload.filename]))
 }
 
 /**
- * The file names of the File components an edit lists the upload of, but whose `attachment://` a newer upload of the
+ * An `attachments` entry as Discord names its upload: a discord.js `Attachment`, or any entry with an `id` and a `name`
+ * but no `filename`, becomes `{ id, filename }`, with its `description` when set. Discord resolves `attachment://` of a
+ * Components V2 media item only through `filename`. Any other entry is left as it is.
+ */
+export function asListedEntry(entry: unknown): unknown {
+  const { id, name, filename, description } = (entry ?? {}) as { id?: unknown; name?: unknown; filename?: unknown; description?: unknown }
+  if (typeof id !== 'string' || typeof name !== 'string' || filename !== undefined) return entry
+  return { id, filename: name, ...(typeof description === 'string' && description !== '' && { description }) }
+}
+
+/** The ids of the uploads a payload's media and embeds show by a CDN URL or, for media, by `attachment_id`. */
+function shownIds(payload: { components?: readonly unknown[]; embeds?: readonly unknown[] }): Set<string> {
+  const ids = new Set<string>()
+  for (const media of mediaIn(payload.components ?? [])) {
+    const id = typeof media?.attachment_id === 'string' ? media.attachment_id : uploadPath(media?.url)?.id
+    if (id !== undefined) ids.add(id)
+  }
+  for (const url of (payload.embeds ?? []).flatMap(embedUrls)) {
+    const id = uploadPath(url)?.id
+    if (id !== undefined) ids.add(id)
+  }
+  return ids
+}
+
+/** How an edit keeps a message's uploads: see {@link keptUploads}. */
+export interface KeptUploads<P> {
+  /** The edit, with its entries reshaped, its list built when it needs one, and its media pointed at kept uploads. */
+  payload: P
+  /** The File components whose upload a newer one of its name shadows, which Discord then refuses. */
+  shadowed: string[]
+  /** Set when the edit's files and the uploads it shows pass Discord's limit, so it keeps none of them: those dropped. */
+  overLimit?: { files: number; dropped: string[] }
+}
+
+/**
+ * An edit of a message holding `own` uploads, as Discord takes it, so that the uploads it shows stay on the message and
+ * attachment-backed:
+ * - An edit that lists `attachments` keeps exactly those: each entry is only reshaped ({@link asListedEntry}), and its
+ *   media point at the uploads it lists.
+ * - One with neither `attachments` nor files keeps every upload: its media point at the message's own.
+ * - One with files and no `attachments` would keep only the new files, as discord.js then lists them alone: it lists
+ *   the message's own uploads it shows, unless those and the files pass `limit`.
+ *
+ * Only Discord CDN URLs of the message's own uploads are rewritten, to `attachment://<filename>`, and a URL of a file
+ * the edit sends points at that file; `attachment://` and other URLs are left as they are.
+ */
+export function keptUploads<P extends { files?: readonly unknown[]; attachments?: readonly unknown[]; components?: readonly unknown[]; embeds?: readonly unknown[] }>(
+  payload: P,
+  own: readonly ListedUpload[],
+  limit: number,
+): KeptUploads<P> {
+  const names = sentNames(payload.files)
+  let edit = payload
+  let candidates: readonly ListedUpload[]
+  let overLimit: KeptUploads<P>['overLimit']
+  if (Array.isArray(payload.attachments)) {
+    const attachments = payload.attachments.map(asListedEntry)
+    edit = { ...payload, attachments }
+    candidates = listedOf(attachments)
+  } else if ((payload.files?.length ?? 0) === 0) {
+    candidates = own
+  } else if (own.length === 0) {
+    candidates = []
+  } else {
+    const shown = shownIds(payload)
+    const listed = own.filter(upload => shown.has(upload.id) && !names.has(upload.filename))
+    if (listed.length + names.size > limit) {
+      candidates = []
+      overLimit = { files: payload.files?.length ?? 0, dropped: listed.map(upload => upload.filename) }
+    } else {
+      candidates = listed
+      if (listed.length > 0) edit = { ...payload, attachments: listed.map(upload => ({ ...upload })) }
+    }
+  }
+  const kept: KeptFiles = { names, uploads: newestOf(candidates) }
+  return { payload: rewriteAttachmentUrls(edit, kept), shadowed: shadowedFiles(edit, candidates, kept), ...(overLimit && { overLimit }) }
+}
+
+/**
+ * The file names of the File components showing one of `candidates`, but whose `attachment://` a newer upload of the
  * same name takes. Such a File keeps its URL, which Discord refuses for a File.
  */
-export function shadowedFiles(payload: { components?: readonly unknown[]; attachments?: readonly unknown[] }, kept: KeptFiles): string[] {
-  const listed = new Map(listedOf(payload).map(upload => [upload.id, upload.filename]))
-  // Without a listed upload nothing is read, so an app's builders are built once, as discord.js sends them
+export function shadowedFiles(payload: { components?: readonly unknown[] }, candidates: readonly ListedUpload[], kept: KeptFiles): string[] {
+  const listed = new Map(candidates.map(upload => [upload.id, upload.filename]))
+  // Without a candidate nothing is read, so an app's builders are built once, as discord.js sends them
   if (listed.size === 0) return []
   const files = (payload.components ?? []).flatMap(function walk(value: unknown): Json[] {
     const component = toJson<Json>(value as Json)
@@ -175,7 +246,7 @@ export function shadowedFiles(payload: { components?: readonly unknown[]; attach
   return files.flatMap(file => {
     const id = typeof file?.attachment_id === 'string' ? file.attachment_id : uploadPath(file?.url)?.id
     const filename = id === undefined ? undefined : listed.get(id)
-    return filename !== undefined && id !== undefined && !kept.uploads.has(id) ? [filename] : []
+    return filename !== undefined && id !== undefined && !kept.uploads.has(id) && !kept.names.has(filename) ? [filename] : []
   })
 }
 
