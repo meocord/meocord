@@ -1,4 +1,8 @@
 import {
+  ActionRowBuilder,
+  Attachment,
+  ButtonBuilder,
+  ButtonStyle,
   type APIEmbed,
   type APIFileComponent,
   type APIMediaGalleryComponent,
@@ -76,11 +80,21 @@ const ON_MESSAGE = {
     createMockInteraction(ModalSubmitInteraction, { customId: 'form', message, fields: createModalFields({}) }),
 } satisfies Record<string, (message: Message) => Interaction>
 
-function on(message: Message, kind: keyof typeof ON_MESSAGE = 'button') {
+/** A presenter whose views carry no files. */
+const plain: ResponsePresenter = {
+  loading: () => ({ text: 'Working' }),
+  error: (_context, { message }) => ({ text: message }),
+}
+
+function on(message: Message, kind: keyof typeof ON_MESSAGE = 'button', presenter = withFiles) {
   const interaction = ON_MESSAGE[kind](message)
-  setPresenter(interaction.client, withFiles)
+  setPresenter(interaction.client, presenter)
   return interaction as ButtonInteraction
 }
+
+/** The first edit a call made, as discord.js received it. */
+const firstEdit = (interaction: ButtonInteraction, call = 0) =>
+  vi.mocked(interaction.editReply).mock.calls[call][0] as { attachments?: unknown[]; components?: { items?: { media: { url: string } }[]; file?: { url: string } }[]; embeds?: APIEmbed[] }
 
 beforeEach(() => useStrictMocks())
 afterEach(() => vi.restoreAllMocks())
@@ -201,7 +215,7 @@ describe('a lock keeping uploads that share a file name', () => {
     const [lock] = vi.mocked(interaction.editReply).mock.calls[0] as [{ files?: unknown[] }]
     expect(lock.files).toBeUndefined()
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('loading.png is named like a file the message keeps'))
-    expect(mediaOf(await interaction.fetchReply())).toEqual([expect.objectContaining({ url: before.url, loading_state: 2 })])
+    expect(mediaOf(await interaction.fetchReply())).toEqual([expect.objectContaining({ attachment_id: before.attachment_id, loading_state: 2 })])
   })
 
   it('points attachment:// at the newer of two kept uploads of one name, and keeps the older on its URL', async () => {
@@ -287,5 +301,184 @@ describe('a lock with a loading view\'s files on an embed message', () => {
     expect(lock.attachments).toEqual([{ id: image?.split('/').at(-2), filename: 'card.png' }])
     expect(lock.embeds?.[0].image?.url).toBe('attachment://card.png')
     expect((await interaction.fetchReply()).embeds[0].image?.url).toBe(image)
+  })
+})
+
+describe('a lock with no files of its own', () => {
+  it("keeps a gallery's upload linked, listing nothing", async () => {
+    const message = await posted({ components: [gallery()], files: [png()], flags: IsComponentsV2 })
+    const [before] = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+
+    await respond(interaction).lock()
+    await responseOf(interaction).release()
+
+    expect(firstEdit(interaction)).not.toHaveProperty('attachments')
+    expect(firstEdit(interaction).components?.[0].items?.[0].media.url).toBe('attachment://probe.png')
+    expect(mediaOf(await interaction.fetchReply())).toEqual([expect.objectContaining({ attachment_id: before.attachment_id, url: before.url })])
+  })
+
+  it('keeps a File component, which Discord refuses by its URL', async () => {
+    const message = await posted({ components: [new FileBuilder().setURL('attachment://probe.zip')], files: [zip()], flags: IsComponentsV2 })
+    const [before] = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+
+    await respond(interaction).lock()
+    await responseOf(interaction).release()
+
+    expect(mediaOf(await interaction.fetchReply())).toEqual([expect.objectContaining({ attachment_id: before.attachment_id })])
+  })
+
+  it("points an embed's uploaded images at attachment://, listing nothing", async () => {
+    const embed = new EmbedBuilder().setImage('attachment://card.png').setFooter({ text: 'f', iconURL: 'attachment://icon.png' })
+    const message = await posted({ embeds: [embed], files: [png('card.png'), png('icon.png')] })
+    const interaction = on(message, 'button', plain)
+
+    await respond(interaction).lock()
+
+    expect(firstEdit(interaction)).not.toHaveProperty('attachments')
+    expect(firstEdit(interaction).embeds?.[0]).toMatchObject({ image: { url: 'attachment://card.png' }, footer: { icon_url: 'attachment://icon.png' } })
+  })
+})
+
+describe("an app's own edit of a message with uploads", () => {
+  /** A button on a V2 message with an uploaded gallery and File, answered by `answer` with the message's components. */
+  async function answering(answer: (interaction: ButtonInteraction, components: unknown[]) => Promise<unknown>) {
+    const message = await posted({ components: [gallery(), new FileBuilder().setURL('attachment://probe.zip')], files: [png(), zip()], flags: IsComponentsV2 })
+    const before = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+    await answer(interaction, message.components.map(component => component.toJSON()))
+    return { before, interaction, after: mediaOf(await interaction.fetchReply()) }
+  }
+  const linked = (before: APIUnfurledMediaItem[]) => before.map(media => expect.objectContaining({ attachment_id: media.attachment_id }))
+
+  it("keeps the uploads when it re-sends the message's components", async () => {
+    const { before, after } = await answering((interaction, components) => respond(interaction).send({ components } as never))
+
+    expect(after).toEqual(linked(before))
+  })
+
+  it('keeps the uploads it shows beside a file it adds without listing attachments', async () => {
+    const { before, interaction, after } = await answering((interaction, components) =>
+      respond(interaction).send({ components, files: [png('added.png')] } as never),
+    )
+
+    expect(after).toEqual(linked(before))
+    expect(namesOf(await interaction.fetchReply())).toEqual(['added.png'])
+  })
+
+  it("keeps the uploads it lists as discord.js's Attachments, reshaped to { id, filename }", async () => {
+    const { before, interaction, after } = await answering((interaction, components) => {
+      const listed = mediaOf(interaction.message).map(media => ({ id: media.attachment_id!, name: media.url.split('/').at(-1)!.split('?')[0], size: 3 }))
+      return respond(interaction).send({ components, attachments: listed } as never)
+    })
+
+    expect(after).toEqual(linked(before))
+    expect(firstEdit(interaction).attachments).toEqual(before.map(media => ({ id: media.attachment_id, filename: media.url.split('/').at(-1)!.split('?')[0] })))
+  })
+
+  it('sends attachments: [] as given, so the message keeps none, its media left as given', async () => {
+    const { before, interaction, after } = await answering((interaction, components) =>
+      respond(interaction).send({ components: components.slice(0, 1), attachments: [] } as never),
+    )
+
+    expect(firstEdit(interaction).attachments).toEqual([])
+    expect(firstEdit(interaction).components?.[0].items?.[0].media.url).toBe(before[0].url)
+    expect(after[0]).toMatchObject({ loading_state: 3 })
+  })
+
+  it('leaves off the list, and on its URL, an upload the app does not list', async () => {
+    const message = await posted({ components: [gallery(), new FileBuilder().setURL('attachment://probe.zip')], files: [png(), zip()], flags: IsComponentsV2 })
+    const [shown, unlisted] = [mediaOf(message)[0], mediaOf(message)[1]]
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+    const listed = [{ id: unlisted.attachment_id, filename: 'probe.zip' }]
+
+    await respond(interaction).send({ components: [message.components[0].toJSON()], files: [png('added.png')], attachments: listed } as never)
+
+    expect(firstEdit(interaction).attachments).toEqual(listed)
+    expect(firstEdit(interaction).components?.[0].items?.[0].media.url).toBe(shown.url)
+  })
+
+  it("leaves another message's uploads alone in a follow-up answer that re-sends them", async () => {
+    const message = await posted({ components: [gallery()], files: [png()], flags: IsComponentsV2 })
+    const [before] = mediaOf(message)
+    const command = createMockInteraction(ChatInputCommandInteraction)
+    setPresenter(command.client, plain)
+    await respond(command).acknowledge()
+    // A private follow-up takes the public deferral's place, and is the answer edit() edits
+    await respond(command).followUp({ components: [new TextDisplayBuilder().setContent('Follow-up')], flags: IsComponentsV2 | Ephemeral })
+
+    await respond(command).edit({ components: message.components.map(component => component.toJSON()), files: [png('added.png')] } as never)
+
+    const edits = vi.mocked(command.editReply).mock.calls.map(([edit]) => edit as { message?: unknown; attachments?: unknown; components?: { items?: { media: { url: string } }[] }[] })
+    const edit = edits.at(-1)!
+    expect(edit.message).toBeDefined()
+    expect(edit).not.toHaveProperty('attachments')
+    expect(edit.components?.[0].items?.[0].media.url).toBe(before.url)
+  })
+
+  it('keeps only its new files, with a warning, when they and the uploads it shows pass 10', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const ten = Array.from({ length: 10 }, (_, index) => `${index}.png`)
+    const message = await posted({ components: [new MediaGalleryBuilder().addItems(ten.map(name => ({ media: { url: `attachment://${name}` } })))], files: ten.map(name => png(name)), flags: IsComponentsV2 })
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+
+    await respond(interaction).send({ components: message.components.map(component => component.toJSON()), files: [png('added.png')] } as never)
+
+    expect(firstEdit(interaction)).not.toHaveProperty('attachments')
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`sends 1 files beside the 10 the message shows, and Discord takes 10: the message keeps only the new files, and drops ${ten.join(', ')}.`))
+  })
+})
+
+describe('a toggle that re-sends the message with a control flipped', () => {
+  /** The body a toggle builds: the components it read, each button disabled. */
+  const toggled = (components: readonly unknown[]) =>
+    JSON.parse(JSON.stringify(components), (_key, value) => (value && typeof value === 'object' && value.type === ComponentType.Button ? { ...value, disabled: true } : value))
+  const row = () => new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId('go').setLabel('Go').setStyle(ButtonStyle.Primary))
+  const galleryUrls = (calls: unknown[][]) =>
+    calls.map(([body]) => ({ url: (body as { components: { items?: { media: { url: string } }[] }[] }).components[0].items?.[0].media.url, listed: 'attachments' in (body as object) }))
+
+  it("keeps the gallery linked through update(), reading interaction.message's components", async () => {
+    const message = await posted({ components: [gallery(), row()], files: [png()], flags: IsComponentsV2 })
+    const [before] = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+
+    await respond(interaction).send({ components: toggled(responseOf(interaction).original?.components ?? message.components.map(component => component.toJSON())) } as never)
+
+    expect(galleryUrls(vi.mocked(interaction.update).mock.calls)).toEqual([{ url: 'attachment://probe.png', listed: false }])
+    expect(mediaOf(await interaction.fetchReply())[0]).toMatchObject({ attachment_id: before.attachment_id })
+  })
+
+  it("keeps the gallery linked through the lock and two edits, reading the lock's original", async () => {
+    const message = await posted({ components: [gallery(), row()], files: [png()], flags: IsComponentsV2 })
+    const [before] = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+    await respond(interaction).lock()
+
+    for (const _ of [1, 2]) await respond(interaction).send({ components: toggled(responseOf(interaction).original?.components ?? []) } as never)
+
+    expect(galleryUrls(vi.mocked(interaction.editReply).mock.calls)).toEqual(Array.from({ length: 3 }, () => ({ url: 'attachment://probe.png', listed: false })))
+    expect(mediaOf(await interaction.fetchReply())[0]).toMatchObject({ attachment_id: before.attachment_id })
+  })
+})
+
+describe("an app list of discord.js's Attachments", () => {
+  it('keeps a gallery and a File it lists, sent as { id, filename }', async () => {
+    const message = await posted({ components: [gallery(), new FileBuilder().setURL('attachment://probe.zip')], files: [png(), zip()], flags: IsComponentsV2 })
+    const before = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+    const names = ['probe.png', 'probe.zip']
+    const attachments = before.map(
+      (media, index) => new (Attachment as unknown as new (data: unknown) => Attachment)({ id: media.attachment_id, filename: names[index], url: media.url, proxy_url: media.url, size: 3 }),
+    )
+
+    await respond(interaction).send({ components: message.components.map(component => component.toJSON()), files: [png('added.png')], attachments } as never)
+
+    expect(firstEdit(interaction).attachments).toEqual(before.map((media, index) => ({ id: media.attachment_id, filename: names[index] })))
+    expect(mediaOf(await interaction.fetchReply())).toEqual(before.map(media => expect.objectContaining({ attachment_id: media.attachment_id })))
   })
 })

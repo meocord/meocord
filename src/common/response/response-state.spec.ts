@@ -389,7 +389,7 @@ describe('respond()', () => {
 
     it('rewrites Components V2 media the message keeps', async () => {
       const message = messageWith({ flags: IsComponentsV2 })
-      Object.assign(message, { attachments: new Map([['1', { name: 'card.png' }]]) })
+      Object.assign(message, { attachments: new Map([['2', { id: '2', name: 'card.png' }]]) })
       const interaction = button(message)
       await respond(interaction).acknowledge()
 

@@ -1,5 +1,5 @@
 import { AttachmentBuilder, ComponentType, EmbedBuilder } from 'discord.js'
-import { attachmentFileName, keptFiles, listedUploads, rewriteAttachmentUrls, shadowedFiles } from '@src/common/response/attachments.js'
+import { asListedEntry, attachmentFileName, keptUploads, listedUploads, rewriteAttachmentUrls, shadowedFiles } from '@src/common/response/attachments.js'
 
 const cdn = (name: string, host = 'cdn.discordapp.com', folder = 'attachments') =>
   `https://${host}/${folder}/1/2/${name}?ex=abc&is=def&hm=123`
@@ -23,34 +23,96 @@ describe('attachmentFileName', () => {
   })
 })
 
-describe('keptFiles', () => {
+describe('keptUploads', () => {
+  const at = (id: string, name: string) => `https://cdn.discordapp.com/attachments/1/${id}/${name}?ex=a&is=b&hm=c`
+  const gallery = (...urls: string[]) => ({ type: ComponentType.MediaGallery, items: urls.map(url => ({ media: { url } })) })
+  const urlsOf = (payload: { components?: readonly unknown[] }) =>
+    (payload.components as { items: { media: { url: string } }[] }[]).flatMap(component => component.items.map(item => item.media.url))
+  const own = [
+    { id: '11', filename: 'a.png' },
+    { id: '12', filename: 'b.png' },
+    { id: '13', filename: 'unshown.txt' },
+  ]
+
+  it('sends an app list of none as it is, adding nothing and leaving its media as given', () => {
+    const payload = { components: [gallery(at('11', 'a.png'))], files: [{ name: 'new.png' }], attachments: [] }
+
+    const { payload: sent } = keptUploads(payload, own, 10)
+
+    expect(sent.attachments).toEqual([])
+    expect(urlsOf(sent)).toEqual([at('11', 'a.png')])
+  })
+
+  it('keeps an app list as given, only reshaping its Attachment entries, and points only the uploads it names at attachment://', () => {
+    const payload = {
+      components: [gallery(at('11', 'a.png'), at('12', 'b.png'), 'attachment://c.png', 'https://example.com/d.png')],
+      attachments: [{ id: '12', name: 'b.png', description: 'B', size: 3 }, { id: '99' }, { id: '13', filename: 'unshown.txt' }],
+    }
+
+    const { payload: sent } = keptUploads(payload, own, 10)
+
+    expect(sent.attachments).toEqual([{ id: '12', filename: 'b.png', description: 'B' }, { id: '99' }, { id: '13', filename: 'unshown.txt' }])
+    expect(urlsOf(sent)).toEqual([at('11', 'a.png'), 'attachment://b.png', 'attachment://c.png', 'https://example.com/d.png'])
+  })
+
+  it('points the media of the message\'s own uploads at attachment:// in an edit with neither files nor a list, adding no list', () => {
+    const payload = { components: [gallery(at('11', 'a.png'), 'https://cdn.discordapp.com/attachments/1/77/a.png')] }
+
+    const { payload: sent } = keptUploads(payload, own, 10)
+
+    expect(sent).not.toHaveProperty('attachments')
+    expect(urlsOf(sent)).toEqual(['attachment://a.png', 'https://cdn.discordapp.com/attachments/1/77/a.png'])
+  })
+
+  it('lists the uploads it shows, and no other, when the edit sends files and no list; a file of a shown name replaces it', () => {
+    const payload = { components: [gallery(at('11', 'a.png'), at('12', 'b.png'))], files: ['/tmp/cards/b.png'] }
+
+    const { payload: sent } = keptUploads(payload, own, 10)
+
+    expect((sent as { attachments?: unknown }).attachments).toEqual([{ id: '11', filename: 'a.png' }])
+    expect(urlsOf(sent)).toEqual(['attachment://a.png', 'attachment://b.png'])
+  })
+
+  it('lists none, and says so, when the uploads it shows and its files pass the limit', () => {
+    const payload = { components: [gallery(at('11', 'a.png'), at('12', 'b.png'))], files: [{ name: 'x.png' }, { name: 'y.png' }] }
+
+    const result = keptUploads(payload, own, 3)
+
+    expect(result.payload).not.toHaveProperty('attachments')
+    expect(result.overLimit).toEqual({ files: 2, dropped: ['a.png', 'b.png'] })
+    expect(urlsOf(result.payload)).toEqual([at('11', 'a.png'), at('12', 'b.png')])
+  })
+
   it('reads the names of files sent as paths, named files, and builders', () => {
-    const { names } = keptFiles(
-      { files: ['/tmp/cards/a.png', { attachment: '/tmp/b.png' }, { attachment: Buffer.from(''), name: 'c.png' }, new AttachmentBuilder(Buffer.from(''), { name: 'd.png' }), { attachment: Buffer.from('') }, 7, null] },
-      [],
-    )
+    const files = ['/tmp/cards/a.png', { attachment: '/tmp/b.png' }, { attachment: Buffer.from(''), name: 'c.png' }, new AttachmentBuilder(Buffer.from(''), { name: 'd.png' }), { attachment: Buffer.from('') }, 7, null]
+    const payload = { components: [gallery(at('91', 'a.png'), at('92', 'b.png'), at('93', 'c.png'), at('94', 'd.png'))], files, attachments: [] }
 
-    expect([...names]).toEqual(['a.png', 'b.png', 'c.png', 'd.png'])
+    expect(urlsOf(keptUploads(payload, [], 10).payload)).toEqual(['attachment://a.png', 'attachment://b.png', 'attachment://c.png', 'attachment://d.png'])
   })
 
-  it("keeps the message's current attachments unless the edit lists the ones to keep", () => {
-    const current = [{ name: 'old.png' }, { name: null }, {}]
+  it('points a name two own uploads share at the newer, keeping the older on its URL, and names a File it shadows', () => {
+    const twins = [{ id: '20', filename: 'a.zip' }, { id: '30', filename: 'a.zip' }]
+    const file = (id: string) => ({ type: ComponentType.File, file: { url: at(id, 'a.zip') } })
 
-    expect([...keptFiles({}, current).names]).toEqual(['old.png'])
-    expect([...keptFiles({ attachments: [{ name: 'listed.png' }, null] }, current).names]).toEqual(['listed.png'])
+    const { payload, shadowed } = keptUploads({ components: [file('20'), file('30')] }, twins, 10)
+
+    expect((payload.components as { file: { url: string } }[]).map(component => component.file.url)).toEqual([at('20', 'a.zip'), 'attachment://a.zip'])
+    expect(shadowed).toEqual(['a.zip'])
+    // A new file of the name takes both, so neither keeps a URL
+    const replaced = keptUploads({ components: [file('20'), file('30')], files: [{ name: 'a.zip' }], attachments: twins }, twins, 10)
+    expect((replaced.payload.components as { file: { url: string } }[]).map(component => component.file.url)).toEqual(['attachment://a.zip', 'attachment://a.zip'])
+    expect(replaced.shadowed).toEqual([])
   })
+})
 
-  it('keeps uploads listed as { id, filename } by id, the newest of each name', () => {
-    const { names, uploads } = keptFiles(
-      { files: [{ name: 'new.png' }], attachments: [{ id: '20', filename: 'a.png' }, { id: '30', filename: 'a.png' }, { id: '10', filename: 'b.png' }, { id: 'x', filename: 'a.png' }] },
-      [{ name: 'old.png' }],
-    )
-
-    expect([...names]).toEqual(['new.png'])
-    expect([...uploads]).toEqual([
-      ['30', 'a.png'],
-      ['10', 'b.png'],
-    ])
+describe('asListedEntry', () => {
+  it('reshapes an Attachment-like entry to { id, filename }, keeping a description, and leaves any other entry', () => {
+    expect(asListedEntry({ id: '1', name: 'a.png', description: 'A', url: 'u' })).toEqual({ id: '1', filename: 'a.png', description: 'A' })
+    expect(asListedEntry({ id: '1', name: 'a.png', description: '' })).toEqual({ id: '1', filename: 'a.png' })
+    const plain = { id: '1', filename: 'a.png', name: 'x' }
+    expect(asListedEntry(plain)).toBe(plain)
+    expect(asListedEntry({ id: '1' })).toEqual({ id: '1' })
+    expect(asListedEntry(null)).toBeNull()
   })
 })
 
@@ -187,14 +249,13 @@ describe('listedUploads', () => {
 })
 
 describe('shadowedFiles', () => {
-  it('names a listed File whose name a newer kept upload takes, and no other', () => {
+  it('names a File showing a candidate whose name a newer kept upload takes, and no other', () => {
     const file = (id: string, name: string) => ({ type: ComponentType.File, file: { url: `https://cdn.discordapp.com/attachments/1/${id}/${name}`, attachment_id: id } })
-    const payload = {
-      components: [file('20', 'a.zip'), { type: ComponentType.Container, components: [file('30', 'a.zip'), file('40', 'b.zip')] }],
-      attachments: [{ id: '20', filename: 'a.zip' }, { id: '30', filename: 'a.zip' }, { id: '40', filename: 'b.zip' }],
-    }
+    const components = [file('20', 'a.zip'), { type: ComponentType.Container, components: [file('30', 'a.zip'), file('40', 'b.zip')] }]
+    const candidates = [{ id: '20', filename: 'a.zip' }, { id: '30', filename: 'a.zip' }, { id: '40', filename: 'b.zip' }]
+    const kept = { names: new Set<string>(), uploads: new Map([['30', 'a.zip'], ['40', 'b.zip']]) }
 
-    expect(shadowedFiles(payload, keptFiles(payload, []))).toEqual(['a.zip'])
-    expect(shadowedFiles({ components: payload.components }, keptFiles({}, []))).toEqual([])
+    expect(shadowedFiles({ components }, candidates, kept)).toEqual(['a.zip'])
+    expect(shadowedFiles({ components }, [], kept)).toEqual([])
   })
 })

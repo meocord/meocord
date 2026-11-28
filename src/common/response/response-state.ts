@@ -33,8 +33,9 @@ import {
   resolveFlags,
   type ResponseStep,
 } from '@src/common/response/flags.js'
-import { keptFiles, type ListedUpload, listedUploads, rewriteAttachmentUrls, shadowedFiles } from '@src/common/response/attachments.js'
+import { keptUploads, type ListedUpload, listedUploads } from '@src/common/response/attachments.js'
 import {
+  ATTACHMENT_LIMIT,
   attachmentsOf,
   DEFAULT_ATTACHMENT_SIZE_LIMIT,
   defaultPresenter,
@@ -442,6 +443,12 @@ export interface ResponseState {
    * A Components V2 message carries only components: an answer to one, such as a V2 reply, is sent without `content`
    * and `embeds`, and a warning names what was dropped.
    *
+   * An edit keeps the files the message shows: its media and embed images that point at the message's own uploads go
+   * out as `attachment://<filename>`, and one that adds `files` without `attachments` lists the uploads it shows, so they
+   * stay beside the new files, unless that passes 10 files, when it keeps only the new ones with a warning; a new file
+   * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it sent
+   * as `{ id, filename }`. To drop files, list the ones to keep, or pass `attachments: []`.
+   *
    * @param payload - Text, or reply options.
    * @param options - `fill: false` leaves this message's embeds and containers uncoloured.
    * @returns The message sent or edited, when Discord returns it.
@@ -451,6 +458,12 @@ export interface ResponseState {
   /**
    * Edits the answer, routed as `send()` is: an edit once the interaction is answered, of the follow-up that replaced
    * a public deferral, or, after `delete()`, a follow-up that becomes the answer.
+   *
+   * An edit keeps the files the message shows: its media and embed images that point at the message's own uploads go
+   * out as `attachment://<filename>`, and one that adds `files` without `attachments` lists the uploads it shows, so they
+   * stay beside the new files, unless that passes 10 files, when it keeps only the new ones with a warning; a new file
+   * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it sent
+   * as `{ id, filename }`. To drop files, list the ones to keep, or pass `attachments: []`.
    *
    * @param payload - Text, or edit options.
    * @param options - `fill: false` leaves this edit's embeds and containers uncoloured.
@@ -1405,15 +1418,31 @@ export class InteractionResponse implements ResponseState {
     this.phase = 'replied'
   }
 
+  /**
+   * `body` as an edit of the answer's message keeps that message's uploads (see `keptUploads`): the uploads it holds as
+   * last read, its media pointed at them, and, when `body` sends files but lists no attachments, the ones it shows
+   * listed. An `attachments` list the body gives is kept as given, its entries only reshaped.
+   */
   private withAttachments(body: Body): Body {
-    const kept = keptFiles(body, this.message?.attachments?.values() ?? [])
-    for (const name of shadowedFiles(body, kept)) {
+    const message = this.message
+    const own = message
+      ? uploadsKept(message, { components: message.components.map(component => component.toJSON() as unknown as Record<string, unknown>), embeds: message.embeds.map(embed => embed.toJSON()) })
+      : []
+    const { payload, shadowed, overLimit } = keptUploads(body, own, ATTACHMENT_LIMIT)
+    const described = describeInteraction(this.interaction as Interaction)
+    for (const name of shadowed) {
       logger.warn(
-        `${describeInteraction(this.interaction as Interaction)} keeps ${name} in a File component beside a newer upload of that name, ` +
+        `${described} keeps ${name} in a File component beside a newer upload of that name, ` +
           `which attachment://${name} reaches instead; Discord takes a File only by attachment://, so it may refuse this edit.`,
       )
     }
-    return rewriteAttachmentUrls(body, kept)
+    if (overLimit) {
+      logger.warn(
+        `${described} sends ${overLimit.files} files beside the ${overLimit.dropped.length} the message shows, and Discord takes ` +
+          `${ATTACHMENT_LIMIT}: the message keeps only the new files, and drops ${overLimit.dropped.join(', ')}. To keep some, list them in attachments.`,
+      )
+    }
+    return payload
   }
 
   /**
