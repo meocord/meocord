@@ -1465,8 +1465,8 @@ export class InteractionResponse implements ResponseState {
     }
     if (omitted) {
       logger.warn(
-        `${described} sends an attachments list without ${omitted.join(', ')}, which its media still show: their media break, ` +
-          'a gallery reading back not found and a File refused. Remove that media too, or keep the uploads listed.',
+        `${described} sends an attachments list without ${omitted.join(', ')}, which its media still show: that media breaks. ` +
+          'Remove it too, or keep the uploads listed.',
       )
     }
     return payload
