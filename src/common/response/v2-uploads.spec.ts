@@ -387,7 +387,7 @@ describe("an app's own edit of a message with uploads", () => {
     expect(firstEdit(interaction).attachments).toEqual([])
     expect(firstEdit(interaction).components?.[0].items?.[0].media.url).toBe(before[0].url)
     expect(after[0]).toMatchObject({ loading_state: 3 })
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sends an attachments list without probe.png, which its media still show: their media break'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sends an attachments list without probe.png, which its media still show: that media breaks. Remove it too, or keep the uploads listed.'))
   })
 
   it('leaves off the list, and on its URL, an upload the app does not list', async () => {
@@ -503,7 +503,18 @@ describe("an app's attachments list that leaves out an upload its media show", (
 
     await expect(sent).rejects.toThrow('UNFURLED_MEDIA_ITEM_MUST_USE_ATTACHMENT_PROTOCOL')
     expect(firstEdit(interaction).attachments).toEqual([])
-    expect(omittedWarnings(warn)).toEqual([[expect.stringContaining('an attachments list without probe.png, probe.zip, which its media still show: their media break')]])
+    expect(omittedWarnings(warn)).toEqual([[expect.stringContaining('an attachments list without probe.png, probe.zip, which its media still show: that media breaks.')]])
+  })
+
+  it("warns the same way of an embed's image upload", async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const message = await posted({ embeds: [new EmbedBuilder().setImage('attachment://card.png')], files: [png('card.png')] })
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+
+    await respond(interaction).send({ embeds: message.embeds.map(embed => embed.toJSON()), attachments: [] } as never)
+
+    expect(omittedWarnings(warn)).toEqual([[expect.stringContaining('an attachments list without card.png, which its media still show: that media breaks.')]])
   })
 
   it('does not warn when the edit no longer shows the uploads it leaves out', async () => {
