@@ -152,13 +152,16 @@ function newestOf(uploads: readonly ListedUpload[]): Map<string, string> {
 
 /**
  * An `attachments` entry as Discord names its upload: a discord.js `Attachment`, or any entry with an `id` and a `name`
- * but no `filename`, becomes `{ id, filename }`, with its `description` when set. Discord resolves `attachment://` of a
- * Components V2 media item only through `filename`. Any other entry is left as it is.
+ * but no `filename`, becomes `{ id, filename }`, with its `description` when set. An entry with only an `id` of one of
+ * the message's `own` uploads, by id, gets that upload's `filename`. Discord resolves `attachment://` of a Components V2
+ * media item only through `filename`. Any other entry is left as it is.
  */
-export function asListedEntry(entry: unknown): unknown {
+export function asListedEntry(entry: unknown, own?: ReadonlyMap<string, string>): unknown {
   const { id, name, filename, description } = (entry ?? {}) as { id?: unknown; name?: unknown; filename?: unknown; description?: unknown }
-  if (typeof id !== 'string' || typeof name !== 'string' || filename !== undefined) return entry
-  return { id, filename: name, ...(typeof description === 'string' && description !== '' && { description }) }
+  if (typeof id !== 'string' || filename !== undefined) return entry
+  if (typeof name === 'string') return { id, filename: name, ...(typeof description === 'string' && description !== '' && { description }) }
+  const ownName = own?.get(id)
+  return ownName === undefined ? entry : { ...(entry as Json), filename: ownName }
 }
 
 /** The ids of the uploads a payload's media and embeds show by a CDN URL or, for media, by `attachment_id`. */
@@ -183,13 +186,16 @@ export interface KeptUploads<P> {
   shadowed: string[]
   /** Set when the edit's files and the uploads it shows pass Discord's limit, so it keeps none of them: those dropped. */
   overLimit?: { files: number; dropped: string[] }
+  /** Set when the edit's own `attachments` leave out uploads its media still show, which the message then drops. */
+  omitted?: string[]
 }
 
 /**
  * An edit of a message holding `own` uploads, as Discord takes it, so that the uploads it shows stay on the message and
  * attachment-backed:
  * - An edit that lists `attachments` keeps exactly those: each entry is only reshaped ({@link asListedEntry}), and its
- *   media point at the uploads it lists.
+ *   media point at the uploads it lists. The own uploads its media show but the list leaves out are named in
+ *   `omitted`, unless a file the edit sends replaces them by name.
  * - One with neither `attachments` nor files keeps every upload: its media point at the message's own.
  * - One with files and no `attachments` would keep only the new files, as discord.js then lists them alone: it lists
  *   the message's own uploads it shows, unless those and the files pass `limit`.
@@ -206,10 +212,16 @@ export function keptUploads<P extends { files?: readonly unknown[]; attachments?
   let edit = payload
   let candidates: readonly ListedUpload[]
   let overLimit: KeptUploads<P>['overLimit']
+  let omitted: string[] | undefined
   if (Array.isArray(payload.attachments)) {
-    const attachments = payload.attachments.map(asListedEntry)
+    const ownNames = new Map(own.map(upload => [upload.id, upload.filename]))
+    const attachments = payload.attachments.map(entry => asListedEntry(entry, ownNames))
     edit = { ...payload, attachments }
     candidates = listedOf(attachments)
+    const listedIds = new Set(attachments.map(entry => (entry as { id?: unknown } | null)?.id))
+    const shown = shownIds(payload)
+    const left = own.filter(upload => shown.has(upload.id) && !listedIds.has(upload.id) && !names.has(upload.filename))
+    if (left.length > 0) omitted = left.map(upload => upload.filename)
   } else if ((payload.files?.length ?? 0) === 0) {
     candidates = own
   } else if (own.length === 0) {
@@ -226,7 +238,12 @@ export function keptUploads<P extends { files?: readonly unknown[]; attachments?
     }
   }
   const kept: KeptFiles = { names, uploads: newestOf(candidates) }
-  return { payload: rewriteAttachmentUrls(edit, kept), shadowed: shadowedFiles(edit, candidates, kept), ...(overLimit && { overLimit }) }
+  return {
+    payload: rewriteAttachmentUrls(edit, kept),
+    shadowed: shadowedFiles(edit, candidates, kept),
+    ...(overLimit && { overLimit }),
+    ...(omitted && { omitted }),
+  }
 }
 
 /**

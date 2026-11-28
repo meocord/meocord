@@ -114,6 +114,34 @@ describe('asListedEntry', () => {
     expect(asListedEntry({ id: '1' })).toEqual({ id: '1' })
     expect(asListedEntry(null)).toBeNull()
   })
+
+  it("names a bare { id } of one of the message's own uploads, keeping its other fields, and leaves any other id", () => {
+    const own = new Map([['1', 'a.png']])
+    expect(asListedEntry({ id: '1' }, own)).toEqual({ id: '1', filename: 'a.png' })
+    expect(asListedEntry({ id: '1', description: 'A' }, own)).toEqual({ id: '1', filename: 'a.png', description: 'A' })
+    const foreign = { id: '2' }
+    expect(asListedEntry(foreign, own)).toBe(foreign)
+  })
+})
+
+describe('keptUploads with an attachments list', () => {
+  const gallery = (...urls: string[]) => ({ type: ComponentType.MediaGallery, items: urls.map(url => ({ media: { url } })) })
+  const cdn = (id: string, name: string) => `https://cdn.discordapp.com/attachments/9/${id}/${name}`
+  const own = [
+    { id: '1', filename: 'a.png' },
+    { id: '2', filename: 'b.png' },
+  ]
+
+  it('names the own uploads its media show that the list leaves out, and only those', () => {
+    expect(keptUploads({ components: [gallery(cdn('1', 'a.png'), cdn('2', 'b.png'))], attachments: [{ id: '2', filename: 'b.png' }] }, own, 10).omitted).toEqual(['a.png'])
+    expect(keptUploads({ components: [gallery(cdn('2', 'b.png'))], attachments: [] }, own, 10).omitted).toEqual(['b.png'])
+    expect(keptUploads({ components: [gallery(cdn('2', 'b.png'))], attachments: [{ id: '2' }] }, own, 10)).not.toHaveProperty('omitted')
+    expect(keptUploads({ components: [], attachments: [] }, own, 10)).not.toHaveProperty('omitted')
+    // A file the edit sends of that name replaces the upload
+    expect(keptUploads({ components: [gallery(cdn('1', 'a.png'))], files: [{ name: 'a.png' }], attachments: [] }, own, 10)).not.toHaveProperty('omitted')
+    // Without a list nothing is left out by the app
+    expect(keptUploads({ components: [gallery(cdn('1', 'a.png'))] }, own, 10)).not.toHaveProperty('omitted')
+  })
 })
 
 describe('rewriteAttachmentUrls', () => {

@@ -401,7 +401,22 @@ export interface ResponseState {
    */
   readonly message: Message | undefined
 
-  /** The components and embeds of the message before `@Defer` locked it; `undefined` until then. */
+  /**
+   * The components and embeds of the message before `@Defer` locked it; `undefined` until then.
+   *
+   * They are what Discord delivered, with uploaded media as CDN URLs. Re-send them through {@link ResponseState.send}
+   * or {@link ResponseState.edit}, which keep the message's uploads attached. A direct `interaction.editReply()` or
+   * `message.edit()` sends the CDN URLs as they are: a gallery's media then loses its upload, and Discord refuses a File
+   * component with a 400.
+   *
+   * @example
+   * ```ts
+   * async function restore(interaction: ButtonInteraction) {
+   *   const original = respond(interaction).original
+   *   if (original) await respond(interaction).edit({ components: original.components })
+   * }
+   * ```
+   */
   readonly original: { readonly components: readonly APIMessageTopLevelComponent[]; readonly embeds: readonly APIEmbed[] } | undefined
 
   /**
@@ -446,8 +461,11 @@ export interface ResponseState {
    * An edit keeps the files the message shows: its media and embed images that point at the message's own uploads go
    * out as `attachment://<filename>`, and one that adds `files` without `attachments` lists the uploads it shows, so they
    * stay beside the new files, unless that passes 10 files, when it keeps only the new ones with a warning; a new file
-   * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it sent
-   * as `{ id, filename }`. To drop files, list the ones to keep, or pass `attachments: []`.
+   * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it, or
+   * an entry with only the `id` of one of the message's uploads, sent as `{ id, filename }`. To drop files, list the
+   * ones to keep, or pass `attachments: []`. Media the edit still shows of a dropped upload is sent as given and breaks:
+   * a gallery reads back not found and Discord refuses a File. Remove that media too, or keep its upload listed; a
+   * warning names any such upload.
    *
    * @param payload - Text, or reply options.
    * @param options - `fill: false` leaves this message's embeds and containers uncoloured.
@@ -462,8 +480,11 @@ export interface ResponseState {
    * An edit keeps the files the message shows: its media and embed images that point at the message's own uploads go
    * out as `attachment://<filename>`, and one that adds `files` without `attachments` lists the uploads it shows, so they
    * stay beside the new files, unless that passes 10 files, when it keeps only the new ones with a warning; a new file
-   * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it sent
-   * as `{ id, filename }`. To drop files, list the ones to keep, or pass `attachments: []`.
+   * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it, or
+   * an entry with only the `id` of one of the message's uploads, sent as `{ id, filename }`. To drop files, list the
+   * ones to keep, or pass `attachments: []`. Media the edit still shows of a dropped upload is sent as given and breaks:
+   * a gallery reads back not found and Discord refuses a File. Remove that media too, or keep its upload listed; a
+   * warning names any such upload.
    *
    * @param payload - Text, or edit options.
    * @param options - `fill: false` leaves this edit's embeds and containers uncoloured.
@@ -1428,7 +1449,7 @@ export class InteractionResponse implements ResponseState {
     const own = message
       ? uploadsKept(message, { components: message.components.map(component => component.toJSON() as unknown as Record<string, unknown>), embeds: message.embeds.map(embed => embed.toJSON()) })
       : []
-    const { payload, shadowed, overLimit } = keptUploads(body, own, ATTACHMENT_LIMIT)
+    const { payload, shadowed, overLimit, omitted } = keptUploads(body, own, ATTACHMENT_LIMIT)
     const described = describeInteraction(this.interaction as Interaction)
     for (const name of shadowed) {
       logger.warn(
@@ -1440,6 +1461,12 @@ export class InteractionResponse implements ResponseState {
       logger.warn(
         `${described} sends ${overLimit.files} files beside the ${overLimit.dropped.length} the message shows, and Discord takes ` +
           `${ATTACHMENT_LIMIT}: the message keeps only the new files, and drops ${overLimit.dropped.join(', ')}. To keep some, list them in attachments.`,
+      )
+    }
+    if (omitted) {
+      logger.warn(
+        `${described} sends an attachments list without ${omitted.join(', ')}, which its media still show: their media break, ` +
+          'a gallery reading back not found and a File refused. Remove that media too, or keep the uploads listed.',
       )
     }
     return payload
