@@ -17,12 +17,12 @@ describe('respond()', () => {
     void respond(interaction).send({ components: [], flags: MessageFlags.IsComponentsV2 })
   })
 
-  it("hands the original message's components back to send and editReply, as it does its embeds", () => {
+  it("hands the original message's components back to send and edit, as it does its embeds", () => {
     const state = respond(interaction)
     const original = state.original
     if (original) {
       void state.send({ components: original.components, embeds: original.embeds })
-      void interaction.editReply({ components: original.components })
+      void state.edit({ components: original.components })
       expectTypeOf(original.components).toEqualTypeOf<readonly APIMessageTopLevelComponent[]>()
     }
   })

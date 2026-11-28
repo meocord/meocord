@@ -378,7 +378,8 @@ describe("an app's own edit of a message with uploads", () => {
     expect(firstEdit(interaction).attachments).toEqual(before.map(media => ({ id: media.attachment_id, filename: media.url.split('/').at(-1)!.split('?')[0] })))
   })
 
-  it('sends attachments: [] as given, so the message keeps none, its media left as given', async () => {
+  it('sends attachments: [] as given, so the message keeps none, its media left as given, with a warning', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     const { before, interaction, after } = await answering((interaction, components) =>
       respond(interaction).send({ components: components.slice(0, 1), attachments: [] } as never),
     )
@@ -386,6 +387,7 @@ describe("an app's own edit of a message with uploads", () => {
     expect(firstEdit(interaction).attachments).toEqual([])
     expect(firstEdit(interaction).components?.[0].items?.[0].media.url).toBe(before[0].url)
     expect(after[0]).toMatchObject({ loading_state: 3 })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sends an attachments list without probe.png, which its media still show: their media break'))
   })
 
   it('leaves off the list, and on its URL, an upload the app does not list', async () => {
@@ -480,5 +482,63 @@ describe("an app list of discord.js's Attachments", () => {
 
     expect(firstEdit(interaction).attachments).toEqual(before.map((media, index) => ({ id: media.attachment_id, filename: names[index] })))
     expect(mediaOf(await interaction.fetchReply())).toEqual(before.map(media => expect.objectContaining({ attachment_id: media.attachment_id })))
+  })
+})
+
+describe("an app's attachments list that leaves out an upload its media show", () => {
+  async function onUploads() {
+    const message = await posted({ components: [gallery(), new FileBuilder().setURL('attachment://probe.zip')], files: [png(), zip()], flags: IsComponentsV2 })
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+    return { message, interaction, before: mediaOf(message) }
+  }
+  const omittedWarnings = (warn: ReturnType<typeof vi.spyOn>) => warn.mock.calls.filter(([text]) => String(text).includes('an attachments list without'))
+
+  it('sends the list as given, and warns once, naming the uploads it leaves out', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { message, interaction } = await onUploads()
+
+    // message.attachments lists only the uploads nothing shows, none here; the File left on its URL is refused
+    const sent = respond(interaction).send({ components: message.components.map(component => component.toJSON()), attachments: [...message.attachments.values()] } as never)
+
+    await expect(sent).rejects.toThrow('UNFURLED_MEDIA_ITEM_MUST_USE_ATTACHMENT_PROTOCOL')
+    expect(firstEdit(interaction).attachments).toEqual([])
+    expect(omittedWarnings(warn)).toEqual([[expect.stringContaining('an attachments list without probe.png, probe.zip, which its media still show: their media break')]])
+  })
+
+  it('does not warn when the edit no longer shows the uploads it leaves out', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { interaction } = await onUploads()
+
+    await respond(interaction).send({ components: [new TextDisplayBuilder().setContent('Done')], attachments: [] } as never)
+
+    expect(firstEdit(interaction).attachments).toEqual([])
+    expect(omittedWarnings(warn)).toEqual([])
+  })
+
+  it('does not warn for an upload a file the edit sends replaces by name', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+    const { message, interaction, before } = await onUploads()
+
+    await respond(interaction).send({ components: message.components.map(component => component.toJSON()), files: [png()], attachments: [{ id: before[1].attachment_id, filename: 'probe.zip' }] } as never)
+
+    expect(omittedWarnings(warn)).toEqual([])
+  })
+})
+
+describe("an app's attachments list naming the message's uploads by id alone", () => {
+  it('sends each as { id, filename }, in its order, keeping a gallery and a File linked', async () => {
+    const message = await posted({ components: [gallery(), new FileBuilder().setURL('attachment://probe.zip')], files: [png(), zip()], flags: IsComponentsV2 })
+    const [image, file] = mediaOf(message)
+    const interaction = on(message, 'button', plain)
+    await interaction.deferUpdate()
+
+    await respond(interaction).send({ components: message.components.map(component => component.toJSON()), attachments: [{ id: file.attachment_id }, { id: image.attachment_id, description: 'A probe' }] } as never)
+
+    expect(firstEdit(interaction).attachments).toEqual([
+      { id: file.attachment_id, filename: 'probe.zip' },
+      { id: image.attachment_id, filename: 'probe.png', description: 'A probe' },
+    ])
+    expect(mediaOf(await interaction.fetchReply())).toEqual([image, file].map(media => expect.objectContaining({ attachment_id: media.attachment_id })))
   })
 })
