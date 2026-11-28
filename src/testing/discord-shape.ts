@@ -27,8 +27,8 @@ const uploaded = (media: Json): boolean =>
   media.attachment_id !== undefined || (typeof media.url === 'string' && (media.url.startsWith('attachment://') || media.url.includes('/attachments/')))
 
 /**
- * An uploaded file as an edit's response has it: processed again, so loading, with a new id and nothing resolved
- * yet. Read back once it has loaded, it is resolved again, with no edit to the message.
+ * An uploaded file as an edit's response has it when the edit re-sends its CDN URL: processed again, so loading, with a
+ * new id and nothing resolved yet. Read back once it has loaded, it is resolved again, with no edit to the message.
  */
 function loadingMedia(media: Json): Json {
   const { attachment_id: _attachment, ...rest } = media
@@ -47,9 +47,17 @@ function* componentsOf(node: unknown): Generator<Json> {
   yield* componentsOf((node as Json).accessory)
 }
 
+/**
+ * Whether media points at one of `linked` uploads by its `attachment_id`, as `attachment://` of an upload the edit
+ * keeps or adds resolves.
+ */
+const linkedTo = (media: Json, linked: ReadonlySet<string> | undefined): boolean =>
+  typeof media.attachment_id === 'string' && (linked?.has(media.attachment_id) ?? false)
+
 /** One component with what Discord adds to it: defaults it fills, and media it resolves, or has yet to. */
-function stored(component: Json, loading: boolean): Json {
-  const media = (item: Json) => (loading && uploaded(item) ? loadingMedia(item) : resolvedMedia(item))
+function stored(component: Json, loading: boolean, linked: ReadonlySet<string> | undefined): Json {
+  // Discord answers an edit that links an upload it keeps or adds with it loaded; one that re-sends its CDN URL, loading
+  const media = (item: Json) => (loading && uploaded(item) && !linkedTo(item, linked) ? loadingMedia(item) : resolvedMedia(item))
   const out: Json = { ...component }
   switch (component.type) {
     case ComponentType.Container:
@@ -76,9 +84,13 @@ function stored(component: Json, loading: boolean): Json {
 /**
  * Top-level components as Discord stores and returns them: every component numbered with an `id` it lacks, in
  * Discord's order, defaults such as `spoiler: false` filled, and media resolved. Ids given are kept. With `loading`,
- * as an edit's response has them: files uploaded with the message still loading, as Discord processes them again.
+ * as an edit's response has them: files uploaded with the message still loading, as Discord processes them again,
+ * except media linked by `attachment_id` to one of the `linked` uploads, which Discord returns loaded.
  */
-export function asDiscordStores(components: readonly unknown[], { loading = false }: { loading?: boolean } = {}): Json[] {
+export function asDiscordStores(
+  components: readonly unknown[],
+  { loading = false, linked }: { loading?: boolean; linked?: ReadonlySet<string> } = {},
+): Json[] {
   const tree = structuredClone(components) as Json[]
   const taken = new Set([...componentsOf(tree)].map(component => component.id).filter(id => typeof id === 'number'))
   let next = 1
@@ -86,7 +98,7 @@ export function asDiscordStores(components: readonly unknown[], { loading = fals
     if (Array.isArray(node)) return node.map(rebuild)
     if (!node || typeof node !== 'object' || typeof (node as Json).type !== 'number') return node
     const component = node as Json
-    const out = stored(component, loading)
+    const out = stored(component, loading, linked)
     if (typeof out.id !== 'number') {
       while (taken.has(next)) next++
       out.id = next

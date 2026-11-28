@@ -28,7 +28,7 @@ import { Logger } from '@src/common/logger.js'
 import { respond, responseOf } from '@src/common/response/response-state.js'
 import { setPresenter } from '@src/common/response/presenter.js'
 import { type ResponsePresenter } from '@src/interface/index.js'
-import { createModalFields, createMockInteraction } from '@src/testing/index.js'
+import { createModalFields, createMockInteraction, createMockMessage } from '@src/testing/index.js'
 import { forgetStrictMocks, useStrictMocks } from '@src/testing/strict-mocks.js'
 
 const { Ephemeral, IsComponentsV2 } = MessageFlags
@@ -551,5 +551,21 @@ describe("an app's attachments list naming the message's uploads by id alone", (
       { id: image.attachment_id, filename: 'probe.png', description: 'A probe' },
     ])
     expect(mediaOf(await interaction.fetchReply())).toEqual([image, file].map(media => expect.objectContaining({ attachment_id: media.attachment_id })))
+  })
+})
+
+describe("an app's edit after @Defer's lock of a message with an upload", () => {
+  it('sends the components it re-sends with the upload as attachment://, from the uploads the lock kept', async () => {
+    // A fixture whose CDN URL names a channel the message isn't in: only the upload's attachment_id identifies it
+    const message = createMockMessage({
+      flags: IsComponentsV2,
+      components: [{ type: ComponentType.MediaGallery, id: 1, items: [{ media: { url: 'https://cdn.discordapp.com/attachments/111/222/card.webp?ex=1&is=2&hm=3&', attachment_id: '222' } }] }] as never,
+    })
+    const interaction = on(message, 'button', plain)
+
+    await respond(interaction).lock()
+    await respond(interaction).edit({ components: message.components.map(component => component.toJSON()) } as never)
+
+    expect(firstEdit(interaction, 1).components?.[0].items?.[0].media.url).toBe('attachment://card.webp')
   })
 })
