@@ -406,8 +406,8 @@ export interface ResponseState {
    *
    * They are what Discord delivered, with uploaded media as CDN URLs. Re-send them through {@link ResponseState.send}
    * or {@link ResponseState.edit}, which keep the message's uploads attached. A direct `interaction.editReply()` or
-   * `message.edit()` sends the CDN URLs as they are: a gallery's media then loses its upload, and Discord refuses a File
-   * component with a 400.
+   * `message.edit()` sends the CDN URLs as they are: a gallery item becomes a plain link to its signed CDN URL, and
+   * Discord refuses a File component with a 400.
    *
    * @example
    * ```ts
@@ -464,8 +464,8 @@ export interface ResponseState {
    * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it, or
    * an entry with only the `id` of one of the message's uploads, sent as `{ id, filename }`. To drop files, list the
    * ones to keep, or pass `attachments: []`. Media the edit still shows of a dropped upload is sent as given and breaks:
-   * a gallery reads back not found and Discord refuses a File. Remove that media too, or keep its upload listed; a
-   * warning names any such upload.
+   * a gallery reads back not found, Discord refuses a File, and an embed's images are left as links to their signed CDN
+   * URLs in place of their uploads. Remove that media too, or keep its upload listed; a warning names any such upload.
    *
    * @param payload - Text, or reply options.
    * @param options - `fill: false` leaves this message's embeds and containers uncoloured.
@@ -483,8 +483,8 @@ export interface ResponseState {
    * named like a shown upload replaces it. An `attachments` list is sent as given, a discord.js `Attachment` in it, or
    * an entry with only the `id` of one of the message's uploads, sent as `{ id, filename }`. To drop files, list the
    * ones to keep, or pass `attachments: []`. Media the edit still shows of a dropped upload is sent as given and breaks:
-   * a gallery reads back not found and Discord refuses a File. Remove that media too, or keep its upload listed; a
-   * warning names any such upload.
+   * a gallery reads back not found, Discord refuses a File, and an embed's images are left as links to their signed CDN
+   * URLs in place of their uploads. Remove that media too, or keep its upload listed; a warning names any such upload.
    *
    * @param payload - Text, or edit options.
    * @param options - `fill: false` leaves this edit's embeds and containers uncoloured.
